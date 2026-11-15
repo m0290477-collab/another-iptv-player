@@ -1,0 +1,45 @@
+# Super X (Another IPTV Player base) — Codemagic iOS workflow (TestFlight)
+# Rename-only build: bundle com.irqus.superx, display name "Super X", build 33.
+workflows:
+  superx-another-testflight:
+    name: Super X — Another (TestFlight)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      groups:
+        - appstore
+      vars:
+        BUNDLE_ID: "com.irqus.superx"
+        APP_NAME: "Super X"
+      xcode: latest
+    scripts:
+      - name: Fetch signing files
+        script: |
+          echo "$CERTIFICATE_PRIVATE_KEY_B64" | base64 -d > /tmp/cert_key.pem
+          export CERTIFICATE_PRIVATE_KEY="$(cat /tmp/cert_key.pem)"
+          keychain initialize
+          mkdir -p ~/private_keys
+          echo "$APP_STORE_CONNECT_PRIVATE_KEY_B64" | base64 -d > ~/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_IDENTIFIER.p8
+          export APP_STORE_CONNECT_PRIVATE_KEY=$(cat ~/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_IDENTIFIER.p8)
+          app-store-connect fetch-signing-files $BUNDLE_ID \
+            --type IOS_APP_STORE --create
+          keychain add-certificates
+      - name: Use profiles
+        script: |
+          cd "$CM_BUILD_DIR/apps/ios"
+          xcode-project use-profiles
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --workspace "$CM_BUILD_DIR/apps/ios/another-iptv-player.xcworkspace" \
+            --scheme "another-iptv-player"
+      - name: Upload to TestFlight
+        script: |
+          mkdir -p ~/private_keys
+          echo "$APP_STORE_CONNECT_PRIVATE_KEY_B64" | base64 -d > ~/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_IDENTIFIER.p8
+          xcrun altool --upload-app -f build/ios/ipa/*.ipa -t ios \
+            --apiKey "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
