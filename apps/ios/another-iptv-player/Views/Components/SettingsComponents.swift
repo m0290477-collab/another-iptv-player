@@ -495,6 +495,9 @@ enum AppPreferenceKeys {
         "player.speedUpOnLongPress", "player.autoPlayNextEpisode",
         "player.showSkipIntro", "player.skipIntroLengthSeconds",
         "player.defaultSleepTimerMinutes",
+        // Build 61 (FA, H1): audio-only default (a live preference
+        // with a real reader — AudioOnlyStore — not a fossil key).
+        "player.audioOnlyDefault",
         "player.videoAspectMode",
         // Round 16 (R6): "player.debugOverlayEnabled" and
         // "player.nextEpisodeTimerSeconds" leave the list — both
@@ -1554,6 +1557,10 @@ struct PlaybackSettingsSection: View {
     @AppStorage("app.playLastChannelOnLaunch") private var playLastChannel = false
     // Build 61 (B9): Q1 loudness, P6 data saver, Q10 dead channels.
     @AppStorage("player.loudnessNormalization") private var loudnessNormalization = false
+    // Build 61 (FA, H1): audio-only Settings default — the exact
+    // key AudioOnlyStore reads (`player.audioOnlyDefault`); a
+    // per-channel choice in the long-press menu wins over it.
+    @AppStorage(AudioOnlyStore.defaultKey) private var audioOnlyDefault = false
     @AppStorage(DataSaverService.toggleKey) private var dataSaverOnCellular = false
     @AppStorage(ChannelHealthStore.hideDeadKey) private var hideDeadChannels = false
     @ObservedObject private var channelHealth = ChannelHealthStore.shared
@@ -1614,6 +1621,22 @@ struct PlaybackSettingsSection: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(L("loudness.title"))
                         Text(L("loudness.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            // Build 61 (FA, H1): audio-only default for live
+            // channels — video decoding is suspended while the
+            // channel plays (audio continues); per-channel menu
+            // choices override this default.
+            Toggle(isOn: $audioOnlyDefault) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "speaker.wave.2", tint: .blue)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("audioonly.default.title"))
+                        Text(L("audioonly.default.desc"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

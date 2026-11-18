@@ -819,6 +819,9 @@ struct LiveStreamCard: View {
     // stores at render (cards are cheap; the stores bump `version`).
     @ObservedObject private var firstSeenStore = FirstSeenStore.shared
     @ObservedObject private var pinnedStore = PinnedChannelStore.shared
+    // Build 61 (FA, H1): audio-only active indicator, read from the
+    // same store the long-press toggle writes and the player reads.
+    @ObservedObject private var audioOnlyStore = AudioOnlyStore.shared
 
     var body: some View {
         Button(action: {
@@ -845,6 +848,20 @@ struct LiveStreamCard: View {
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(AppTheme.accent)
                             .padding(6)
+                    }
+                }
+                // Build 61 (FA, H1): audio-only indicator — shown
+                // only while the store says this channel plays
+                // audio-only (explicit choice or Settings default).
+                .overlay(alignment: .bottomTrailing) {
+                    if audioOnlyStore.isEnabled(playlistId: playlistId, streamId: stream.streamId) {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(4)
+                            .background(AppTheme.accent, in: Circle())
+                            .padding(6)
+                            .accessibilityLabel(L("audioonly.badge"))
                     }
                 }
 
@@ -1401,6 +1418,9 @@ struct LivePlayerShell: View {
                     // User-Agent reaches the engine's existing
                     // load path through the shell.
                     userAgent: playlist.playbackUserAgent(channelUserAgent: nil),
+                    // Build 61 (FA, F-2/G2): the playlist's custom
+                    // headers reach playback alongside the UA.
+                    customHeaders: playlist.customHeaders,
                     epgChannelKey: EPGChannelKey.forXtream(session.stream),
                     canGoToPreviousChannel: (currentIndex ?? 0) > 0,
                     canGoToNextChannel: {
