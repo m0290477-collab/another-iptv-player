@@ -73,6 +73,18 @@ struct DownloadsView: View {
     private var completed: [DBDownloadedItem] { filteredItems.filter { $0.downloadStatus == .completed } }
     private var failed: [DBDownloadedItem] { filteredItems.filter { $0.downloadStatus == .failed } }
 
+    /// Build 61 fix round 2: the completed rows' ids as a
+    /// standalone, explicitly-typed expression. Inline in the
+    /// body chain (the X7 `.onAppear` seed and the `.onChange`
+    /// diff below) this filter+map chain timed out the type
+    /// checker; as its own property it is trivially checkable
+    /// and both call sites observe the identical value.
+    private var completedItemIDs: [String] {
+        items
+            .filter { (item: DBDownloadedItem) in item.downloadStatus == .completed }
+            .map(\.id)
+    }
+
     private var completedMovies: [DBDownloadedItem] {
         completed.filter { $0.type == "vod" }
     }
@@ -107,7 +119,7 @@ struct DownloadsView: View {
         let episodes = completed.filter { $0.type == "episode" }
         let grouped = Dictionary(grouping: episodes) { $0.secondaryTitle ?? $0.seriesId ?? "-" }
         return grouped
-            .map { (key, items) in
+            .map { (key: String, items: [DBDownloadedItem]) in
                 let sorted = items.sorted { lhs, rhs in
                     let ls = lhs.seasonNumber ?? 0, rs = rhs.seasonNumber ?? 0
                     if ls != rs { return ls < rs }
@@ -258,6 +270,26 @@ struct DownloadsView: View {
         }
     }
 
+    /// Build 61 fix round 2: the two item-driven alert
+    /// presentations as standalone, explicitly-typed bindings.
+    /// Inline `Binding(get:set:)` constructions inside the body
+    /// modifier chain are solver-heavy; the presentation logic
+    /// (presented iff the item is non-nil, dismissal clears it)
+    /// is unchanged.
+    private var missingFileAlertBinding: Binding<Bool> {
+        Binding(
+            get: { missingFileItem != nil },
+            set: { if !$0 { missingFileItem = nil } }
+        )
+    }
+
+    private var cancelAlertBinding: Binding<Bool> {
+        Binding(
+            get: { cancelCandidate != nil },
+            set: { if !$0 { cancelCandidate = nil } }
+        )
+    }
+
     var body: some View {
         Group {
             if items.isEmpty {
@@ -309,10 +341,7 @@ struct DownloadsView: View {
         }
         .alert(
             L("download.missing_file.title"),
-            isPresented: Binding(
-                get: { missingFileItem != nil },
-                set: { if !$0 { missingFileItem = nil } }
-            ),
+            isPresented: missingFileAlertBinding,
             presenting: missingFileItem
         ) { item in
             Button(L("download.retry")) {
@@ -324,10 +353,7 @@ struct DownloadsView: View {
         }
         .alert(
             L("download.cancel.title"),
-            isPresented: Binding(
-                get: { cancelCandidate != nil },
-                set: { if !$0 { cancelCandidate = nil } }
-            ),
+            isPresented: cancelAlertBinding,
             presenting: cancelCandidate
         ) { item in
             Button(L("download.cancel"), role: .destructive) {
@@ -367,11 +393,11 @@ struct DownloadsView: View {
         .onAppear {
             guard !completedSeeded else { return }
             completedSeeded = true
-            knownCompletedIDs = Set(items.filter { $0.downloadStatus == .completed }.map(\.id))
+            knownCompletedIDs = Set(completedItemIDs)
         }
         // The diff runs over the UNFILTERED completed set, so a
         // search-filter change can never masquerade as a completion.
-        .onChange(of: items.filter { $0.downloadStatus == .completed }.map(\.id)) { _, newIDs in
+        .onChange(of: completedItemIDs) { _, newIDs in
             guard completedSeeded else { return }
             let newSet = Set(newIDs)
             let fresh = newSet.subtracting(knownCompletedIDs)
@@ -708,62 +734,90 @@ struct DownloadsView: View {
             // If it is an episode it is stored in the DB as history.type "series"; if a movie, as "vod".
             // A recording plays through the same file-playback path as a movie (type "vod").
             let historyType = item.type == "episode" ? "series" : "vod"
-            let existingHistory: DBWatchHistory? = try? await AppDatabase.shared.read { db in
-                try DBWatchHistory
-                    .filter(
-                        Column("playlistId") == playlist.id
-                        && Column("type") == historyType
-                        && Column("streamId") == item.streamId
-                    )
-                    .fetchOne(db)
-            }
+            let existingHistory = await fetchWatchHistory(for: item, historyType: historyType)
 
             await MainActor.run {
                 if item.type == "episode" {
-                    // Belongs to a series — HistorySeriesPlayerShell handles both resume and the next/previous
-                    // manages the transition to the episode (the ordering is the series' own episode order, not the download order).
-                    let history = existingHistory ?? DBWatchHistory(
-                        id: "\(playlist.id)_series_\(item.streamId)",
-                        playlistId: playlist.id,
-                        streamId: item.streamId,
-                        type: "series",
-                        lastTimeMs: 0,
-                        durationMs: 0,
-                        lastWatchedAt: Date(),
-                        seriesId: item.seriesId,
-                        title: item.title,
-                        secondaryTitle: item.secondaryTitle,
-                        imageURL: item.imageURL,
-                        containerExtension: item.containerExtension
-                    )
-                    playerOverlay.present(skipDownloadCheck: true, playlistId: playlist.id) {
-                        HistorySeriesPlayerShell(
-                            playlist: playlist,
-                            history: history,
-                            url: localURL,
-                            onNavigateToDetail: navigateToSeriesDetail
-                        )
-                    }
+                    presentEpisodePlayback(item: item, localURL: localURL, existingHistory: existingHistory)
                 } else {
-                    // Movie — no prev/next, only local playback + resume.
-                    playerOverlay.present(skipDownloadCheck: true, playlistId: playlist.id) {
-                        PlayerView(
-                            url: localURL,
-                            title: item.title,
-                            subtitle: item.secondaryTitle,
-                            artworkURL: item.imageURL.flatMap { URL(string: $0) },
-                            isLiveStream: false,
-                            playlistId: playlist.id,
-                            streamId: item.streamId,
-                            type: "vod",
-                            seriesId: item.seriesId,
-                            resumeTimeMs: existingHistory?.lastTimeMs,
-                            containerExtension: item.containerExtension,
-                            onNavigateToDetail: item.type == "recording" ? nil : navigateToMovieDetail
-                        )
-                    }
+                    presentMoviePlayback(item: item, localURL: localURL, existingHistory: existingHistory)
                 }
             }
+        }
+    }
+
+    /// Build 61 fix round 2: the watch-history lookup as its own
+    /// explicitly-typed step. Inside the `play(_:)` Task closure,
+    /// this GRDB filter chain plus the two player presentations
+    /// overloaded the type checker ("failed to produce diagnostic
+    /// for expression" at the `Task {`). Each step is now its own
+    /// declaration and trivially checkable; the query, the values
+    /// it binds and the constructed views are unchanged.
+    private func fetchWatchHistory(for item: DBDownloadedItem, historyType: String) async -> DBWatchHistory? {
+        let playlistId = playlist.id
+        let streamId = item.streamId
+        let history: DBWatchHistory? = try? await AppDatabase.shared.read { db in
+            try DBWatchHistory
+                .filter(
+                    Column("playlistId") == playlistId
+                    && Column("type") == historyType
+                    && Column("streamId") == streamId
+                )
+                .fetchOne(db)
+        }
+        return history
+    }
+
+    /// Build 61 fix round 2: the episode presentation, verbatim
+    /// from `play(_:)`'s former MainActor block (called on the
+    /// main actor from there, as before).
+    private func presentEpisodePlayback(item: DBDownloadedItem, localURL: URL, existingHistory: DBWatchHistory?) {
+        // Belongs to a series — HistorySeriesPlayerShell handles both resume and the next/previous
+        // manages the transition to the episode (the ordering is the series' own episode order, not the download order).
+        let history = existingHistory ?? DBWatchHistory(
+            id: "\(playlist.id)_series_\(item.streamId)",
+            playlistId: playlist.id,
+            streamId: item.streamId,
+            type: "series",
+            lastTimeMs: 0,
+            durationMs: 0,
+            lastWatchedAt: Date(),
+            seriesId: item.seriesId,
+            title: item.title,
+            secondaryTitle: item.secondaryTitle,
+            imageURL: item.imageURL,
+            containerExtension: item.containerExtension
+        )
+        playerOverlay.present(skipDownloadCheck: true, playlistId: playlist.id) {
+            HistorySeriesPlayerShell(
+                playlist: playlist,
+                history: history,
+                url: localURL,
+                onNavigateToDetail: navigateToSeriesDetail
+            )
+        }
+    }
+
+    /// Build 61 fix round 2: the movie/recording presentation,
+    /// verbatim from `play(_:)`'s former MainActor block (called
+    /// on the main actor from there, as before).
+    private func presentMoviePlayback(item: DBDownloadedItem, localURL: URL, existingHistory: DBWatchHistory?) {
+        // Movie — no prev/next, only local playback + resume.
+        playerOverlay.present(skipDownloadCheck: true, playlistId: playlist.id) {
+            PlayerView(
+                url: localURL,
+                title: item.title,
+                subtitle: item.secondaryTitle,
+                artworkURL: item.imageURL.flatMap { URL(string: $0) },
+                isLiveStream: false,
+                playlistId: playlist.id,
+                streamId: item.streamId,
+                type: "vod",
+                seriesId: item.seriesId,
+                resumeTimeMs: existingHistory?.lastTimeMs,
+                containerExtension: item.containerExtension,
+                onNavigateToDetail: item.type == "recording" ? nil : navigateToMovieDetail
+            )
         }
     }
 
