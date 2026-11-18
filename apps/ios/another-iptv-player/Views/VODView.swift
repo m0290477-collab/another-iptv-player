@@ -1123,6 +1123,11 @@ struct VODCategoryContent: View, Equatable {
                                     )
                                 }
                                 .buttonStyle(.plain)
+                                // Build 61 (B8, C2/J1): long-press —
+                                // Watch Later + favorite groups.
+                                .contextMenu {
+                                    VODCardMenuItems(playlist: playlist, movie: item.stream)
+                                }
                                 // Load the next page while cells near the end scroll into view.
                                 // Triggered from inside the lazy grid so onAppear is reliable.
                                 .onAppear { if index >= visibleCount - 15 { loadMore() } }

@@ -16,7 +16,6 @@ struct ChannelQuickPreviewSheet: View {
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
     @Environment(\.epgSnapshot) private var epgSnapshot
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var audioOnlyStore = AudioOnlyStore.shared
 
     private var nowNext: EPGNowNext? {
         epgSnapshot?[EPGChannelKey.forXtream(stream)]
@@ -37,14 +36,9 @@ struct ChannelQuickPreviewSheet: View {
                             .font(.headline)
                             .lineLimit(2)
                         if let number = stream.channelNumber {
-                            Text(L("channels.number_format", number))
+                            Text(L("channels.number_format", String(number)))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                        }
-                        if audioOnlyStore.isEnabled(playlistId: playlist.id, streamId: stream.streamId) {
-                            Label(L("audioonly.badge"), systemImage: "waveform")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(AppTheme.accent)
                         }
                     }
                     Spacer(minLength: 0)

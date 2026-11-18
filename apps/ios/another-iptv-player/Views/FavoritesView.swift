@@ -275,6 +275,9 @@ struct FavoritesView: View {
                             )
                         }
                         .contextMenu {
+                            // Build 61 (B8, C2/J1): Watch Later +
+                            // groups ride the same menu.
+                            VODCardMenuItems(playlist: playlist, movie: item.stream)
                             Button(role: .destructive) {
                                 removeFavorite(streamId: item.stream.streamId, type: "vod")
                             } label: {
@@ -308,6 +311,9 @@ struct FavoritesView: View {
                             )
                         }
                         .contextMenu {
+                            // Build 61 (B8, C2/J1): Watch Later +
+                            // groups ride the same menu.
+                            SeriesCardMenuItems(playlist: playlist, series: item.series)
                             Button(role: .destructive) {
                                 removeFavorite(streamId: item.series.seriesId, type: "series")
                             } label: {

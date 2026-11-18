@@ -1151,6 +1151,11 @@ struct SeriesCategoryContent: View, Equatable {
                                     seasonEpisodeCounts: contentStore.seriesSeasonEpisodeCounts[item.series.seriesId]
                                 )
                             }
+                            // Build 61 (B8, C2/J1): long-press —
+                            // Watch Later + favorite groups.
+                            .contextMenu {
+                                SeriesCardMenuItems(playlist: playlist, series: item.series)
+                            }
                             .onAppear { if index >= visibleCount - 15 { loadMore() } }
                         }
                     }

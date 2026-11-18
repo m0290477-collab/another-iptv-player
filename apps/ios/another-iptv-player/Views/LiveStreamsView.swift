@@ -824,7 +824,7 @@ struct LiveStreamCard: View {
                 // Build 61 (B8, H5): the provider's channel number,
                 // only when the provider supplied one.
                 if let number = stream.channelNumber {
-                    Text(L("channels.number_format", number))
+                    Text(L("channels.number_format", String(number)))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
