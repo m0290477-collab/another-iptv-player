@@ -41,7 +41,11 @@ final class CategoryOrderStore: ObservableObject {
     func applyOrder<T>(_ items: [T], playlistId: UUID, type: String, id: (T) -> String) -> [T] {
         let saved = orderedIds(playlistId: playlistId, type: type)
         guard !saved.isEmpty else { return items }
-        let rank = Dictionary(uniqueKeysWithValues: saved.enumerated().map { ($0.element, $0.offset) })
+        // Duplicate-safe: this is a persistence boundary, so a saved
+        // order that somehow contains a duplicate id must never trap
+        // here — the first occurrence wins.
+        let rank = Dictionary(saved.enumerated().map { ($0.element, $0.offset) },
+                              uniquingKeysWith: { first, _ in first })
         return items.enumerated()
             .sorted { a, b in
                 let ra = rank[id(a.element)] ?? Int.max
