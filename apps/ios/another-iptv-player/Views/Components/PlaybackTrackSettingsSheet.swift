@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct PlaybackTrackSettingsSheet: View {
     @ObservedObject var player: VideoPlayerController
+    @ObservedObject private var sleepTimer = PlaybackSleepTimer.shared
     @Binding var showDebugOverlay: Bool
     let streamURL: URL
     @Environment(\.dismiss) private var dismiss
@@ -44,6 +45,8 @@ struct PlaybackTrackSettingsSheet: View {
                 if !player.isLiveStream {
                     importedSubtitlesSection
                 }
+                speedSection
+                sleepTimerSection
                 Section(L("player.dev_section")) {
                     Toggle(L("player.show_debug_overlay"), isOn: $showDebugOverlay)
                 }
@@ -119,6 +122,89 @@ struct PlaybackTrackSettingsSheet: View {
         } footer: {
             Text(L("player.subtitle_import.footer"))
         }
+    }
+
+    private static let speedOptions: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+    private static let sleepMinuteOptions: [Int] = [15, 30, 45, 60]
+
+    private var speedSection: some View {
+        Section(L("player.speed.title")) {
+            ForEach(Self.speedOptions, id: \.self) { rate in
+                optionRow(
+                    title: speedLabel(rate),
+                    isSelected: abs(player.rate - rate) < 0.01
+                ) {
+                    player.setRate(rate)
+                }
+            }
+        }
+    }
+
+    private var sleepTimerSection: some View {
+        Section {
+            optionRow(
+                title: L("player.sleep.off"),
+                isSelected: sleepTimer.mode == .off
+            ) {
+                sleepTimer.cancel()
+            }
+            ForEach(Self.sleepMinuteOptions, id: \.self) { minutes in
+                optionRow(
+                    title: L("player.sleep.minutes", minutes),
+                    isSelected: sleepTimer.mode == .minutes(minutes)
+                ) {
+                    sleepTimer.arm(minutes: minutes, player: player)
+                }
+            }
+            if !player.isLiveStream {
+                optionRow(
+                    title: L("player.sleep.end_of_episode"),
+                    isSelected: sleepTimer.mode == .endOfEpisode
+                ) {
+                    sleepTimer.armEndOfEpisode(player: player)
+                }
+            }
+        } header: {
+            Text(L("player.sleep.title"))
+        } footer: {
+            if let remaining = sleepTimer.remainingSeconds {
+                Text(L("player.sleep.remaining", countdownText(remaining)))
+            }
+        }
+    }
+
+    /// Row styled like the track rows above: title on the leading side,
+    /// accent checkmark on the trailing side when selected.
+    private func optionRow(
+        title: String,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 10) {
+                Text(title)
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 8)
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+        }
+    }
+
+    private func speedLabel(_ rate: Float) -> String {
+        // Numeric label, formatted like the audio-delay readout in this sheet.
+        let trimmed = rate == rate.rounded()
+            ? String(format: "%.1f", rate)
+            : String(rate)
+        return "\(trimmed)×"
+    }
+
+    private func countdownText(_ seconds: Int) -> String {
+        String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 
     private var audioDelaySection: some View {
@@ -203,5 +289,115 @@ struct PlaybackTrackSettingsSheet: View {
                 }
             }
         }
+    }
+}
+
+/// Sleep timer behind the sheet's Sleep Timer section. Shared instance, so an
+/// armed timer keeps running after the sheet is dismissed; when it fires it
+/// pauses the player it was armed from (the controller is held weakly — if
+/// that player goes away first, the timer simply cancels itself).
+@MainActor
+final class PlaybackSleepTimer: ObservableObject {
+    static let shared = PlaybackSleepTimer()
+
+    enum Mode: Equatable {
+        case off
+        case minutes(Int)
+        case endOfEpisode
+    }
+
+    @Published private(set) var mode: Mode = .off
+    /// Countdown for `.minutes` mode, shown in the sheet footer; nil otherwise.
+    @Published private(set) var remainingSeconds: Int?
+
+    private weak var player: VideoPlayerController?
+    private var tickTask: Task<Void, Never>?
+    /// Set once the armed item reaches `.ended`: the player's auto-advance
+    /// starts the next episode a few seconds later, and that start is what
+    /// this timer exists to stop.
+    private var endedWatchDeadline: Date?
+
+    private init() {}
+
+    func arm(minutes: Int, player: VideoPlayerController) {
+        self.player = player
+        mode = .minutes(minutes)
+        remainingSeconds = minutes * 60
+        endedWatchDeadline = nil
+        startTicking()
+    }
+
+    func armEndOfEpisode(player: VideoPlayerController) {
+        self.player = player
+        mode = .endOfEpisode
+        remainingSeconds = nil
+        endedWatchDeadline = nil
+        startTicking()
+    }
+
+    func cancel() {
+        mode = .off
+        remainingSeconds = nil
+        endedWatchDeadline = nil
+        tickTask?.cancel()
+        tickTask = nil
+    }
+
+    private func startTicking() {
+        tickTask?.cancel()
+        tickTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled, let self else { return }
+                self.tick()
+            }
+        }
+    }
+
+    private func tick() {
+        guard let player else { cancel(); return }
+        switch mode {
+        case .off:
+            cancel()
+        case .minutes:
+            guard let remaining = remainingSeconds else { cancel(); return }
+            if remaining <= 1 {
+                pausePlayback()
+                cancel()
+            } else {
+                remainingSeconds = remaining - 1
+            }
+        case .endOfEpisode:
+            tickEndOfEpisode(player)
+        }
+    }
+
+    private func tickEndOfEpisode(_ player: VideoPlayerController) {
+        if player.state == .ended, endedWatchDeadline == nil {
+            endedWatchDeadline = Date().addingTimeInterval(10)
+        }
+        if let deadline = endedWatchDeadline {
+            if player.isPlaying {
+                // Auto-advance started the next episode inside the watch window.
+                pausePlayback()
+                cancel()
+            } else if Date() > deadline {
+                cancel()
+            }
+            return
+        }
+        // Pause just before the item's end, so the player's post-end
+        // auto-advance countdown never starts.
+        guard player.isPlaying, player.durationMs > 0 else { return }
+        let remaining = Double(player.durationMs - player.timeMs) / 1000
+        if remaining <= 1.5 {
+            pausePlayback()
+            cancel()
+        }
+    }
+
+    private func pausePlayback() {
+        guard let player, player.isPlaying else { return }
+        player.togglePlayPause()
     }
 }
