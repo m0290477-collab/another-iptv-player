@@ -194,6 +194,14 @@ struct HomeView: View {
                             shelfView(kind)
                         }
 
+                        // ── B12 (build 61, M1) BEGIN: Today's Matches
+                        // entry — the LAST Home section per O1; Matches
+                        // hangs off Home, it is NOT a tab (O2). B7: keep
+                        // this row when restyling Home surfaces.
+                        matchesEntryRow
+                            .padding(.horizontal, 16)
+                        // ── B12 (build 61, M1) END ──
+
                         // B6 per-type loading: a type that has not
                         // landed yet shows a skeleton while the others
                         // already render.
@@ -793,6 +801,52 @@ struct HomeView: View {
         .frame(maxWidth: 560)
         .frame(maxWidth: .infinity)
     }
+
+    // ── B12 (build 61, M1) BEGIN: Today's Matches entry row ──
+    // One entry into MatchesView (live scores + results only, M-pack).
+    // NOTE for B7/coordinator: B13's F6 SectionVisibility store has not
+    // merged into this tree yet and no `sections.hidden.*` key exists
+    // here, so this row is not yet gated on the Matches visibility
+    // flag — wire it where the other Home sections consume that store.
+    private var matchesEntryRow: some View {
+        NavigationLink {
+            MatchesView()
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(AppTheme.accent.opacity(0.16))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "soccerball")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("matches.title"))
+                        .font(AppTheme.fontCardTitle)
+                        .foregroundStyle(.primary)
+                    Text(L("matches.subtitle"))
+                        .font(AppTheme.fontMetadata)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(AppTheme.fontBadge)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius)
+                    .fill(AppTheme.elevated)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppTheme.cornerRadius)
+                            .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+    // ── B12 (build 61, M1) END ──
 
     // MARK: - Shelves
 
