@@ -63,6 +63,12 @@ struct LiveStreamsView: View {
     private var liveHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "live") }
     @State private var showingCategoryPicker = false
     @State private var pendingScrollTarget: String? = nil
+    // Build 61 (B3, item 5): parental lock guard for direct channel
+    // playback — a selection whose category is PIN-locked waits
+    // here until the PIN sheet verifies. (B8: preserve this guard
+    // when editing this file; the store/API is ParentalControlStore.)
+    @State private var parentalPendingSelection: LivePlayerSelection?
+    @State private var showParentalPIN = false
 
     private var livePlaybackQueue: [DBLiveStream] {
         // Round 8 (audit A3): flattened from the cached sections. The
@@ -230,6 +236,22 @@ struct LiveStreamsView: View {
                 pendingScrollTarget = id
             }
         }
+        // Build 61 (B3, item 5): PIN sheet for the playback guard
+        // in presentLiveSelection — success session-unlocks the
+        // category and plays the pending selection.
+        .sheet(isPresented: $showParentalPIN) {
+            PINEntrySheet(message: L("parental.locked.enter_pin")) {
+                if let pending = parentalPendingSelection {
+                    if let categoryId = pending.stream.categoryId {
+                        ParentalControlStore.shared.unlockForSession(
+                            playlistId: playlist.id, type: "live", categoryId: categoryId
+                        )
+                    }
+                    parentalPendingSelection = nil
+                    presentLiveSelection(pending)
+                }
+            }
+        }
         .sheet(isPresented: $showSearchSheet) {
             NavigationStack {
                 // Round 10: SearchView owns its big title — the
@@ -241,6 +263,17 @@ struct LiveStreamsView: View {
     }
 
     private func presentLiveSelection(_ selection: LivePlayerSelection) {
+        // Build 61 (B3, item 5): a channel in a PIN-locked category
+        // does not start playing until the PIN is entered (the PIN
+        // sheet's success re-enters this function with the category
+        // session-unlocked).
+        if ParentalControlStore.shared.isBlocked(
+            playlistId: playlist.id, type: "live", categoryId: selection.stream.categoryId
+        ) {
+            parentalPendingSelection = selection
+            showParentalPIN = true
+            return
+        }
         playerOverlay.present(playlistId: playlist.id) {
             LivePlayerShell(
                 playlist: playlist,

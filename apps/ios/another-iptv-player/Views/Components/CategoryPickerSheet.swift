@@ -21,6 +21,11 @@ struct CategoryPickerSheet: View {
     @ObservedObject private var locale = LocalizationManager.shared
     @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
     @ObservedObject private var orderStore = CategoryOrderStore.shared
+    // Build 61 (B3, item 5): parental category locks — a locked
+    // category cannot be opened from here until the PIN is entered.
+    @ObservedObject private var parentalStore = ParentalControlStore.shared
+    @State private var pendingLockedEntry: Entry?
+    @State private var showPINForLockedCategory = false
 
     @Environment(\.dismiss) private var dismiss
     @State private var query: String = ""
@@ -140,6 +145,16 @@ struct CategoryPickerSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        // Build 61 (B3, item 5): PIN gate for a locked category.
+        .sheet(isPresented: $showPINForLockedCategory) {
+            PINEntrySheet(message: L("parental.locked.enter_pin")) {
+                if let entry = pendingLockedEntry, let pid = playlistId, let t = type {
+                    parentalStore.unlockForSession(playlistId: pid, type: t, categoryId: entry.id)
+                    onSelect(entry.id)
+                }
+                pendingLockedEntry = nil
+            }
+        }
     }
 
     @ViewBuilder
@@ -153,9 +168,25 @@ struct CategoryPickerSheet: View {
             // scroll the (hidden) shelf into view. Unhiding stays on
             // the swipe action below; the management UI is unchanged.
             guard !isHidden else { return }
+            // Build 61 (B3, item 5): a PIN-locked category does not
+            // open — the PIN sheet comes first; only a verified PIN
+            // (which session-unlocks the category) lets the
+            // selection through.
+            if let pid = playlistId, let t = type,
+               parentalStore.isBlocked(playlistId: pid, type: t, categoryId: entry.id) {
+                pendingLockedEntry = entry
+                showPINForLockedCategory = true
+                return
+            }
             onSelect(entry.id)
         } label: {
             HStack {
+                if let pid = playlistId, let t = type,
+                   parentalStore.isLocked(playlistId: pid, type: t, categoryId: entry.id) {
+                    Image(systemName: "lock.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                }
                 Text(entry.name)
                     .foregroundColor(.primary)
                     .lineLimit(1)
