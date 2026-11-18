@@ -4,16 +4,53 @@ import Combine
 import GRDB
 import GRDBQuery
 
+/// Combined recompute trigger for `SeriesView` (round 8, audit A2 — the
+/// `HomeRecomputeToken` pattern): one Equatable token over both inputs
+/// `recomputeFilter()` reads, so the two passes run once per real change
+/// instead of once per `.task(id:)` modifier.
+private struct SeriesRecomputeToken: Equatable {
+    let loaded: Bool
+    let hidden: Set<String>
+    /// Round 20 (R20-5): the series row count, so the pass re-runs
+    /// the moment the series fetch publishes (the store publishes
+    /// live → vod → series progressively) instead of waiting for
+    /// `streamsLoaded`, which only flips after the LAST type lands.
+    var seriesCount: Int = 0
+    var rankingsStamp: String = ""
+    /// Saved category drag order (CategoryOrderStore): a reorder in
+    /// the picker must re-run the pass that sorts the shelves.
+    var order: [String] = []
+}
+
+/// Round 14 (B8): per-series in-progress state for the Series tab
+/// shelves, derived from REAL watch history in one DB pass — the
+/// latest episode's progress fraction and its season/episode numbers
+/// for the "S# • E#" position line.
+struct SeriesProgressInfo: Equatable {
+    let progress: Double
+    let seasonNumber: Int?
+    let episodeNumber: Int?
+
+    var positionText: String? {
+        guard let episodeNumber else { return nil }
+        if let seasonNumber {
+            return "S\(seasonNumber) • E\(episodeNumber)"
+        }
+        return "E\(episodeNumber)"
+    }
+}
+
 struct SeriesView: View {
     let playlist: Playlist
     @ObservedObject private var contentStore = PlaylistContentStore.shared
     @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
+    @ObservedObject private var orderStore = CategoryOrderStore.shared
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
 
     @State private var pendingSeriesDetail: DBSeries?
 
     private var pickerEntries: [CategoryPickerSheet.Entry] {
-        contentStore.seriesCategories.map { cat in
+        orderStore.applyOrder(contentStore.seriesCategories, playlistId: playlist.id, type: "series") { $0.id }.map { cat in
             CategoryPickerSheet.Entry(
                 id: cat.id,
                 name: cat.name,
@@ -22,14 +59,40 @@ struct SeriesView: View {
         }
     }
 
-    @State private var searchText = ""
-    @State private var debouncedQuery = ""
-    @State private var debounceTask: Task<Void, Never>?
-    @State private var isSearchActive = false
+    // Round 5: the native `.searchable` is GONE (same treatment Live got
+    // in round 3 and Movies got this round) — the tab's ONE search entry
+    // is the HomeSearchBar in the header, opening the global SearchView.
+    @State private var homeSearchText = ""
+    @State private var showSearchSheet = false
+
+    // Round 5: unified content pattern — filter chips.
+    // Round 8 (D-4/D-5): the Favorites and History chips were removed —
+    // they duplicated the nav-bar star's FavoritesView and the Continue
+    // Watching row, now the ONE entry for each. Remaining chips are
+    // pure orderings: All (shelves) and Newest (the catalog's
+    // `lastModified` ordering, extended cut). Their grids/queries went.
+    @State private var selectedChip: ContentChip = .all
 
     @State private var displayCategories: [DBCategory] = []
     @State private var displayItemsByCategory: [String: [SeriesWithCategory]] = [:]
     @State private var recentlyAddedSeries: [DBSeries] = []
+    @State private var newestSeries: [DBSeries] = []
+    @State private var topRatedSeries: [DBSeries] = []
+    /// B8: seriesId (string key) → in-progress state for shelf cards.
+    @State private var progressBySeriesId: [String: SeriesProgressInfo] = [:]
+    /// Full `lastModified`-desc ordering for the paginated Newest
+    /// grid (the shared ranking is capped at 60).
+    @State private var newestAll: [DBSeries] = []
+    @State private var newestVisibleCount = 90
+    private static let newestPageSize = 90
+    /// Round 15 (C12): bumped on every tab appearance so the identity
+    /// shelf replays the LIGHT entrance on tab return (the shared
+    /// ShelfEntranceModifier's replay token).
+    @State private var shelfReplayToken = 0
+
+    init(playlist: Playlist) {
+        self.playlist = playlist
+    }
 
     @State private var showingCategoryPicker = false
     @State private var pendingScrollTarget: String? = nil
@@ -37,7 +100,18 @@ struct SeriesView: View {
     var body: some View {
         Group {
             if displayCategories.isEmpty {
-                if contentStore.isLoading || playlist.id != contentStore.activePlaylistId {
+                // Round 20 (R20-5): the Home tab's round-12 guard,
+                // which this tab never got. Phase 1 of the catalog
+                // load sets isLoading=false with categories only,
+                // while streamsLoaded stays false until ALL of phase
+                // 2 lands — the old condition fell through to
+                // "No category found" for that whole window on every
+                // cold open (owner recording, build 54). Until the
+                // streams have actually loaded (and there is no error
+                // to show instead), an empty display set means
+                // LOADING, not empty.
+                if contentStore.isLoading || playlist.id != contentStore.activePlaylistId
+                    || (!contentStore.streamsLoaded && contentStore.loadError == nil) {
                     VStack(spacing: 16) {
                         ProgressView()
                             .scaleEffect(1.2)
@@ -46,7 +120,7 @@ struct SeriesView: View {
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let loadError = contentStore.loadError, debouncedQuery.isEmpty {
+                } else if let loadError = contentStore.loadError {
                     CatalogLoadErrorView(message: loadError) {
                         Task { await contentStore.loadPlaylist(playlist) }
                     }
@@ -55,7 +129,7 @@ struct SeriesView: View {
                         Image(systemName: "play.tv")
                             .font(.largeTitle)
                             .foregroundColor(.secondary)
-                        Text(debouncedQuery.isEmpty ? L("live.empty.no_category") : L("list.no_result"))
+                        Text(L("live.empty.no_category"))
                             .foregroundColor(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -63,38 +137,52 @@ struct SeriesView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        ContinueWatchingRow(
-                            playlist: playlist,
-                            typeFilter: "series",
-                            destination: {
-                                WatchHistoryListView(playlist: playlist, typeFilter: "series") { item in
+                        tabHeader
+
+                        // The chips swap the scroll content — All keeps
+                        // the shelves; Newest renders its grid.
+                        switch selectedChip {
+                        case .all:
+                            ContinueWatchingRow(
+                                playlist: playlist,
+                                typeFilter: "series",
+                                destination: {
+                                    WatchHistoryListView(playlist: playlist, typeFilter: "series") { item in
+                                        presentSeriesHistoryItem(item)
+                                    }
+                                },
+                                onPlay: { item in
                                     presentSeriesHistoryItem(item)
                                 }
-                            },
-                            onPlay: { item in
-                                presentSeriesHistoryItem(item)
-                            }
-                        )
+                            )
 
-                        if !recentlyAddedSeries.isEmpty {
-                            RecentlyAddedSeriesShelf(playlist: playlist, items: recentlyAddedSeries)
-                        }
-
-                        LazyVStack(spacing: 0) {
-                            ForEach(displayCategories) { category in
-                                SeriesCategoryShelfRow(
-                                    playlist: playlist,
-                                    category: category,
-                                    items: displayItemsByCategory[category.id] ?? [],
-                                    isStreamsLoading: !contentStore.streamsLoaded
-                                )
-                                .equatable()
-                                .id(category.id)
+                            if topRatedSeries.count >= 3 {
+                                PopularSeriesShelf(playlist: playlist, items: topRatedSeries, progressBySeriesId: progressBySeriesId, replayToken: shelfReplayToken)
                             }
+
+                            if !recentlyAddedSeries.isEmpty {
+                                RecentlyAddedSeriesShelf(playlist: playlist, items: recentlyAddedSeries, progressBySeriesId: progressBySeriesId)
+                            }
+
+                            LazyVStack(spacing: 0) {
+                                ForEach(displayCategories) { category in
+                                    SeriesCategoryShelfRow(
+                                        playlist: playlist,
+                                        category: category,
+                                        items: displayItemsByCategory[category.id] ?? [],
+                                        isStreamsLoading: !contentStore.streamsLoaded,
+                                        progressBySeriesId: progressBySeriesId
+                                    )
+                                    .equatable()
+                                    .id(category.id)
+                                }
+                            }
+                        case .newest:
+                            newestGrid
                         }
                     }
                     .refreshable {
-                        // Bağımsız Task: refreshable iptali isteklere yayılmasın (bkz. LiveStreamsView).
+                        // Independent Task: so the refreshable cancellation doesn't propagate to the requests (see LiveStreamsView).
                         let work = Task { await contentStore.refreshFromNetwork(playlist: playlist, only: .series) }
                         await work.value
                     }
@@ -111,16 +199,9 @@ struct SeriesView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                NavigationLink {
-                    AllSeriesView(playlist: playlist)
-                } label: {
-                    Image(systemName: "square.grid.2x2")
-                        .font(.body.weight(.semibold))
-                }
-                .disabled(contentStore.seriesItems.isEmpty)
-                .accessibilityLabel(L("browse.all_series"))
-            }
+            // Round 8 (D-3): NO toolbar grid icon — AllSeriesView was
+            // reachable twice from this tab (here + the Popular Series
+            // shelf's "See all"). The shelf entry stays as the ONE path.
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     showingCategoryPicker = true
@@ -143,24 +224,107 @@ struct SeriesView: View {
                 pendingScrollTarget = id
             }
         }
-        .searchable(text: $searchText, isPresented: $isSearchActive, prompt: L("series.search_placeholder"))
-        .onChange(of: searchText) { _, new in
-            debounceTask?.cancel()
-            debounceTask = Task {
-                try? await Task.sleep(nanoseconds: 250_000_000)
-                guard !Task.isCancelled else { return }
-                await MainActor.run { debouncedQuery = new }
+        .sheet(isPresented: $showSearchSheet) {
+            NavigationStack {
+                // Round 10: SearchView owns its big title — the
+                // wrapper's inline title was removed.
+                SearchView(playlist: playlist, searchText: $homeSearchText)
             }
         }
-        .onChange(of: isSearchActive) { _, active in
-            if !active { searchText = ""; debouncedQuery = "" }
-        }
-        .task(id: debouncedQuery) { await recomputeFilter() }
-        .task(id: contentStore.streamsLoaded) { await recomputeFilter() }
-        .task(id: hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")) { await recomputeFilter() }
+        // Round 8 (audit A2): ONE recompute trigger — the same combined
+        // token round 7 gave Home. The two separate `.task(id:)` modifiers
+        // that used to sit here (streamsLoaded + the hidden set) fired
+        // back-to-back at catalog load, so the two full-catalog passes
+        // inside recomputeFilter ran twice in a row. One token change =
+        // one run; the outputs are rule-identical.
+        .task(id: SeriesRecomputeToken(
+            loaded: contentStore.streamsLoaded,
+            hidden: hiddenStore.hiddenIds(playlistId: playlist.id, type: "series"),
+            seriesCount: contentStore.seriesItems.count,
+            rankingsStamp: "\(contentStore.sharedTopRatedSeries.count)-\(contentStore.sharedNewestSeries.count)-\(contentStore.sharedTopRatedSeries.first?.seriesId ?? -1)-\(contentStore.sharedNewestSeries.first?.seriesId ?? -1)",
+            order: orderStore.orderedIds(playlistId: playlist.id, type: "series")
+        )) { await recomputeFilter() }
+        .onAppear { shelfReplayToken += 1 }
         .transaction { $0.animation = nil }
         .navigationDestination(item: $pendingSeriesDetail) { series in
             SeriesDetailView(playlist: playlist, series: series)
+        }
+        .cinematicBackground()
+    }
+
+    /// Round 5 elite header, reordered in round 7 by the owner's direct
+    /// order ("search must be at the top"): the tab's ONE search entry
+    /// is the FIRST element under the title, then the REAL visible
+    /// series total, then the filter chips.
+    private var tabHeader: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HomeSearchBar(placeholder: L("home.search_placeholder")) {
+                showSearchSheet = true
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+
+            Text(L("home.count_series", CatalogCountFormatter.string(displayCategories.reduce(0) { $0 + (displayItemsByCategory[$1.id]?.count ?? 0) })))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                // Round 15 (C12): animated numeric counter.
+                .contentTransition(.numericText())
+                .animation(Motion.tabFade, value: displayItemsByCategory.values.reduce(0) { $0 + $1.count })
+                .padding(.horizontal, 16)
+
+            ContentChipsRow(chips: [.all, .newest], selection: $selectedChip)
+        }
+        .padding(.bottom, 6)
+    }
+
+    @Environment(\.posterMetrics) private var posterMetrics
+
+    private var posterGridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: posterMetrics.categoryGridPosterWidth), spacing: posterMetrics.gridSpacing)]
+    }
+
+    private var newestGrid: some View {
+        Group {
+            if newestAll.isEmpty {
+                ContentUnavailableView(
+                    L("list.no_result"),
+                    systemImage: "clock.badge.xmark"
+                )
+                .padding(.top, 40)
+            } else {
+                LazyVGrid(columns: posterGridColumns, spacing: posterMetrics.gridRowSpacing) {
+                    ForEach(Array(newestAll.prefix(newestVisibleCount).enumerated()), id: \.element.id) { index, series in
+                        NavigationLink {
+                            SeriesDetailView(playlist: playlist, series: series)
+                        } label: {
+                            SeriesCard(
+                                playlistId: playlist.id,
+                                stream: series,
+                                posterWidth: posterMetrics.categoryGridPosterWidth,
+                                posterHeight: posterMetrics.categoryGridPosterHeight,
+                                imageLoadProfile: .grid,
+                                watchProgress: progressBySeriesId[String(series.seriesId)]?.progress,
+                                seasonEpisodeCounts: contentStore.seriesSeasonEpisodeCounts[series.seriesId],
+                                positionText: progressBySeriesId[String(series.seriesId)]?.positionText
+                            )
+                        }
+                        .buttonStyle(PressScaleButtonStyle())
+                        .onAppear {
+                            if index >= newestVisibleCount - 15 {
+                                newestVisibleCount = min(newestVisibleCount + Self.newestPageSize, newestAll.count)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+                if newestVisibleCount < newestAll.count {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                }
+            }
         }
     }
 
@@ -215,60 +379,167 @@ struct SeriesView: View {
         }
     }
 
+    /// Round 5: with the native search bar removed there is no in-tab
+    /// query anymore — the display set is simply every visible category
+    /// with its series, exactly what the old empty-query path produced
+    /// (the same simplification Live got in round 3).
     private func recomputeFilter() async {
         guard playlist.id == contentStore.activePlaylistId else {
-            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedSeries = []; return
+            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedSeries = []; newestSeries = []; topRatedSeries = []; newestAll = []; progressBySeriesId = [:]; return
         }
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")
-        let allCats = contentStore.seriesCategories.filter { !hidden.contains($0.id) }
+        let allCats = orderStore.applyOrder(
+            contentStore.seriesCategories.filter { !hidden.contains($0.id) },
+            playlistId: playlist.id, type: "series"
+        ) { $0.id }
         let allByCategory = contentStore.seriesItemsByCategoryId
-        let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
 
-        if q.isEmpty {
-            displayCategories = allCats
-            displayItemsByCategory = allByCategory
-            let visibleCatIds = Set(allCats.map(\.id))
-            let allSeries = contentStore.seriesItems
-            recentlyAddedSeries = await Task.detached(priority: .userInitiated) {
-                allSeries
-                    .lazy
-                    .filter { visibleCatIds.contains($0.series.categoryId ?? "") }
-                    .compactMap { item -> (DBSeries, Int)? in
-                        guard let ts = item.series.lastModified.flatMap(Int.init) else { return nil }
-                        return (item.series, ts)
-                    }
-                    .sorted { $0.1 > $1.1 }
-                    .prefix(20)
-                    .map(\.0)
-            }.value
-            return
-        }
-        recentlyAddedSeries = []
+        displayCategories = allCats
+        displayItemsByCategory = allByCategory
+        let visibleCatIds = Set(allCats.map(\.id))
+        let allSeries = contentStore.seriesItems
+        // Round 14 (B10): rankings come from the store's shared
+        // arrays (computed once), filtered by visible categories.
+        // The store's Newest ordering already uses the tolerant
+        // `lastModified` parser (round 15, C8).
+        let sharedTop = contentStore.sharedTopRatedSeries
+        let sharedNewest = contentStore.sharedNewestSeries
+        topRatedSeries = Array(sharedTop.filter { visibleCatIds.contains($0.categoryId ?? "") }.prefix(15))
+        recentlyAddedSeries = Array(sharedNewest.filter { visibleCatIds.contains($0.categoryId ?? "") }.prefix(20))
+        newestSeries = Array(sharedNewest.filter { visibleCatIds.contains($0.categoryId ?? "") }.prefix(60))
 
-        let result = await Task.detached(priority: .userInitiated) {
-            var cats: [DBCategory] = []
-            var byCategory: [String: [SeriesWithCategory]] = [:]
-            for cat in allCats {
-                let catMatch = CatalogTextSearch.matches(search: q, text: cat.name)
-                let items = allByCategory[cat.id] ?? []
-                let filtered = catMatch ? items : items.filter { CatalogTextSearch.matches(search: q, text: $0.series.name) }
-                if catMatch || !filtered.isEmpty {
-                    cats.append(cat)
-                    byCategory[cat.id] = filtered
+        // The Newest GRID paginates past the shared cap, so it keeps
+        // a full ordering (tolerant timestamp parsing, C8).
+        let byModifiedDesc = await Task.detached(priority: .userInitiated) {
+            allSeries
+                .lazy
+                .filter { visibleCatIds.contains($0.series.categoryId ?? "") }
+                .compactMap { item -> (DBSeries, Int)? in
+                    guard let ts = CatalogTimestampParsing.epochSeconds(from: item.series.lastModified) else { return nil }
+                    return (item.series, ts)
                 }
-            }
-            return (cats, byCategory)
+                .sorted { $0.1 > $1.1 }
+                .map(\.0)
         }.value
-
         guard !Task.isCancelled else { return }
-        displayCategories = result.0
-        displayItemsByCategory = result.1
+        newestAll = byModifiedDesc
+        newestVisibleCount = min(Self.newestPageSize, byModifiedDesc.count)
+
+        await loadProgressBySeries()
+    }
+
+    /// B8: one DB pass — the latest history row per series, joined to
+    /// its episode record for the real season/episode numbers.
+    private func loadProgressBySeries() async {
+        let pid = playlist.id
+        let result = try? await AppDatabase.shared.read { db -> [String: SeriesProgressInfo] in
+            let rows = try DBWatchHistory
+                .filter(Column("playlistId") == pid && Column("type") == "series" && Column("durationMs") > 0)
+                .order(Column("lastWatchedAt").desc)
+                .fetchAll(db)
+            var latest: [String: DBWatchHistory] = [:]
+            for row in rows {
+                guard let sid = row.seriesId, latest[sid] == nil else { continue }
+                latest[sid] = row
+            }
+            var out: [String: SeriesProgressInfo] = [:]
+            for (sid, history) in latest {
+                let progress = min(max(Double(history.lastTimeMs) / Double(history.durationMs), 0), 1)
+                guard progress > 0.02, progress < 0.98 else { continue }
+                let episode = try DBEpisode
+                    .filter(Column("episodeId") == history.streamId || Column("id") == history.streamId)
+                    .fetchOne(db)
+                let seasonNumber = episode.flatMap { ep in
+                    ep.seasonId.split(separator: "_").last.flatMap { Int($0) }
+                }
+                out[sid] = SeriesProgressInfo(
+                    progress: progress,
+                    seasonNumber: seasonNumber,
+                    episodeNumber: episode?.episodeNum
+                )
+            }
+            return out
+        }
+        guard !Task.isCancelled else { return }
+        progressBySeriesId = result ?? [:]
     }
 
     private func buildURL(for item: DBWatchHistory) -> URL? {
         let builder = PlaybackURLBuilder(playlist: playlist)
-        // Series tab olduğu için series varsayımı
+        // Because it is the Series tab, the series assumption
         return builder.seriesURL(streamId: item.streamId, containerExtension: item.containerExtension)
+    }
+}
+
+// MARK: - Popular Series shelf
+
+/// "Popular Series" row: the catalog's highest-rated series (real panel
+/// ratings only, computed in `recomputeFilter`). Round 9: portrait
+/// poster cards (`SeriesCard`, the series cover) — the wide 16:9
+/// `SeriesWideCard` showed backdrop art where it existed and low-res
+/// covers upscaled into a 264pt-wide frame where it did not, visibly
+/// blurrier than the Movies shelves' crisp portrait posters (owner
+/// recording, build 45). Same card, size and image profile the Movies
+/// shelves use. "See all" opens the existing All Series grid.
+struct PopularSeriesShelf: View, Equatable {
+    let playlist: Playlist
+    let items: [DBSeries]
+    var progressBySeriesId: [String: SeriesProgressInfo] = [:]
+    var replayToken: Int = 0
+
+    static func == (lhs: PopularSeriesShelf, rhs: PopularSeriesShelf) -> Bool {
+        lhs.playlist.id == rhs.playlist.id && lhs.items == rhs.items
+            && lhs.progressBySeriesId == rhs.progressBySeriesId
+            && lhs.replayToken == rhs.replayToken
+    }
+
+    @Environment(\.posterMetrics) private var posterMetrics
+    @ObservedObject private var contentStore = PlaylistContentStore.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            CinematicSectionHeader(title: L("home.popular_series")) {
+                AllSeriesView(playlist: playlist)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 14) {
+                    ForEach(items.indices, id: \.self) { index in
+                        NavigationLink {
+                            SeriesDetailView(playlist: playlist, series: items[index])
+                        } label: {
+                            // Round 14 (B8): Popular Series is a
+                            // RANKED shelf — outlined numerals, the
+                            // series identity mirroring Top Movies.
+                            RankedPosterCard(
+                                rank: index + 1,
+                                imageURL: items[index].cover.flatMap { URL(string: $0) },
+                                title: items[index].name,
+                                ratingText: ContentRating.normalizedDisplayText(
+                                    rating: items[index].rating,
+                                    rating5Based: items[index].rating5Based
+                                ),
+                                // B8: real season/episode counts
+                                // ride the card's meta line when the
+                                // store has computed them.
+                                metaText: contentStore.seriesSeasonEpisodeCounts[items[index].seriesId].map {
+                                    "\(L("series.seasons_count_format", $0.seasons)) • \(L("series.episode_count_format", $0.episodes))"
+                                },
+                                posterWidth: posterMetrics.shelfPosterWidth,
+                                posterHeight: posterMetrics.shelfPosterHeight,
+                                iconName: "play.tv"
+                            )
+                            .tint(SectionTheme.series)
+                        }
+                        .buttonStyle(.plain)
+                        .shelfEntrance(index: index, replayToken: replayToken)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .shelfEdgeFade()
+        }
+        .padding(.vertical, 6)
     }
 }
 
@@ -277,31 +548,23 @@ struct SeriesView: View {
 struct RecentlyAddedSeriesShelf: View, Equatable {
     let playlist: Playlist
     let items: [DBSeries]
+    var progressBySeriesId: [String: SeriesProgressInfo] = [:]
 
     static func == (lhs: RecentlyAddedSeriesShelf, rhs: RecentlyAddedSeriesShelf) -> Bool {
         lhs.playlist.id == rhs.playlist.id && lhs.items == rhs.items
+            && lhs.progressBySeriesId == rhs.progressBySeriesId
     }
 
     @Environment(\.posterMetrics) private var posterMetrics
+    @ObservedObject private var contentStore = PlaylistContentStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                NavigationLink {
-                    RecentlyAddedSeriesDetailView(playlist: playlist, items: items)
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(L("recently_added.title"))
-                            .font(.headline)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .foregroundStyle(.primary)
-                }
-                Spacer()
+            // Round 8: the ONE shelf-header style (was headline +
+            // chevron); destination unchanged.
+            CinematicSectionHeader(title: L("recently_added.title")) {
+                RecentlyAddedSeriesDetailView(playlist: playlist, items: items)
             }
-            .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
@@ -309,12 +572,20 @@ struct RecentlyAddedSeriesShelf: View, Equatable {
                         NavigationLink {
                             SeriesDetailView(playlist: playlist, series: series)
                         } label: {
+                            // Round 9: portrait poster card (cover),
+                            // same as the Movies shelves — see
+                            // `PopularSeriesShelf`. Round 14 (B8):
+                            // in-progress series carry their progress
+                            // bar + position line here too.
                             SeriesCard(
                                 playlistId: playlist.id,
                                 stream: series,
                                 posterWidth: posterMetrics.shelfPosterWidth,
                                 posterHeight: posterMetrics.shelfPosterHeight,
-                                imageLoadProfile: .shelf
+                                imageLoadProfile: .shelf,
+                                watchProgress: progressBySeriesId[String(series.seriesId)]?.progress,
+                                seasonEpisodeCounts: contentStore.seriesSeasonEpisodeCounts[series.seriesId],
+                                positionText: progressBySeriesId[String(series.seriesId)]?.positionText
                             )
                         }
                         .buttonStyle(.plain)
@@ -322,7 +593,8 @@ struct RecentlyAddedSeriesShelf: View, Equatable {
                 }
                 .padding(.horizontal, 16)
             }
-            .frame(height: posterMetrics.shelfRowTotalHeight)
+            .frame(height: posterMetrics.shelfRowTotalHeight + 18)
+            .shelfEdgeFade()
         }
         .padding(.vertical, 6)
     }
@@ -368,7 +640,7 @@ struct RecentlyAddedSeriesDetailView: View {
 
 // MARK: - Category shelf
 private enum SeriesCategoryShelf {
-    static let prefetchHeadCount = 32
+    static let prefetchHeadCount = 16 // Round 7: 32 → 16 (see ListImagePrefetch — bounds speculative decode work per shelf)
 }
 
 struct SeriesCategoryShelfRow: View, Equatable {
@@ -376,37 +648,31 @@ struct SeriesCategoryShelfRow: View, Equatable {
     let category: DBCategory
     let items: [SeriesWithCategory]
     var isStreamsLoading: Bool = false
+    var progressBySeriesId: [String: SeriesProgressInfo] = [:]
 
     static func == (lhs: SeriesCategoryShelfRow, rhs: SeriesCategoryShelfRow) -> Bool {
         lhs.playlist.id == rhs.playlist.id &&
         lhs.category == rhs.category &&
         lhs.items == rhs.items &&
-        lhs.isStreamsLoading == rhs.isStreamsLoading
+        lhs.isStreamsLoading == rhs.isStreamsLoading &&
+        lhs.progressBySeriesId == rhs.progressBySeriesId
     }
 
     @Environment(\.posterMetrics) private var posterMetrics
+    @ObservedObject private var contentStore = PlaylistContentStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                NavigationLink {
-                    SeriesCategoryDetailView(playlist: playlist, category: category)
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(category.name)
-                            .font(.headline)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .foregroundStyle(.primary)
-                }
-                Spacer()
+            // Round 8: the ONE shelf-header style — destination and the
+            // real per-category count badge (round 5, elite pattern)
+            // are unchanged; both now ride on CinematicSectionHeader.
+            CinematicSectionHeader(title: category.name, count: items.isEmpty ? nil : items.count) {
+                SeriesCategoryDetailView(playlist: playlist, category: category)
             }
-            .padding(.horizontal, 16)
 
             if items.isEmpty {
                 if isStreamsLoading {
+                    // Round 9: matches the portrait-card row height.
                     Color.clear.frame(height: posterMetrics.shelfRowTotalHeight)
                 } else {
                     Text(L("series.empty.no_in_category"))
@@ -417,26 +683,51 @@ struct SeriesCategoryShelfRow: View, Equatable {
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: 14) {
-                        ForEach(items) { item in
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                             NavigationLink {
                                 SeriesDetailView(playlist: playlist, series: item.series)
                             } label: {
+                                // Round 9: portrait poster card
+                                // (cover), same as the Movies shelves.
+                                // Round 14 (B8): counts + in-progress
+                                // state ride the card.
                                 SeriesCard(
                                     playlistId: playlist.id,
                                     stream: item.series,
                                     posterWidth: posterMetrics.shelfPosterWidth,
                                     posterHeight: posterMetrics.shelfPosterHeight,
-                                    imageLoadProfile: .shelf
+                                    imageLoadProfile: .shelf,
+                                    watchProgress: progressBySeriesId[String(item.series.seriesId)]?.progress,
+                                    seasonEpisodeCounts: contentStore.seriesSeasonEpisodeCounts[item.series.seriesId],
+                                    positionText: progressBySeriesId[String(item.series.seriesId)]?.positionText
                                 )
                             }
                             .buttonStyle(.plain)
+                            // Round 20 (R20-5): as each cell appears,
+                            // warm the covers just ahead of it — the
+                            // old head-only prefetch left every cover
+                            // past the first 16 a cold request during
+                            // fast horizontal scrolls (the placeholder
+                            // fields in the owner's build-54 recording
+                            // were this shelf's Ramadan rows).
+                            .onAppear {
+                                prefetchWindow(from: items, after: index)
+                            }
                         }
                     }
                     .padding(.horizontal, 16)
                 }
-                .frame(height: posterMetrics.shelfRowTotalHeight)
+                .frame(height: posterMetrics.shelfRowTotalHeight + 18)
+                .shelfEdgeFade()
                 .onAppear {
                     prefetchCovers(from: items)
+                }
+                .onDisappear {
+                    // Round 20 (R20-5): retract this shelf's
+                    // not-yet-started head batch so a fast vertical
+                    // fling doesn't leave the shared prefetch queue
+                    // full of shelves the user already passed.
+                    stopPrefetchCovers(from: items)
                 }
             }
         }
@@ -444,10 +735,45 @@ struct SeriesCategoryShelfRow: View, Equatable {
     }
 
     private func prefetchCovers(from list: [SeriesWithCategory]) {
+        // Round 9: prefetch exactly what the portrait cards render —
+        // the cover at shelf poster size (mirrors
+        // `VODCategoryShelfRow.prefetchPosters`). The old request
+        // prefetched backdrop art at the deleted wide-card size, a
+        // cache key no card ever asked for.
         let urls = list.prefix(SeriesCategoryShelf.prefetchHeadCount)
             .compactMap { $0.series.cover }
             .compactMap { URL(string: $0) }
         ListImagePrefetch.start(
+            urls: urls,
+            width: posterMetrics.shelfPosterWidth,
+            height: posterMetrics.shelfPosterHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
+    }
+
+    /// Round 20 (R20-5): the scroll window ahead of the cell at
+    /// `index` (see ListImagePrefetch.scrollWindow).
+    private func prefetchWindow(from list: [SeriesWithCategory], after index: Int) {
+        let start = index + 1
+        guard start < list.count else { return }
+        let urls = list[start..<min(start + ListImagePrefetch.scrollWindow, list.count)]
+            .compactMap { $0.series.cover }
+            .compactMap { URL(string: $0) }
+        ListImagePrefetch.start(
+            urls: urls,
+            width: posterMetrics.shelfPosterWidth,
+            height: posterMetrics.shelfPosterHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
+    }
+
+    private func stopPrefetchCovers(from list: [SeriesWithCategory]) {
+        let urls = list.prefix(SeriesCategoryShelf.prefetchHeadCount)
+            .compactMap { $0.series.cover }
+            .compactMap { URL(string: $0) }
+        ListImagePrefetch.stop(
             urls: urls,
             width: posterMetrics.shelfPosterWidth,
             height: posterMetrics.shelfPosterHeight,
@@ -464,8 +790,40 @@ struct SeriesCard: View {
     var posterWidth: CGFloat = 160
     var posterHeight: CGFloat = 240
     var imageLoadProfile: ImageLoadProfile = .standard
-    /// Kart başına @Query açmak yerine üst view'dan geçilir (nil = progress bar gizli)
+    /// Passed from the upper view instead of opening a @Query per card (nil = progress bar hidden)
     var watchProgress: Double? = nil
+    /// Round 14 (B8): real season/episode counts computed by
+    /// PlaylistContentStore — nil (entry absent) shows NOTHING, never
+    /// a fabricated 0.
+    var seasonEpisodeCounts: SeriesSeasonEpisodeCounts? = nil
+    /// B8: "S# • E#" of the latest in-progress episode, from real
+    /// watch history; nil when the series isn't in progress.
+    var positionText: String? = nil
+
+    /// "2024 • Fantasy" — built only from fields the record actually
+    /// carries (release year, first genre); nil when neither exists.
+    private var metaLine: String? {
+        var parts: [String] = []
+        if let year = DetailFormatting.year(from: stream.releaseDate) {
+            parts.append(year)
+        }
+        if let genre = stream.genre?.split(separator: ",").first {
+            let g = genre.trimmingCharacters(in: .whitespaces)
+            if !g.isEmpty { parts.append(g) }
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " • ")
+    }
+
+    /// The one extra line under the meta line: the in-progress
+    /// position when there is one (it is the more useful signal),
+    /// else the real season/episode counts.
+    private var extraLine: String? {
+        if let positionText { return positionText }
+        if let counts = seasonEpisodeCounts {
+            return "\(L("series.seasons_count_format", counts.seasons)) • \(L("series.episode_count_format", counts.episodes))"
+        }
+        return nil
+    }
 
     var body: some View {
         VStack {
@@ -481,7 +839,7 @@ struct SeriesCard: View {
 
                 if let progress = watchProgress, progress > 0 {
                     Rectangle()
-                        .fill(Color.accentColor)
+                        .fill(AppTheme.accent)
                         .frame(height: 4)
                         .frame(width: posterWidth * progress)
                         .frame(maxWidth: posterWidth, alignment: .leading)
@@ -491,24 +849,45 @@ struct SeriesCard: View {
                         .padding(.horizontal, 4)
                 }
 
-                PosterRatingBadge(rating: stream.rating)
+                // B7: badge shows the ONE normalized rating value.
+                PosterRatingBadge(rating: ContentRating.normalizedDisplayText(
+                    rating: stream.rating,
+                    rating5Based: stream.rating5Based
+                ))
                     .padding(6)
             }
 
+            // Round 15 (C9): left-aligned card titles on the shared
+            // font tokens (matching RankedPosterCard).
             Text(stream.name)
-                .font(.caption)
-                .fontWeight(.medium)
+                .font(AppTheme.fontCardTitle)
                 .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .frame(width: posterWidth)
+                .multilineTextAlignment(.leading)
+                .frame(width: posterWidth, alignment: .leading)
                 .foregroundColor(.primary)
+
+            if let metaLine {
+                Text(metaLine)
+                    .font(AppTheme.fontMetadata)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .frame(width: posterWidth, alignment: .leading)
+            }
+
+            if let extraLine {
+                Text(extraLine)
+                    .font(AppTheme.fontMetadata)
+                    .foregroundColor(positionText != nil ? AppTheme.accent : .secondary)
+                    .lineLimit(1)
+                    .frame(width: posterWidth, alignment: .leading)
+            }
 
             if let catName = categoryName {
                 Text(catName)
-                    .font(.system(size: 10))
+                    .font(AppTheme.fontMetadata)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
-                    .frame(width: posterWidth)
+                    .frame(width: posterWidth, alignment: .leading)
             }
         }
     }
@@ -562,6 +941,9 @@ struct SeriesCategoryDetailView: View {
 struct SeriesCategoryContent: View, Equatable {
     let playlist: Playlist
     let items: [SeriesWithCategory]
+    /// Round 14 (B1): a genre chip on a series detail page lands
+    /// here with that genre pre-applied to the existing genre filter.
+    var initialGenre: String? = nil
 
     /// Cheap signature compare so a parent @Published re-render doesn't force SwiftUI
     /// to re-process a huge item list. Internal @State/@Query updates still invalidate.
@@ -574,8 +956,10 @@ struct SeriesCategoryContent: View, Equatable {
 
     @Environment(\.posterMetrics) private var posterMetrics
     @Query<WatchProgressMapRequest> private var progressMap: [String: Double]
+    @ObservedObject private var contentStore = PlaylistContentStore.shared
 
     @AppStorage(SeriesSortOption.storageKey) private var sortOption: SeriesSortOption = .defaultOrder
+    @State private var showSortSheet = false
     /// Screen-local: genres are specific to the currently shown list.
     @State private var genreFilter: Set<String> = []
     /// Sort/filter output, recomputed off the main thread on input changes.
@@ -587,9 +971,10 @@ struct SeriesCategoryContent: View, Equatable {
 
     private static let pageSize = 90
 
-    init(playlist: Playlist, items: [SeriesWithCategory]) {
+    init(playlist: Playlist, items: [SeriesWithCategory], initialGenre: String? = nil) {
         self.playlist = playlist
         self.items = items
+        self.initialGenre = initialGenre
         _progressMap = Query(WatchProgressMapRequest(playlistId: playlist.id, type: "series"), in: \.appDatabase)
     }
 
@@ -626,7 +1011,13 @@ struct SeriesCategoryContent: View, Equatable {
 
     private func loadMore() {
         guard visibleCount < displayItems.count else { return }
+        let pageStart = visibleCount
         visibleCount = min(visibleCount + Self.pageSize, displayItems.count)
+        // Round 20 (R20-5): warm the page that is about to be
+        // revealed — the old flow only ever prefetched the grid's
+        // first 24 covers (at recompute), so every paged-in page
+        // painted cold during fast scrolling.
+        prefetch(displayItems, startingAt: pageStart)
     }
 
     var body: some View {
@@ -652,7 +1043,8 @@ struct SeriesCategoryContent: View, Equatable {
                                     posterWidth: posterMetrics.categoryGridPosterWidth,
                                     posterHeight: posterMetrics.categoryGridPosterHeight,
                                     imageLoadProfile: .grid,
-                                    watchProgress: progressMap[String(item.series.seriesId)]
+                                    watchProgress: progressMap[String(item.series.seriesId)],
+                                    seasonEpisodeCounts: contentStore.seriesSeasonEpisodeCounts[item.series.seriesId]
                                 )
                             }
                             .onAppear { if index >= visibleCount - 15 { loadMore() } }
@@ -676,43 +1068,51 @@ struct SeriesCategoryContent: View, Equatable {
         .task(id: itemsToken) { await recompute() }
         .task(id: sortOption) { await recompute() }
         .task(id: genreFilter) { await recompute() }
+        .task(id: initialGenre) {
+            if let initialGenre, genreFilter.isEmpty {
+                genreFilter = [initialGenre]
+            }
+        }
+        .cinematicBackground()
     }
 
+    /// Round 10 (point 13): the raw popover `Menu` is now the
+    /// styled `SortFilterSheet` bottom sheet — same state, same
+    /// options, same toggle/clear behavior.
     private var sortFilterMenu: some View {
-        Menu {
-            Picker(L("sort.title"), selection: $sortOption) {
-                ForEach(SeriesSortOption.allCases) { option in
-                    Label(L(option.titleKey), systemImage: option.systemImage).tag(option)
-                }
-            }
-
-            if !genres.isEmpty {
-                Section(L("filter.genre")) {
-                    ForEach(genres, id: \.self) { genre in
-                        Button {
-                            toggleGenre(genre)
-                        } label: {
-                            if genreFilter.contains(genre) {
-                                Label(genre, systemImage: "checkmark")
-                            } else {
-                                Text(genre)
-                            }
-                        }
-                    }
-                    if !genreFilter.isEmpty {
-                        Button(role: .destructive) {
-                            genreFilter.removeAll()
-                        } label: {
-                            Label(L("filter.clear"), systemImage: "xmark.circle")
-                        }
-                    }
-                }
-            }
+        Button {
+            showSortSheet = true
         } label: {
             Image(systemName: isFilterActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                 .font(.body.weight(.semibold))
         }
         .accessibilityLabel(L("sort.title"))
+        .sheet(isPresented: $showSortSheet) {
+            SortFilterSheet(
+                sortRows: SeriesSortOption.allCases.map { option in
+                    SortFilterSheet.Row(
+                        id: option.rawValue,
+                        title: L(option.titleKey),
+                        systemImage: option.systemImage,
+                        isSelected: sortOption == option
+                    ) { sortOption = option }
+                },
+                filterTitle: genres.isEmpty ? nil : L("filter.genre"),
+                filterRows: genres.map { genre in
+                    SortFilterSheet.Row(
+                        id: "genre-\(genre)",
+                        title: genre,
+                        isSelected: genreFilter.contains(genre)
+                    ) { toggleGenre(genre) }
+                },
+                // Round 14 (B1): Clear resets the SORT as well as the
+                // genre filter.
+                onClearFilters: (sortOption == .defaultOrder && genreFilter.isEmpty) ? nil : {
+                    sortOption = .defaultOrder
+                    genreFilter.removeAll()
+                }
+            )
+        }
     }
 
     private func toggleGenre(_ genre: String) {
@@ -723,8 +1123,8 @@ struct SeriesCategoryContent: View, Equatable {
         }
     }
 
-    private func prefetch(_ list: [SeriesWithCategory]) {
-        let urls = list.prefix(ListImagePrefetch.maxBatch)
+    private func prefetch(_ list: [SeriesWithCategory], startingAt: Int = 0) {
+        let urls = list.dropFirst(startingAt).prefix(ListImagePrefetch.maxBatch)
             .compactMap { $0.series.cover }
             .compactMap { URL(string: $0) }
         ListImagePrefetch.start(
@@ -770,6 +1170,7 @@ struct AllSeriesView: View {
             .task(id: debouncedQuery) { await recompute() }
             .task(id: contentStore.streamsLoaded) { await recompute() }
             .task(id: hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")) { await recompute() }
+            .cinematicBackground()
     }
 
     private func recompute() async {
@@ -804,6 +1205,31 @@ struct SeriesDetailView: View {
     @State private var selectedEpisode: (DBEpisode, DBWatchHistory?)?
     @State private var episodeNavPrevious: DBEpisode?
     @State private var episodeNavNext: DBEpisode?
+    /// F-58: the next episode's numbers for the T-50 card line,
+    /// resolved with the neighbors in `loadEpisodeNeighbors`.
+    @State private var episodeNavNextSeason: Int?
+    @State private var episodeNavNextEpisode: Int?
+    /// Round 10: the Episodes/About tab under the action bar.
+    @State private var detailTab = 0
+    /// The episode the watch history points at (for the
+    /// "Continue • Episode N" label and the download row) and the
+    /// series' first episode (the no-history download target) —
+    /// both resolved from the database, never assumed.
+    @State private var resumeEpisode: DBEpisode?
+    @State private var firstEpisode: DBEpisode?
+    /// Round 14 (B1): series Play surfaces a VISIBLE failure when no
+    /// episode resolves — never a silent no-op.
+    @State private var showPlayFailure = false
+    /// Round 14 (B3): the "Play next unwatched" target — the episode
+    /// after the latest watched one in chain order, when one exists.
+    @State private var nextUnwatchedEpisode: DBEpisode?
+    /// Round 15 (C8): episodes present in the DB that weren't in the
+    /// known-ID set from the previous detail open (first open only
+    /// records the baseline).
+    @State private var newEpisodeCount = 0
+    /// One navigation route for genre + people browsing (single
+    /// destination registration per type, as SwiftUI requires).
+    @State private var pendingRoute: MovieDetailRoute?
     @Query<SeriesByIDRequest> private var seriesRecord: DBSeries?
     @Query<SeasonsRequest> private var seasons: [DBSeason]
     @Query<IsFavoriteRequest> private var isFavorite: Bool
@@ -825,11 +1251,16 @@ struct SeriesDetailView: View {
     private var heroConfig: DetailHeroConfig {
         DetailHeroConfig(
             title: currentSeries.name,
-            backdropURL: currentSeries.backdropPath.flatMap { URL(string: $0) },
+            backdropURL: currentSeries.backdropPath.flatMap { let t = $0.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : URL(string: t) },
             posterURL: currentSeries.cover.flatMap { URL(string: $0) },
             year: DetailFormatting.year(from: currentSeries.releaseDate),
+            releaseDate: currentSeries.releaseDate,
             runtime: DetailFormatting.seriesRuntime(currentSeries.episodeRunTime),
-            rating10: currentSeries.rating5Based.map { $0 * 2 },
+            // B7: the hero reads the ONE rating normalization point.
+            rating10: ContentRating.normalizedRating10(
+                rating: currentSeries.rating,
+                rating5Based: currentSeries.rating5Based
+            ),
             ratingText: currentSeries.rating,
             posterIconName: "play.tv",
             backdropIconName: "play.tv"
@@ -837,16 +1268,41 @@ struct SeriesDetailView: View {
     }
 
     private var trailerURL: URL? {
+        // C7 validation, same rule as the movie side: only a real
+        // YouTube URL or a bare 11-char video id produces a trailer.
         guard let raw = currentSeries.youtubeTrailer?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else {
             return nil
         }
-        if raw.lowercased().hasPrefix("http") { return URL(string: raw) }
+        if raw.lowercased().hasPrefix("http") {
+            guard let url = URL(string: raw),
+                  let host = url.host?.lowercased(),
+                  host.contains("youtube.com") || host.contains("youtu.be") else { return nil }
+            return url
+        }
+        let idCharset = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        guard raw.count == 11, raw.unicodeScalars.allSatisfy({ idCharset.contains($0) }) else { return nil }
         return URL(string: "https://www.youtube.com/watch?v=\(raw)")
     }
 
     private var hasResume: Bool {
         guard let h = watchHistory else { return false }
         return h.lastTimeMs > 5000
+    }
+
+    /// Round 14 (B8): the ONE finished threshold — ≥98% — matching
+    /// SeriesPlayShell. A finished latest episode means the primary
+    /// action moves to the NEXT episode, not a resume into the last
+    /// seconds.
+    private var resumeIsFinished: Bool {
+        guard let h = watchHistory, h.durationMs > 0 else { return false }
+        return Double(h.lastTimeMs) / Double(h.durationMs) >= 0.98
+    }
+
+    /// Seasons in chain order (season 0 last — see
+    /// SeriesPlaybackOrdering): the first entry is the first REGULAR
+    /// season whenever one exists.
+    private var orderedSeasons: [DBSeason] {
+        SeriesPlaybackOrdering.orderedSeasons(seasons)
     }
 
     private var resumeProgress: Double? {
@@ -874,22 +1330,179 @@ struct SeriesDetailView: View {
         }
         .navigationTitle(showNavTitle ? currentSeries.name : "")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(action: {
-                    Task { await toggleFavorite() }
-                }) {
-                    Image(systemName: isFavorite ? "star.fill" : "star")
-                        .foregroundColor(isFavorite ? .yellow : .primary)
-                }
-            }
-        }
+        // Round 10: the favorite action moved beside the Play
+        // button (DetailFavoriteDownloadRow) — the toolbar star is
+        // gone so the action exists exactly once on this page.
         .fullScreenCover(item: $enlargedImage) { wrapper in
             FullscreenImageViewer(url: wrapper.url)
+        }
+        // Round 14 (B1): the visible Play failure.
+        .alert(L("series.no_seasons_info"), isPresented: $showPlayFailure) {
+            Button(L("common.ok"), role: .cancel) {}
+        }
+        .navigationDestination(item: $pendingRoute) { route in
+            switch route {
+            case .genre(let genre):
+                SeriesGenreGridView(playlist: playlist, genre: genre)
+            case .person(let person):
+                PersonTitlesView(playlist: playlist, person: person)
+            }
         }
         .task {
             if !currentSeries.seasonsLoaded {
                 await fetchSeriesInfo()
+            }
+        }
+        .task(id: watchHistory?.streamId) { await loadResumeEpisode() }
+        .task(id: watchHistory?.streamId) { await loadNextUnwatched() }
+        .task(id: seasons.first?.id) { await loadFirstEpisode() }
+        .task(id: currentSeries.seasonsLoaded) {
+            if currentSeries.seasonsLoaded {
+                await detectNewEpisodes()
+            }
+        }
+        .cinematicBackground()
+    }
+
+    /// The big Play button's label (point 20): "Continue • Episode
+    /// N" with the REAL episode number from the resumed episode's
+    /// record; "Play Episode 1" when there is no history but the
+    /// series has seasons; the previous generic labels otherwise.
+    /// Round 14 (B8): a FINISHED latest episode (≥98%) labels the
+    /// button with the NEXT episode instead of "Continue".
+    private var primaryActionTitle: String {
+        if hasResume {
+            if resumeIsFinished {
+                if let num = nextUnwatchedEpisode?.episodeNum {
+                    return L("detail.continue_episode", num)
+                }
+                return L("detail.play_next_unwatched")
+            }
+            if let num = resumeEpisode?.episodeNum {
+                return L("detail.continue_episode", num)
+            }
+            return L("detail.resume")
+        }
+        return seasons.isEmpty ? L("detail.watch") : L("detail.play_episode_1")
+    }
+
+    /// The download row's target: the resumed episode when there is
+    /// one, else the first episode — nil (row omitted) until one
+    /// actually resolves from the database.
+    private var downloadTargetEpisode: DBEpisode? {
+        resumeEpisode ?? firstEpisode
+    }
+
+    private func loadResumeEpisode() async {
+        guard let history = watchHistory else { resumeEpisode = nil; return }
+        let streamId = history.streamId
+        let ep = try? await AppDatabase.shared.read { db in
+            try DBEpisode.filter(Column("episodeId") == streamId || Column("id") == streamId).fetchOne(db)
+        }
+        resumeEpisode = ep ?? nil
+    }
+
+    private func loadFirstEpisode() async {
+        // Round 14 (B8): the first episode comes from the chain
+        // ordering — season 0 is skipped whenever a season ≥ 1
+        // exists (it stays manually reachable in the episode list).
+        let ep = try? await AppDatabase.shared.read { db in
+            try SeriesPlaybackOrdering.firstEpisode(
+                seriesId: currentSeries.seriesId,
+                playlistId: playlist.id,
+                db: db
+            )
+        }
+        firstEpisode = ep ?? nil
+    }
+
+    /// B3: the next unwatched episode = the chain successor of the
+    /// latest watched episode.
+    private func loadNextUnwatched() async {
+        guard let history = watchHistory else { nextUnwatchedEpisode = nil; return }
+        let ctx = try? await AppDatabase.shared.read { db in
+            try SeriesPlaybackOrdering.navigationContext(
+                playlistId: playlist.id,
+                playbackStreamId: history.streamId,
+                seriesIdHint: String(currentSeries.seriesId),
+                db: db
+            )
+        }
+        nextUnwatchedEpisode = ctx?.next ?? nil
+    }
+
+    private func playNextUnwatched() {
+        guard let next = nextUnwatchedEpisode else {
+            // B1: a Play tap that resolves nothing must SAY so.
+            showPlayFailure = true
+            return
+        }
+        selectedEpisode = (next, nil)
+        presentEpisodeOverlay(ep: next, history: nil)
+    }
+
+    /// Round 15 (C8): new-episode detection by episode-ID diff at
+    /// detail open. The known set lives in UserDefaults per playlist
+    /// + series; the FIRST open only records the baseline.
+    private func detectNewEpisodes() async {
+        let key = "series.known_episode_ids.\(playlist.id.uuidString).\(currentSeries.seriesId)"
+        let sid = currentSeries.seriesId
+        let pid = playlist.id
+        let current = try? await AppDatabase.shared.read { db -> Set<String> in
+            let seasonIds = try DBSeason
+                .filter(Column("seriesId") == sid && Column("playlistId") == pid)
+                .fetchAll(db)
+                .map(\.id)
+            guard !seasonIds.isEmpty else { return [] }
+            let episodes = try DBEpisode
+                .filter(seasonIds.contains(Column("seasonId")))
+                .fetchAll(db)
+            return Set(episodes.map { $0.episodeId ?? $0.id })
+        }
+        guard let current, !current.isEmpty else { return }
+        let known = UserDefaults.standard.stringArray(forKey: key).map(Set.init)
+        if let known {
+            newEpisodeCount = current.subtracting(known).count
+        } else {
+            newEpisodeCount = 0
+        }
+        UserDefaults.standard.set(Array(current), forKey: key)
+    }
+
+    /// Round 14 (B8): enqueue EVERY episode of a season through the
+    /// existing DownloadManager queue (the same call the per-episode
+    /// DownloadButton makes).
+    private func downloadSeason(_ season: DBSeason) {
+        let pid = playlist.id
+        let seriesName = currentSeries.name
+        let seriesCover = currentSeries.cover
+        let seriesIdString = String(currentSeries.seriesId)
+        Task {
+            let episodes = (try? await AppDatabase.shared.read { db in
+                try DBEpisode
+                    .filter(Column("seasonId") == season.id)
+                    .fetchAll(db)
+            }) ?? []
+            for episode in SeriesPlaybackOrdering.orderedEpisodes(episodes) {
+                let streamId = episode.episodeId ?? episode.id
+                guard let url = PlaybackURLBuilder(playlist: playlist).seriesURL(
+                    streamId: streamId,
+                    containerExtension: episode.containerExtension
+                ) else { continue }
+                await DownloadManager.shared.enqueue(
+                    id: DownloadManager.idFor(episode: pid, episodeId: streamId),
+                    playlistId: pid,
+                    streamId: streamId,
+                    type: "episode",
+                    title: episode.title ?? seriesName,
+                    secondaryTitle: seriesName,
+                    imageURL: episode.cover ?? seriesCover,
+                    remoteURL: url,
+                    containerExtension: episode.containerExtension,
+                    seriesId: seriesIdString,
+                    seasonNumber: season.seasonNumber,
+                    episodeNumber: episode.episodeNum
+                )
             }
         }
     }
@@ -928,7 +1541,16 @@ struct SeriesDetailView: View {
                 canGoToNextEpisode: episodeNavNext != nil,
                 onPreviousEpisode: { selectAdjacentEpisode(goBack: true) },
                 onNextEpisode: { selectAdjacentEpisode(goBack: false) },
-                onNavigateToDetail: { _, _ in }
+                nextEpisodeSeason: episodeNavNextSeason,
+                nextEpisodeEpisode: episodeNavNextEpisode
+                // Round 8 (F-7): the inert `onNavigateToDetail: { _, _ in }`
+                // that used to sit here is REMOVED, not wired — this
+                // player is presented FROM SeriesDetailView, so the
+                // title tap's "go to detail" has nowhere to go: closing
+                // the player already lands on this series' detail. With
+                // the parameter nil the title tap is inert by design
+                // (the history/VOD shells pass real closures because
+                // they are NOT already on the detail screen).
             )
             .task(id: ep.id) {
                 await loadEpisodeNeighbors(for: ep)
@@ -960,33 +1582,111 @@ struct SeriesDetailView: View {
                     enlargedImage = IdentifiableURL(url: url)
                 }
 
-                GenreChipRow(genres: DetailFormatting.genreList(currentSeries.genre))
+                // Round 14 (B1): genre chips navigate to the Series
+                // tab's genre-filtered grid.
+                GenreChipRow(genres: DetailFormatting.genreList(currentSeries.genre)) { genre in
+                    pendingRoute = .genre(genre)
+                }
 
                 DetailActionBar(
-                    primaryTitle: hasResume ? L("detail.resume") : L("detail.watch"),
-                    primarySubtitle: resumeSubtitle,
+                    primaryTitle: primaryActionTitle,
+                    primarySubtitle: resumeIsFinished ? nil : resumeSubtitle,
                     primaryIcon: hasResume ? "play.circle.fill" : "play.fill",
-                    progress: resumeProgress,
+                    progress: resumeIsFinished ? nil : resumeProgress,
                     onPrimary: {
-                        if hasResume { resumeLatestEpisode() } else { playFirstEpisode() }
+                        if hasResume && resumeIsFinished {
+                            playNextUnwatched()
+                        } else if hasResume {
+                            resumeLatestEpisode()
+                        } else {
+                            playFirstEpisode()
+                        }
                     },
                     trailerURL: trailerURL
                 )
 
-                if let plot = currentSeries.plot?.trimmingCharacters(in: .whitespacesAndNewlines), !plot.isEmpty {
-                    DetailPlotBlock(plot: plot)
-                        .padding(.top, 4)
+                // Round 14 (B3): "Play next unwatched" — shown while
+                // the primary button resumes the current episode;
+                // once that episode is finished the primary button
+                // itself becomes this action (B8), so the row hides.
+                if hasResume, !resumeIsFinished, let next = nextUnwatchedEpisode {
+                    Button {
+                        selectedEpisode = (next, nil)
+                        presentEpisodeOverlay(ep: next, history: nil)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "forward.end.fill")
+                                .font(.footnote.weight(.semibold))
+                            Text(L("detail.play_next_unwatched"))
+                                .font(.footnote.weight(.semibold))
+                                .lineLimit(1)
+                            Spacer()
+                        }
+                        .foregroundStyle(Color.primary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+                        .background(
+                            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                                .fill(AppTheme.elevated)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                                .strokeBorder(AppTheme.cardBorderColor, lineWidth: 0.5)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.top, -10)
                 }
 
-                if let director = currentSeries.director?.trimmingCharacters(in: .whitespacesAndNewlines), !director.isEmpty {
-                    DetailInfoTextBlock(label: L("movie.director"), value: director)
+                // Round 10 (point 20): favorite + download beside
+                // Play. The download targets the resumed episode,
+                // else episode 1 — and the slot stays empty until
+                // one resolves, never a dead button.
+                DetailFavoriteDownloadRow(
+                    isFavorite: isFavorite,
+                    onToggleFavorite: { Task { await toggleFavorite() } }
+                ) {
+                    if let ep = downloadTargetEpisode,
+                       let remoteURL = PlaybackURLBuilder(playlist: playlist).seriesURL(
+                           streamId: ep.episodeId ?? ep.id,
+                           containerExtension: ep.containerExtension
+                       ) {
+                        DownloadButton(
+                            id: DownloadManager.idFor(episode: playlist.id, episodeId: ep.episodeId ?? ep.id),
+                            playlistId: playlist.id,
+                            streamId: ep.episodeId ?? ep.id,
+                            type: "episode",
+                            title: ep.title ?? currentSeries.name,
+                            secondaryTitle: currentSeries.name,
+                            imageURL: ep.cover ?? currentSeries.cover,
+                            remoteURL: remoteURL,
+                            containerExtension: ep.containerExtension,
+                            seriesId: String(currentSeries.seriesId),
+                            seasonNumber: ep.seasonId.split(separator: "_").last.flatMap { Int($0) },
+                            episodeNumber: ep.episodeNum
+                        )
+                    } else {
+                        EmptyView()
+                    }
                 }
+                .padding(.top, -10)
 
-                if let cast = currentSeries.cast?.trimmingCharacters(in: .whitespacesAndNewlines), !cast.isEmpty {
-                    DetailInfoTextBlock(label: L("movie.cast"), value: cast, lineLimit: 3)
+                // Round 10: Episodes / About segmented tabs — the
+                // episode list is the default surface; Story,
+                // Director and Cast live under About.
+                Picker("", selection: $detailTab) {
+                    Text(L("detail.episodes")).tag(0)
+                    Text(L("detail.about")).tag(1)
                 }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
 
-                seasonsSection
+                if detailTab == 0 {
+                    seasonsSection
+                } else {
+                    aboutSection
+                }
             }
             .padding(.bottom, 48)
         }
@@ -999,6 +1699,31 @@ struct SeriesDetailView: View {
             }
         }
         .ignoresSafeArea(edges: .top)
+    }
+
+    /// The About tab's content: Story / Director / Cast from the
+    /// series record's own fields — each block omitted when its
+    /// field is empty, exactly as before the tabs existed.
+    @ViewBuilder
+    private var aboutSection: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            if let plot = currentSeries.plot?.trimmingCharacters(in: .whitespacesAndNewlines), !plot.isEmpty {
+                DetailPlotBlock(plot: plot)
+            }
+
+            if let director = currentSeries.director?.trimmingCharacters(in: .whitespacesAndNewlines), !director.isEmpty {
+                // C7: people names are tappable, as on movie detail.
+                DetailInfoTextBlock(label: L("movie.director"), value: director) { person in
+                    pendingRoute = .person(person)
+                }
+            }
+
+            if let cast = currentSeries.cast?.trimmingCharacters(in: .whitespacesAndNewlines), !cast.isEmpty {
+                DetailInfoTextBlock(label: L("movie.cast"), value: cast) { person in
+                    pendingRoute = .person(person)
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -1014,6 +1739,16 @@ struct SeriesDetailView: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(L("series.seasons"))
                         .font(.title3.weight(.bold))
+                    // Round 15 (C8): new-episode badge from the
+                    // episode-ID diff at detail open.
+                    if newEpisodeCount > 0 {
+                        Text(L("series.new_episodes_format", newEpisodeCount))
+                            .font(AppTheme.fontBadge)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(AppTheme.accent))
+                    }
                     Spacer()
                     if let sid = selectedSeasonId,
                        let s = seasons.first(where: { $0.id == sid }),
@@ -1021,6 +1756,18 @@ struct SeriesDetailView: View {
                         Text(L("detail.episode_count_plural", count))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
+                            .contentTransition(.numericText())
+                        // Round 14 (B8): download the whole season
+                        // through the existing download queue.
+                        Button {
+                            downloadSeason(s)
+                        } label: {
+                            Image(systemName: "arrow.down.circle")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(AppTheme.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(L("series.download_season"))
                     }
                 }
                 .padding(.horizontal, 16)
@@ -1038,16 +1785,13 @@ struct SeriesDetailView: View {
                     }
 
                 if let sid = selectedSeasonId {
-                    if let season = seasons.first(where: { $0.id == sid }),
-                       let overview = season.overview?.trimmingCharacters(in: .whitespacesAndNewlines),
-                       !overview.isEmpty {
-                        Text(overview)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 16)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
+                    // Round 11 (owner, build 47): the season `overview`
+                    // line that used to render here is DELETED. On real
+                    // panels that field carries the season's cover URL,
+                    // so the page showed a raw `http://…_small.jpg`
+                    // string as text under the season pill. The owner
+                    // ordered it gone entirely — not rendered as text
+                    // and not turned into an image in its place.
                     EpisodesPanel(
                         seasonId: sid,
                         playlist: playlist,
@@ -1065,7 +1809,10 @@ struct SeriesDetailView: View {
     }
 
     private func resumeLatestEpisode() {
-        guard let history = watchHistory else { return }
+        guard let history = watchHistory else {
+            showPlayFailure = true
+            return
+        }
         Task {
             if let ep = try? await AppDatabase.shared.read({ db in
                 try DBEpisode.filter(Column("episodeId") == history.streamId || Column("id") == history.streamId).fetchOne(db)
@@ -1074,35 +1821,48 @@ struct SeriesDetailView: View {
                     selectedEpisode = (ep, history)
                     presentEpisodeOverlay(ep: ep, history: history)
                 }
+            } else {
+                // B1: the resume target no longer resolves — say so
+                // visibly instead of swallowing the tap.
+                await MainActor.run { showPlayFailure = true }
             }
         }
     }
 
     private func playFirstEpisode() {
         Task {
-            guard let firstSeasonId = seasons.first?.id else { return }
-            if let first = try? await AppDatabase.shared.read({ db in
-                try DBEpisode
-                    .filter(Column("seasonId") == firstSeasonId)
-                    .order(Column("episodeNum"))
-                    .fetchOne(db)
-            }) {
-                await MainActor.run {
+            // B8: chain ordering — season 0 skipped when a regular
+            // season exists.
+            let first = try? await AppDatabase.shared.read { db in
+                try SeriesPlaybackOrdering.firstEpisode(
+                    seriesId: currentSeries.seriesId,
+                    playlistId: playlist.id,
+                    db: db
+                )
+            }
+            await MainActor.run {
+                if let first {
                     selectedEpisode = (first, nil)
                     presentEpisodeOverlay(ep: first, history: nil)
+                } else {
+                    // B1: visible failure, never a silent no-op.
+                    showPlayFailure = true
                 }
             }
         }
     }
 
-    // Sezon kapakları hiçbir yerde render edilmiyor; prefetch etmek yalnızca boşa ağ
-    // trafiği ve pil tüketiyordu (bkz. inceleme bulgusu). Kapaklar ileride gösterilirse
-    // render parametreleriyle birebir aynı prefetch yeniden eklenmeli.
+    // Season covers are not rendered anywhere; prefetching them was only wasting network
+    // traffic and battery (see the review finding). If the covers are shown in the future,
+    // a prefetch exactly matching the render parameters must be re-added.
 
-    /// En son izlenen bölümün sezonunu döner; izlenmiş bölüm yoksa ilk sezonu döner.
+    /// Returns the season of the most recently watched episode; if there is no watched episode, it returns the first season.
+    /// Round 15 (C8): "first" means the first REGULAR season — season
+    /// 0's tab sits last and is never the landing tab when a regular
+    /// season exists.
     private func resolveInitialSeasonId(from seasons: [DBSeason]) async -> String? {
         guard let history = watchHistory else {
-            return seasons.first?.id
+            return SeriesPlaybackOrdering.orderedSeasons(seasons).first?.id
         }
         let streamId = history.streamId
         if let episode = try? await AppDatabase.shared.read({ db in
@@ -1130,6 +1890,8 @@ struct SeriesDetailView: View {
             let oldNext = episodeNavNext
             episodeNavPrevious = ctx?.previous
             episodeNavNext = ctx?.next
+            episodeNavNextSeason = ctx?.nextSeasonNumber
+            episodeNavNextEpisode = ctx?.nextEpisodeNumber
             let neighborsChanged =
                 oldPrev?.id != episodeNavPrevious?.id || oldNext?.id != episodeNavNext?.id
             if neighborsChanged,
@@ -1170,6 +1932,10 @@ struct SeriesDetailView: View {
             try await AppDatabase.shared.write { db in
                 let episodesBySeason = info.episodesBySeasonNumber
 
+                // Round 15 (C8): the fetched episode-ID set, for the
+                // ghost cleanup after the saves below.
+                var fetchedEpisodeIds = Set<String>()
+
                 for (seasonNum, apiSeason) in info.resolvedSeasons {
                     let seasonId = DBSeason.scopedId(playlistId: playlist.id, seriesId: series.seriesId, seasonNumber: seasonNum)
                     let eps = episodesBySeason[seasonNum] ?? []
@@ -1201,10 +1967,30 @@ struct SeriesDetailView: View {
                             rating: ep.info?.rating,
                             seasonId: seasonId
                         )
+                        fetchedEpisodeIds.insert(dbEp.id)
                         try dbEp.save(db)
                     }
                 }
-                
+
+                // Round 15 (C8): ghost-episode cleanup — stored
+                // episodes of THIS series (any of its seasons,
+                // including seasons the panel no longer returns) that
+                // are absent from the fetched set are deleted in the
+                // same transaction, so a panel-side removal stops
+                // haunting the episode list and prev/next chain.
+                let storedSeasonIds = try DBSeason
+                    .filter(Column("seriesId") == series.seriesId && Column("playlistId") == playlist.id)
+                    .fetchAll(db)
+                    .map(\.id)
+                if !storedSeasonIds.isEmpty {
+                    let stored = try DBEpisode
+                        .filter(storedSeasonIds.contains(Column("seasonId")))
+                        .fetchAll(db)
+                    for stale in stored where !fetchedEpisodeIds.contains(stale.id) {
+                        try stale.delete(db)
+                    }
+                }
+
                 // Update series metadata in DB
                 var updatedSeries = series
                 updatedSeries.seasonsLoaded = true
@@ -1223,7 +2009,10 @@ struct SeriesDetailView: View {
                 }
                 try updatedSeries.update(db)
             }
-            
+
+            // B8: the store's season/episode counts now include this
+            // series — refresh them for the tab shelves.
+            await PlaylistContentStore.shared.refreshSeriesSeasonEpisodeCounts()
             await MainActor.run { self.isLoading = false }
         } catch {
             await MainActor.run {
@@ -1246,17 +2035,17 @@ struct SeriesDetailView: View {
                 }
             }
         } catch {
-            print("Failed to toggle favorite: \(error)")
+            Log.error("Series", "Failed to toggle favorite: \(error.localizedDescription)")
         }
     }
 
 }
 
-/// @Query + `.id(seasonId)` ScrollView kaydırma konumunu sıfırlıyordu; sezon değişince aynı panelde abonelik yenilenir.
+/// @Query + `.id(seasonId)` was resetting the ScrollView scroll position; when the season changes, the subscription is renewed in the same panel.
 private final class SeasonEpisodesObserver: ObservableObject {
     @Published private(set) var episodes: [DBEpisode] = []
-    /// İlk yayın gelene dek true olmaz — "bu sezonda bölüm yok" metni yükleme
-    /// sırasında yanıp sönmesin diye panel önce yükleme durumunu gösterir.
+    /// It does not become true until the first publication arrives — so the "no episodes in this season" text doesn't
+    /// flicker during loading, the panel first shows the loading state.
     @Published private(set) var hasLoaded = false
     private var cancellable: AnyCancellable?
 
@@ -1373,23 +2162,49 @@ private struct EpisodeDetailRow: View {
         )
     }
 
+    /// Round 10 (point 4): the thumbnail is the episode's OWN still
+    /// when the panel provided one; when it didn't, the row falls
+    /// back to the series' cover art instead of rendering an empty
+    /// placeholder box (the build-46 defect). Both are real art from
+    /// the loaded data — nothing is substituted or invented.
+    private var thumbnailURL: URL? {
+        if let cover = episode.cover?.trimmingCharacters(in: .whitespaces), !cover.isEmpty {
+            return URL(string: cover)
+        }
+        if let cover = seriesCover?.trimmingCharacters(in: .whitespaces), !cover.isEmpty {
+            return URL(string: cover)
+        }
+        return nil
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
+                // Round 14 (B1): the WHOLE row is tappable, thumbnail
+                // included — the tap target is no longer just the
+                // text block. The download button stays separate.
                 ZStack(alignment: .bottom) {
                     CachedImage(
-                        url: episode.cover.flatMap { URL(string: $0) },
+                        url: thumbnailURL,
                         width: posterMetrics.episodeThumbWidth,
                         height: posterMetrics.episodeThumbHeight,
-                        cornerRadius: 8,
+                        cornerRadius: AppTheme.smallCornerRadius,
                         contentMode: .fill,
                         iconName: "play.rectangle.fill",
                         loadProfile: .grid
                     )
+
+                    // Round 10: a play affordance centered on the
+                    // thumbnail, so the row reads as playable video.
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 26))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.6), radius: 4)
+                        .frame(width: posterMetrics.episodeThumbWidth, height: posterMetrics.episodeThumbHeight)
                     
                     if let history = watchHistory, history.durationMs > 0 {
                         let progress = Double(history.lastTimeMs) / Double(history.durationMs)
                         Rectangle()
-                            .fill(Color.accentColor)
+                            .fill(AppTheme.accent)
                             .frame(height: 3)
                             .frame(width: posterMetrics.episodeThumbWidth * min(max(progress, 0), 1))
                             .frame(maxWidth: posterMetrics.episodeThumbWidth, alignment: .leading)
@@ -1398,6 +2213,10 @@ private struct EpisodeDetailRow: View {
                             .padding(.bottom, 2)
                             .padding(.horizontal, 4)
                     }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onStreamSelected(episode, watchHistory)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -1409,7 +2228,9 @@ private struct EpisodeDetailRow: View {
 
                     if let history = watchHistory, history.durationMs > 0 {
                         let progress = Double(history.lastTimeMs) / Double(history.durationMs)
-                        if progress >= 0.95 {
+                        // Round 14 (B8): the unified finished
+                        // threshold is ≥98% everywhere.
+                        if progress >= 0.98 {
                             Label(L("detail.watched"), systemImage: "checkmark.circle.fill")
                                 .font(.caption)
                                 .foregroundStyle(.green)
@@ -1418,7 +2239,7 @@ private struct EpisodeDetailRow: View {
                             let remainingMs = history.durationMs - history.lastTimeMs
                             Label(L("detail.remaining_format", formatWatchMs(remainingMs)), systemImage: "play.circle")
                                 .font(.caption)
-                                .foregroundStyle(Color.accentColor)
+                                .foregroundStyle(AppTheme.accent)
                                 .labelStyle(.titleAndIcon)
                         }
                     }
@@ -1449,9 +2270,9 @@ private struct EpisodeDetailRow: View {
                         remoteURL: remoteURL,
                         containerExtension: episode.containerExtension,
                         seriesId: seriesId,
-                        // seasonId "<playlistUUID>_<seriesId>_<seasonNum>" — son bileşen
-                        // sezon numarası. Geçilmeyince DownloadsView S02E01'i S01E02'nin
-                        // önüne diziyordu (hepsi season 0 sayılıyordu).
+                        // seasonId "<playlistUUID>_<seriesId>_<seasonNum>" — the last component
+                        // is the season number. When it wasn't parsed, DownloadsView was sorting S02E01
+                        // ahead of S01E02 (all of them counted as season 0).
                         seasonNumber: episode.seasonId.split(separator: "_").last.flatMap { Int($0) },
                         episodeNumber: episode.episodeNum,
                         compact: true
@@ -1482,8 +2303,25 @@ private struct EpisodeDetailRow: View {
 private struct FlowMetaRow: View {
     let episode: DBEpisode
 
+    /// "S01E03" from the record's own numbers — the season number is
+    /// the seasonId's last component (the same derivation the
+    /// download button uses), the episode number is the record's.
+    /// A code, not prose: identical in every language.
+    private var episodeCode: String? {
+        guard let ep = episode.episodeNum else { return nil }
+        if let seasonPart = episode.seasonId.split(separator: "_").last, let season = Int(seasonPart) {
+            return String(format: "S%02dE%02d", season, ep)
+        }
+        return String(format: "E%02d", ep)
+    }
+
     var body: some View {
         HStack(spacing: 12) {
+            if let episodeCode {
+                Text(episodeCode)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
             if let d = episode.duration?.trimmingCharacters(in: .whitespacesAndNewlines), !d.isEmpty {
                 Label(d, systemImage: "clock")
                     .font(.caption)
@@ -1494,5 +2332,36 @@ private struct FlowMetaRow: View {
                 RatingLabel(rating: episode.rating, style: .compact)
             }
         }
+    }
+}
+
+// MARK: - Series genre grid (round 14, B1)
+
+/// Landing surface for a series detail page's genre chip: the whole
+/// visible series catalog in the standard category grid, with the
+/// tapped genre pre-applied to its existing genre filter.
+struct SeriesGenreGridView: View {
+    let playlist: Playlist
+    let genre: String
+
+    @ObservedObject private var contentStore = PlaylistContentStore.shared
+    @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
+    @State private var displayItems: [SeriesWithCategory] = []
+
+    var body: some View {
+        SeriesCategoryContent(playlist: playlist, items: displayItems, initialGenre: genre)
+            .equatable()
+            .navigationTitle(genre)
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar(.hidden, for: .tabBar)
+            .task(id: contentStore.streamsLoaded) { await recompute() }
+            .task(id: hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")) { await recompute() }
+            .cinematicBackground()
+    }
+
+    private func recompute() async {
+        guard playlist.id == contentStore.activePlaylistId else { displayItems = []; return }
+        let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")
+        displayItems = contentStore.seriesItems.filter { !hidden.contains($0.series.categoryId ?? "") }
     }
 }

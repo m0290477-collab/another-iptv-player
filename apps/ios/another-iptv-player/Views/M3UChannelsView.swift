@@ -1,12 +1,13 @@
 import SwiftUI
 
-/// Grup (group-title) başlıklı yatay raflar. Xtream Canlı TV görünümü ile aynı desen.
+/// Horizontal shelves with group (group-title) headings. The same pattern as the Xtream Live TV view.
 struct M3UChannelsView: View {
     static let hiddenCategoryType = "m3u"
 
     let playlist: Playlist
     @ObservedObject private var store = M3UContentStore.shared
     @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
+    @ObservedObject private var orderStore = CategoryOrderStore.shared
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
 
     @State private var searchText = ""
@@ -14,18 +15,21 @@ struct M3UChannelsView: View {
     @State private var debounceTask: Task<Void, Never>?
     @State private var isSearchActive = false
 
-    /// Arama sonrası filtrelenmiş gruplar.
+    /// The groups filtered after a search.
     @State private var displayGroups: [String] = []
     @State private var displayChannelsByGroup: [String: [DBM3UChannel]] = [:]
 
-    /// Kategori atlama: picker sheet açık mı, ve en son talep edilen grup (scrollTo için).
+    /// Category jump: whether the picker sheet is open, and the most recently requested group (for scrollTo).
     @State private var showingCategoryPicker = false
     @State private var pendingScrollTarget: String? = nil
 
-    /// Shelf listesinde gösterilecek gruplar (gizlenenler çıkarılır). Picker tüm grupları görür.
+    /// The groups to show in the shelf list (hidden ones removed). The picker sees all groups.
     private var visibleShelfGroups: [String] {
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: Self.hiddenCategoryType)
-        return displayGroups.filter { !hidden.contains($0) }
+        return orderStore.applyOrder(
+            displayGroups.filter { !hidden.contains($0) },
+            playlistId: playlist.id, type: Self.hiddenCategoryType
+        ) { $0 }
     }
 
     var body: some View {
@@ -77,7 +81,7 @@ struct M3UChannelsView: View {
                 } label: {
                     Image(systemName: "star.fill")
                         .font(.body.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(AppTheme.accent)
                 }
                 .accessibilityLabel(L("favorites.title"))
             }
@@ -95,7 +99,9 @@ struct M3UChannelsView: View {
         .sheet(isPresented: $showingCategoryPicker) {
             CategoryPickerSheet(
                 title: L("category_picker.title"),
-                entries: displayGroups.map { g in
+                // B1 (Round 14): hidden groups are NOT jump targets —
+                // the picker lists visible groups only.
+                entries: visibleShelfGroups.map { g in
                     CategoryPickerSheet.Entry(
                         id: g,
                         name: M3UContentStore.displayName(forGroup: g),
@@ -112,7 +118,7 @@ struct M3UChannelsView: View {
         .searchable(text: $searchText, isPresented: $isSearchActive, prompt: L("m3u.search_placeholder"))
         .onChange(of: searchText) { _, new in
             debounceTask?.cancel()
-            // Boş aramaya geçişte debounce bekletme yok — tam listeyi anında göster.
+            // On switching to an empty search there is no debounce wait — show the full list instantly.
             let trimmed = new.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty {
                 debouncedQuery = ""
@@ -135,13 +141,14 @@ struct M3UChannelsView: View {
         }
         .task(id: debouncedQuery) { await recomputeFilter() }
         .onChange(of: store.channels) { _, _ in
-            // Store güncellendikçe mevcut aramayı yeniden uygula (boşsa tam liste).
+            // As the store updates, re-apply the current search (if empty, the full list).
             Task { await recomputeFilter() }
         }
         .onAppear { applyFull() }
+        .cinematicBackground()
     }
 
-    /// Tam liste görüntüsüne anında dön (debounce atla).
+    /// Return to the full-list view instantly (skip the debounce).
     private func applyFull() {
         guard playlist.id == store.activePlaylistId else { return }
         displayGroups = store.groupNames
@@ -152,7 +159,7 @@ struct M3UChannelsView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    // İzlemeye devam: arama yokken üstte.
+                    // Continue watching: at the top when there is no search.
                     if debouncedQuery.isEmpty {
                         ContinueWatchingRow(
                             playlist: playlist,
@@ -182,16 +189,21 @@ struct M3UChannelsView: View {
                 }
             }
             .refreshable {
-                // Bağımsız Task: refreshable iptali isteklere yayılmasın (bkz. LiveStreamsView).
+                // Independent Task: so the refreshable cancellation doesn't propagate to the requests (see LiveStreamsView).
                 let work = Task { await refreshCatalog() }
                 await work.value
+                // C12: success haptic + UI sound on real completion.
+                if store.loadError == nil {
+                    Haptics.success()
+                    AppSound.play(.refreshSuccess)
+                }
             }
             .onChange(of: pendingScrollTarget) { _, target in
                 guard let target else { return }
                 withAnimation(.easeOut(duration: 0.25)) {
                     proxy.scrollTo(target, anchor: .top)
                 }
-                // Reset; aynı grup tekrar seçilirse onChange yeniden tetiklensin.
+                // Reset; so onChange fires again if the same group is selected again.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     pendingScrollTarget = nil
                 }
@@ -199,9 +211,9 @@ struct M3UChannelsView: View {
         }
     }
 
-    /// Pull-to-refresh: URL tabanlı playlist'te tam yeniden indirme + import (ayarlardaki
-    /// yenilemeyle aynı yol); yerel dosyalı playlist'te yalnızca DB'den yeniden yükleme
-    /// (dosya yeniden seçilmeden içerik değişemez).
+    /// Pull-to-refresh: on a URL-based playlist, a full re-download + import (the same path as the refresh in Settings);
+    /// on a local-file playlist, only a reload from the DB
+    /// (the content cannot change without the file being re-selected).
     private func refreshCatalog() async {
         let url = playlist.serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !url.isEmpty else {
@@ -218,7 +230,7 @@ struct M3UChannelsView: View {
             )
             await store.reloadIfActive(playlist: playlist)
         } catch {
-            // Store'un hata alanına yaz; başarısız yenileme mevcut içeriği bozmaz.
+            // Write it to the store's error field; a failed refresh does not corrupt the existing content.
             store.loadError = error.localizedDescription
         }
     }
@@ -273,20 +285,20 @@ struct M3UChannelsView: View {
         }
     }
 
-    /// Prev/next için aynı grubun kanal listesini queue olarak kullan.
-    /// Anahtar, store'un grupladığı KANONİK etiket olmalı — L() ile localize edilmiş
-    /// etiket store anahtarıyla eşleşmez ve queue tek kanala düşer (prev/next ölür).
+    /// For prev/next, use the channel list of the same group as the queue.
+    /// The key must be the CANONICAL label the store grouped by — a label localized with L()
+    /// does not match the store key and the queue falls to a single channel (prev/next dies).
     private func queueForChannel(_ channel: DBM3UChannel) -> [DBM3UChannel] {
         let key = channel.groupTitle?.trimmingCharacters(in: .whitespaces).nonEmptyOrNil
             ?? M3UContentStore.ungroupedLabel
         return displayChannelsByGroup[key] ?? [channel]
     }
 
-    /// Continue Watching row'undan gelen kaydı oynatır. Kanal reimport sonrası kaybolmuşsa alert.
+    /// Plays the record coming from the Continue Watching row. If the channel has disappeared after a reimport, an alert.
     private func presentHistoryItem(_ item: DBWatchHistory) {
         guard let channel = store.channels.first(where: { $0.id == item.streamId }) else {
-            // Kanal silinmiş olabilir (playlist'ten kalktı). Sessizce yut, Continue row
-            // bir sonraki refresh'te güncellenecek.
+            // The channel may have been deleted (removed from the playlist). Swallow it silently, the Continue row
+            // will be updated on the next refresh.
             return
         }
         guard M3UParser.sanitizedURL(from: channel.url) != nil else { return }
@@ -309,9 +321,9 @@ private extension String {
 // MARK: - Group shelf (horizontal preview)
 
 private enum M3UShelf {
-    /// Kart göründüğünde kaç sonraki logoyu önden yükleyelim.
+    /// How many subsequent logos to preload when a card appears.
     static let lookAhead = 10
-    /// İlk açılışta kullanıcı kaydırmadan önce görünür pencere için hazırlık.
+    /// Preparation for the visible window before the user scrolls, on first open.
     static let initialWarmup = 6
 }
 
@@ -374,7 +386,7 @@ struct M3UGroupShelfRow: View, Equatable {
                     .padding(.horizontal, 16)
                 }
                 .onAppear {
-                    // Sadece başlangıçta görünür pencereyi ısıt; gerisi scroll'da yüklenir.
+                    // Only warm the initially visible window; the rest loads on scroll.
                     prefetchAhead(from: -1, count: M3UShelf.initialWarmup)
                 }
             }
@@ -382,8 +394,8 @@ struct M3UGroupShelfRow: View, Equatable {
         .padding(.vertical, 6)
     }
 
-    /// `index` kartı görünür olduğunda `index+1 ..< index+1+count` aralığını prefetch eder.
-    /// Nuke memory cache zaten dedupe ettiği için çakışan çağrılar ucuz.
+    /// When the `index` card becomes visible, it prefetches the `index+1 ..< index+1+count` range.
+    /// Because the Nuke memory cache already dedupes, overlapping calls are cheap.
     private func prefetchAhead(from index: Int, count: Int = M3UShelf.lookAhead) {
         let start = max(0, index + 1)
         let end = min(items.count, start + count)
@@ -442,9 +454,9 @@ struct M3UChannelCard: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            // Store'u @ObservedObject ile gözlemek, tek bir favori değişiminde lazy
-            // stack'in yaşattığı BİNLERCE kartı yeniden render ediyordu. Favori durumu
-            // yalnız burada gerekli; menü her açılışta yeniden kurulduğundan anlık
+            // Observing the store with @ObservedObject was re-rendering the THOUSANDS of cards the lazy
+            // stack kept alive on a single favorite change. The favorite state is
+            // only needed here; because the menu is rebuilt on every open, an instantaneous
             // okumak yeterli.
             let isFavorite = M3UFavoriteStore.shared.isFavorite(channelId: channel.id)
             Button {
@@ -454,7 +466,7 @@ struct M3UChannelCard: View {
                       systemImage: isFavorite ? "star.slash" : "star")
             }
             // Sadece VOD-tipi kanallar (mp4/mkv/... veya /vod/, /movie/ path'i) indirilebilir.
-            // Live HLS/TS akışları tek-dosyalı download'a uygun değil.
+            // Live HLS/TS streams are not suitable for single-file download.
             if let url = M3UParser.sanitizedURL(from: channel.url) {
                 let cls = M3UStreamClassifier.classify(url: url, groupTitle: channel.groupTitle)
                 if !cls.isLive {
@@ -526,7 +538,7 @@ struct M3UGroupDetailView: View {
 
     private func present(_ channel: DBM3UChannel) {
         guard M3UParser.sanitizedURL(from: channel.url) != nil else { return }
-        // Bu detay ekranında queue = bu grubun tüm kanalları (arama varsa filtrelenmiş).
+        // In this detail screen, the queue = all channels of this group (filtered if there is a search).
         playerOverlay.present {
             M3UPlayerShell(
                 playlist: playlist,
@@ -540,10 +552,13 @@ struct M3UGroupDetailView: View {
 struct M3UGroupGridContent: View {
     let items: [DBM3UChannel]
     var onChannelSelected: ((DBM3UChannel) -> Void)? = nil
+    /// C1 (Round 15): when set (the Favorites grid sets it), each card
+    /// gains a long-press "Remove from favorites" context menu entry.
+    var onRemoveFavorite: ((DBM3UChannel) -> Void)? = nil
 
     @Environment(\.posterMetrics) private var posterMetrics
 
-    /// Grid kartı göründükçe bir sonraki satır/pencereyi önden indir.
+    /// As grid cards appear, download the next row/window ahead.
     private func prefetchAhead(from index: Int, count: Int = 16) {
         let start = max(0, index + 1)
         let end = min(items.count, start + count)
@@ -582,6 +597,21 @@ struct M3UGroupGridContent: View {
                                 imageLoadProfile: .grid,
                                 onChannelSelected: onChannelSelected
                             )
+                            // Round 12 (point 7): the same one-shot
+                            // card entrance every other grid has
+                            // (Xtream live/VOD/series grids all use
+                            // it); one-shot + index-capped, so
+                            // scrolling cost is unchanged.
+                            .shelfCardAppear(index: index)
+                            .contextMenu {
+                                if let onRemoveFavorite {
+                                    Button(role: .destructive) {
+                                        onRemoveFavorite(channel)
+                                    } label: {
+                                        Label(L("favorites.remove"), systemImage: "star.slash")
+                                    }
+                                }
+                            }
                             .onAppear { prefetchAhead(from: index) }
                         }
                     }
@@ -594,18 +624,18 @@ struct M3UGroupGridContent: View {
 
 // MARK: - Player shell
 
-/// M3U oynatma — canlı kanalda önceki/sonraki kanal, VOD'da tek oynatım (prev/next gizli).
-/// Queue genellikle mevcut grubun kanal listesidir; boş bırakılırsa navigation pasif.
-/// `resumeTimeMs` sadece ilk kanal açılırken kullanılır (Continue Watching girişleri için).
+/// M3U playback — prev/next channel on a live channel, single playback on VOD (prev/next hidden).
+/// The queue is usually the current group's channel list; if left empty, navigation is passive.
+/// `resumeTimeMs` is only used when the first channel opens (for Continue Watching entries).
 struct M3UPlayerShell: View {
     let playlist: Playlist
     let initialResumeMs: Int?
     private let initialChannel: DBM3UChannel
     private let initialQueue: [DBM3UChannel]
-    /// Panelden başka bir kategoriye geçiş yapıldığında queue yeniden üretildiği için `@State`.
+    /// `@State` because when switching to another category from the panel, the queue is regenerated.
     @State private var queue: [DBM3UChannel]
-    /// Playlist'in tüm canlı kanallarından (store yüklüyse) veya queue'dan (fallback) türetilen panel modeli.
-    /// `.task(id:)` içinde, off-main hesaplanıp cache'lenir — body her render olduğunda yeniden üretilmez.
+    /// The panel model derived from all live channels of the playlist (if the store is loaded) or from the queue (fallback).
+    /// Calculated off-main and cached inside `.task(id:)` — it is not regenerated on every body render.
     @State private var livePanelSections: [ChannelPanelSection] = []
     @State private var currentIndex: Int
     @State private var resumeTimeMs: Int?
@@ -645,9 +675,9 @@ struct M3UPlayerShell: View {
         if let url = M3UParser.sanitizedURL(from: channel.url) {
             let classification = M3UStreamClassifier.classify(url: url, groupTitle: channel.groupTitle)
             let activeChannel = channel
-            // Queue tek elemansa prev/next anlamsız; aksi hâlde live (showLiveChannelSkip) ve
-            // VOD (showVODQueueSkip) için callback'leri ikisi de açık bırakılır. PlayerView
-            // `type` + `isLive` kombinasyonundan hangi UI'ı göstereceğine karar veriyor.
+            // If the queue has a single element, prev/next is meaningless; otherwise both callbacks are left open for live (showLiveChannelSkip) and
+            // VOD (showVODQueueSkip). PlayerView
+            // decides which UI to show from the `type` + `isLive` combination.
             let hasQueueNav = queue.count > 1
             let panelSections = classification.isLive ? livePanelSections : []
             ZStack(alignment: .bottom) {
@@ -721,8 +751,8 @@ struct M3UPlayerShell: View {
         }
     }
 
-    /// Store'daki playlist id, grup sayısı ve gizli kategori sürümü değiştiğinde `.task(id:)`
-    /// yeniden tetiklensin diye birleşik anahtar.
+    /// When the playlist id, the group count and the hidden-category version in the store change, `.task(id:)`
+    /// a combined key so it re-fires.
     private var panelSectionsCacheKey: String {
         "\(m3uStore.activePlaylistId?.uuidString ?? "none")-\(m3uStore.groupNames.count)-\(playlist.id.uuidString)-\(hiddenStore.version)"
     }
@@ -732,8 +762,8 @@ struct M3UPlayerShell: View {
         let snapshotNames = useStore ? m3uStore.groupNames : []
         let snapshotByGroup = useStore ? m3uStore.channelsByGroup : [:]
         let snapshotQueue = useStore ? [] : queue
-        // Store anahtarlarıyla ve hidden-category id'leriyle tutarlı kalması için
-        // kanonik etiket; başlıklar render sırasında displayName ile localize edilir.
+        // To stay consistent with the store keys and the hidden-category ids,
+        // the canonical label; headings are localized with displayName at render time.
         let ungroupedLabel = M3UContentStore.ungroupedLabel
         let hiddenIds = hiddenStore.hiddenIds(playlistId: playlist.id, type: M3UChannelsView.hiddenCategoryType)
 
@@ -764,7 +794,7 @@ struct M3UPlayerShell: View {
             resumeTimeMs = nil
             return
         }
-        // Farklı kategoriden seçim yapıldı — queue'yu o kategorinin kanallarından yeniden üret.
+        // A selection was made from a different category — regenerate the queue from that category's channels.
         guard let section = livePanelSections.first(where: { section in
             section.items.contains(where: { $0.id == id })
         }) else { return }
@@ -806,7 +836,7 @@ struct M3UPlayerShell: View {
         }
     }
 
-    /// Store zaten playlist'i gruplamış; her kategori için sadece canlı kanalları filtrelemek yeterli.
+    /// The store has already grouped the playlist; for each category it is enough to filter only the live channels.
     nonisolated private static func buildLivePanelSectionsFromStore(
         names: [String],
         byGroup: [String: [DBM3UChannel]]
@@ -837,19 +867,19 @@ struct M3UPlayerShell: View {
     }
 }
 
-/// M3U kanallarının canlı yayın mı yoksa VOD (film/dizi) mu olduğunu tespit eder.
-/// Seek bar, resume, control-center davranışları buna bağlı.
+/// Detects whether M3U channels are live broadcasts or VOD (movie/series).
+/// The seek bar, resume and control-center behaviors depend on this.
 enum M3UStreamClassifier {
     struct Classification {
-        /// `PlayerView.isLiveStream`'e verilir — false ise seek bar görünür, resume çalışır.
+        /// Given to `PlayerView.isLiveStream` — if false, the seek bar appears and resume works.
         let isLive: Bool
-        /// `PlayerView.type` — watch history için ("live" | "vod").
+        /// `PlayerView.type` — for watch history ("live" | "vod").
         let playbackType: String
-        /// URL'de belirgin bir dosya uzantısı varsa (mp4/mkv/...) player'a bilgi olarak iletilir.
+        /// If the URL has an obvious file extension (mp4/mkv/...), it is passed to the player as info.
         let containerExtension: String?
     }
 
-    /// VOD göstergeleri: dosya uzantıları ve Xtream tarzı yollar.
+    /// VOD indicators: file extensions and Xtream-style paths.
     nonisolated private static let vodExtensions: Set<String> = ["mp4", "mkv", "avi", "mov", "webm", "flv", "m4v", "wmv", "3gp"]
     nonisolated private static let vodPathHints: [String] = ["/movie/", "/movies/", "/series/", "/vod/", "/films/", "/film/"]
 
@@ -863,7 +893,7 @@ enum M3UStreamClassifier {
         if vodExtensions.contains(ext) {
             return Classification(isLive: false, playbackType: "vod", containerExtension: ext)
         }
-        // Bilinen live indikatörleri veya uzantısız Xtream-style: canlı varsay.
+        // Known live indicators or extensionless Xtream-style: assume live.
         return Classification(isLive: true, playbackType: "live", containerExtension: ext.isEmpty ? nil : ext)
     }
 }
