@@ -94,6 +94,9 @@ final class KSPlayerEngine: NSObject, ObservableObject {
   private var embeddedSubtitleSourceAttached = false
   private var pendingAudioDelay: Double = 0
   private var loadTimeoutWorkItem: DispatchWorkItem?
+  /// Build 61 (B9, E3): pending release of the HLS start-low
+  /// bitrate cap (see `applyHLSStartLowCapIfNeeded`).
+  private var hlsRampWorkItem: DispatchWorkItem?
   private var lastPositionPublish: TimeInterval = 0
   private var isDisposed = false
   /// Cached quarter-rotation of the current AVPlayer video track. Synchronous
@@ -163,6 +166,7 @@ final class KSPlayerEngine: NSObject, ObservableObject {
 
   private func resetForNewLoad() {
     cancelLoadTimeoutWatchdog()
+    cancelHLSRamp()
     playbackFailureMessage = nil
     playbackFailureIsRecoverable = false
     playbackFailureIsProviderRefusal = false
@@ -278,6 +282,20 @@ final class KSPlayerEngine: NSObject, ObservableObject {
       // VOD (mkv/avi/ts): limit the worst-case analysis time without leaving multi-part headers closed.
       options.maxAnalyzeDuration = 3_000_000  // 3.0s tavan
     }
+    // Build 61 (B9, Q1): loudness normalization — the Settings
+    // toggle "player.loudnessNormalization" (default off). On the
+    // FFmpeg path, `KSOptions.audioFilters` is joined into the
+    // avfilter graph per frame (KSPlayer's Filter.swift), and
+    // "dynaudnorm" is FFmpeg's real-time dynamic loudness
+    // normalizer — the engine-level mechanism for evening out
+    // loud/quiet channels. Safety: if the bundled FFmpeg lacked
+    // the filter, graph setup fails and Filter passes the frame
+    // through UNFILTERED — the failure mode is "no effect", never
+    // broken audio. The AVPlayer path (HLS/mp4) does not consume
+    // audioFilters, so the toggle has no effect there (reported).
+    if UserDefaults.standard.bool(forKey: "player.loudnessNormalization") {
+      options.audioFilters = ["dynaudnorm"]
+    }
     // Let a single IO on a stalled socket fail in 10 sec; FFmpeg returns the real error code
     // before the watchdog (12s) kicks in. Only the FFmpeg path (AVPlayer ignores this).
     options.formatContextOptions["rw_timeout"] = 10_000_000  // mikrosaniye
@@ -350,6 +368,7 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     guard !isDisposed else { return }
     isDisposed = true
     cancelLoadTimeoutWatchdog()
+    cancelHLSRamp()
     layer?.stop()
     layer = nil
   }
@@ -697,6 +716,44 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     }
   }
 
+  // MARK: - Build 61 (B9, E3): HLS start-low rendition ramp
+
+  /// For multi-rendition HLS on the AVPlayer path only: cap the
+  /// item's peak bit rate at the start so AVPlayer opens on a low
+  /// rendition and reaches the first frame fast, then release the
+  /// cap after a few seconds of playback — AVPlayer returns to
+  /// its own best-rendition selection (the pick the existing
+  /// logic would make; there is no stored user quality
+  /// preference, T3 having landed partial). Single-rendition HLS
+  /// is untouched in effect: the cap sits at or above its only
+  /// rendition. `preferredPeakBitRate` is AVPlayerItem's
+  /// documented runtime-adjustable property; the FFmpeg path has
+  /// no rendition switching and is not involved.
+  private static let hlsStartPeakBitRate: Double = 800_000
+  private static let hlsRampDelay: TimeInterval = 6
+
+  private func applyHLSStartLowCapIfNeeded(layer: KSPlayerLayer) {
+    guard layer.url.pathExtension.lowercased() == "m3u8",
+          let avPlayer = layer.player as? KSAVPlayer,
+          let item = avPlayer.player.currentItem
+    else { return }
+    item.preferredPeakBitRate = Self.hlsStartPeakBitRate
+    cancelHLSRamp()
+    let work = DispatchWorkItem { [weak self] in
+      guard let self, !self.isDisposed else { return }
+      if let current = self.layer?.player as? KSAVPlayer {
+        current.player.currentItem?.preferredPeakBitRate = 0
+      }
+    }
+    hlsRampWorkItem = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.hlsRampDelay, execute: work)
+  }
+
+  private func cancelHLSRamp() {
+    hlsRampWorkItem?.cancel()
+    hlsRampWorkItem = nil
+  }
+
   // MARK: - Watchdog
 
   // Round 20 (R20-4): build-33 watchdog restored verbatim in
@@ -832,6 +889,7 @@ extension KSPlayerEngine: KSPlayerLayerDelegate {
         if !self.isBuffering { self.isBuffering = true }
       case .readyToPlay:
         self.cancelLoadTimeoutWatchdog()
+        self.applyHLSStartLowCapIfNeeded(layer: layer)
         if !self.isPlaybackEstablished { self.isPlaybackEstablished = true }
         // Establishing playback always supersedes a stale watchdog/error message.
         if self.playbackFailureMessage != nil { self.playbackFailureMessage = nil }

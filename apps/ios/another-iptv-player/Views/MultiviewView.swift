@@ -87,7 +87,14 @@ struct MultiviewView: View {
                     select(stream, forPaneAt: target.index)
                 }
             }
+            // Build 61 (B9, P1): channel pre-warming stands down
+            // while Multiview is on screen — the panes' own
+            // engines own the network here.
+            .onAppear {
+                PlaybackPrewarmService.shared.multiviewActive = true
+            }
             .onDisappear {
+                PlaybackPrewarmService.shared.multiviewActive = false
                 for pane in panes { pane.stop() }
             }
         }
