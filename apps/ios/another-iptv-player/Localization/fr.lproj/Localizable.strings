@@ -141,7 +141,7 @@
 "settings.back_to_list" = "Retour aux listes";
 "settings.refresh_all" = "Retélécharger tout";
 "settings.player.title" = "Paramètres du lecteur";
-"settings.player.pip.title" = "Picture in Picture";
+"settings.player.pip.title" = "Image dans l'image";
 "settings.player.pip.desc" = "Autorise le mode PiP";
 "settings.player.background.title" = "Lecture en arrière-plan";
 "settings.player.background.desc" = "Sinon la lecture se met en pause en arrière-plan";
@@ -413,7 +413,7 @@
 "detail.show_more" = "Afficher plus";
 "detail.show_less" = "Afficher moins";
 "player.a11y.playback_position" = "Position de lecture";
-"download.error.no_space" = "Espace de stockage insuffisant sur cet appareil";
+"download.error.no_space" = "Espace de stockage insuffisant sur cet appareil. Supprimez d'anciens téléchargements pour libérer de l'espace, puis réessayez.";
 "download.missing_file.title" = "Fichier absent de l'appareil";
 "download.missing_file.message" = "Le fichier téléchargé est introuvable (après une restauration ou une migration). Le télécharger à nouveau ?";
 "content.uncategorized" = "Sans catégorie";
@@ -1068,7 +1068,7 @@
 
 /* MARK: Build 61 (b12) */
 "matches.empty" = "Aucun match aujourd'hui";
-"matches.error" = "Impossible de charger les matchs";
+"matches.error" = "Impossible de charger les matchs. Vérifiez votre connexion et touchez Réessayer.";
 "matches.final" = "Terminé";
 "matches.live" = "EN DIRECT";
 "matches.retry" = "Réessayer";

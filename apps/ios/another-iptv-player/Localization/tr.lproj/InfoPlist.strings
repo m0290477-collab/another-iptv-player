@@ -1,1 +1,3 @@
 "NSLocalNetworkUsageDescription" = "AirPlay ile oynatmak için video, yerel ağ üzerinden Apple TV'ye aktarılır.";
+"NSCameraUsageDescription" = "Sağlayıcınızın giriş QR kodunu taramak için kullanılır.";
+"NSFaceIDUsageDescription" = "Uygulama kilidi açıkken uygulamanın kilidini açmak için Super X, Face ID kullanır.";

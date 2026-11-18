@@ -413,7 +413,7 @@
 "detail.show_more" = "और दिखाएँ";
 "detail.show_less" = "कम दिखाएँ";
 "player.a11y.playback_position" = "प्लेबैक स्थिति";
-"download.error.no_space" = "इस डिवाइस पर पर्याप्त खाली संग्रहण नहीं है";
+"download.error.no_space" = "इस डिवाइस पर पर्याप्त खाली संग्रहण नहीं है। जगह बनाने के लिए पुराने डाउनलोड हटाएँ, फिर फिर से प्रयास करें।";
 "download.missing_file.title" = "फ़ाइल अब डिवाइस पर नहीं है";
 "download.missing_file.message" = "डाउनलोड की गई फ़ाइल गायब है (डिवाइस रीस्टोर या माइग्रेशन के बाद ऐसा होता है)। फिर से डाउनलोड करें?";
 "content.uncategorized" = "अवर्गीकृत";
@@ -1068,7 +1068,7 @@
 
 /* MARK: Build 61 (b12) */
 "matches.empty" = "आज कोई मैच नहीं";
-"matches.error" = "मैच लोड नहीं हो सके";
+"matches.error" = "मैच लोड नहीं हो सके। अपना कनेक्शन जांचें और फिर से प्रयास करें पर टैप करें।";
 "matches.final" = "समाप्त";
 "matches.live" = "लाइव";
 "matches.retry" = "पुनः प्रयास करें";

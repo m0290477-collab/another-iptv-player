@@ -1,1 +1,3 @@
 "NSLocalNetworkUsageDescription" = "To play via AirPlay, video is streamed to your Apple TV over the local network.";
+"NSCameraUsageDescription" = "Used to scan your provider's sign-in QR code.";
+"NSFaceIDUsageDescription" = "Super X uses Face ID to unlock the app when the app lock is on.";

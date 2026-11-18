@@ -141,7 +141,7 @@
 "settings.back_to_list" = "Voltar às listas";
 "settings.refresh_all" = "Baixar todo o conteúdo de novo";
 "settings.player.title" = "Ajustes do player";
-"settings.player.pip.title" = "Picture in Picture";
+"settings.player.pip.title" = "Imagem dentro de imagem";
 "settings.player.pip.desc" = "Permite o modo PiP";
 "settings.player.background.title" = "Continuar em segundo plano";
 "settings.player.background.desc" = "Se desativado, pausa em segundo plano";
@@ -413,7 +413,7 @@
 "detail.show_more" = "Mostrar mais";
 "detail.show_less" = "Mostrar menos";
 "player.a11y.playback_position" = "Posição de reprodução";
-"download.error.no_space" = "Armazenamento livre insuficiente neste dispositivo";
+"download.error.no_space" = "Armazenamento livre insuficiente neste dispositivo. Exclua downloads antigos para liberar espaço e tente novamente.";
 "download.missing_file.title" = "Arquivo não está mais no dispositivo";
 "download.missing_file.message" = "O arquivo baixado está ausente (acontece após restaurar ou migrar o dispositivo). Baixar novamente?";
 "content.uncategorized" = "Sem categoria";
@@ -421,7 +421,7 @@
 "db.error.ephemeral_message" = "Não foi possível abrir o banco de dados do app. Nada que você adicionar ou alterar nesta sessão será salvo. Libere espaço e reinicie o app.";
 "db.error.reset_title" = "Os dados foram redefinidos";
 "db.error.reset_message" = "O banco de dados do app estava danificado e precisou ser redefinido. Suas playlists, favoritos e histórico foram apagados — adicione suas playlists novamente.";
-"player.a11y.pip" = "Picture in Picture";
+"player.a11y.pip" = "Imagem dentro de imagem";
 "player.airplay_active" = "Reproduzindo via AirPlay";
 "player.a11y.subtitle_appearance" = "Aparência das legendas";
 "player.a11y.track_settings" = "Faixas de áudio e legendas";
@@ -1068,7 +1068,7 @@
 
 /* MARK: Build 61 (b12) */
 "matches.empty" = "Sem jogos hoje";
-"matches.error" = "Não foi possível carregar os jogos";
+"matches.error" = "Não foi possível carregar os jogos. Verifique sua conexão e toque em Tentar novamente.";
 "matches.final" = "Fim";
 "matches.live" = "AO VIVO";
 "matches.retry" = "Tentar de novo";

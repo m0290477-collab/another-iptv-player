@@ -413,7 +413,7 @@
 "detail.show_more" = "展开";
 "detail.show_less" = "收起";
 "player.a11y.playback_position" = "播放进度";
-"download.error.no_space" = "设备上的可用存储空间不足";
+"download.error.no_space" = "设备上的可用存储空间不足。请删除旧的下载内容以释放空间，然后重试。";
 "download.missing_file.title" = "文件已不在设备上";
 "download.missing_file.message" = "下载的文件已丢失（通常发生在恢复或迁移设备之后）。要重新下载吗？";
 "content.uncategorized" = "未分类";
@@ -1068,7 +1068,7 @@
 
 /* MARK: Build 61 (b12) */
 "matches.empty" = "今天没有比赛";
-"matches.error" = "无法加载比赛";
+"matches.error" = "无法加载比赛。请检查网络连接，然后点按重试。";
 "matches.final" = "完场";
 "matches.live" = "直播";
 "matches.retry" = "重试";
