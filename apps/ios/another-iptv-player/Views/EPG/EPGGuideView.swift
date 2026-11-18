@@ -25,6 +25,9 @@ struct EPGGuideView: View {
     /// Ignore those briefly so they cannot undo the jump to the selected time.
     @State private var programmaticTargetX: CGFloat?
     @State private var targetReleaseTask: Task<Void, Never>?
+    /// C12 (Round 15): now-line breathing glow — one small opacity
+    /// pulse on the now-line only (transform/opacity class, no layout).
+    @State private var nowLineGlow = false
     @State private var selected: SelectedProgramme?
     @State private var selectionTask: Task<Void, Never>?
     @State private var detailChannel: EPGGuideRow?
@@ -67,9 +70,14 @@ struct EPGGuideView: View {
             .sheet(item: $selected) { sel in
                 EPGProgrammeDetailSheet(playlist: model.playlist, programme: sel.programme,
                                         channelName: sel.row.displayName, channelIcon: sel.row.iconURL,
-                                        liveStream: sel.row.liveStream)
+                                        liveStream: sel.row.liveStream,
+                                        // Finisher wiring: catch-up player title
+                                        // tap pushes this channel's schedule via
+                                        // the guide's existing navigationDestination.
+                                        onNavigateToChannelDetail: { _ in detailChannel = sel.row })
                     .presentationDetents([.medium, .large])
             }
+            .cinematicBackground()
     }
 
     @ViewBuilder
@@ -94,9 +102,69 @@ struct EPGGuideView: View {
         case .ready:
             VStack(spacing: 0) {
                 dayPicker
+                // F-37: while the (existing) guide search field holds
+                // a query, programme-title matches across all channels
+                // appear above the timeline, grouped by channel.
+                if isSearching {
+                    programmeResults
+                }
                 grid
             }
         }
+    }
+
+    // MARK: - Programme search (F-37)
+
+    private var isSearching: Bool {
+        !model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @ViewBuilder
+    private var programmeResults: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(L("epg.search.programmes"))
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+
+            if model.programmeSearchResults.isEmpty {
+                Text(L("epg.search.no_results"))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+            } else {
+                List {
+                    ForEach(model.programmeSearchResults) { group in
+                        Section(group.row.displayName) {
+                            ForEach(group.programmes) { programme in
+                                Button {
+                                    // The guide's existing programme
+                                    // selection: opens the programme
+                                    // detail sheet for that channel.
+                                    showProgramme(programme, in: group.row)
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Text(programme.title)
+                                            .lineLimit(1)
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                        Text(EPGTimeFormat.range(programme.start, programme.stop))
+                                            .font(.caption)
+                                            .monospacedDigit()
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .frame(height: 260)
+            }
+        }
+        Divider()
     }
 
     // MARK: - Day picker
@@ -150,10 +218,18 @@ struct EPGGuideView: View {
                 // now-lines to one offset keeps them on the exact same screen column.
                 .overlay(alignment: .leading) {
                     if let nowX = nowLineX {
-                        Rectangle().fill(Color.red)
+                        Rectangle().fill(AppTheme.live)
                             .frame(width: 1.5, height: metrics.axisHeight)
                             .offset(x: nowX - bodyOffsetX)
+                            .opacity(nowLineGlow ? 1 : 0.55)
+                            .shadow(color: AppTheme.live.opacity(nowLineGlow ? 0.8 : 0.3), radius: 3)
                             .allowsHitTesting(false)
+                            .onAppear {
+                                guard Motion.animate(.easeInOut(duration: 1.6)) != nil else { return }
+                                withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+                                    nowLineGlow = true
+                                }
+                            }
                     }
                 }
                 .clipped()
@@ -217,9 +293,10 @@ struct EPGGuideView: View {
                 .equatable()
 
                 if let nowX = nowLineX {
-                    Rectangle().fill(Color.red.opacity(0.85))
+                    Rectangle().fill(AppTheme.live.opacity(0.85))
                         .frame(width: 1.5, height: metrics.rowHeight)
                         .offset(x: nowX)
+                        .opacity(nowLineGlow ? 1 : 0.6)
                         .allowsHitTesting(false)
                 }
             }
@@ -345,7 +422,11 @@ struct EPGGuideView: View {
             Task { await model.selectDay(Date()) }
             return
         }
-        applyProgrammaticOffset(defaultTimeOffset)
+        // C12 (Round 15): Jump-to-Now ANIMATES with a spring instead of
+        // the instant jump the initial layout positioning uses.
+        withAnimation(Motion.animate(Motion.shelfSpring) ?? .easeInOut(duration: 0.3)) {
+            applyProgrammaticOffset(defaultTimeOffset)
+        }
     }
 
     private var defaultTimeOffset: CGFloat {
@@ -397,7 +478,21 @@ struct EPGGuideView: View {
 
     private func playChannel(_ row: EPGGuideRow) {
         guard let stream = row.liveStream else {
-            detailChannel = row  // M3U: no single-view live shell here → open schedule
+            // B1 (Round 14): an M3U channel tap inside the guide PLAYS
+            // the channel (matching Xtream behavior) instead of only
+            // opening its schedule. The channel is resolved from the
+            // M3U store by the row's id; long-press still opens the
+            // schedule detail.
+            if model.playlist.kind == .m3u,
+               let channel = M3UContentStore.shared.channels.first(where: { $0.id == row.id }),
+               M3UParser.sanitizedURL(from: channel.url) != nil {
+                let queue = M3UContentStore.shared.channels.filter { $0.groupTitle == channel.groupTitle }
+                playerOverlay.present {
+                    M3UPlayerShell(playlist: model.playlist, channel: channel, queue: queue.isEmpty ? [channel] : queue)
+                }
+                return
+            }
+            detailChannel = row
             return
         }
         // Hand the player the whole live catalog so prev/next channel and the channel
@@ -428,6 +523,10 @@ struct EPGGuideView: View {
         if cal.isDateInToday(day) { return L("epg.day.today") }
         if cal.isDateInTomorrow(day) { return L("epg.day.tomorrow") }
         if cal.isDateInYesterday(day) { return L("epg.day.yesterday") }
-        return day.formatted(.dateTime.weekday(.abbreviated).day())
+        // C9 one-locale law: bind to the APP's chosen language.
+        let formatter = DateFormatter()
+        formatter.locale = AppTheme.appLocale
+        formatter.dateFormat = "EEE d"
+        return formatter.string(from: day)
     }
 }

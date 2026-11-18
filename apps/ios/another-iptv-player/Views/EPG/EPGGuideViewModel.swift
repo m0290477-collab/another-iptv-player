@@ -63,6 +63,14 @@ struct EPGRowLayout: Equatable, Sendable {
     let version: Int
 }
 
+/// F-37: one channel's programme-title matches in programme search.
+struct EPGProgrammeSearchGroup: Identifiable, Equatable {
+    let row: EPGGuideRow
+    let programmes: [EPGProgramme]
+
+    var id: String { row.id }
+}
+
 @MainActor
 final class EPGGuideViewModel: ObservableObject {
     enum Source: Equatable {
@@ -94,8 +102,14 @@ final class EPGGuideViewModel: ObservableObject {
         didSet {
             guard searchQuery != oldValue else { return }
             recomputeItems()
+            scheduleProgrammeSearch()
         }
     }
+
+    /// F-37: programme-title matches for the current search query,
+    /// grouped by channel in guide order. Computed off the main actor
+    /// from the loaded day's programmes (see `programmesByKey`).
+    @Published private(set) var programmeSearchResults: [EPGProgrammeSearchGroup] = []
 
     /// Categories in display order with their channels. Built once per row set;
     /// `items` is derived from this plus the search query and collapse state.
@@ -108,7 +122,20 @@ final class EPGGuideViewModel: ObservableObject {
     private let calendar = Calendar.current
     private var loadGeneration = 0
     private var programmeTask: Task<[String: [EPGProgramme]], Error>?
-    private var layoutTask: Task<[String: EPGRowLayout], Never>?
+    private var programmeSearchTask: Task<[EPGProgrammeSearchGroup], Never>?
+    private var programmeSearchGeneration = 0
+
+    /// F-34: the loaded day's programmes, retained so row layouts are
+    /// computed lazily — one channel at a time, on first render —
+    /// instead of precomputing every channel's layout at load.
+    private var programmesByKey: [String: [EPGProgramme]] = [:]
+    private var layoutDayStart: Date = Date()
+    private var layoutDayEnd: Date = Date()
+    /// Lazily computed row layouts, keyed by channel key. A plain
+    /// (non-published) cache: `layout(for:)` is called during view
+    /// rendering, where publishing would mutate state mid-update.
+    /// Invalidated wholesale whenever the day's programmes reload.
+    private var layoutCache: [String: EPGRowLayout] = [:]
 
     /// Shared fallback for channels without listings. Keeping one value avoids a
     /// dictionary entry and cell array for every no-data channel.
@@ -240,10 +267,11 @@ final class EPGGuideViewModel: ObservableObject {
 
     func cancelLoading() {
         loadGeneration += 1
+        programmeSearchGeneration += 1
         programmeTask?.cancel()
-        layoutTask?.cancel()
+        programmeSearchTask?.cancel()
         programmeTask = nil
-        layoutTask = nil
+        programmeSearchTask = nil
     }
 
     private func buildRows() {
@@ -304,36 +332,87 @@ final class EPGGuideViewModel: ObservableObject {
 
         guard generation == loadGeneration, !Task.isCancelled else { return }
 
+        // F-34: keep the day's programmes and let `layout(for:)`
+        // compute each channel's row layout on first access. The old
+        // code precomputed layouts for ALL channels here (thousands
+        // of channels × dozens of cells on every load/day change);
+        // the rendered output is identical because the same `cells`
+        // builder produces each layout — just later, per visible row.
         layoutVersion += 1
-        let version = layoutVersion
         let metrics = EPGGuideMetrics(compact: true)
-        let hourWidth = metrics.hourWidth
         emptyLayout = EPGRowLayout(
             cells: [EPGCellLayout(id: "empty", programme: nil, x: 0, width: metrics.dayWidth)],
-            version: version
+            version: layoutVersion
         )
-        // Precompute frames off the main actor — for large playlists this is
-        // thousands of channels × dozens of cells.
-        layoutTask?.cancel()
-        let task = Task.detached(priority: .userInitiated) { () -> [String: EPGRowLayout] in
-            EPGGuideViewModel.makeLayouts(
-                byKey: byKey,
-                wantedKeys: wantedKeys,
-                dayStart: start,
-                dayEnd: end,
-                hourWidth: hourWidth,
-                version: version
-            )
-        }
-        layoutTask = task
-        let newLayouts = await task.value
-        guard generation == loadGeneration, !Task.isCancelled, !task.isCancelled else { return }
-        layouts = newLayouts
+        programmesByKey = byKey
+        layoutDayStart = start
+        layoutDayEnd = end
+        layoutCache = [:]
+        layouts = [:]
+        _ = wantedKeys
         state = .ready
+        scheduleProgrammeSearch()
     }
 
     func layout(for channelKey: String) -> EPGRowLayout {
-        layouts[channelKey] ?? emptyLayout
+        if let cached = layoutCache[channelKey] { return cached }
+        if let published = layouts[channelKey] { return published }
+        guard let programmes = programmesByKey[channelKey], !programmes.isEmpty else {
+            return emptyLayout
+        }
+        let metrics = EPGGuideMetrics(compact: true)
+        let layout = EPGRowLayout(
+            cells: Self.cells(
+                for: programmes.sorted { $0.start < $1.start },
+                dayStart: layoutDayStart,
+                dayEnd: layoutDayEnd,
+                hourWidth: metrics.hourWidth
+            ),
+            version: layoutVersion
+        )
+        layoutCache[channelKey] = layout
+        return layout
+    }
+
+    // MARK: - Programme search (F-37)
+
+    /// Recomputes `programmeSearchResults` for the current query from
+    /// the loaded day's programmes: title matches (case-insensitive)
+    /// across ALL channels of the current source, grouped by channel
+    /// in guide order. Runs off the main actor; a newer keystroke
+    /// cancels the previous pass.
+    private func scheduleProgrammeSearch() {
+        programmeSearchTask?.cancel()
+        programmeSearchGeneration += 1
+        let generation = programmeSearchGeneration
+        let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else {
+            programmeSearchResults = []
+            return
+        }
+        let byKey = programmesByKey
+        let guideRows = rows
+        let task = Task.detached(priority: .userInitiated) { () -> [EPGProgrammeSearchGroup] in
+            var groups: [EPGProgrammeSearchGroup] = []
+            for row in guideRows {
+                guard !Task.isCancelled else { return [] }
+                guard let programmes = byKey[row.channelKey] else { continue }
+                let matches = programmes
+                    .filter { $0.title.lowercased().contains(q) }
+                    .sorted { $0.start < $1.start }
+                if !matches.isEmpty {
+                    groups.append(EPGProgrammeSearchGroup(row: row, programmes: Array(matches.prefix(50))))
+                }
+                if groups.count >= 100 { break }
+            }
+            return groups
+        }
+        programmeSearchTask = task
+        Task {
+            let results = await task.value
+            guard !Task.isCancelled, generation == programmeSearchGeneration else { return }
+            programmeSearchResults = results
+        }
     }
 
     nonisolated static func makeLayouts(
