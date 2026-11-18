@@ -1519,6 +1519,11 @@ struct SeriesDetailView: View {
     }
 
     private func presentEpisodeOverlay(ep: DBEpisode, history: DBWatchHistory?, localOverrideURL: URL?) {
+        // A new episode's player must never render the PREVIOUS
+        // episode's next-episode numbers: clear the pair here; the
+        // presented player's neighbor load fills in this episode's.
+        episodeNavNextSeason = nil
+        episodeNavNextEpisode = nil
         let remoteURL = PlaybackURLBuilder(playlist: playlist).seriesURL(
             streamId: ep.episodeId ?? ep.id, containerExtension: ep.containerExtension
         )
@@ -1876,6 +1881,11 @@ struct SeriesDetailView: View {
     }
 
     private func loadEpisodeNeighbors(for ep: DBEpisode) async {
+        // Clear first, for the same reason as in
+        // `presentEpisodeOverlay`: until this episode's neighbors
+        // land, no numbers are better than a previous episode's.
+        episodeNavNextSeason = nil
+        episodeNavNextEpisode = nil
         let playId = ep.episodeId ?? ep.id
         let ctx = try? await AppDatabase.shared.read { db in
             try SeriesPlaybackOrdering.navigationContext(
