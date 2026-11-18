@@ -16,7 +16,16 @@ import SwiftUI
 
 struct SplashView: View {
     @State private var shown = false
+    /// X1 (B7): the one-shot ignition — the flame scales up from a
+    /// spark with a bright flash, ~0.8 s total, once per cold start.
+    @State private var ignited = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// X1 guards: ignition is a heavy effect — skipped entirely
+    /// (flame renders at rest) under Reduce Motion / Q21 / motion-off.
+    private var ignitionAllowed: Bool {
+        EffectsGate.allowsHeavyEffects(reduceMotion: reduceMotion)
+    }
 
     var body: some View {
         ZStack {
@@ -26,10 +35,15 @@ struct SplashView: View {
             VStack(spacing: 12) {
                 // The Design-4 flame mark in the fixed brand
                 // gradient (same treatment as the gate header).
+                // X1: ignition — spark → full flame with a glow
+                // flash; tap anywhere skips to the rest state.
                 Image(systemName: "flame.fill")
                     .font(.system(size: 64, weight: .bold))
                     .foregroundStyle(AppTheme.brandGradient)
-                    .shadow(color: AppTheme.accentStart.opacity(0.45), radius: 16, x: 0, y: 8)
+                    .shadow(color: AppTheme.accentStart.opacity(ignited ? 0.45 : 0.95),
+                            radius: ignited ? 16 : 30, x: 0, y: 8)
+                    .scaleEffect(ignitionAllowed && !ignited ? 0.55 : 1)
+                    .opacity(ignitionAllowed && !ignited ? 0.6 : 1)
 
                 // Wordmark: "Super" white, the X in the brand
                 // gradient — the mockup's flame-treated X.
@@ -50,11 +64,28 @@ struct SplashView: View {
             .scaleEffect(shown || reduceMotion ? 1 : 0.96)
         }
         .accessibilityLabel(L("splash.accessibility_label"))
+        // X1: tap to skip the ignition (the splash itself still
+        // hands off the moment content is ready — ContentView owns
+        // dismissal; this only settles the flame to its rest state).
+        .onTapGesture {
+            withAnimation(Motion.animate(.easeOut(duration: 0.2))) {
+                ignited = true
+                shown = true
+            }
+        }
         .onAppear {
             // Subtle fade-in, one shot; instant under Reduce Motion
             // (Motion.animate collapses to nil there).
             withAnimation(Motion.animate(.easeOut(duration: 0.45))) {
                 shown = true
+            }
+            // X1 ignition: one spring to full flame over ~0.8 s.
+            if ignitionAllowed {
+                withAnimation(.spring(response: 0.8, dampingFraction: 0.62)) {
+                    ignited = true
+                }
+            } else {
+                ignited = true
             }
         }
     }

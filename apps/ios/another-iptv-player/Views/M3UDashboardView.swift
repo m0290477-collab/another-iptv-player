@@ -76,6 +76,9 @@ struct M3UDashboardView: View {
             // single instance during transitions, and keeps
             // platform-standard tap targets.
             .environment(\.posterMetrics, posterMetrics)
+            // W2b (B7): regular-width iPad sidebar, same as the
+            // Xtream dashboard; compact width unchanged.
+            .iPadSidebarAdaptable()
 
             ZStack {
                 if let item = playerOverlay.presentation {

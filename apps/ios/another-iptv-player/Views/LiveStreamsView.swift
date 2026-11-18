@@ -424,7 +424,8 @@ struct LiveStreamsView: View {
                     stream: hero,
                     nowProgramTitle: heroNowTitle(for: hero),
                     previewURL: PlaybackURLBuilder(playlist: playlist).liveURL(streamId: hero.streamId),
-                    previewActive: heroPreviewActive
+                    previewActive: heroPreviewActive,
+                    userAgent: playlist.trimmedUserAgent
                 ) {
                     presentLiveSelection(LivePlayerSelection(stream: hero, history: heroHistory(for: hero)))
                 }

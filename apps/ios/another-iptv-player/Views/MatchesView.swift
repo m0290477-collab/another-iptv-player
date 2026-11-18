@@ -133,7 +133,8 @@ struct MatchesView: View {
     private func sportContent(_ state: MatchesViewModel.SportState) -> some View {
         if !state.hasLoaded && state.sections.allSatisfy({ !$0.failed }) {
             // First load in flight (or not started yet).
-            ProgressView()
+            // X6 (B7): branded loader view swap only.
+            BrandedLoader()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if selectedSport != .soccer, let only = state.sections.first, only.result == nil {
             // Single-league tab (NFL/NBA) with nothing to show:
@@ -213,33 +214,20 @@ struct MatchesView: View {
         }
     }
 
+    // O10 (B7): the full-screen states render through the ONE
+    // shared EmptyStateView — same icon, same localized text, same
+    // Retry action as B12's hand-built versions.
     private var fullEmptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "calendar.badge.exclamationmark")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary)
-            Text(L("matches.empty"))
-                .font(.headline)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(iconName: "calendar.badge.exclamationmark", message: L("matches.empty"))
     }
 
     private var fullErrorState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary)
-            Text(L("matches.error"))
-                .font(.headline)
-                .foregroundStyle(.secondary)
-            Button(L("matches.retry")) {
-                Task { await model.refresh(sport: selectedSport) }
-            }
-            .font(AppTheme.fontCardTitle)
-            .foregroundStyle(AppTheme.accent)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            iconName: "exclamationmark.triangle",
+            message: L("matches.error"),
+            actionTitle: L("matches.retry"),
+            action: { Task { await model.refresh(sport: selectedSport) } }
+        )
     }
 
     private func staleBanner(_ updated: Date) -> some View {

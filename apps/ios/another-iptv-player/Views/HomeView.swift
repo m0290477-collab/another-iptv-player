@@ -111,9 +111,143 @@ struct HomeView: View {
     @ObservedObject private var updateService = AppUpdateService.shared
     @State private var showOfflineAlert = false
 
+    // Build 61 (B7): J3 Home row order (persisted, O1 default) +
+    // Edit-mode state for the content rows.
+    @ObservedObject private var homeOrderStore = HomeSectionOrderStore.shared
+    @State private var editingHomeRows = false
+
     private var liveHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "live") }
     private var vodHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod") }
     private var seriesHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "series") }
+
+    // MARK: - Build 61 (B7): Z12 hero + O1/J3 rows
+
+    /// Z12: the featured live channel for the hero — the first
+    /// channel with a programme on air right now (the On-now set),
+    /// else the first live channel in the catalog. Nil only when the
+    /// playlist carries no live channels (hero falls back to the
+    /// featured carousel, whose lead is the top movie).
+    private var heroLiveStream: DBLiveStream? {
+        onNowEntries.first?.stream ?? contentStore.liveStreams.first?.stream
+    }
+
+    private var heroLiveNowTitle: String? {
+        guard let hero = heroLiveStream else { return nil }
+        return onNowEntries.first(where: { $0.stream.streamId == hero.streamId })?.nowTitle
+    }
+
+    /// One J3 content row, wrapped with Edit-mode move controls
+    /// while editing. Rows render NOTHING when their content is
+    /// empty (O1: empty sections are hidden, never rendered empty).
+    @ViewBuilder
+    private func homeRow(_ kind: HomeRowKind) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if editingHomeRows {
+                HStack(spacing: 16) {
+                    Button {
+                        homeOrderStore.move(kind, by: -1)
+                    } label: {
+                        Image(systemName: "chevron.up")
+                            .font(.subheadline.weight(.bold))
+                    }
+                    .accessibilityLabel(L("b7.home.move_up"))
+                    Button {
+                        homeOrderStore.move(kind, by: 1)
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.subheadline.weight(.bold))
+                    }
+                    .accessibilityLabel(L("b7.home.move_down"))
+                    Spacer()
+                }
+                .foregroundStyle(AppTheme.accent)
+                .padding(.horizontal, 16)
+            }
+            homeRowContent(kind)
+        }
+    }
+
+    @ViewBuilder
+    private func homeRowContent(_ kind: HomeRowKind) -> some View {
+        switch kind {
+        case .continueWatching:
+            // B6: Continue Watching ABOVE the category tiles (O1
+            // position 1 until the user reorders).
+            ContinueWatchingRow(
+                playlist: playlist,
+                typeFilter: nil,
+                destination: {
+                    WatchHistoryListView(playlist: playlist, typeFilter: nil) { item in
+                        presentHistoryItem(item)
+                    }
+                },
+                onPlay: { item in
+                    presentHistoryItem(item)
+                }
+            )
+        case .continueSeries:
+            // B8 (C7) component, wired by B7 per O1 position 2.
+            ContinueSeriesRow(playlist: playlist) { item in
+                presentHistoryItem(item)
+            }
+        case .recentChannels:
+            // B8 (C9) component, wired by B7 per O1 position 3.
+            RecentChannelsRow(playlist: playlist) { stream in
+                presentLiveSelectionFromHome(stream)
+            }
+        case .live:
+            // B6: "On now on your channels" — real EPG now-titles.
+            if !onNowEntries.isEmpty {
+                onNowShelf
+            }
+        case .discovery:
+            // The Movies/Series discovery block: category tiles +
+            // the C6 time-bucket shelves (F6-gated inside shelfView).
+            VStack(alignment: .leading, spacing: 26) {
+                categoryTiles
+                ForEach(shelfOrder, id: \.self) { shelfKind in
+                    shelfView(shelfKind)
+                }
+            }
+        case .recentlyAdded:
+            // B8 (R3) component, wired by B7 per amended O1 (after
+            // Series, before Today's Matches); hidden when empty.
+            RecentlyAddedRow(playlist: playlist) { entry in
+                selectRecentlyAdded(entry)
+            }
+        case .matches:
+            // ── B12 (build 61, M1): Today's Matches entry — the
+            // LAST Home section per O1; Matches hangs off Home, it
+            // is NOT a tab (O2). Coordinator integration: F6 gate —
+            // hidden when the user hid the Matches section (B13's
+            // SectionVisibility key `sections.hidden.matches`).
+            if !UserDefaults.standard.bool(forKey: "sections.hidden.matches") {
+                matchesEntryRow
+                    .padding(.horizontal, 16)
+            }
+        }
+    }
+
+    /// Routes a Recently Added tap through Home's EXISTING paths:
+    /// live → the live player shell, movie/series → the same detail
+    /// state the shelves use. Opening clears the NEW badge (R2).
+    private func selectRecentlyAdded(_ entry: RecentlyAddedEntry) {
+        FirstSeenStore.shared.markOpened(playlistId: playlist.id, itemKey: entry.key)
+        let rawId = entry.key.split(separator: ":").last.flatMap { Int($0) }
+        switch entry.kind {
+        case .live:
+            guard let streamId = rawId,
+                  let stream = contentStore.liveStreams.first(where: { $0.stream.streamId == streamId })?.stream
+            else { return }
+            presentLiveSelectionFromHome(stream)
+        case .vod:
+            guard let streamId = rawId else { return }
+            pendingMovieDetail = contentStore.vodStreams.first(where: { $0.stream.streamId == streamId })?.stream
+        case .series:
+            guard let seriesId = rawId else { return }
+            pendingSeriesDetail = contentStore.seriesItems.first(where: { $0.series.seriesId == seriesId })?.series
+        }
+    }
 
     /// Round 7 (landscape fix): the card width used to derive from the
     /// screen's WIDTH alone — `min(width - 32, 760)`. In landscape the
@@ -173,7 +307,36 @@ struct HomeView: View {
                         // unchanged: Continue Watching below resumes
                         // the same item through the same handler.
 
-                        if !featured.isEmpty {
+                        // Build 61 (B8, R4): what's-new banner — one
+                        // per refresh batch, real counts, never
+                        // stacked; a BANNER (not a J3 row), so it
+                        // stays above the content rows.
+                        WhatsNewBanner(playlist: playlist)
+                            .padding(.horizontal, 16)
+
+                        // Build 61 (B7, Z12): the hero leads with
+                        // LIVE content — the featured live channel
+                        // (first channel with a live EPG programme,
+                        // else the first live channel) with its
+                        // inline preview. The featured movie/series
+                        // carousel is the fallback when the playlist
+                        // has no live channels at all. The hero is
+                        // NOT a J3-reorderable row.
+                        if let heroLive = heroLiveStream {
+                            LiveHeroCard(
+                                stream: heroLive,
+                                nowProgramTitle: heroLiveNowTitle,
+                                previewURL: PlaybackURLBuilder(playlist: playlist).liveURL(streamId: heroLive.streamId),
+                                previewActive: isVisible && scenePhase == .active,
+                                userAgent: playlist.trimmedUserAgent
+                            ) {
+                                presentLiveSelectionFromHome(heroLive)
+                            }
+                            .padding(.horizontal, 16)
+                            .frame(maxWidth: 560)
+                            .frame(maxWidth: .infinity)
+                            .background(AmbientHeroGlow())
+                        } else if !featured.isEmpty {
                             featuredCarousel
                         } else if !contentStore.streamsLoaded {
                             // B6: skeleton placeholders instead of the
@@ -181,46 +344,26 @@ struct HomeView: View {
                             SkeletonShelf()
                         }
 
-                        // B6: "On now on your channels" — directly
-                        // under the hero, real EPG now-titles.
-                        if !onNowEntries.isEmpty {
-                            onNowShelf
-                        }
-
-                        // B6: Continue Watching ABOVE the category tiles.
-                        ContinueWatchingRow(
-                            playlist: playlist,
-                            typeFilter: nil,
-                            destination: {
-                                WatchHistoryListView(playlist: playlist, typeFilter: nil) { item in
-                                    presentHistoryItem(item)
-                                }
-                            },
-                            onPlay: { item in
-                                presentHistoryItem(item)
+                        // Build 61 (B7, J3): Edit-mode toggle for
+                        // the CONTENT rows below (persisted order,
+                        // O1 by default). Banners and the hero are
+                        // not rows and never move.
+                        HStack {
+                            Spacer()
+                            Button(editingHomeRows ? L("common.done") : L("b7.home.customize")) {
+                                editingHomeRows.toggle()
+                                Haptics.selection()
                             }
-                        )
-
-                        categoryTiles
-
-                        // C6: remaining shelves ordered by the
-                        // watch-history time bucket (see shelfOrder).
-                        ForEach(shelfOrder, id: \.self) { kind in
-                            shelfView(kind)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AppTheme.accent)
                         }
+                        .padding(.horizontal, 16)
 
-                        // ── B12 (build 61, M1) BEGIN: Today's Matches
-                        // entry — the LAST Home section per O1; Matches
-                        // hangs off Home, it is NOT a tab (O2). B7: keep
-                        // this row when restyling Home surfaces.
-                        // Coordinator integration: F6 gate — hidden when
-                        // the user hid the Matches section (B13's
-                        // SectionVisibility key `sections.hidden.matches`).
-                        if !UserDefaults.standard.bool(forKey: "sections.hidden.matches") {
-                            matchesEntryRow
-                                .padding(.horizontal, 16)
+                        // Build 61 (B7, O1/J3): the content rows in
+                        // the user's persisted order (O1 default).
+                        ForEach(homeOrderStore.order, id: \.self) { kind in
+                            homeRow(kind)
                         }
-                        // ── B12 (build 61, M1) END ──
 
                         // B6 per-type loading: a type that has not
                         // landed yet shows a skeleton while the others
@@ -424,8 +567,8 @@ struct HomeView: View {
             || playlist.id != contentStore.activePlaylistId
             || (!contentStore.streamsLoaded && contentStore.loadError == nil) {
             VStack(spacing: 16) {
-                ProgressView()
-                    .scaleEffect(1.4)
+                // X6 (B7): branded loader view swap only.
+                BrandedLoader(size: 52)
                 Text(contentStore.loadingMessage ?? L("live.empty.preparing"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -2065,6 +2208,9 @@ private struct FeaturedSlide: View {
                             .padding(.horizontal, 22)
                             .padding(.vertical, 10)
                             .background(Capsule().fill(AppTheme.accent))
+                            // ST2 (B7): the signature glow lives ONLY
+                            // under primary/hero actions like this one.
+                            .signatureGlow()
                     }
                     .buttonStyle(PressScaleButtonStyle())
 
@@ -2097,6 +2243,8 @@ private struct FeaturedSlide: View {
         .frame(width: width, height: width * 9 / 16)
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
+        // X4 (B7): subtle shine across the hero art while pressed.
+        .posterShine()
         .onTapGesture { if isCurrent { onDetails() } }
         .onChange(of: isCurrent) { _, current in
             if current {
