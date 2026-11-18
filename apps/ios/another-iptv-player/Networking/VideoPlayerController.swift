@@ -1208,20 +1208,17 @@ final class VideoPlayerController: ObservableObject {
     remoteCommandTargets.append((center.changePlaybackPositionCommand, tSeek))
 
     center.skipForwardCommand.isEnabled = true
-    // Round 15 (C1): the lock-screen / remote skip interval matches
-    // the in-player ±10 s transport (was 15 s — two different skip
-    // lengths for the same gesture family confused users).
-    center.skipForwardCommand.preferredIntervals = [10]
+    center.skipForwardCommand.preferredIntervals = [15]
     let t4 = center.skipForwardCommand.addTarget { [weak self] _ in
-      self?.jump(seconds: 10)
+      self?.jump(seconds: 15)
       return .success
     }
     remoteCommandTargets.append((center.skipForwardCommand, t4))
 
     center.skipBackwardCommand.isEnabled = true
-    center.skipBackwardCommand.preferredIntervals = [10]
+    center.skipBackwardCommand.preferredIntervals = [15]
     let t5 = center.skipBackwardCommand.addTarget { [weak self] _ in
-      self?.jump(seconds: -10)
+      self?.jump(seconds: -15)
       return .success
     }
     remoteCommandTargets.append((center.skipBackwardCommand, t5))

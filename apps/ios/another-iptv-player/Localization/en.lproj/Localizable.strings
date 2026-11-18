@@ -502,8 +502,6 @@
 "player.a11y.track_settings" = "Audio and subtitle tracks";
 "player.a11y.skip_back_15" = "Back 15 seconds";
 "player.a11y.skip_forward_15" = "Forward 15 seconds";
-"player.a11y.skip_back_10" = "Back 10 seconds";
-"player.a11y.skip_forward_10" = "Forward 10 seconds";
 "player.skip_intro" = "Skip Intro";
 "player.speed" = "Speed";
 "player.sleep_timer" = "Sleep Timer";

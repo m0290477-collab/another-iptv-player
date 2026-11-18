@@ -502,8 +502,6 @@
 "player.a11y.track_settings" = "Ses ve altyazı parçaları";
 "player.a11y.skip_back_15" = "15 saniye geri";
 "player.a11y.skip_forward_15" = "15 saniye ileri";
-"player.a11y.skip_back_10" = "10 saniye geri";
-"player.a11y.skip_forward_10" = "10 saniye ileri";
 "player.skip_intro" = "İntroyu Atla";
 "player.speed" = "Hız";
 "player.sleep_timer" = "Uyku Zamanlayıcı";

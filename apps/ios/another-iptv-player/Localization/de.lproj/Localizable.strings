@@ -569,8 +569,6 @@
 "download.keep" = "Weiter herunterladen";
 "download.delete.title" = "Download löschen?";
 "download.delete.message" = "Die heruntergeladene Datei wird von diesem Gerät entfernt.";
-"player.a11y.skip_back_10" = "10 Sekunden zurück";
-"player.a11y.skip_forward_10" = "10 Sekunden vor";
 "player.skip_intro" = "Intro überspringen";
 "player.speed" = "Geschwindigkeit";
 "player.sleep_timer" = "Sleep-Timer";

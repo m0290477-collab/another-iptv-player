@@ -569,8 +569,6 @@
 "download.keep" = "继续下载";
 "download.delete.title" = "删除下载？";
 "download.delete.message" = "已下载的文件将从此设备中删除。";
-"player.a11y.skip_back_10" = "后退 10 秒";
-"player.a11y.skip_forward_10" = "快进 10 秒";
 "player.skip_intro" = "跳过片头";
 "player.speed" = "速度";
 "player.sleep_timer" = "睡眠定时器";

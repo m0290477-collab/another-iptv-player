@@ -2317,14 +2317,14 @@ private struct PlayerViewImpl: View {
         HStack(spacing: transportSpacing) {
             if effectiveSeekable && !isCenterTransportLoading {
                 transparentTransportButton(
-                    systemName: "gobackward.10",
+                    systemName: "gobackward.15",
                     symbolSize: transportSkipSymbol,
                     hitFrame: transportSkipHit
                 ) {
-                    player.jump(seconds: -10)
+                    player.jump(seconds: -15)
                     UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
                 }
-                .accessibilityLabel(L("player.a11y.skip_back_10"))
+                .accessibilityLabel(L("player.a11y.skip_back_15"))
                 .disabled(hasPlaybackFailure)
                 .opacity(hasPlaybackFailure ? 0.4 : 1)
             }
@@ -2333,14 +2333,14 @@ private struct PlayerViewImpl: View {
 
             if effectiveSeekable && !isCenterTransportLoading {
                 transparentTransportButton(
-                    systemName: "goforward.10",
+                    systemName: "goforward.15",
                     symbolSize: transportSkipSymbol,
                     hitFrame: transportSkipHit
                 ) {
-                    player.jump(seconds: 10)
+                    player.jump(seconds: 15)
                     UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
                 }
-                .accessibilityLabel(L("player.a11y.skip_forward_10"))
+                .accessibilityLabel(L("player.a11y.skip_forward_15"))
                 .disabled(hasPlaybackFailure)
                 .opacity(hasPlaybackFailure ? 0.4 : 1)
             }
@@ -2518,8 +2518,8 @@ private struct PlayerViewImpl: View {
             )
             .layoutPriority(1)
             // DragGesture VoiceOver altında erişilemez; kaydırıcıyı ayarlanabilir öğe
-            // olarak sun (yan parlaklık/ses slider'larıyla aynı desen). ±10 sn adım (F-101),
-            // mevcut goforward/gobackward.10 butonlarıyla tutarlı (F-101).
+            // olarak sun (yan parlaklık/ses slider'larıyla aynı desen). ±15 sn adım,
+            // mevcut goforward/gobackward.15 butonlarıyla tutarlı.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(L("player.a11y.playback_position"))
             .accessibilityValue("\(formatMs(Int(player.timeMs))) / \(totalDurationLabel)")
@@ -2527,8 +2527,8 @@ private struct PlayerViewImpl: View {
                 guard effectiveSeekable else { return }
                 resetTimer()
                 switch direction {
-                case .increment: player.jump(seconds: 10)
-                case .decrement: player.jump(seconds: -10)
+                case .increment: player.jump(seconds: 15)
+                case .decrement: player.jump(seconds: -15)
                 @unknown default: break
                 }
             }

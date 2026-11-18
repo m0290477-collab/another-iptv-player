@@ -569,8 +569,6 @@
 "download.keep" = "Продолжить загрузку";
 "download.delete.title" = "Удалить загрузку?";
 "download.delete.message" = "Загруженный файл будет удалён с этого устройства.";
-"player.a11y.skip_back_10" = "Назад на 10 секунд";
-"player.a11y.skip_forward_10" = "Вперёд на 10 секунд";
 "player.skip_intro" = "Пропустить заставку";
 "player.speed" = "Скорость";
 "player.sleep_timer" = "Таймер сна";

@@ -569,8 +569,6 @@
 "download.keep" = "डाउनलोड जारी रखें";
 "download.delete.title" = "डाउनलोड हटाएँ?";
 "download.delete.message" = "डाउनलोड की गई फ़ाइल इस डिवाइस से हटा दी जाएगी।";
-"player.a11y.skip_back_10" = "10 सेकंड पीछे";
-"player.a11y.skip_forward_10" = "10 सेकंड आगे";
 "player.skip_intro" = "इंट्रो छोड़ें";
 "player.speed" = "गति";
 "player.sleep_timer" = "स्लीप टाइमर";
