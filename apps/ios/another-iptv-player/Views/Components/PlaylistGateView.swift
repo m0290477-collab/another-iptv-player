@@ -50,6 +50,20 @@ private enum GateFormField: Hashable {
     case m3uName, m3uURL
 }
 
+private extension View {
+    /// Build 61 (Design-4) gate field treatment: dark translucent
+    /// fill with a thin red-orange (accent) outline, as in panel 4.
+    /// Padding included — replaces the old elevated-fill chain.
+    func gateFieldStyle() -> some View {
+        padding(12)
+            .background(AppTheme.fieldBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(AppTheme.accent.opacity(0.45), lineWidth: 1)
+            )
+    }
+}
+
 struct PlaylistGateView: View {
     /// The saved playlists — used ONLY to recognize a re-sign-in to
     /// an already-saved account (no list is rendered from it).
@@ -235,58 +249,38 @@ struct PlaylistGateView: View {
 
     // MARK: - Header
 
-    /// The REAL app icon from the bundle's primary-icon files
-    /// (the asset catalog's AppIcon set, compiled into the app
-    /// bundle) — nil only if the bundle metadata is missing, in
-    /// which case the header falls back to an accent SX monogram.
-    private var appIconImage: UIImage? {
-        guard let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],
-              let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
-              let files = primary["CFBundleIconFiles"] as? [String],
-              let name = files.last else { return nil }
-        return UIImage(named: name)
-    }
-
     private var header: some View {
         VStack(spacing: 10) {
-            // Round 14 (B13): the real app icon, ≈84 pt, rounded,
-            // with a subtle accent glow — ALWAYS in the header,
-            // including the signed-out path.
-            Group {
-                if let appIconImage {
-                    Image(uiImage: appIconImage)
-                        .resizable()
-                        .scaledToFit()
-                } else {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(AppTheme.accent)
-                        Text("SX")
-                            .font(.system(size: 34, weight: .black))
-                            .foregroundColor(.white)
-                    }
-                }
-            }
-            .frame(width: 84, height: 84)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .shadow(color: AppTheme.accent.opacity(0.45), radius: 14, x: 0, y: 6)
-            .padding(.bottom, 2)
+            // Build 61 (Design-4, panel 4): the centered flame mark
+            // over the wordmark — the mockup's flame-X treatment,
+            // rendered with the system flame glyph in the fixed
+            // Design-4 brand gradient (the LaunchMark asset is an
+            // opaque blue-on-black raster, so it cannot carry the
+            // treatment; the app icon itself is unchanged and still
+            // shows everywhere the system shows it).
+            Image(systemName: "flame.fill")
+                .font(.system(size: 54, weight: .bold))
+                .foregroundStyle(AppTheme.brandGradient)
+                .shadow(color: AppTheme.accentStart.opacity(0.45), radius: 14, x: 0, y: 6)
+                .padding(.bottom, 2)
 
-            // Typographic wordmark — no invented logo artwork. Round 5
-            // elite alignment: bigger, black weight, tight tracking — the
-            // bold confident type of the approved Home/Movies pictures.
+            // Typographic wordmark — no invented logo artwork: "Super"
+            // in white, the X in the brand gradient (the mockup's
+            // flame-treated X), black weight, tight tracking.
             HStack(spacing: 4) {
                 Text("Super")
+                    .foregroundStyle(.white)
                 Text("X")
-                    .foregroundColor(AppTheme.accent)
+                    .foregroundStyle(AppTheme.brandGradient)
             }
             .font(.system(size: 44, weight: .black))
             .tracking(-0.5)
-            .foregroundStyle(.white)
 
-            Text(L("gate.welcome"))
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+            // Design-4 subtitle ("IPTV • Playlist Login" in the
+            // mockup), in the accent.
+            Text(L("gate.subtitle"))
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(AppTheme.accent)
 
             if playlists.isEmpty {
                 Text(L("playlists.empty.message"))
@@ -304,25 +298,13 @@ struct PlaylistGateView: View {
 
     private var addSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(L("playlist_type.title"))
-                .font(.title2.weight(.bold))
-
-            // Round 14 (B13): two radio cards showing the EXISTING
-            // subtitle strings, so a newcomer sees the difference.
-            HStack(spacing: 12) {
-                typeCard(
-                    kind: .xtream,
-                    title: L("playlist_type.xtream.title"),
-                    subtitle: L("playlist_type.xtream.subtitle"),
-                    systemImage: "tv"
-                )
-                typeCard(
-                    kind: .m3u,
-                    title: L("playlist_type.m3u.title"),
-                    subtitle: L("playlist_type.m3u.subtitle"),
-                    systemImage: "list.bullet"
-                )
-            }
+            // Build 61 (Design-4, panel 4): the segmented pill switch
+            // replaces the round-14 radio cards — one capsule track,
+            // the selected segment a dark pill with accent text and a
+            // thin accent outline, the other segment plain white text.
+            // Same `formKind` state, same two forms below; the type
+            // subtitles still live in the help sheet's explainer.
+            segmentedTypeSwitch
 
             // Round 15 (C13): QR sign-in — the scan feeds the
             // existing XtreamLinkDetector / smart-paste parser
@@ -360,45 +342,46 @@ struct PlaylistGateView: View {
         .animation(.easeInOut(duration: 0.25), value: formKind)
     }
 
-    private func typeCard(kind: FormKind, title: String, subtitle: String, systemImage: String) -> some View {
+    /// Build 61 (Design-4): the M3U | Xtream segmented pill switch.
+    private var segmentedTypeSwitch: some View {
+        HStack(spacing: 4) {
+            segmentButton(kind: .m3u, title: L("playlist_type.m3u.title"))
+            segmentButton(kind: .xtream, title: L("playlist_type.xtream.title"))
+        }
+        .padding(4)
+        .background(Capsule().fill(AppTheme.surface))
+        .overlay(
+            Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private func segmentButton(kind: FormKind, title: String) -> some View {
         let selected = formKind == kind
         return Button {
             formKind = kind
         } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Image(systemName: systemImage)
-                        .font(.body.weight(.semibold))
-                        .foregroundColor(selected ? AppTheme.accent : .secondary)
-                    Spacer()
-                    Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                        .font(.body)
-                        .foregroundColor(selected ? AppTheme.accent : .secondary)
-                }
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.primary)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(AppTheme.elevated, in: RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                    .strokeBorder(selected ? AppTheme.accent : Color.white.opacity(0.06), lineWidth: selected ? 1.5 : 1)
-            )
+            Text(title)
+                .font(.subheadline.weight(.bold))
+                .foregroundColor(selected ? AppTheme.accent : .white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(
+                    Capsule().fill(selected ? AppTheme.background : Color.clear)
+                )
+                .overlay(
+                    Capsule().strokeBorder(selected ? AppTheme.accent.opacity(0.65) : Color.clear, lineWidth: 1)
+                )
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
-    /// Small label above a field (round 14, B13).
+    /// Small label above a field (round 14, B13). Build 61
+    /// (Design-4): bold white, as in the mockup.
     private func fieldLabel(_ text: String) -> some View {
         Text(text)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(.white)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -432,9 +415,7 @@ struct PlaylistGateView: View {
                     .focused($focusedField, equals: .xtreamName)
                     .submitLabel(.next)
                     .onSubmit { focusedField = .xtreamURL }
-                    .padding(12)
-                    .background(AppTheme.elevated)
-                    .cornerRadius(AppTheme.cornerRadius)
+                    .gateFieldStyle()
             }
 
             VStack(spacing: 6) {
@@ -459,9 +440,7 @@ struct PlaylistGateView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(12)
-                .background(AppTheme.elevated)
-                .cornerRadius(AppTheme.cornerRadius)
+                .gateFieldStyle()
                 if xtreamURLInvalid {
                     fieldError(L("gate.validation.invalid_url"))
                 }
@@ -475,9 +454,7 @@ struct PlaylistGateView: View {
                     .focused($focusedField, equals: .xtreamUsername)
                     .submitLabel(.next)
                     .onSubmit { focusedField = .xtreamPassword }
-                    .padding(12)
-                    .background(AppTheme.elevated)
-                    .cornerRadius(AppTheme.cornerRadius)
+                    .gateFieldStyle()
             }
 
             VStack(spacing: 6) {
@@ -507,9 +484,7 @@ struct PlaylistGateView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(L("gate.toggle_password_visibility"))
                 }
-                .padding(12)
-                .background(AppTheme.elevated)
-                .cornerRadius(AppTheme.cornerRadius)
+                .gateFieldStyle()
             }
 
             Toggle(isOn: $filterAdultContent) {
@@ -526,8 +501,7 @@ struct PlaylistGateView: View {
             }
         }
         .padding(16)
-        .background(AppTheme.surface)
-        .cornerRadius(AppTheme.cornerRadius)
+        .background(AppTheme.cardGradient, in: RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
@@ -544,9 +518,7 @@ struct PlaylistGateView: View {
                     .focused($focusedField, equals: .m3uName)
                     .submitLabel(.next)
                     .onSubmit { focusedField = .m3uURL }
-                    .padding(12)
-                    .background(AppTheme.elevated)
-                    .cornerRadius(AppTheme.cornerRadius)
+                    .gateFieldStyle()
             }
 
             VStack(spacing: 6) {
@@ -572,9 +544,7 @@ struct PlaylistGateView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(12)
-                .background(AppTheme.elevated)
-                .cornerRadius(AppTheme.cornerRadius)
+                .gateFieldStyle()
                 if m3uURLInvalid {
                     fieldError(L("gate.validation.invalid_url"))
                 }
@@ -621,9 +591,12 @@ struct PlaylistGateView: View {
                 }
             }
 
+            // Design-4: the helper line under the M3U fields is
+            // small accent text (the mockup's "Load your .m3u or
+            // .m3u8 playlist").
             Text(L("add_m3u.section.source_footer"))
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .font(.caption.weight(.medium))
+                .foregroundColor(AppTheme.accent)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             submitButton(title: L("gate.load_playlist"), enabled: canSaveM3U) {
@@ -631,8 +604,7 @@ struct PlaylistGateView: View {
             }
         }
         .padding(16)
-        .background(AppTheme.surface)
-        .cornerRadius(AppTheme.cornerRadius)
+        .background(AppTheme.cardGradient, in: RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
@@ -641,9 +613,11 @@ struct PlaylistGateView: View {
 
     private func submitButton(title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
+            // Design-4 primary button: big solid accent fill, BLACK
+            // bold text (the mockup's Load Playlist / Connect).
             Text(title)
-                .font(.headline)
-                .foregroundColor(.white)
+                .font(.headline.weight(.bold))
+                .foregroundColor(AppTheme.onAccent)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
                 .background(AppTheme.accent)
@@ -817,8 +791,8 @@ struct PlaylistGateView: View {
                     }
                 } label: {
                     Text(L("gate.expired.enter_anyway"))
-                        .font(.headline)
-                        .foregroundColor(.white)
+                        .font(.headline.weight(.bold))
+                        .foregroundColor(AppTheme.onAccent)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .background(AppTheme.accent)

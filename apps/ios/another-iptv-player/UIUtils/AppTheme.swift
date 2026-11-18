@@ -2,27 +2,60 @@ import Combine
 import SwiftUI
 import UIKit
 
-/// Cinematic Dark design tokens (owner-picked "Style 1").
+/// Design-4 design tokens (owner-picked 2026-11-18, build 61 — panel 4
+/// of the gate/home mockup grids: "Dark Charcoal • Red-Orange").
 ///
-/// Central palette for the whole app: near-black backgrounds, dark card
-/// surfaces, white primary text (via `.primary` under the forced dark
-/// scheme), one blue accent (the asset-catalog `AccentColor`), and red
+/// Central palette for the whole app: near-black charcoal backgrounds,
+/// charcoal card surfaces with a subtle top-light gradient, white
+/// primary text (via `.primary` under the dark scheme), the red-orange
+/// accent #FF4A1F (gradient to #FF7A18 for brand/hero fills), and red
 /// reserved for LIVE indicators only. Screens should use these tokens
 /// instead of ad-hoc colors so the design stays consistent.
 enum AppTheme {
-    /// App-wide near-black background (#0B0B10).
-    static let background = Color(red: 0.043, green: 0.043, blue: 0.063)
-    /// Card / shelf surface (#16161D).
-    static let surface = Color(red: 0.086, green: 0.086, blue: 0.114)
-    /// Raised surface for sheets-on-sheets, chips and placeholders (#1E1E27).
-    static let elevated = Color(red: 0.118, green: 0.118, blue: 0.153)
+    /// App-wide near-black charcoal background (#0B0B0E).
+    static let background = Color(red: 0.043, green: 0.043, blue: 0.055)
+    /// Raised surface (#141419).
+    static let surface = Color(red: 0.078, green: 0.078, blue: 0.098)
+    /// Card surface (#1A1A21) — sheets-on-sheets, chips, placeholders
+    /// and the Design-4 card fill.
+    static let elevated = Color(red: 0.102, green: 0.102, blue: 0.129)
     /// The app accent — user-selectable since round 7 (Settings → App →
-    /// Accent Color); defaults to the design blue #0A84FF. Views read the
-    /// accent through this token; the root view observes
+    /// Accent Color); since build 61 the DEFAULT preset is the Design-4
+    /// red-orange #FF4A1F (users who already picked another accent keep
+    /// theirs — the store only defaults when nothing is stored). Views
+    /// read the accent through this token; the root view observes
     /// `AccentThemeStore`, so a picker change re-renders the hierarchy
     /// and every read here picks up the new color (UIKit chrome is
     /// re-applied separately via `AppChrome.apply()`).
     static var accent: Color { AccentThemeStore.shared.color }
+
+    // MARK: Design-4 tokens (build 61, B6)
+
+    /// The Design-4 accent stops: #FF4A1F → #FF7A18. Fixed brand
+    /// colors (the flame mark, the splash/gate brand lockup) — NOT the
+    /// user accent; interactive chrome reads `accent` above.
+    static let accentStart = Color(red: 1.000, green: 0.290, blue: 0.122) // #FF4A1F
+    static let accentEnd = Color(red: 1.000, green: 0.478, blue: 0.094)   // #FF7A18
+    /// The Design-4 brand gradient (hero fills, flame mark, wordmark
+    /// X). Fixed to the design stops above so the brand treatment is
+    /// identical for every user.
+    static let brandGradient = LinearGradient(
+        colors: [accentStart, accentEnd],
+        startPoint: .topLeading, endPoint: .bottomTrailing
+    )
+    /// Card fill with the subtle top-light gradient of the design:
+    /// #1A1A21 easing down into the raised surface #141419.
+    static let cardGradient = LinearGradient(
+        colors: [elevated, surface],
+        startPoint: .top, endPoint: .bottom
+    )
+    /// Text on a solid accent fill: Design-4 primary buttons carry
+    /// BLACK bold text (the mockup's Load Playlist / PLAY).
+    static let onAccent: Color = .black
+    /// Gate text-field fill: dark translucent over the charcoal
+    /// background; the field outline is `accent` at reduced opacity
+    /// (applied at the call site so focus/validation can vary it).
+    static let fieldBackground = Color.white.opacity(0.045)
     /// LIVE badge / live-now indicator red (#E82A2E). Nothing else uses red
     /// except destructive actions, which keep the system red.
     static let live = Color(red: 0.910, green: 0.165, blue: 0.180)
@@ -156,14 +189,16 @@ enum AppSymbols {
 // MARK: - Accent color (round 7)
 
 /// Owner-facing accent presets (Settings → App → Accent Color). The
-/// default is the design blue. Semantic colors never follow this
+/// default is the Design-4 flame (build 61); users who already stored
+/// a different preset keep it. Semantic colors never follow this
 /// picker: the LIVE badge keeps `AppTheme.live` red and the rating
 /// star keeps its gold.
 enum AccentPreset: String, CaseIterable {
-    case blue, violet, pink, red, orange, green, teal
+    case flame, blue, violet, pink, red, orange, green, teal
 
     private var components: (r: Double, g: Double, b: Double) {
         switch self {
+        case .flame: return (1.000, 0.290, 0.122)  // #FF4A1F — Design-4 red-orange (build 61 default)
         case .blue: return (0.039, 0.518, 1.000)   // #0A84FF
         case .violet: return (0.486, 0.361, 1.000) // #7C5CFF
         case .pink: return (1.000, 0.216, 0.373)   // #FF375F
@@ -210,7 +245,10 @@ final class AccentThemeStore: ObservableObject {
 
     private init() {
         let raw = UserDefaults.standard.string(forKey: Self.storageKey)
-        preset = AccentPreset(rawValue: raw ?? "") ?? .blue
+        // Build 61 (Design-4): the default for users who never picked
+        // an accent is now the flame red-orange; a stored choice is
+        // always honored unchanged.
+        preset = AccentPreset(rawValue: raw ?? "") ?? .flame
     }
 
     var color: Color { preset.color }
@@ -293,8 +331,26 @@ extension View {
 /// Applied once at app launch from the app delegate; SwiftUI screens keep
 /// using semantic colors under the forced dark color scheme.
 enum AppChrome {
+    /// Design-4 (build 61): the selected tab sits in a FILLED ACCENT
+    /// PILL (home mockup, panel 4). UIKit's one hook for that is the
+    /// tab bar's selection-indicator image: a rounded accent capsule,
+    /// drawn at runtime in the CURRENT accent (regenerated on every
+    /// `apply()`, which the accent store calls on each picker change),
+    /// with resizable cap insets so it stretches to the item frame.
+    private static func selectionPillImage(color: UIColor) -> UIImage {
+        let size = CGSize(width: 76, height: 38)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { _ in
+            color.setFill()
+            UIBezierPath(roundedRect: CGRect(origin: .zero, size: size),
+                         cornerRadius: size.height / 2).fill()
+        }
+        return image.resizableImage(withCapInsets: UIEdgeInsets(top: 18, left: 18, bottom: 18, right: 18),
+                                    resizingMode: .stretch)
+    }
+
     static func apply() {
-        let background = UIColor(red: 0.043, green: 0.043, blue: 0.063, alpha: 1)
+        let background = UIColor(red: 0.043, green: 0.043, blue: 0.055, alpha: 1)
         // Round 7: the chrome accent follows the user's picker choice.
         let accent = AccentThemeStore.shared.uiColor
         let muted = UIColor(red: 0.557, green: 0.557, blue: 0.576, alpha: 1)
@@ -307,11 +363,15 @@ enum AppChrome {
                                tabBar.compactInlineLayoutAppearance] {
             itemAppearance.normal.iconColor = muted
             itemAppearance.normal.titleTextAttributes = [.foregroundColor: muted]
-            itemAppearance.selected.iconColor = accent
-            itemAppearance.selected.titleTextAttributes = [.foregroundColor: accent]
+            // Design-4: the selected item's glyph + title sit ON the
+            // accent pill, so they render white (the mockup's white
+            // house glyph on the red-orange pill).
+            itemAppearance.selected.iconColor = .white
+            itemAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor.white]
         }
         UITabBar.appearance().standardAppearance = tabBar
         UITabBar.appearance().scrollEdgeAppearance = tabBar
+        UITabBar.appearance().selectionIndicatorImage = selectionPillImage(color: accent)
 
         let navBar = UINavigationBarAppearance()
         navBar.configureWithDefaultBackground()

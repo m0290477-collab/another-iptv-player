@@ -16,12 +16,28 @@ struct ContentView: View {
     /// when a saved playlist exists.
     @State private var suppressAutoLoad = false
     @State private var showStorageWarning = false
+    /// Build 61 (D2, B6): the branded splash covers the cold start
+    /// until the playlists query has answered — the moment the gate
+    /// or the auto-loaded dashboard underneath is ready. No timer,
+    /// no artificial delay.
+    @State private var showSplash = true
 
     private let lastPlaylistKey = "lastPlaylistId"
 
     var body: some View {
         storageAwareBody
+            .overlay {
+                if showSplash {
+                    SplashView()
+                        .transition(.opacity)
+                        .zIndex(100)
+                }
+            }
+            .onChange(of: playlists != nil) { _, ready in
+                if ready { dismissSplash() }
+            }
             .onAppear {
+                if playlists != nil { dismissSplash() }
                 if AppDatabase.isEphemeral || AppDatabase.didResetCorruptStore {
                     showStorageWarning = true
                 }
@@ -164,6 +180,15 @@ struct ContentView: View {
             return // all expired → the gate's all-expired state
         }
         selectedPlaylist = pick
+    }
+
+    /// Build 61 (D2): cross-fade the splash out as soon as content
+    /// is ready (Motion-safe: duration collapses when reduced/off).
+    private func dismissSplash() {
+        guard showSplash else { return }
+        withAnimation(Motion.animate(.easeInOut(duration: 0.3))) {
+            showSplash = false
+        }
     }
 
     private func selectPlaylist(_ playlist: Playlist) {

@@ -99,6 +99,11 @@ struct HomeView: View {
     @State private var showRefreshConfirm = false
     @State private var isRefreshingHome = false
 
+    // Build 61 (S4): expiry-banner dismissal for THIS appearance of
+    // Home; the durable per-expiry-date record is in UserDefaults
+    // (see expiryBannerModel).
+    @State private var expiryBannerDismissed = false
+
     private var liveHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "live") }
     private var vodHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod") }
     private var seriesHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "series") }
@@ -135,6 +140,14 @@ struct HomeView: View {
                         // keep theirs.
                         homeTopBar
                             .padding(.horizontal, 16)
+
+                        // Build 61 (S4): subscription-expiry banner —
+                        // real ProviderExpiryStore data for the ACTIVE
+                        // playlist only.
+                        if let expiryBanner = expiryBannerModel {
+                            expiryBannerView(expiryBanner)
+                                .padding(.horizontal, 16)
+                        }
 
                         // Round 18 (R18-4): the "Back to the last
                         // thing" pill is REMOVED. It duplicated the
@@ -412,7 +425,13 @@ struct HomeView: View {
             // quick playlist switcher (real switching via ContentView's
             // existing mechanism, passed down as onSwitchPlaylist).
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 3) {
+                // Build 61 (Design-4, home panel 4): flame mark +
+                // SUPER X wordmark — the flame in the fixed brand
+                // gradient, the X in the accent.
+                HStack(spacing: 5) {
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 19, weight: .bold))
+                        .foregroundStyle(AppTheme.brandGradient)
                     Text("Super")
                     Text("X")
                         .foregroundColor(AppTheme.accent)
@@ -473,7 +492,14 @@ struct HomeView: View {
             Button {
                 showSearchSheet = true
             } label: {
-                topBarSquare(systemName: "magnifyingglass")
+                // Build 61 (Design-4, home panel 4): Search is the
+                // circular ACCENT button at the top bar's end; the
+                // other actions keep their square tiles.
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(AppTheme.onAccent)
+                    .frame(width: 38, height: 38)
+                    .background(Circle().fill(AppTheme.brandGradient))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(L("dashboard.search"))
@@ -505,6 +531,80 @@ struct HomeView: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(AppTheme.elevated)
             )
+    }
+
+    // MARK: - S4 expiry banner (build 61)
+
+    /// The banner's data: the ACTIVE playlist's recorded provider
+    /// expiry (ProviderExpiryStore — Xtream playlists only; M3U
+    /// records none, so no banner). Shown when the subscription is
+    /// already expired, or expires within 7 days. Dismissal is
+    /// remembered PER EXPIRY DATE: the stored stamp is the expiry
+    /// timestamp itself, so a renewal (a new recorded date) makes
+    /// the banner eligible again.
+    private struct ExpiryBannerModel {
+        let expiry: Date
+        let text: String
+    }
+
+    private var expiryBannerModel: ExpiryBannerModel? {
+        guard !expiryBannerDismissed,
+              let expiry = ProviderExpiryStore.expiryDate(playlistId: playlist.id)
+        else { return nil }
+        let dismissalKey = "home.expiryBanner.dismissed.\(playlist.id.uuidString)"
+        guard UserDefaults.standard.double(forKey: dismissalKey) != expiry.timeIntervalSince1970
+        else { return nil }
+
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        formatter.locale = AppTheme.appLocale
+        let dateText = formatter.string(from: expiry)
+
+        if ProviderExpiryStore.isExpired(expiryDate: expiry) {
+            return ExpiryBannerModel(expiry: expiry, text: L("home.expiry.expired", dateText))
+        }
+        let calendar = Calendar.current
+        let days = calendar.dateComponents(
+            [.day],
+            from: calendar.startOfDay(for: Date()),
+            to: calendar.startOfDay(for: expiry)
+        ).day ?? 0
+        guard days <= 7 else { return nil }
+        return ExpiryBannerModel(expiry: expiry, text: L("home.expiry.expiring", max(days, 0), dateText))
+    }
+
+    private func expiryBannerView(_ model: ExpiryBannerModel) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.orange)
+            Text(model.text)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            Button {
+                UserDefaults.standard.set(
+                    model.expiry.timeIntervalSince1970,
+                    forKey: "home.expiryBanner.dismissed.\(playlist.id.uuidString)"
+                )
+                expiryBannerDismissed = true
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L("home.expiry.dismiss"))
+        }
+        .padding(12)
+        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .strokeBorder(Color.orange.opacity(0.45), lineWidth: 1)
+        )
     }
 
     /// The confirmed top-bar refresh: the same network refresh the
@@ -675,7 +775,12 @@ struct HomeView: View {
             HomeCategoryTile(
                 title: L("dashboard.series"),
                 countText: L("home.count_series", CatalogCountFormatter.string(contentStore.seriesItems.count)),
-                tint: AccentPreset.violet.color,
+                // Build 61: the Series tile follows the shared
+                // SectionTheme (a hue-shifted sibling of the CURRENT
+                // accent) instead of a hard-coded violet preset, so
+                // the tile family stays inside the Design-4 system
+                // for every accent choice.
+                tint: SectionTheme.series,
                 iconName: "play.tv",
                 action: onOpenSeries
             )
@@ -1772,9 +1877,12 @@ private struct FeaturedSlide: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             VStack(alignment: .leading, spacing: 8) {
+                // Build 61 (Design-4, home panel 4): the hero title
+                // is BIG and in the accent (the mockup's red-orange
+                // headline over the art).
                 Text(entry.title)
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(.white)
+                    .font(.title.weight(.black))
+                    .foregroundStyle(AppTheme.accent)
                     .lineLimit(1)
 
                 HStack(spacing: 8) {
@@ -1798,9 +1906,11 @@ private struct FeaturedSlide: View {
 
                 HStack(spacing: 10) {
                     Button(action: onPlay) {
+                        // Design-4 PLAY pill: solid accent, BLACK
+                        // bold text (SPEC §2, as the gate's primary).
                         Label(L("home.play"), systemImage: "play.fill")
                             .font(.subheadline.weight(.bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(AppTheme.onAccent)
                             .padding(.horizontal, 22)
                             .padding(.vertical, 10)
                             .background(Capsule().fill(AppTheme.accent))
