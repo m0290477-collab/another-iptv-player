@@ -267,6 +267,33 @@ struct AmbientHeroGlow: View {
     }
 }
 
+// MARK: - W2b iPad sidebar chrome
+
+/// W2b: on regular-width (iPad) the tab bar becomes a sidebar via
+/// the system's sidebar-adaptable style; on compact width the
+/// standard tab bar is untouched (the round-16 note stands: the
+/// adaptable style alone on iPhone floats the bar over content,
+/// which is why it is applied ONLY at regular width). No feature
+/// differences — chrome only.
+struct IPadSidebarModifier: ViewModifier {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    func body(content: Content) -> some View {
+        if horizontalSizeClass == .regular {
+            AnyView(content.tabViewStyle(.sidebarAdaptable))
+        } else {
+            AnyView(content)
+        }
+    }
+}
+
+extension View {
+    /// W2b: sidebar on regular-width iPad, standard tabs otherwise.
+    func iPadSidebarAdaptable() -> some View {
+        modifier(IPadSidebarModifier())
+    }
+}
+
 // MARK: - J3 Home row order
 
 /// J3: the user-reorderable Home CONTENT rows. The hero and every

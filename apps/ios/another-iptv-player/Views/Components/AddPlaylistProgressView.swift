@@ -66,8 +66,8 @@ struct AddPlaylistProgressView: View {
             ProgressView()
                 .frame(width: 20, height: 20)
         case .done:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(AppTheme.accent)
+            // X7 (B7): drawn animated check on stage completion.
+            AnimatedCheckView(size: 20)
         case .failed:
             Image(systemName: "exclamationmark.circle.fill")
                 .foregroundStyle(.orange)
@@ -95,9 +95,17 @@ struct AddPlaylistSummaryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                Image(systemName: summary.failedStage == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .font(.title3)
-                    .foregroundStyle(summary.failedStage == nil ? AppTheme.accent : .orange)
+                // X7 (B7): the add-success summary leads with the
+                // drawn animated check (+ light success haptic);
+                // the partial-success warning glyph is unchanged.
+                if summary.failedStage == nil {
+                    AnimatedCheckView(size: 26)
+                        .onAppear { Haptics.success() }
+                } else {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.orange)
+                }
                 Text(summary.failedStage == nil ? L("addplaylist.summary.title") : L("addplaylist.summary.partial_title"))
                     .font(.headline)
             }

@@ -408,6 +408,10 @@ enum AppChrome {
         let tabBar = UITabBarAppearance()
         tabBar.configureWithOpaqueBackground()
         tabBar.backgroundColor = background
+        // ST1 (B7): subtle glass/blur on the tab bar — a dark
+        // system blur under the charcoal tint. Chrome only, applied
+        // once here; no per-cell blur anywhere.
+        tabBar.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterialDark)
         for itemAppearance in [tabBar.stackedLayoutAppearance,
                                tabBar.inlineLayoutAppearance,
                                tabBar.compactInlineLayoutAppearance] {

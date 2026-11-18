@@ -219,7 +219,7 @@ struct PlaylistSettingsView: View {
 
                 Toggle(isOn: $continuePlayingInBackground) {
                     HStack(spacing: 12) {
-                        SettingsIconTile(systemImage: "speaker.wave.2.fill", tint: .purple)
+                        SettingsIconTile(systemImage: "speaker.wave.2.fill", tint: SectionTheme.series)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(L("settings.player.background.title"))
                             Text(L("settings.player.background.desc"))

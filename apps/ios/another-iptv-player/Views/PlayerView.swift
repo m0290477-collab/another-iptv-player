@@ -1619,10 +1619,10 @@ private struct PlayerViewImpl: View {
                 // baş başa kalıyordu. Kontroller açıkken ortadaki buton zaten spinner
                 // gösterdiği için burada yalnızca !showControls durumunda çizilir.
                 if isCenterTransportLoading && !showControls {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(.white)
-                        .scaleEffect(1.4)
+                    // X6 (B7): branded loader VIEW swap only — the
+                    // buffering/loading logic and this condition are
+                    // untouched; only the spinner's appearance changed.
+                    BrandedLoader(size: 38)
                         .padding(18)
                         .background(.black.opacity(0.35), in: Circle())
                         .allowsHitTesting(false)
@@ -2212,10 +2212,9 @@ private struct PlayerViewImpl: View {
     private var centerPlayPauseOrLoadingButton: some View {
         Group {
             if isCenterTransportLoading {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .tint(.white.opacity(0.95))
-                    .scaleEffect(1.6)
+                // X6 (B7): branded loader VIEW swap only — same
+                // condition, same frame, zero logic change.
+                BrandedLoader(size: 42)
                     .frame(width: transportPlayHit, height: transportPlayHit)
                     .allowsHitTesting(false)
             } else {

@@ -155,14 +155,9 @@ struct RecentlyAddedView: View {
     var body: some View {
         Group {
             if entries.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "sparkles")
-                        .font(.largeTitle)
-                        .foregroundColor(.secondary)
-                    Text(L("newcontent.empty"))
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // O10 (B7): shared empty-state component, same
+                // icon + localized text as before.
+                EmptyStateView(iconName: "sparkles", message: L("newcontent.empty"))
             } else {
                 List {
                     section(kind: .live, title: L("newcontent.group.channels"))

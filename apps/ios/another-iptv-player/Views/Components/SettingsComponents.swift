@@ -1018,7 +1018,7 @@ struct NewFeatureSettingsSection: View {
 
             SettingsPickerRow(
                 systemImage: "wand.and.stars",
-                tint: .purple,
+                tint: SectionTheme.series,
                 title: L("motion.intensity.title"),
                 selection: $motionIntensity
             ) {
@@ -1624,7 +1624,7 @@ struct AppearanceSettingsSection: View {
             // shared `sections.hidden.<section>` key through the
             // store; hidden sections leave the tab bar AND Home.
             sectionToggle(.movies, titleKey: "sections.movies", systemImage: "film.fill", tint: AppTheme.accent)
-            sectionToggle(.series, titleKey: "sections.series", systemImage: "play.tv.fill", tint: .purple)
+            sectionToggle(.series, titleKey: "sections.series", systemImage: "play.tv.fill", tint: SectionTheme.series)
             sectionToggle(.matches, titleKey: "sections.matches", systemImage: "sportscourt.fill", tint: .green)
             sectionToggle(.library, titleKey: "sections.library", systemImage: "star.fill", tint: .yellow)
         }

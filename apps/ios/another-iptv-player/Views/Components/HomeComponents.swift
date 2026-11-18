@@ -63,9 +63,13 @@ struct CinematicSectionHeader<Destination: View>: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title)
-                .font(AppTheme.fontSectionTitle)
-                .foregroundStyle(.primary)
+            // Build 61 (B7, completing B6's cross-builder note):
+            // Design-4 section headers are small-caps ACCENT titles
+            // ("• LIVE CHANNELS •" style, SPEC §2) via the shared
+            // tokens — no per-screen header styling anywhere.
+            Text("• \(title.uppercased()) •")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(AppTheme.accent)
                 .lineLimit(1)
             Spacer()
             if let count, count > 0 {

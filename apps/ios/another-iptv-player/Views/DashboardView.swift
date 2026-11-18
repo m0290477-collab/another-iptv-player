@@ -55,13 +55,20 @@ struct DashboardView: View {
     /// icon weight family (semibold, filled symbols) and the selected
     /// tab's icon carries the accent under-glow.
     @ViewBuilder
-    private func tabLabel(_ title: String, symbol: String, tab: DashboardTab) -> some View {
+    private func tabLabel(_ title: String, glyph: String, tab: DashboardTab) -> some View {
         let isSelected = selectedTab == tab
         Label {
             Text(title)
         } icon: {
-            Image(systemName: symbol)
-                .font(.body.weight(.semibold))
+            // ST4 (B7): custom flame-X-family line glyphs from the
+            // asset catalog (template-rendered vector PDFs), NOT
+            // stock system symbols. The ST2 signature glow under
+            // the selected tab is the existing accent under-glow.
+            Image(glyph)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 24, height: 24)
                 .shadow(color: isSelected ? AppTheme.tabGlow : .clear,
                         radius: isSelected ? 7 : 0, y: isSelected ? 3 : 0)
         }
@@ -99,14 +106,14 @@ struct DashboardView: View {
                         // Home's own top bar is the top of the screen.
                         .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.home"), hidesNavigationBar: true)
                     }
-                } label: { tabLabel(L("dashboard.home"), symbol: "house.fill", tab: DashboardTab.home) }
+                } label: { tabLabel(L("dashboard.home"), glyph: "TabGlyphHome", tab: DashboardTab.home) }
 
                 Tab(value: DashboardTab.live) {
                     NavigationStack {
                         LiveStreamsView(playlist: playlist)
                             .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.live"), type: "live")
                     }
-                } label: { tabLabel(L("dashboard.live"), symbol: "tv.fill", tab: DashboardTab.live) }
+                } label: { tabLabel(L("dashboard.live"), glyph: "TabGlyphLive", tab: DashboardTab.live) }
 
                 // F6 (B13): Movies/Series tabs exist only while
                 // their section is visible in the ONE store.
@@ -116,7 +123,7 @@ struct DashboardView: View {
                             VODView(playlist: playlist)
                                 .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.movies"), type: "vod")
                         }
-                    } label: { tabLabel(L("dashboard.movies"), symbol: "film.fill", tab: DashboardTab.movies) }
+                    } label: { tabLabel(L("dashboard.movies"), glyph: "TabGlyphMovies", tab: DashboardTab.movies) }
                 }
 
                 if sectionVisibility.isVisible(.series) {
@@ -125,7 +132,7 @@ struct DashboardView: View {
                             SeriesView(playlist: playlist)
                                 .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.series"), type: "series")
                         }
-                    } label: { tabLabel(L("dashboard.series"), symbol: "play.tv.fill", tab: DashboardTab.series) }
+                    } label: { tabLabel(L("dashboard.series"), glyph: "TabGlyphSeries", tab: DashboardTab.series) }
                 }
 
                 Tab(value: DashboardTab.settings) {
@@ -133,7 +140,7 @@ struct DashboardView: View {
                         PlaylistSettingsView(playlist: playlist, onDismiss: onDismiss, onSwitchPlaylist: onSwitchPlaylist)
                             .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.settings"))
                     }
-                } label: { tabLabel(L("dashboard.settings"), symbol: "gearshape.fill", tab: DashboardTab.settings) }
+                } label: { tabLabel(L("dashboard.settings"), glyph: "TabGlyphSettings", tab: DashboardTab.settings) }
 
                 // Round 7: NO Search tab. Round 5's six tabs made iOS
                 // collapse everything past the fifth into an automatic
@@ -156,6 +163,9 @@ struct DashboardView: View {
             // exactly one bar instance at all times, and its
             // targets are the platform-standard size.
             .environment(\.posterMetrics, posterMetrics)
+            // W2b (B7): regular-width iPad gets the sidebar form of
+            // the SAME tab bar; compact width is unchanged.
+            .iPadSidebarAdaptable()
 
             ZStack {
                 if let item = playerOverlay.presentation {

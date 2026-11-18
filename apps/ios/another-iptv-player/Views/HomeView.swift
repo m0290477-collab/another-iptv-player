@@ -567,8 +567,8 @@ struct HomeView: View {
             || playlist.id != contentStore.activePlaylistId
             || (!contentStore.streamsLoaded && contentStore.loadError == nil) {
             VStack(spacing: 16) {
-                ProgressView()
-                    .scaleEffect(1.4)
+                // X6 (B7): branded loader view swap only.
+                BrandedLoader(size: 52)
                 Text(contentStore.loadingMessage ?? L("live.empty.preparing"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
