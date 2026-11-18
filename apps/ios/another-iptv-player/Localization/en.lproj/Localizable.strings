@@ -1177,3 +1177,10 @@
 "applock.unlock_faceid" = "Unlock with Face ID";
 "applock.unlock_passcode" = "Unlock with Device Passcode";
 "applock.unlock_touchid" = "Unlock with Touch ID";
+
+/* MARK: Build 61 (fa) */
+"audioonly.badge" = "Audio only";
+"audioonly.default.desc" = "Live channels play with audio only (no video) unless set otherwise per channel. Saves battery and data.";
+"audioonly.default.title" = "Audio Only by Default";
+"audioonly.off" = "Turn Off Audio Only";
+"audioonly.on" = "Turn On Audio Only";

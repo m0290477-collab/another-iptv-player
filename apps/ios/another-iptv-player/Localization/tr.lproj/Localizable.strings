@@ -1177,3 +1177,10 @@
 "applock.unlock_faceid" = "Face ID ile Aç";
 "applock.unlock_passcode" = "Cihaz Parolasıyla Aç";
 "applock.unlock_touchid" = "Touch ID ile Aç";
+
+/* MARK: Build 61 (fa) */
+"audioonly.badge" = "Yalnızca ses";
+"audioonly.default.desc" = "Canlı kanallar, kanal bazında değiştirilmedikçe yalnızca sesle (videosuz) oynatılır. Pil ve veri tasarrufu sağlar.";
+"audioonly.default.title" = "Varsayılan Olarak Yalnızca Ses";
+"audioonly.off" = "Yalnızca Sesi Kapat";
+"audioonly.on" = "Yalnızca Sesi Aç";

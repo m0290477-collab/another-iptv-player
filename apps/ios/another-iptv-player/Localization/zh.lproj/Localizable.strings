@@ -1159,3 +1159,10 @@
 "applock.unlock_faceid" = "用 Face ID 解锁";
 "applock.unlock_passcode" = "用设备密码解锁";
 "applock.unlock_touchid" = "用 Touch ID 解锁";
+
+/* MARK: Build 61 (fa) */
+"audioonly.badge" = "纯音频";
+"audioonly.default.desc" = "直播频道仅以音频播放（无视频），除非按频道单独设置。可节省电量和流量。";
+"audioonly.default.title" = "默认纯音频";
+"audioonly.off" = "关闭纯音频";
+"audioonly.on" = "开启纯音频";

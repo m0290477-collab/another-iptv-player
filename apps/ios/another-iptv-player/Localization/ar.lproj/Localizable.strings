@@ -1159,3 +1159,10 @@
 "applock.unlock_faceid" = "إلغاء القفل بـ Face ID";
 "applock.unlock_passcode" = "إلغاء القفل برمز مرور الجهاز";
 "applock.unlock_touchid" = "إلغاء القفل بـ Touch ID";
+
+/* MARK: Build 61 (fa) */
+"audioonly.badge" = "صوت فقط";
+"audioonly.default.desc" = "تُشغَّل القنوات المباشرة بالصوت فقط (بدون فيديو) ما لم تُغيَّر لكل قناة. يوفّر البطارية والبيانات.";
+"audioonly.default.title" = "الصوت فقط افتراضيًا";
+"audioonly.off" = "إيقاف الصوت فقط";
+"audioonly.on" = "تشغيل الصوت فقط";

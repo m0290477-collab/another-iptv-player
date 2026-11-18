@@ -1159,3 +1159,10 @@
 "applock.unlock_faceid" = "Разблокировать по Face ID";
 "applock.unlock_passcode" = "Разблокировать код-паролем устройства";
 "applock.unlock_touchid" = "Разблокировать по Touch ID";
+
+/* MARK: Build 61 (fa) */
+"audioonly.badge" = "Только аудио";
+"audioonly.default.desc" = "Прямые каналы воспроизводятся только со звуком (без видео), если не изменено для канала. Экономит заряд и трафик.";
+"audioonly.default.title" = "Только аудио по умолчанию";
+"audioonly.off" = "Выключить только аудио";
+"audioonly.on" = "Включить только аудио";

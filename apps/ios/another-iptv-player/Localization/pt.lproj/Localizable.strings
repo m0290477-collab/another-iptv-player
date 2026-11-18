@@ -1159,3 +1159,10 @@
 "applock.unlock_faceid" = "Desbloquear com Face ID";
 "applock.unlock_passcode" = "Desbloquear com o código do dispositivo";
 "applock.unlock_touchid" = "Desbloquear com Touch ID";
+
+/* MARK: Build 61 (fa) */
+"audioonly.badge" = "Só áudio";
+"audioonly.default.desc" = "Os canais ao vivo tocam só com áudio (sem vídeo), salvo ajuste por canal. Economiza bateria e dados.";
+"audioonly.default.title" = "Só áudio por padrão";
+"audioonly.off" = "Desativar só áudio";
+"audioonly.on" = "Ativar só áudio";

@@ -1159,3 +1159,10 @@
 "applock.unlock_faceid" = "Face ID से अनलॉक करें";
 "applock.unlock_passcode" = "डिवाइस पासकोड से अनलॉक करें";
 "applock.unlock_touchid" = "Touch ID से अनलॉक करें";
+
+/* MARK: Build 61 (fa) */
+"audioonly.badge" = "केवल ऑडियो";
+"audioonly.default.desc" = "लाइव चैनल केवल ऑडियो (बिना वीडियो) के साथ चलते हैं, जब तक प्रति चैनल न बदला जाए। बैटरी और डेटा बचाता है।";
+"audioonly.default.title" = "डिफ़ॉल्ट रूप से केवल ऑडियो";
+"audioonly.off" = "केवल ऑडियो बंद करें";
+"audioonly.on" = "केवल ऑडियो चालू करें";
