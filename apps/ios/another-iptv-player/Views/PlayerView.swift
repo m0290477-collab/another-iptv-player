@@ -186,10 +186,6 @@ private struct PlayerViewImpl: View {
     }
 
     @State private var showControls = true
-    /// Preserved fault fix (build 56, round 14 A2): the failure
-    /// message the user already closed the failure card for — a NEW
-    /// failure (different message) re-shows the card.
-    @State private var dismissedFailureMessage: String?
     /// Preserved invisible plumbing (round 15 C10): last EPG
     /// fullscreen-stamp heartbeat write.
     @State private var lastEPGStampAt: Date = .distantPast
@@ -966,10 +962,7 @@ private struct PlayerViewImpl: View {
                 canNext: canGoToNextChannel,
                 onPrevious: onPreviousChannel,
                 onNext: onNextChannel,
-                // Preserved invisible plumbing (round 20 R20-2): a
-                // movie opened WITH a queue swaps Lock Screen skip
-                // for queue prev/next, exactly like series episodes.
-                swapSkipForNav: isLiveStream || showVODQueueSkip
+                swapSkipForNav: isLiveStream
             )
         }
     }
@@ -2040,13 +2033,9 @@ private struct PlayerViewImpl: View {
 
     /// Preserved fault fix (build 56): the failure card is up when a failure
     /// message exists that the user hasn't already closed the
-    /// player over. (Close dismisses the player itself, so the
-    /// card never needs a separate dismissed flag in practice;
-    /// `dismissedFailureMessage` covers the expired-view's own
-    /// close path if it is ever reused in place.)
+    /// player over. (Close dismisses the player itself.)
     private var showFailureCard: Bool {
         hasPlaybackFailure
-            && (player.playbackFailureMessage ?? nil) != dismissedFailureMessage
     }
 
     /// The centered failure card: real cause (from the engine's
