@@ -161,6 +161,32 @@ struct DownloadsView: View {
                         }
                     }
 
+                    // B2 (build 61, Z9): queue controls — Pause All
+                    // suspends the active transfers in place and
+                    // blocks the queue; Resume All restarts them in
+                    // queue order. Shown only when there is something
+                    // to pause or resume.
+                    if !inProgress.isEmpty || !queued.isEmpty {
+                        Section(L("queue.title")) {
+                            if manager.queuePaused {
+                                Label(L("queue.paused"), systemImage: "pause.circle")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.orange)
+                                Button {
+                                    manager.resumeAll()
+                                } label: {
+                                    Label(L("queue.resume_all"), systemImage: "play.fill")
+                                }
+                            } else {
+                                Button {
+                                    manager.pauseAll()
+                                } label: {
+                                    Label(L("queue.pause_all"), systemImage: "pause.fill")
+                                }
+                            }
+                        }
+                    }
+
                     if !inProgress.isEmpty {
                         Section(L("download.status.downloading")) {
                             ForEach(inProgress) { item in
@@ -176,6 +202,16 @@ struct DownloadsView: View {
                         Section(L("download.status.queued")) {
                             ForEach(queued) { item in
                                 actionableRow(item)
+                            }
+                            // Z9: drag-to-reprioritize (in Edit
+                            // mode). The new order is written back
+                            // as the rows' queue order — the exact
+                            // order DownloadManager's pump consumes.
+                            .onMove { offsets, destination in
+                                var reordered = queued
+                                reordered.move(fromOffsets: offsets, toOffset: destination)
+                                let ids = reordered.map(\.id)
+                                Task { await manager.reprioritize(orderedIds: ids) }
                             }
                         }
                     }
@@ -215,6 +251,15 @@ struct DownloadsView: View {
         }
         .navigationTitle(L("download.title"))
         .navigationBarTitleDisplayMode(.inline)
+        // Z9: Edit mode enables the queued section's drag handles.
+        // Only offered when there is a queue worth reordering.
+        .toolbar {
+            if queued.count > 1 {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    EditButton()
+                }
+            }
+        }
         .searchable(text: $searchText, isPresented: $isSearchActive, prompt: L("download.search_placeholder"))
         .onChange(of: searchText) { _, new in
             debounceTask?.cancel()

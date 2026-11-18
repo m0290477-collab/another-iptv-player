@@ -49,6 +49,61 @@ final class DownloadManager: NSObject, ObservableObject {
     /// a silent stall.
     @Published private(set) var isWaitingForWifi: Bool = false
 
+    // MARK: - B2 (build 61, Z9) queue pause
+
+    /// True while the user has paused the whole download queue
+    /// (Pause All in DownloadsView). Persisted, so a relaunch keeps
+    /// the queue paused instead of silently resuming transfers the
+    /// user stopped. While paused, `pumpQueue` starts nothing and
+    /// active tasks are suspended (their partial data + resume
+    /// state survive per the Q15 resumable design).
+    @Published private(set) var queuePaused: Bool =
+        UserDefaults.standard.bool(forKey: "download.queue_paused")
+
+    /// Pause All: suspends every active transfer in place and
+    /// blocks the pump from starting queued downloads.
+    func pauseAll() {
+        queuePaused = true
+        UserDefaults.standard.set(true, forKey: "download.queue_paused")
+        for task in idToTask.values { task.suspend() }
+        dbVersion &+= 1
+    }
+
+    /// Resume All: resumes the suspended transfers and re-runs the
+    /// pump so queued downloads start in queue order.
+    func resumeAll() {
+        queuePaused = false
+        UserDefaults.standard.set(false, forKey: "download.queue_paused")
+        for task in idToTask.values { task.resume() }
+        dbVersion &+= 1
+        Task { await pumpQueue() }
+    }
+
+    /// Z9 drag-to-reprioritize: rewrites the `createdAt` of the
+    /// given QUEUED rows so their relative order matches
+    /// `orderedIds`. The pump consumes `.queued` rows in ascending
+    /// `createdAt`, so this order IS the start order when a slot
+    /// frees — a real priority change, not a display sort. The
+    /// earliest existing timestamp is kept as the base so the rows
+    /// stay ahead of anything enqueued later.
+    func reprioritize(orderedIds: [String]) async {
+        guard orderedIds.count > 1 else { return }
+        _ = try? await AppDatabase.shared.write { db in
+            let rows = try DBDownloadedItem
+                .filter(orderedIds.contains(Column("id")))
+                .filter(Column("status") == DownloadStatus.queued.rawValue)
+                .fetchAll(db)
+            guard rows.count > 1, let base = rows.map(\.createdAt).min() else { return }
+            let byId = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+            for (index, id) in orderedIds.enumerated() {
+                guard var row = byId[id] else { continue }
+                row.createdAt = base.addingTimeInterval(Double(index))
+                try row.update(db)
+            }
+        }
+        dbVersion &+= 1
+    }
+
     /// Bumps `dbVersion` for services that write download rows
     /// outside the manager (LiveRecordingService) so observing views
     /// refresh.
@@ -266,6 +321,13 @@ final class DownloadManager: NSObject, ObservableObject {
                 )
                 matchedIds.insert(match.id)
             }
+        }
+
+        // Z9: if the user paused the queue before the app closed,
+        // the restored tasks must come back SUSPENDED, not running —
+        // and the pump below stays blocked by the same flag.
+        if queuePaused {
+            for task in idToTask.values { task.suspend() }
         }
 
         // After a force-kill / OS termination, iOS may have dropped the background task too.
@@ -696,6 +758,8 @@ final class DownloadManager: NSObject, ObservableObject {
     /// if the playlist has a slot, start it; otherwise skip and look at the next row.
     /// Only one pump runs at a time; overlapping calls are marked with `pumpPending`.
     private func pumpQueue() async {
+        // Z9: a user-paused queue starts nothing (Resume All re-pumps).
+        guard !queuePaused else { return }
         if pumpInFlight {
             pumpPending = true
             return
