@@ -112,7 +112,12 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     play: Bool,
     startSeconds: TimeInterval?,
     liveLowLatency: Bool,
-    userAgent: String?
+    userAgent: String?,
+    // Build 61 (FA, F-2/G2): the active playlist's parsed custom
+    // headers, threaded alongside the User-Agent by the shells'
+    // existing load path. Defaulted so preview/multiview callers
+    // that pass no headers keep their previous behaviour.
+    customHeaders: [String: String] = [:]
   ) {
     guard !isDisposed else { return }
     resetForNewLoad()
@@ -134,7 +139,8 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     let options = Self.makeOptions(
       liveLowLatency: liveLowLatency,
       startSeconds: startSeconds,
-      userAgent: userAgent
+      userAgent: userAgent,
+      customHeaders: customHeaders
     )
     // The layer is built from scratch on every load. The `layer.set(url:)` path is NOT USED:
     // KSPlayerLayer.url.didSet, while any wireless route is active,
@@ -209,9 +215,30 @@ final class KSPlayerEngine: NSObject, ObservableObject {
   private static func makeOptions(
     liveLowLatency: Bool,
     startSeconds: TimeInterval?,
-    userAgent: String?
+    userAgent: String?,
+    customHeaders: [String: String] = [:]
   ) -> KSOptions {
     let options = KSOptions()
+    // Build 61 (FA, F-2/G2): per-playlist custom headers at
+    // PLAYBACK (B10 wired them to playlist + EPG fetch only).
+    // The real KSPlayer channel is `KSOptions.appendHeader(_:)`:
+    // it writes the FFmpeg `headers` format-context option AND
+    // the AVURLAsset HTTP header fields, covering both decode
+    // paths. Applied BEFORE the User-Agent block below so the
+    // dedicated UA wins over a "User-Agent" line inside the
+    // custom dict — the same precedence `Playlist.applyCustomHeaders`
+    // uses on the fetch paths. The AVPlayer-side merge is also
+    // written explicitly (mirroring the UA block) so the asset
+    // headers are correct regardless of appendHeader's internals.
+    if !customHeaders.isEmpty {
+      options.appendHeader(customHeaders)
+      var assetHeaders =
+        options.avOptions["AVURLAssetHTTPHeaderFieldsKey"] as? [String: String] ?? [:]
+      for (name, value) in customHeaders {
+        assetHeaders[name] = value
+      }
+      options.avOptions["AVURLAssetHTTPHeaderFieldsKey"] = assetHeaders
+    }
     if let userAgent, !userAgent.isEmpty {
       options.userAgent = userAgent
       // `KSOptions.userAgent` only sets the FFmpeg header (`formatContextOptions`). The
@@ -295,6 +322,7 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     // audioFilters, so the toggle has no effect there (reported).
     if UserDefaults.standard.bool(forKey: "player.loudnessNormalization") {
       options.audioFilters = ["dynaudnorm"]
+    }
     // Build 61 (B10, Q5): night/dialogue audio mode — when the
     // user enabled it (key "player.nightAudioMode", toggled in
     // the track-settings sheet), APPEND the dynamic-range

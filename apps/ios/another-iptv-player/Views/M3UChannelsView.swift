@@ -788,6 +788,8 @@ struct M3UPlayerShell: View {
                     // Build 61 (B10, G2): the playlist's own
                     // User-Agent wins over the per-channel one.
                     userAgent: playlist.playbackUserAgent(channelUserAgent: activeChannel.userAgent),
+                    // Build 61 (FA, F-2/G2): custom headers alongside the UA.
+                    customHeaders: playlist.customHeaders,
                     epgChannelKey: classification.isLive ? EPGChannelKey.forM3U(activeChannel) : nil,
                     canGoToPreviousChannel: hasQueueNav && currentIndex > 0,
                     canGoToNextChannel: hasQueueNav && currentIndex < queue.count - 1,

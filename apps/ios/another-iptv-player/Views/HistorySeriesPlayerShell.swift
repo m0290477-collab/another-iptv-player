@@ -37,6 +37,8 @@ struct HistorySeriesPlayerShell: View {
             containerExtension: session.containerExtension,
             // Build 61 (B10, G2): playlist User-Agent to the engine load path.
             userAgent: playlist.playbackUserAgent(channelUserAgent: nil),
+            // Build 61 (FA, F-2/G2): custom headers alongside the UA.
+            customHeaders: playlist.customHeaders,
             canGoToPreviousEpisode: neighborPrev != nil,
             canGoToNextEpisode: neighborNext != nil,
             onPreviousEpisode: { jumpTo(neighborPrev) },

@@ -267,6 +267,50 @@ struct AmbientHeroGlow: View {
     }
 }
 
+// MARK: - X5 zap sweep (FA fixer stage)
+
+extension Notification.Name {
+    /// Build 61 (FA, X5): posted by PlayerView's live center-cluster
+    /// prev/next buttons on a channel zap; observed by the player
+    /// chrome, which plays the sweep. Presentation only — nothing
+    /// in the load path posts or observes this.
+    static let superXLiveZap = Notification.Name("superx.liveZap")
+}
+
+/// X5: a quick (<200 ms) red-orange sweep along the player chrome's
+/// top edge on a live channel change. A 3 pt gradient segment sweeps
+/// leading → trailing across a hairline track; it is never a
+/// full-screen overlay, never hit-testable, and renders NOTHING
+/// when the effects gate is closed (Reduce Motion / Q21) or before
+/// the first zap (`trigger == 0`).
+struct ZapSweepView: View {
+    let trigger: Int
+    @State private var phase: CGFloat = -1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var animates: Bool { EffectsGate.allowsHeavyEffects(reduceMotion: reduceMotion) }
+
+    var body: some View {
+        GeometryReader { proxy in
+            if animates, trigger > 0 {
+                LinearGradient(
+                    colors: [.clear, AppTheme.accent, AppTheme.accentEnd, .clear],
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: proxy.size.width * 0.45, height: 3)
+                .offset(x: phase * proxy.size.width * 1.6)
+            }
+        }
+        .frame(height: 3)
+        .accessibilityHidden(true)
+        .onChange(of: trigger) { _, _ in
+            guard animates else { return }
+            phase = -1
+            withAnimation(.linear(duration: 0.18)) { phase = 1 }
+        }
+    }
+}
+
 // MARK: - W2b iPad sidebar chrome
 
 /// W2b: on regular-width (iPad) the tab bar becomes a sidebar via

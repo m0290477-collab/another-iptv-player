@@ -713,6 +713,9 @@ final class ICloudSyncService: NSObject {
         "player.speedUpOnLongPress", "player.autoPlayNextEpisode",
         "player.showSkipIntro", "player.skipIntroLengthSeconds",
         "player.defaultSleepTimerMinutes", "player.videoAspectMode",
+        // Build 61 (FA, H1): the audio-only Settings default syncs
+        // with the per-channel audioonly.* sets B8 already syncs.
+        "player.audioOnlyDefault",
         "player.zappingEnabled", "player.zappingDirection",
         "player.nextEpisodeCardMode",
         // Downloads preferences

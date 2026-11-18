@@ -170,7 +170,10 @@ struct MultiviewView: View {
         guard let url = PlaybackURLBuilder(playlist: playlist)
             .liveURL(streamId: stream.streamId)
         else { return }
-        panes[index].play(stream: stream, url: url)
+        // Build 61 (FA, G2): pass the playlist's trimmed User-Agent
+        // to the pane load — the same fix B7 applied to the hero
+        // call sites; panes previously loaded with no UA at all.
+        panes[index].play(stream: stream, url: url, userAgent: playlist.trimmedUserAgent)
         // Selecting a channel focuses its pane — the user just chose
         // what to watch and hear.
         focus(index)
@@ -200,14 +203,14 @@ final class MultiviewPane: ObservableObject {
     @Published private(set) var stream: DBLiveStream?
     private var isFocused = false
 
-    func play(stream: DBLiveStream, url: URL) {
+    func play(stream: DBLiveStream, url: URL, userAgent: String?) {
         self.stream = stream
         engine.load(
             url,
             play: true,
             startSeconds: nil,
             liveLowLatency: true,
-            userAgent: nil
+            userAgent: userAgent
         )
         applyAudioFocus(isFocused)
     }

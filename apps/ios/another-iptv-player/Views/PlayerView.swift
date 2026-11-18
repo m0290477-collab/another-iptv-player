@@ -59,6 +59,9 @@ struct PlayerView: View {
     var containerExtension: String? = nil
     /// M3U kanal bazlı User-Agent (#EXTVLCOPT / #KODIPROP); motora load'da geçirilir.
     var userAgent: String? = nil
+    /// Build 61 (FA, F-2/G2): the active playlist's parsed custom
+    /// headers; reaches the engine's KSOptions alongside the UA.
+    var customHeaders: [String: String] = [:]
     /// EPG lookup key for the live channel; drives the in-player now-playing strip.
     var epgChannelKey: String? = nil
     /// Catch-up playback must not write watch history (would overwrite the live row).
@@ -100,6 +103,7 @@ struct PlayerView: View {
             resumeTimeMs: resumeTimeMs,
             containerExtension: containerExtension,
             userAgent: userAgent,
+            customHeaders: customHeaders,
             epgChannelKey: epgChannelKey,
             suppressWatchHistory: suppressWatchHistory,
             isFavorite: isFavorite,
@@ -139,6 +143,8 @@ private struct PlayerViewImpl: View {
     var resumeTimeMs: Int? = nil
     var containerExtension: String? = nil
     var userAgent: String? = nil
+    /// Build 61 (FA, F-2/G2): playlist custom headers (see PlayerView).
+    var customHeaders: [String: String] = [:]
     var epgChannelKey: String? = nil
     var suppressWatchHistory: Bool = false
 
@@ -218,6 +224,10 @@ private struct PlayerViewImpl: View {
     /// V1 sleep row drives B4's PlaybackSleepTimer engine (shared singleton,
     /// formerly driven from the track-settings sheet).
     @ObservedObject private var sleepTimer = PlaybackSleepTimer.shared
+    /// Build 61 (FA, X5): zap-sweep trigger — bumped when the live
+    /// zap event arrives (posted by the center-cluster prev/next
+    /// buttons); the chrome-edge sweep view observes this value.
+    @State private var zapSweepTrigger = 0
     /// V3 additive swipe state: direction locks on first significant movement.
     private enum SwipeGestureKind {
         case seek
@@ -743,6 +753,7 @@ private struct PlayerViewImpl: View {
             // `play` can race within the same tick. First layout also relieves the main queue.
             DispatchQueue.main.async {
                 applyPlaybackTransitionIfNeeded()
+                armDefaultSleepTimerIfNeeded()
                 applySelectedAspectMode(force: true)
                 applySeriesEpisodeRemoteCommands()
                 if let v = volumeBackupDuringChannelBrowser {
@@ -784,6 +795,12 @@ private struct PlayerViewImpl: View {
         }
         .onChange(of: currentNowNext?.now?.id) { _, _ in
             player.setPlaybackPresentation(makePresentation())
+        }
+        // Build 61 (FA, X5): the zap event bumps the sweep trigger;
+        // the sweep itself lives in the chrome layer (see
+        // playerChromeAndVideo) and never touches the load path.
+        .onReceive(NotificationCenter.default.publisher(for: .superXLiveZap)) { _ in
+            zapSweepTrigger += 1
         }
         .onDisappear {
             timer?.invalidate()
@@ -974,14 +991,44 @@ private struct PlayerViewImpl: View {
         }
         player.play(
             url: url, startSeconds: initialStartSeconds, isLiveStream: isLiveStream,
-            userAgent: userAgent
+            userAgent: userAgent, customHeaders: customHeaders
         )
+        // === Build 61 (FA, H1): audio-only for live channels. ===
+        // This present site is the one place that knows BOTH the
+        // channel identity (playlistId + streamId) and the active
+        // engine — `KSPlayerEngine.load` receives neither. On every
+        // presentation / zap the store's effective state for THIS
+        // channel is applied: on suspends video decoding on the
+        // engine just loaded; off restores it (channel change /
+        // unset). Live Xtream channels only — the store is keyed
+        // by the provider's Int stream id; M3U string ids and all
+        // non-live content are untouched.
+        if isLiveStream, type == "live", let liveStreamId = Int(streamId) {
+            player.engine.setVideoDecodingSuspended(
+                AudioOnlyStore.shared.isEnabled(playlistId: playlistId, streamId: liveStreamId)
+            )
+        }
+        // === End FA H1 ===
         // Coordinator wiring (build 61, Item 9): keep a connected Cast
         // receiver in sync with the stream this player just loaded.
         GoogleCastService.shared.updateNowPlaying(url: url, title: title, isLive: isLiveStream)
         applySelectedAspectMode(force: true)
         player.setPlaybackPresentation(makePresentation())
         applySeriesEpisodeRemoteCommands()
+    }
+
+    /// Build 61 (FA, F-1/Z5): the settings pickers' "Default sleep
+    /// timer" (`player.defaultSleepTimerMinutes`) is the V1 sleep
+    /// row's SESSION default. It is applied once, when the player
+    /// presents: a stored default > 0 arms B4's PlaybackSleepTimer
+    /// with that many minutes — but only when no timer is already
+    /// active, so a timer the user armed (here or in a previous
+    /// presentation that is still counting down) is never reset,
+    /// and a default of 0 (Off) changes nothing.
+    private func armDefaultSleepTimerIfNeeded() {
+        let minutes = UserDefaults.standard.integer(forKey: "player.defaultSleepTimerMinutes")
+        guard minutes > 0, sleepTimer.mode == .off else { return }
+        sleepTimer.arm(minutes: minutes, player: player)
     }
 
     private func checkAndPerformResume() {
@@ -1763,6 +1810,20 @@ private struct PlayerViewImpl: View {
                     .zIndex(33)
                 }
 
+                // Build 61 (FA, X5): zap sweep — a thin red-orange
+                // sweep along the TOP chrome edge on live channel
+                // change. Presentation only: 3pt tall, hit-testing
+                // off, under 200ms, gated by EffectsGate inside the
+                // view; it is NOT a full-screen overlay and cannot
+                // delay or cover the video's first frame.
+                VStack(spacing: 0) {
+                    ZapSweepView(trigger: zapSweepTrigger)
+                    Spacer(minLength: 0)
+                }
+                .ignoresSafeArea(edges: .top)
+                .allowsHitTesting(false)
+                .zIndex(36)
+
                 if let aspectToastText {
                     VStack {
                         HStack(spacing: 8) {
@@ -2326,6 +2387,8 @@ private struct PlayerViewImpl: View {
                     symbolSize: transportSkipSymbol,
                     hitFrame: transportSkipHit
                 ) {
+                    // Build 61 (FA, X5): zap event for the chrome sweep.
+                    NotificationCenter.default.post(name: .superXLiveZap, object: nil)
                     onPreviousChannel?()
                 }
                 .accessibilityLabel(L("player.a11y.previous_channel"))
@@ -2341,6 +2404,8 @@ private struct PlayerViewImpl: View {
                     symbolSize: transportSkipSymbol,
                     hitFrame: transportSkipHit
                 ) {
+                    // Build 61 (FA, X5): zap event for the chrome sweep.
+                    NotificationCenter.default.post(name: .superXLiveZap, object: nil)
                     onNextChannel?()
                 }
                 .accessibilityLabel(L("player.a11y.next_channel"))

@@ -32,6 +32,9 @@ struct LiveCardContextMenu: ViewModifier {
     @State private var showPreview = false
     @ObservedObject private var pinnedStore = PinnedChannelStore.shared
     @ObservedObject private var hiddenChannelStore = HiddenChannelStore.shared
+    // Build 61 (FA, H1): audio-only store — B8 shipped the state
+    // layer unwired; the toggle below is its menu consumer.
+    @ObservedObject private var audioOnlyStore = AudioOnlyStore.shared
     // === End B8 state ===
 
     // MARK: - B2 (build 61) state: recording service + reorder sheet
@@ -101,6 +104,20 @@ struct LiveCardContextMenu: ViewModifier {
                     hiddenChannelStore.setHidden(true, playlistId: playlist.id, streamId: stream.streamId)
                 } label: {
                     Label(L("channels.hide"), systemImage: "eye.slash")
+                }
+
+                // Build 61 (FA, H1): audio-only toggle — writes the
+                // SAME AudioOnlyStore the player present site reads;
+                // while on, the channel plays with video decoding
+                // suspended (audio keeps playing).
+                Button {
+                    audioOnlyStore.toggle(playlistId: playlist.id, streamId: stream.streamId)
+                } label: {
+                    Label(
+                        audioOnlyStore.isEnabled(playlistId: playlist.id, streamId: stream.streamId)
+                            ? L("audioonly.off") : L("audioonly.on"),
+                        systemImage: "speaker.wave.2"
+                    )
                 }
                 // === End B8 menu items ===
 

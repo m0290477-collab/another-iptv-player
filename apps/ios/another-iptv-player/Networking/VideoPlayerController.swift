@@ -223,6 +223,9 @@ final class VideoPlayerController: ObservableObject {
     let startSeconds: TimeInterval?
     let isLiveStream: Bool
     let userAgent: String?
+    /// Build 61 (FA, F-2/G2): the active playlist's custom headers,
+    /// carried with the UA so reconnect/stall retries keep them.
+    let customHeaders: [String: String]
   }
 
   private var pendingLoadRequest: PendingLoadRequest?
@@ -472,7 +475,8 @@ final class VideoPlayerController: ObservableObject {
             url: request.url,
             startSeconds: resumeAt,
             isLiveStream: request.isLiveStream,
-            userAgent: request.userAgent
+            userAgent: request.userAgent,
+            customHeaders: request.customHeaders
           )
           self.tryFlushPendingLoad()
         }
@@ -561,7 +565,8 @@ final class VideoPlayerController: ObservableObject {
         url: request.url,
         startSeconds: resumeAt,
         isLiveStream: request.isLiveStream,
-        userAgent: request.userAgent
+        userAgent: request.userAgent,
+        customHeaders: request.customHeaders
       )
       self.tryFlushPendingLoad()
     }
@@ -833,7 +838,8 @@ final class VideoPlayerController: ObservableObject {
       play: true,
       startSeconds: request.startSeconds,
       liveLowLatency: request.isLiveStream,
-      userAgent: request.userAgent
+      userAgent: request.userAgent,
+      customHeaders: request.customHeaders
     )
     // While a new KSPlayerLayer is being set up, the old one's deinit
     // deleted their targets; rebuild the lock screen controls.
@@ -874,7 +880,9 @@ final class VideoPlayerController: ObservableObject {
     url: URL,
     startSeconds: TimeInterval? = nil,
     isLiveStream: Bool = false,
-    userAgent: String? = nil
+    userAgent: String? = nil,
+    // Build 61 (FA, F-2/G2): playlist custom headers, alongside the UA.
+    customHeaders: [String: String] = [:]
   ) {
     guard !isTornDown else { return }
     // === Build 61 (B9): fresh per-load state for P2/Q10/E6/P3 ===
@@ -892,7 +900,8 @@ final class VideoPlayerController: ObservableObject {
       url: url,
       startSeconds: startSeconds,
       isLiveStream: isLiveStream,
-      userAgent: userAgent
+      userAgent: userAgent,
+      customHeaders: customHeaders
     )
     // While a cast session is active (zap / auto-next), content flows through the cast pipeline; the engine
     // does NOT OPEN — opening a second connection to the panel was the root cause of handover errors on
