@@ -3,9 +3,9 @@ import SwiftUI
 
 /// Round 12 (point 4): the "Privacy & Legal" group the owner asked
 /// for, modeled on STRONG's arrangement — Contact Support, Privacy
-/// Policy, Terms of Use, Report objectionable content, Delete
-/// Account — placed after About & Legal in BOTH settings screens
-/// (one shared component, no duplication).
+/// Policy, Terms of Use, Report objectionable content — placed
+/// after About & Legal in BOTH settings screens (one shared
+/// component, no duplication).
 ///
 /// Every row is genuinely wired, per the no-fake-UI rule:
 /// - Contact Support / Report objectionable content open in-app
@@ -20,23 +20,16 @@ import SwiftUI
 ///   collected, everything local); the terms state only true
 ///   things (free, brings no content, the user's own provider
 ///   supplies the streams).
-/// - Delete Account does the honest local equivalent for an app
-///   with no server accounts: after a destructive confirmation it
-///   deletes ALL playlists and ALL app data on this device
-///   (catalog, favorites, history, EPG, downloads incl. files)
-///   through the ONE shared deletion implementation
-///   (`AccountDataDeletion`) and returns to the playlist gate.
+///
+/// Build 61 (B3, owner rules O5/O6): the round-12 "Delete
+/// Account" row that used to live here is REMOVED — erasing all
+/// app data now has exactly ONE entry point, the Danger Zone's
+/// "Erase all app data" (DangerZoneSection in
+/// SettingsComponents.swift), which keeps this row's PIN guard
+/// and adds the second confirmation. Both run the ONE shared
+/// deletion implementation (`AccountDataDeletion`).
 struct PrivacyLegalSection: View {
     let onExitToGate: () -> Void
-
-    @State private var showDeleteConfirmation = false
-    @State private var isDeleting = false
-    /// Round 15 (C5): when a parental PIN is set, Delete Account
-    /// asks for it BEFORE the destructive confirmation.
-    @State private var showPINForDelete = false
-    /// Round 14 (B1): a failed wipe step must SURFACE, never fail
-    /// silently behind a bare `try?` — this drives the error alert.
-    @State private var showDeleteError = false
 
     var body: some View {
         Section(header: Text(L("settings.group.privacy_legal"))) {
@@ -75,58 +68,6 @@ struct PrivacyLegalSection: View {
                     Text(L("settings.legal.report_content"))
                 }
             }
-
-            Button(role: .destructive) {
-                // Round 15 (C5): PIN guard — with a PIN set, the
-                // PIN comes first; the confirmation follows it.
-                if PINStore.hasPIN {
-                    showPINForDelete = true
-                } else {
-                    showDeleteConfirmation = true
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    SettingsIconTile(systemImage: "person.crop.circle.badge.xmark", tint: .red)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L("settings.legal.delete_account"))
-                        Text(L("settings.legal.delete_account_desc"))
-                            .font(.caption)
-                            .foregroundStyle(.red.opacity(0.7))
-                    }
-                    if isDeleting {
-                        Spacer()
-                        ProgressView()
-                    }
-                }
-            }
-            .disabled(isDeleting)
-        }
-        .sheet(isPresented: $showPINForDelete) {
-            PINEntrySheet(message: L("pin.guard.delete_account")) {
-                showDeleteConfirmation = true
-            }
-        }
-        .alert(L("settings.legal.delete_account.title"), isPresented: $showDeleteConfirmation) {
-            Button(L("common.cancel"), role: .cancel) {}
-            Button(L("common.confirm_delete_yes"), role: .destructive) {
-                Task { @MainActor in
-                    isDeleting = true
-                    let succeeded = await DeleteAccountAction.wipeAllLocalData()
-                    isDeleting = false
-                    if succeeded {
-                        onExitToGate()
-                    } else {
-                        showDeleteError = true
-                    }
-                }
-            }
-        } message: {
-            Text(L("settings.legal.delete_account.message"))
-        }
-        .alert(L("common.error"), isPresented: $showDeleteError) {
-            Button(L("common.ok"), role: .cancel) {}
-        } message: {
-            Text(L("settings.legal.delete_account.error_message"))
         }
     }
 }
@@ -201,24 +142,8 @@ private struct LegalSupportView: View {
     }
 }
 
-/// The Delete Account action (round 12, point 4): the honest local
-/// equivalent for an app whose accounts live only on the user's own
-/// provider panels. Removes every playlist and every piece of app
-/// data stored on this device.
-///
-/// Round 17 (R17-2): the implementation moved to
-/// `AccountDataDeletion` — the ONE deletion path shared with the
-/// gate's saved-account removal and My Playlists' delete. The old
-/// inline version deleted from `epgShortCache` / `xmltvGuideCache`
-/// in a single all-or-nothing transaction; both tables were
-/// dropped by the `dropLegacyEPGTables` migration, so the wipe
-/// threw on a nonexistent table, rolled EVERYTHING back and
-/// reported "Some data could not be deleted" with nothing deleted.
-enum DeleteAccountAction {
-    /// Returns true only when every store succeeded; each store is
-    /// cleared independently inside `AccountDataDeletion`, so one
-    /// failure can no longer block the rest.
-    static func wipeAllLocalData() async -> Bool {
-        await AccountDataDeletion.deleteAllLocalData()
-    }
-}
+/// Build 61 (B3, O6): the round-12 `DeleteAccountAction` wrapper
+/// that lived here is removed with its row — the Danger Zone's
+/// erase calls `AccountDataDeletion.deleteAllLocalData()`
+/// directly (the ONE deletion path, round 17 R17-2, shared with
+/// the gate's saved-account removal and My Playlists' delete).

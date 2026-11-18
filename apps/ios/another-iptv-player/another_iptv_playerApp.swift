@@ -144,6 +144,20 @@ struct another_iptv_playerApp: App {
 /// the RTL layout follow the chosen language, not the device language.
 private struct AppRootView: View {
     @ObservedObject private var localization = LocalizationManager.shared
+    // Build 61 (B3, item 7a): the user's appearance choice
+    // (Settings ▸ Playback & Appearance; key "app.appearance",
+    // values "system" / "light" / "dark"). Default is "dark" —
+    // the app's established look — until the user picks otherwise.
+    @AppStorage("app.appearance") private var appearanceChoice = "dark"
+
+    /// The stored choice as a color scheme; nil = follow system.
+    private var preferredScheme: ColorScheme? {
+        switch appearanceChoice {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
+        }
+    }
     // Round 7: observing the accent store re-renders the hierarchy on a
     // picker change; the environment accent below routes every
     // `Color.accentColor` / control tint in the app to the chosen color
@@ -165,9 +179,17 @@ private struct AppRootView: View {
                 // the service degrades silently when iCloud is off) ===
                 ICloudSyncService.shared.startIfNeeded()
                 // === End B5 Item 3 ===
+                // Build 61 (B3, T2): queue the last watched live
+                // channel for launch resume when the user enabled
+                // it (consumed by the dashboard's existing
+                // pending-playback path; a no-op when off).
+                await LaunchResumeService.scheduleIfEnabled()
             }
-            // Cinematic Dark is the app's only appearance.
-            .preferredColorScheme(.dark)
+            // Build 61 (B3, item 7a): the stored appearance choice
+            // replaces the hard-forced dark scheme (default stays
+            // dark). The player subtree keeps its own nil reset in
+            // PlayerOverlayController, exactly as before.
+            .preferredColorScheme(preferredScheme)
             .accentColor(accentTheme.color)
             .tint(accentTheme.color)
             .environment(\.appDatabase, .shared)

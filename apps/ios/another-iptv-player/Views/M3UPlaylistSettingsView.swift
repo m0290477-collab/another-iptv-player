@@ -240,6 +240,19 @@ struct M3UPlaylistSettingsView: View {
             }
             }
 
+            // — Build 61 (B3, owner rule O5 — fixed group order
+            // Playback / Appearance / Downloads / Parental /
+            // Storage / Support & About): the Playback group
+            // (buffer, play-last-channel) and the Appearance
+            // group (appearance choice) directly follow the
+            // legacy Player group, ahead of Downloads. —
+            if settingsSearchMatches(settingsSearch, "buffer play last channel launch playback") {
+                PlaybackSettingsSection()
+            }
+            if settingsSearchMatches(settingsSearch, "appearance theme light dark") {
+                AppearanceSettingsSection()
+            }
+
             // — Content & Data (round 14, B4): standalone group,
             // same structure as the Xtream screen — refresh
             // actions, stats strip, EPG rows (always visible) and
@@ -359,8 +372,29 @@ struct M3UPlaylistSettingsView: View {
             if settingsSearchMatches(settingsSearch, "pin parental lock settings") {
                 ParentalPINSection()
             }
+            // — Build 61 (B3, O5): the Parental group continues
+            // with the locked categories (item 5), then the
+            // Storage group (T1 cache). —
+            if settingsSearchMatches(settingsSearch, "locked categories parental lock pin") {
+                LockedCategoriesSection(playlist: playlist)
+            }
+            if settingsSearchMatches(settingsSearch, "storage cache space") {
+                StorageSettingsSection()
+            }
             if settingsSearchMatches(settingsSearch, "backup export import reset defaults transfer") {
                 BackupSettingsSection(playlists: allPlaylists ?? [])
+            }
+
+            // — Build 61 (B3, Support & About group, O5):
+            // subscriptions (T5) and support (item 13) sit with
+            // the backup section above and About/Privacy below —
+            // the whole tail of this form is the Support & About
+            // group, in the fixed order. —
+            if settingsSearchMatches(settingsSearch, "subscription expiry provider playlists") {
+                SubscriptionSettingsSection(playlists: allPlaylists ?? [])
+            }
+            if settingsSearchMatches(settingsSearch, "support faq help diagnostics") {
+                SupportSettingsSection(playlists: allPlaylists ?? [])
             }
 
             // — About & Legal (round 14, B4): version ONCE here.
@@ -392,6 +426,11 @@ struct M3UPlaylistSettingsView: View {
             // (B4): stays LAST before the brand footer. —
             if settingsSearchMatches(settingsSearch, "privacy legal support terms report delete account") {
                 PrivacyLegalSection(onExitToGate: onDismiss)
+            }
+
+            // — Build 61 (B3, T6): danger zone, double-confirmed. —
+            if settingsSearchMatches(settingsSearch, "danger sign out erase delete all data zone") {
+                DangerZoneSection(onExitToGate: onDismiss)
             }
 
             // Round 14 (B4): the standalone Sign Out section is
