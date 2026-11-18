@@ -43,14 +43,14 @@ struct PlayerSpeedHoldGesturePolicy {
   }
 }
 
-/// media-kit style: show the controls with a single-finger `UITapGestureRecognizer` while they are **closed** (so it doesn't confuse drag-to-close
-/// with `touchesBegan`). While **open**, hiding is again a tap; with `UILongPressGestureRecognizer` (2x)
-/// the `require(toFail:)` ordering is used.
-/// VOD skip ±15 sec, with the SwiftUI buttons next to play/pause.
-/// All pinch + pan (while zoomed) is in this UIKit container; when a SwiftUI `.gesture` is attached to the scaled view,
-/// its coordinate system breaks and it conflicts with the outer dismiss gesture.
-/// `hitTest` always returns `super` — the gesture recognizers capture the touches; tap/pinch/pan
-/// talk simultaneously via `shouldRecognizeSimultaneouslyWith`.
+/// media-kit tarzı: kontroller **kapalıyken** tek parmak `UITapGestureRecognizer` ile göster (sürükleyerek kapatmayı
+/// `touchesBegan` ile karıştırmaz). **Açıkken** gizleme yine tap; `UILongPressGestureRecognizer` (2x) ile
+/// `require(toFail:)` sırası kullanılır.
+/// VOD atlama ±15 sn, play/pause yanındaki SwiftUI düğmeleriyle.
+/// Tüm pinch + pan (zoomluyken) bu UIKit container'ında; SwiftUI `.gesture` scaled-view'a
+/// attached olduğunda koordinat sistemi bozuluyor ve outer dismiss gesture ile çakışıyor.
+/// `hitTest` her zaman `super` döner — gesture recognizer'lar touch'ları yakalar, tap/pinch/pan
+/// aynı anda `shouldRecognizeSimultaneouslyWith` ile konuşur.
 final class PlayerMediaKitTouchContainerView: UIView, UIGestureRecognizerDelegate {
   fileprivate weak var coordinator: PlayerMediaKitStyleTouchOverlay.Coordinator?
 
@@ -59,14 +59,6 @@ final class PlayerMediaKitTouchContainerView: UIView, UIGestureRecognizerDelegat
   }
   var enableSpeedHold: Bool = false
   var isSpeedHoldActive: Bool = false
-  /// Round 14 (B3): vertical-swipe channel zapping is armed only
-  /// for fullscreen live playback with a channel queue.
-  var channelZapEnabled: Bool = false {
-    didSet {
-      zapUp.isEnabled = channelZapEnabled
-      zapDown.isEnabled = channelZapEnabled
-    }
-  }
   var edgeSliderTrackSize: CGSize = .zero
   var edgeSliderLeadingInset: CGFloat = 0
   var edgeSliderTrailingInset: CGFloat = 0
@@ -74,8 +66,6 @@ final class PlayerMediaKitTouchContainerView: UIView, UIGestureRecognizerDelegat
   fileprivate let centerView = MediaKitCenterPanel()
   private let videoPinch = UIPinchGestureRecognizer()
   private let videoPan = UIPanGestureRecognizer()
-  private let zapUp = UISwipeGestureRecognizer()
-  private let zapDown = UISwipeGestureRecognizer()
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -93,25 +83,8 @@ final class PlayerMediaKitTouchContainerView: UIView, UIGestureRecognizerDelegat
     videoPan.delegate = self
     videoPan.minimumNumberOfTouches = 1
     videoPan.maximumNumberOfTouches = 1
-    videoPan.isEnabled = false  // only active while zoomed
+    videoPan.isEnabled = false  // yalnızca zoomluyken aktif
     addGestureRecognizer(videoPan)
-
-    // Round 14 (B3): swipe up = next channel, swipe down =
-    // previous channel (TV-remote direction). Disabled unless the
-    // SwiftUI side arms them (live + fullscreen + queue exists).
-    zapUp.direction = .up
-    zapUp.addTarget(self, action: #selector(handleZapUp(_:)))
-    zapUp.cancelsTouchesInView = false
-    zapUp.delegate = self
-    zapUp.isEnabled = false
-    addGestureRecognizer(zapUp)
-
-    zapDown.direction = .down
-    zapDown.addTarget(self, action: #selector(handleZapDown(_:)))
-    zapDown.cancelsTouchesInView = false
-    zapDown.delegate = self
-    zapDown.isEnabled = false
-    addGestureRecognizer(zapDown)
 
     addSubview(centerView)
   }
@@ -131,17 +104,12 @@ final class PlayerMediaKitTouchContainerView: UIView, UIGestureRecognizerDelegat
     syncPanels()
   }
 
-  /// Round 14 (B12): double-tap seek is armed only for seekable,
-  /// actually-playing content (set from the SwiftUI side).
-  var seekEnabled: Bool = false
-
   func syncPanels() {
     let show = coordinator?.showControls.wrappedValue ?? true
     centerView.configureRecognizers(
       showControls: show,
       enableSpeedHold: enableSpeedHold,
       isSpeedHoldActive: isSpeedHoldActive,
-      seekEnabled: seekEnabled,
       edgeSliderTrackSize: edgeSliderTrackSize,
       edgeSliderLeadingInset: edgeSliderLeadingInset,
       edgeSliderTrailingInset: edgeSliderTrailingInset
@@ -175,14 +143,6 @@ final class PlayerMediaKitTouchContainerView: UIView, UIGestureRecognizerDelegat
     }
   }
 
-  @objc private func handleZapUp(_: UISwipeGestureRecognizer) {
-    coordinator?.requestChannelZapFromUIKit(1)
-  }
-
-  @objc private func handleZapDown(_: UISwipeGestureRecognizer) {
-    coordinator?.requestChannelZapFromUIKit(-1)
-  }
-
   func gestureRecognizer(
     _ gestureRecognizer: UIGestureRecognizer,
     shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
@@ -196,10 +156,8 @@ private final class MediaKitCenterPanel: UIView, UIGestureRecognizerDelegate {
 
   private let showTap = UITapGestureRecognizer()
   private let hideTap = UITapGestureRecognizer()
-  private let doubleTap = UITapGestureRecognizer()
   private let speedHold = UILongPressGestureRecognizer()
   private var controlsVisible = true
-  private var seekEnabled = false
   private var edgeSliderTrackSize: CGSize = .zero
   private var edgeSliderLeadingInset: CGFloat = 0
   private var edgeSliderTrailingInset: CGFloat = 0
@@ -222,17 +180,6 @@ private final class MediaKitCenterPanel: UIView, UIGestureRecognizerDelegate {
     hideTap.delegate = self
     addGestureRecognizer(hideTap)
 
-    // Round 14 (B12): double-tap seek — left half −10 s, right
-    // half +10 s (the same jumps the center transport buttons
-    // make). Single taps must wait for the double-tap to fail,
-    // the standard streaming-player tradeoff; the speed-hold
-    // failure requirement already imposed the same wait.
-    doubleTap.addTarget(self, action: #selector(doubleTapRecognized(_:)))
-    doubleTap.numberOfTapsRequired = 2
-    doubleTap.cancelsTouchesInView = false
-    doubleTap.delegate = self
-    addGestureRecognizer(doubleTap)
-
     speedHold.addTarget(self, action: #selector(speedHoldRecognized(_:)))
     speedHold.minimumPressDuration = 0.42
     speedHold.allowableMovement = 80
@@ -242,9 +189,6 @@ private final class MediaKitCenterPanel: UIView, UIGestureRecognizerDelegate {
 
     showTap.require(toFail: speedHold)
     hideTap.require(toFail: speedHold)
-    showTap.require(toFail: doubleTap)
-    hideTap.require(toFail: doubleTap)
-    doubleTap.require(toFail: speedHold)
   }
 
   required init?(coder: NSCoder) {
@@ -255,31 +199,22 @@ private final class MediaKitCenterPanel: UIView, UIGestureRecognizerDelegate {
     showControls: Bool,
     enableSpeedHold: Bool,
     isSpeedHoldActive: Bool,
-    seekEnabled: Bool,
     edgeSliderTrackSize: CGSize,
     edgeSliderLeadingInset: CGFloat,
     edgeSliderTrailingInset: CGFloat
   ) {
     controlsVisible = showControls
-    self.seekEnabled = seekEnabled
     self.edgeSliderTrackSize = edgeSliderTrackSize
     self.edgeSliderLeadingInset = edgeSliderLeadingInset
     self.edgeSliderTrailingInset = edgeSliderTrailingInset
     showTap.isEnabled = !showControls && !isSpeedHoldActive
     hideTap.isEnabled = showControls && !isSpeedHoldActive
-    doubleTap.isEnabled = seekEnabled && !isSpeedHoldActive
     // Once the hold has begun, transient buffering must not disable (and therefore
     // cancel) the recognizer. The user's finger-up remains the single end condition.
     speedHold.isEnabled = PlayerSpeedHoldGesturePolicy.recognizerEnabled(
       canBegin: enableSpeedHold,
       isActive: isSpeedHoldActive
     )
-  }
-
-  @objc private func doubleTapRecognized(_ g: UITapGestureRecognizer) {
-    guard seekEnabled, bounds.width > 0 else { return }
-    let point = g.location(in: self)
-    coordinator?.requestDoubleTapSeekFromUIKit(forward: point.x >= bounds.midX)
   }
 
   func gestureRecognizer(
@@ -336,12 +271,6 @@ struct PlayerMediaKitStyleTouchOverlay: UIViewRepresentable {
   let videoZoomScale: CGFloat
   let isSpeedHoldActive: Bool
   let isSpeedHoldEnabled: Bool
-  /// Round 14 (B12): arms the double-tap ±10 s seek recognizers.
-  var seekEnabled: Bool = false
-  var onDoubleTapSeek: ((Bool) -> Void)? = nil
-  /// Round 14 (B3): arms the vertical-swipe channel zap.
-  var channelZapEnabled: Bool = false
-  var onChannelZap: ((Int) -> Void)? = nil
   let edgeSliderTrackSize: CGSize
   let edgeSliderLeadingInset: CGFloat
   let edgeSliderTrailingInset: CGFloat
@@ -371,8 +300,6 @@ struct PlayerMediaKitStyleTouchOverlay: UIViewRepresentable {
       onVideoPinchEnded: onVideoPinchEnded,
       onVideoPanChanged: onVideoPanChanged,
       onVideoPanEnded: onVideoPanEnded,
-      onDoubleTapSeek: onDoubleTapSeek,
-      onChannelZap: onChannelZap,
       onVideoSurfaceTap: onVideoSurfaceTap
     )
   }
@@ -394,14 +321,10 @@ struct PlayerMediaKitStyleTouchOverlay: UIViewRepresentable {
     context.coordinator.onVideoPinchEnded = onVideoPinchEnded
     context.coordinator.onVideoPanChanged = onVideoPanChanged
     context.coordinator.onVideoPanEnded = onVideoPanEnded
-    context.coordinator.onDoubleTapSeek = onDoubleTapSeek
-    context.coordinator.onChannelZap = onChannelZap
     context.coordinator.onVideoSurfaceTap = onVideoSurfaceTap
     uiView.videoZoomScale = videoZoomScale
     uiView.enableSpeedHold = isSpeedHoldEnabled && !isSeekDisabled && videoZoomScale <= 1.02
     uiView.isSpeedHoldActive = isSpeedHoldActive
-    uiView.seekEnabled = seekEnabled && !isSeekDisabled && videoZoomScale <= 1.02
-    uiView.channelZapEnabled = channelZapEnabled && videoZoomScale <= 1.02
     uiView.edgeSliderTrackSize = edgeSliderTrackSize
     uiView.edgeSliderLeadingInset = edgeSliderLeadingInset
     uiView.edgeSliderTrailingInset = edgeSliderTrailingInset
@@ -421,8 +344,6 @@ struct PlayerMediaKitStyleTouchOverlay: UIViewRepresentable {
     var onVideoPinchEnded: () -> Void
     var onVideoPanChanged: (CGSize) -> Void
     var onVideoPanEnded: (CGSize) -> Void
-    var onDoubleTapSeek: ((Bool) -> Void)?
-    var onChannelZap: ((Int) -> Void)?
     var onVideoSurfaceTap: (() -> Void)?
 
     init(
@@ -436,8 +357,6 @@ struct PlayerMediaKitStyleTouchOverlay: UIViewRepresentable {
       onVideoPinchEnded: @escaping () -> Void,
       onVideoPanChanged: @escaping (CGSize) -> Void,
       onVideoPanEnded: @escaping (CGSize) -> Void,
-      onDoubleTapSeek: ((Bool) -> Void)? = nil,
-      onChannelZap: ((Int) -> Void)? = nil,
       onVideoSurfaceTap: (() -> Void)? = nil
     ) {
       self.showControls = showControls
@@ -450,8 +369,6 @@ struct PlayerMediaKitStyleTouchOverlay: UIViewRepresentable {
       self.onVideoPinchEnded = onVideoPinchEnded
       self.onVideoPanChanged = onVideoPanChanged
       self.onVideoPanEnded = onVideoPanEnded
-      self.onDoubleTapSeek = onDoubleTapSeek
-      self.onChannelZap = onChannelZap
       self.onVideoSurfaceTap = onVideoSurfaceTap
     }
 
@@ -488,18 +405,6 @@ struct PlayerMediaKitStyleTouchOverlay: UIViewRepresentable {
         guard self.showControls.wrappedValue else { return }
         self.setShowControlsAnimated(false)
         self.onInvalidateTimer()
-      }
-    }
-
-    func requestDoubleTapSeekFromUIKit(forward: Bool) {
-      runOnMain { [weak self] in
-        self?.onDoubleTapSeek?(forward)
-      }
-    }
-
-    func requestChannelZapFromUIKit(_ direction: Int) {
-      runOnMain { [weak self] in
-        self?.onChannelZap?(direction)
       }
     }
 
