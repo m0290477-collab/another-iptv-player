@@ -52,6 +52,15 @@ struct ContentView: View {
             }
         }
         // === End B15 W1 ===
+        // Build 61 fixer (ST5 application): IBM Plex Sans Arabic as
+        // the ENVIRONMENT DEFAULT font for the whole app — Arabic UI
+        // text that does not hard-specify its own font renders in the
+        // bundled face. `environmentDefault` is nil for every other
+        // language, so Latin is byte-for-byte unaffected. (AppRootView
+        // rebuilds this hierarchy on a language change, so the value
+        // is re-read then.) Hard-specified system fonts on individual
+        // views keep their own font — the documented ST5 limit.
+        .font(AppFont.environmentDefault)
     }
 
     private var mainBody: some View {

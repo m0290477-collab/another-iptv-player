@@ -47,13 +47,19 @@ struct SplashView: View {
 
                 // Wordmark: "Super" white, the X in the brand
                 // gradient — the mockup's flame-treated X.
+                // Build 61 fixer (Z11): this release presents as
+                // "Super X Pro Max" — DISPLAY string only (bundle
+                // ID / CFBundleDisplayName / product name untouched);
+                // the size steps down so the longer lockup fits.
                 HStack(spacing: 4) {
                     Text("Super")
                         .foregroundStyle(.white)
                     Text("X")
                         .foregroundStyle(AppTheme.brandGradient)
+                    Text("Pro Max")
+                        .foregroundStyle(.white)
                 }
-                .font(.system(size: 48, weight: .black))
+                .font(.system(size: 34, weight: .black))
                 .tracking(-0.5)
 
                 Text(L("gate.subtitle"))

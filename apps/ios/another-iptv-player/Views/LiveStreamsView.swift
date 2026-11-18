@@ -80,6 +80,11 @@ struct LiveStreamsView: View {
     private var liveHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "live") }
     @State private var showingCategoryPicker = false
     @State private var pendingScrollTarget: String? = nil
+    // Build 61 fixer (O9): scroll restoration for the shelves list —
+    // the category shelf at the top anchor, persisted per playlist
+    // via ScrollAnchorStore. Shelves ("list") mode only; the Z13
+    // grid mode keeps its own behaviour.
+    @State private var scrollAnchorID: String? = nil
     // Build 61 (B3, item 5): parental lock guard for direct channel
     // playback — a selection whose category is PIN-locked waits
     // here until the PIN sheet verifies. (B8: preserve this guard
@@ -557,7 +562,32 @@ struct LiveStreamsView: View {
                     pendingScrollTarget = nil
                 }
             }
+            // Build 61 fixer (O9): bind the shelves list to the
+            // persisted anchor — the system tracks the first-visible
+            // category shelf; the store write keeps it for the next
+            // appearance, and the restore below re-applies it (a
+            // jump — setting the binding never animates).
+            .scrollPosition(id: $scrollAnchorID, anchor: .top)
+            .onChange(of: scrollAnchorID) { _, newValue in
+                if let newValue {
+                    ScrollAnchorStore.save(newValue, surface: "live", playlistId: playlist.id)
+                }
+            }
+            .onAppear { restoreScrollAnchor() }
+            .onChange(of: displayCategories.map(\.id)) { _, _ in restoreScrollAnchor() }
         }
+    }
+
+    /// O9 restore: once the shelves exist, jump back to the
+    /// persisted first-visible shelf (only when it is still in the
+    /// list and the position is not already there).
+    private func restoreScrollAnchor() {
+        guard !displayCategories.isEmpty,
+              let saved = ScrollAnchorStore.anchor(surface: "live", playlistId: playlist.id),
+              saved != scrollAnchorID,
+              displayCategories.contains(where: { $0.id == saved })
+        else { return }
+        scrollAnchorID = saved
     }
 
     private func historyURL(for item: DBWatchHistory) -> URL? {

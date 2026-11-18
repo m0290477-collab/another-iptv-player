@@ -185,7 +185,7 @@
 "settings.filter_adult.m3u_desc" = "يخفي القنوات/المجموعات التي تحوي XXX أو 18+ أو adult";
 
 "settings.about.title" = "حول";
-"settings.about.version" = "الإصدار";
+"settings.about.version" = "Super X Pro Max · الإصدار";
 
 // MARK: - M3U settings
 "settings.m3u.type_label" = "M3U / M3U8";
@@ -844,7 +844,7 @@
 "storage.title" = "التخزين";
 "storage.cache" = "ذاكرة التخزين المؤقت";
 "storage.clear_cache" = "مسح";
-"subscription.title" = "الاشتراكات";
+"subscription.title" = "اشتراكات المزوّد";
 "subscription.m3u_source" = "قائمة M3U — بدون حساب مزوّد";
 "subscription.provider_format" = "المزوّد: %@";
 "subscription.provider_unknown" = "مزوّد Xtream";
@@ -910,7 +910,7 @@
 "home.expiry.expiring" = "ينتهي اشتراكك خلال %d أيام (%@)";
 "home.expiry.expired" = "انتهى اشتراكك في %@";
 "home.expiry.dismiss" = "إغلاق";
-"splash.accessibility_label" = "Super X";
+"splash.accessibility_label" = "Super X Pro Max";
 
 /* MARK: Build 61 (b2) */
 "download.error.corrupt_removed" = "الملف المنزّل تالف وتمت إزالته. يمكنك تنزيله مرة أخرى.";

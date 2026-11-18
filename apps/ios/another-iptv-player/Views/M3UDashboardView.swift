@@ -37,7 +37,14 @@ struct M3UDashboardView: View {
     private func tabLabel(_ title: String, symbol: String, tab: Int) -> some View {
         let isSelected = selectedTab == tab
         Label {
-            Text(title)
+            // ST5 (fixer): same tab-label treatment as DashboardView —
+            // IBM Plex Sans Arabic only when the language is Arabic.
+            if AppFont.isArabic {
+                Text(title)
+                    .font(AppFont.uiFont(size: 10, semibold: isSelected))
+            } else {
+                Text(title)
+            }
         } icon: {
             Image(systemName: symbol)
                 .font(.body.weight(.semibold))

@@ -312,13 +312,19 @@ struct PlaylistGateView: View {
             // Typographic wordmark — no invented logo artwork: "Super"
             // in white, the X in the brand gradient (the mockup's
             // flame-treated X), black weight, tight tracking.
+            // Build 61 fixer (Z11): this release presents as "Super X
+            // Pro Max" — DISPLAY string only (bundle ID /
+            // CFBundleDisplayName / product name untouched); the size
+            // steps down so the longer lockup fits the gate header.
             HStack(spacing: 4) {
                 Text("Super")
                     .foregroundStyle(.white)
                 Text("X")
                     .foregroundStyle(AppTheme.brandGradient)
+                Text("Pro Max")
+                    .foregroundStyle(.white)
             }
-            .font(.system(size: 44, weight: .black))
+            .font(.system(size: 32, weight: .black))
             .tracking(-0.5)
 
             // Design-4 subtitle ("IPTV • Playlist Login" in the

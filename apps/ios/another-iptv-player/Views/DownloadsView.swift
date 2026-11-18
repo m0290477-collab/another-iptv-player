@@ -35,6 +35,18 @@ struct DownloadsView: View {
     /// loaded from the DB; drives "Delete watched downloads".
     @State private var finishedHistoryKeys: Set<String> = []
     @State private var showDeleteWatchedAlert = false
+    /// Build 61 fixer (X7, download half): the completed-set diff
+    /// that drives the drawn-check moment. `knownCompletedIDs` is
+    /// seeded from the rows already completed when this view appears
+    /// (those never animate); a download that TRANSITIONS to
+    /// completed while the view is open lands in `justCompletedIDs`,
+    /// shows B7's shared `AnimatedCheckView` in place of the play
+    /// icon for a beat, and fires the same light success haptic as
+    /// the playlist-add half. Driven by the @Query items diff —
+    /// event-based, no polling.
+    @State private var knownCompletedIDs: Set<String> = []
+    @State private var completedSeeded = false
+    @State private var justCompletedIDs: Set<String> = []
 
     init(playlist: Playlist) {
         self.playlist = playlist
@@ -330,6 +342,31 @@ struct DownloadsView: View {
                 AppSound.play(.downloadComplete)
             }
         }
+        // Build 61 fixer (X7, download half): seed the completed set
+        // on first appearance, then diff it — only NEW completions
+        // (transitions observed while this view is open) get the
+        // drawn check + haptic; rows already completed at open never
+        // animate.
+        .onAppear {
+            guard !completedSeeded else { return }
+            completedSeeded = true
+            knownCompletedIDs = Set(items.filter { $0.downloadStatus == .completed }.map(\.id))
+        }
+        // The diff runs over the UNFILTERED completed set, so a
+        // search-filter change can never masquerade as a completion.
+        .onChange(of: items.filter { $0.downloadStatus == .completed }.map(\.id)) { _, newIDs in
+            guard completedSeeded else { return }
+            let newSet = Set(newIDs)
+            let fresh = newSet.subtracting(knownCompletedIDs)
+            knownCompletedIDs = newSet
+            guard !fresh.isEmpty else { return }
+            justCompletedIDs.formUnion(fresh)
+            Haptics.success()
+            Task {
+                try? await Task.sleep(nanoseconds: 2_200_000_000)
+                justCompletedIDs.subtract(fresh)
+            }
+        }
         .onChange(of: manager.dbVersion) { _, _ in
             Task { await loadFinishedHistory() }
         }
@@ -588,9 +625,17 @@ struct DownloadsView: View {
                 .font(.title2)
                 .foregroundStyle(Color.orange)
         case .completed:
-            Image(systemName: "play.circle.fill")
-                .font(.title2)
-                .foregroundStyle(AppTheme.accent)
+            // X7 (fixer): a download that just transitioned to
+            // completed shows the shared drawn check (the same
+            // component as the playlist-add success) for a beat,
+            // then settles back to the play affordance.
+            if justCompletedIDs.contains(item.id) {
+                AnimatedCheckView(size: 26)
+            } else {
+                Image(systemName: "play.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(AppTheme.accent)
+            }
         }
     }
 

@@ -270,7 +270,10 @@ struct SettingsGroupHeader: View {
 
     var body: some View {
         Text(title)
-            .font(.headline)
+            // ST5 (fixer): chrome font via AppFont — IBM Plex Sans
+            // Arabic (SemiBold) when Arabic, identical system
+            // headline otherwise.
+            .font(AppFont.font(.headline, weight: .semibold))
             .foregroundStyle(.primary)
             .frame(maxWidth: .infinity, alignment: .leading)
     }

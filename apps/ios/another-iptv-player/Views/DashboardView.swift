@@ -58,7 +58,16 @@ struct DashboardView: View {
     private func tabLabel(_ title: String, glyph: String, tab: DashboardTab) -> some View {
         let isSelected = selectedTab == tab
         Label {
-            Text(title)
+            // ST5 (fixer): tab labels render in IBM Plex Sans Arabic
+            // when the app language is Arabic; in every other
+            // language the label keeps the tab bar's own system font
+            // untouched (no explicit font applied at all).
+            if AppFont.isArabic {
+                Text(title)
+                    .font(AppFont.uiFont(size: 10, semibold: isSelected))
+            } else {
+                Text(title)
+            }
         } icon: {
             // ST4 (B7): custom flame-X-family line glyphs from the
             // asset catalog (template-rendered vector PDFs), NOT

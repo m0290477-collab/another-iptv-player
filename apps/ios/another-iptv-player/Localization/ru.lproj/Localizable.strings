@@ -185,7 +185,7 @@
 "settings.filter_adult.m3u_desc" = "Скрывает каналы/группы с XXX, 18+, adult";
 
 "settings.about.title" = "О приложении";
-"settings.about.version" = "Версия";
+"settings.about.version" = "Super X Pro Max · Версия";
 
 // MARK: - M3U settings
 "settings.m3u.type_label" = "M3U / M3U8";
@@ -844,7 +844,7 @@
 "storage.title" = "Хранилище";
 "storage.cache" = "Кэш";
 "storage.clear_cache" = "Очистить";
-"subscription.title" = "Подписки";
+"subscription.title" = "Подписки провайдера";
 "subscription.m3u_source" = "Плейлист M3U — без аккаунта провайдера";
 "subscription.provider_format" = "Провайдер: %@";
 "subscription.provider_unknown" = "Провайдер Xtream";
@@ -910,7 +910,7 @@
 "home.expiry.expiring" = "Ваша подписка истекает через %d дн. (%@)";
 "home.expiry.expired" = "Ваша подписка истекла %@";
 "home.expiry.dismiss" = "Закрыть";
-"splash.accessibility_label" = "Super X";
+"splash.accessibility_label" = "Super X Pro Max";
 
 /* MARK: Build 61 (b2) */
 "download.error.corrupt_removed" = "Загруженный файл был повреждён и удалён. Вы можете скачать его снова.";

@@ -116,6 +116,15 @@ struct HomeView: View {
     @ObservedObject private var homeOrderStore = HomeSectionOrderStore.shared
     @State private var editingHomeRows = false
 
+    // Build 61 fixer (Z12, M-pack hero variant): the first LIVE
+    // match found in the real MatchesService data for today, plus
+    // its league name. Nil until a fetch finds one — and nil again
+    // when none is live, in which case the hero keeps its existing
+    // live-channel → featured-movie fallback. No placeholder data:
+    // this is only ever set from a decoded ESPN payload.
+    @State private var heroLiveMatch: MatchEvent?
+    @State private var heroLiveMatchLeague: String?
+
     private var liveHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "live") }
     private var vodHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod") }
     private var seriesHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "series") }
@@ -134,6 +143,201 @@ struct HomeView: View {
     private var heroLiveNowTitle: String? {
         guard let hero = heroLiveStream else { return nil }
         return onNowEntries.first(where: { $0.stream.streamId == hero.streamId })?.nowTitle
+    }
+
+    /// Z12 (fixer): one MatchesService pass for the hero — sports in
+    /// MatchesView's tab order (soccer → NFL → NBA), leagues in
+    /// payload order, first `.live` match wins; the pass stops at
+    /// the first hit. Runs once per Home appearance and again when
+    /// the app returns to the foreground (event-driven, no polling
+    /// loop). When the user hid the Matches section (F6), the probe
+    /// does not run and no match hero is shown. Any failure leaves
+    /// the previous state to the fallback chain (nil → live
+    /// channel → movie carousel).
+    private func loadHeroLiveMatch() async {
+        guard !UserDefaults.standard.bool(forKey: "sections.hidden.matches") else {
+            heroLiveMatch = nil
+            heroLiveMatchLeague = nil
+            return
+        }
+        let dateParameter = MatchesService.todayParameter()
+        for sport in MatchSport.allCases {
+            let outcomes = await MatchesService.fetchSport(sport, dateParameter: dateParameter)
+            for outcome in outcomes {
+                guard case .loaded(let result) = outcome,
+                      let match = result.matches.first(where: { $0.state == .live })
+                else { continue }
+                heroLiveMatch = match
+                heroLiveMatchLeague = result.leagueName
+                return
+            }
+        }
+        heroLiveMatch = nil
+        heroLiveMatchLeague = nil
+    }
+
+    // MARK: - Build 61 fixer (F-3): O1 cross-row dedupe
+    //
+    // SPEC §4.5-O1 mandates ONE shared seen-IDs set threaded through
+    // the Home rows in O1 order — earlier rows win, later rows drop
+    // what was already shown. B7 assembled the rows in O1 order but
+    // never imposed the set, so an in-progress movie rendered in
+    // Continue Watching AND again in Top Rated / New (critic F-3).
+    //
+    // The seen set is built from the EARLIER rows' own data sources,
+    // replicated exactly:
+    // - Continue Watching (row 1): the row's own display algorithm
+    //   (one card per series, finished series dropped, cap 10) run
+    //   over the same history request this view already loads.
+    // - Continue Series (row 2): the latest history record per
+    //   series — the row's source set (its in-progress series are
+    //   already in row 1's set; finished-with-next series join here).
+    // - Recent Channels (row 3): live history deduped by channel,
+    //   resolved against the catalog, cap 15 — the row's algorithm.
+    // The Live shelf, the Movies/Series discovery shelves and
+    // Recently Added then exclude these IDs (see
+    // `applyCrossRowDedupe`, `onNowShelfEntries`,
+    // `recentlyAddedExclusionKeys`). Priority follows the canonical
+    // O1 order, not the user's J3 rearrangement. The hero and the
+    // banners are NOT rows and are unaffected; the Favorites shelf
+    // (user-curated) and Tonight (programme items, not channels)
+    // are not catalog shelves and keep their own contents.
+
+    /// Row 1's display items, replicated from
+    /// `ContinueWatchingRow.displayItems` over this view's identical
+    /// history source (its limit-50 fetch covers the row's 30).
+    private var continueWatchingDisplayItems: [DBWatchHistory] {
+        var seenSeries = Set<String>()
+        var result: [DBWatchHistory] = []
+        for item in recentHistory.prefix(30) {
+            if item.type == "series", let seriesId = item.seriesId, !seriesId.isEmpty {
+                guard seenSeries.insert(seriesId).inserted else { continue }
+                if item.durationMs > 0,
+                   Double(item.lastTimeMs) / Double(item.durationMs) >= 0.98 {
+                    continue
+                }
+            }
+            result.append(item)
+            if result.count >= 10 { break }
+        }
+        return result
+    }
+
+    /// Movie IDs already shown by the earlier O1 rows.
+    private var homeSeenMovieIDs: Set<Int> {
+        Set(continueWatchingDisplayItems.filter { $0.type == "vod" }
+            .compactMap { Int($0.streamId) })
+    }
+
+    /// Series IDs already shown by rows 1–2 (Continue Watching's
+    /// series cards + Continue Series' source set).
+    private var homeSeenSeriesIDs: Set<Int> {
+        var ids = Set(continueWatchingDisplayItems.filter { $0.type == "series" }
+            .compactMap { $0.seriesId.flatMap(Int.init) ?? Int($0.streamId) })
+        var seenSeries = Set<String>()
+        for item in recentHistory where item.type == "series" {
+            guard let seriesId = item.seriesId, !seriesId.isEmpty,
+                  seenSeries.insert(seriesId).inserted else { continue }
+            if let value = Int(seriesId) { ids.insert(value) }
+        }
+        return ids
+    }
+
+    /// Live channel IDs already shown by row 3 (Recent Channels).
+    private var homeSeenLiveIDs: Set<Int> {
+        var seen = Set<Int>()
+        var result = Set<Int>()
+        for item in recentHistory where item.type == "live" {
+            guard let streamId = Int(item.streamId), seen.insert(streamId).inserted else { continue }
+            guard contentStore.liveStreams.contains(where: { $0.stream.streamId == streamId }) else { continue }
+            result.insert(streamId)
+            if result.count >= 15 { break }
+        }
+        return result
+    }
+
+    /// Filters a discovery shelf pair (FeaturedEntry lists) against
+    /// the running seen sets, adding what survives.
+    private func dedupeEntries(_ entries: [FeaturedEntry],
+                               seenMovies: inout Set<Int>,
+                               seenSeries: inout Set<Int>) -> [FeaturedEntry] {
+        entries.filter { entry in
+            switch entry {
+            case .movie(let movie): return seenMovies.insert(movie.streamId).inserted
+            case .series(let series): return seenSeries.insert(series.seriesId).inserted
+            }
+        }
+    }
+
+    /// The cross-row dedupe pass over the discovery shelves, in
+    /// their RENDERED order (`shelfOrder`): each shelf drops IDs the
+    /// earlier O1 rows — or an earlier shelf in the same block —
+    /// already showed, then contributes its own IDs to the set.
+    private func applyCrossRowDedupe() {
+        var seenMovies = homeSeenMovieIDs
+        var seenSeries = homeSeenSeriesIDs
+        for kind in shelfOrder {
+            switch kind {
+            case .topMovies:
+                topRatedMovies = topRatedMovies.filter { seenMovies.insert($0.streamId).inserted }
+            case .topSeries:
+                topRatedSeries = topRatedSeries.filter { seenSeries.insert($0.seriesId).inserted }
+            case .newMovies:
+                newMovies = newMovies.filter { seenMovies.insert($0.streamId).inserted }
+            case .newSeries:
+                newSeries = newSeries.filter { seenSeries.insert($0.seriesId).inserted }
+            case .because:
+                becauseYouWatched = dedupeEntries(becauseYouWatched, seenMovies: &seenMovies, seenSeries: &seenSeries)
+            case .newEpisodes:
+                newEpisodeSeries = newEpisodeSeries.filter { seenSeries.insert($0.seriesId).inserted }
+            case .newSinceVisit:
+                newSinceVisit = dedupeEntries(newSinceVisit, seenMovies: &seenMovies, seenSeries: &seenSeries)
+            case .favorites, .tonight:
+                // Not catalog shelves: Favorites is the user's own
+                // curated set; Tonight's items are programmes on
+                // already-watched channels, not channel entries.
+                break
+            }
+        }
+    }
+
+    /// The Live shelf's entries after dedupe (row 4 drops channels
+    /// row 3 already showed). The HERO keeps reading the raw
+    /// `onNowEntries` — banners/hero are outside the dedupe.
+    private var onNowShelfEntries: [OnNowEntry] {
+        onNowEntries.filter { !homeSeenLiveIDs.contains($0.stream.streamId) }
+    }
+
+    /// Recently Added (row 6) exclusions, in the resolver's key
+    /// space ("vod:<id>" / "series:<id>" / "live:<id>"): everything
+    /// rows 1–5 show — Continue rows, the Live shelf and the
+    /// (already deduped) discovery shelves.
+    private var recentlyAddedExclusionKeys: Set<String> {
+        var keys = Set<String>()
+        for item in continueWatchingDisplayItems {
+            switch item.type {
+            case "vod":
+                if let id = Int(item.streamId) { keys.insert("vod:\(id)") }
+            case "series":
+                if let id = item.seriesId.flatMap(Int.init) ?? Int(item.streamId) { keys.insert("series:\(id)") }
+            case "live":
+                if let id = Int(item.streamId) { keys.insert("live:\(id)") }
+            default:
+                break
+            }
+        }
+        for id in homeSeenSeriesIDs { keys.insert("series:\(id)") }
+        for id in homeSeenLiveIDs { keys.insert("live:\(id)") }
+        for entry in onNowShelfEntries { keys.insert("live:\(entry.stream.streamId)") }
+        for movie in topRatedMovies + newMovies { keys.insert("vod:\(movie.streamId)") }
+        for series in topRatedSeries + newSeries + newEpisodeSeries { keys.insert("series:\(series.seriesId)") }
+        for entry in becauseYouWatched + newSinceVisit {
+            switch entry {
+            case .movie(let movie): keys.insert("vod:\(movie.streamId)")
+            case .series(let series): keys.insert("series:\(series.seriesId)")
+            }
+        }
+        return keys
     }
 
     /// One J3 content row, wrapped with Edit-mode move controls
@@ -197,7 +401,10 @@ struct HomeView: View {
             }
         case .live:
             // B6: "On now on your channels" — real EPG now-titles.
-            if !onNowEntries.isEmpty {
+            // F-3 (fixer): the shelf renders the DEDUPED entries
+            // (Recent Channels, row 3, wins); the hero above keeps
+            // the raw set.
+            if !onNowShelfEntries.isEmpty {
                 onNowShelf
             }
         case .discovery:
@@ -212,7 +419,8 @@ struct HomeView: View {
         case .recentlyAdded:
             // B8 (R3) component, wired by B7 per amended O1 (after
             // Series, before Today's Matches); hidden when empty.
-            RecentlyAddedRow(playlist: playlist) { entry in
+            // F-3 (fixer): rows 1–5 win — their IDs are excluded here.
+            RecentlyAddedRow(playlist: playlist, excludingKeys: recentlyAddedExclusionKeys) { entry in
                 selectRecentlyAdded(entry)
             }
         case .matches:
@@ -322,7 +530,24 @@ struct HomeView: View {
                         // carousel is the fallback when the playlist
                         // has no live channels at all. The hero is
                         // NOT a J3-reorderable row.
-                        if let heroLive = heroLiveStream {
+                        // Build 61 fixer (Z12, M-pack variant): a
+                        // LIVE match right now outranks the live
+                        // channel — the hero becomes the match card
+                        // and taps through to MatchesView. Driven
+                        // only by the real MatchesService fetch in
+                        // `loadHeroLiveMatch`.
+                        if let heroMatch = heroLiveMatch {
+                            NavigationLink {
+                                MatchesView()
+                            } label: {
+                                LiveMatchHeroCard(match: heroMatch, leagueName: heroLiveMatchLeague)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 16)
+                            .frame(maxWidth: 560)
+                            .frame(maxWidth: .infinity)
+                            .background(AmbientHeroGlow())
+                        } else if let heroLive = heroLiveStream {
                             LiveHeroCard(
                                 stream: heroLive,
                                 nowProgramTitle: heroLiveNowTitle,
@@ -537,6 +762,17 @@ struct HomeView: View {
             vod: vodHiddenIds,
             series: seriesHiddenIds
         )) { await recompute() }
+        // Build 61 fixer (Z12): the live-match hero probe, once per
+        // Home appearance for this playlist.
+        .task(id: playlist.id) { await loadHeroLiveMatch() }
+        // Z12: re-probe when the app returns to the foreground, so a
+        // match that kicked off while the app was backgrounded can
+        // take the hero (and a finished one releases it).
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await loadHeroLiveMatch() }
+            }
+        }
         // C6 Tonight row: rebuild when the EPG snapshot changes.
         .task(id: epgStore.snapshot?.version ?? 0) { await recomputeTonight() }
         .onDisappear {
@@ -1365,7 +1601,7 @@ struct HomeView: View {
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(onNowEntries) { entry in
+                    ForEach(onNowShelfEntries) { entry in
                         LiveHeroMiniCard(stream: entry.stream, nowTitle: entry.nowTitle, progress: entry.progress) {
                             presentLiveSelectionFromHome(entry.stream)
                         }
@@ -1981,6 +2217,10 @@ struct HomeView: View {
         } else {
             newSinceVisit = []
         }
+
+        // Build 61 fixer (F-3): the O1 cross-row dedupe runs LAST in
+        // the assembly, over the final shelf arrays.
+        applyCrossRowDedupe()
     }
 }
 
@@ -2103,6 +2343,98 @@ enum FeaturedEntry: Identifiable, Equatable {
             if let runtime = DetailFormatting.seriesRuntime(series.episodeRunTime) { parts.append(runtime) }
         }
         return parts.isEmpty ? nil : parts.joined(separator: " • ")
+    }
+}
+
+// MARK: - Live match hero (Z12, fixer)
+
+/// The M-pack hero variant: a match that is LIVE right now, from
+/// the real MatchesService payload only — league name (when the
+/// payload carries one), both teams' logos/names/scores exactly as
+/// provided, the LIVE badge and the live clock. M-pack discipline
+/// holds: scores and state only, nothing invented; the whole card
+/// is the tap target into MatchesView (wired by the caller).
+private struct LiveMatchHeroCard: View {
+    let match: MatchEvent
+    let leagueName: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(AppTheme.accent)
+                    .frame(width: 8, height: 8)
+                Text(L("matches.live"))
+                    .font(AppTheme.fontBadge)
+                    .foregroundStyle(AppTheme.accent)
+                if let clock = liveClockText {
+                    Text(clock)
+                        .font(AppTheme.fontMetadata.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                        .monospacedDigit()
+                }
+                Spacer()
+                if let leagueName, !leagueName.isEmpty {
+                    Text(leagueName)
+                        .font(AppTheme.fontMetadata)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Image(systemName: "chevron.right")
+                    .font(AppTheme.fontBadge)
+                    .foregroundStyle(.secondary)
+            }
+
+            teamRow(match.home)
+            teamRow(match.away)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .fill(AppTheme.elevated)
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                        .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+                )
+        )
+        .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
+    }
+
+    private func teamRow(_ side: MatchTeamSide) -> some View {
+        HStack(spacing: 12) {
+            CachedImage(
+                url: side.logoURL,
+                width: 34,
+                height: 34,
+                cornerRadius: 17,
+                iconName: "shield"
+            )
+            // Team name EXACTLY as the payload provides it (M6).
+            Text(side.name ?? "")
+                .font(AppTheme.fontCardTitle)
+                .lineLimit(1)
+            Spacer()
+            if let score = side.score {
+                Text(score)
+                    .font(.title3.weight(.bold))
+                    .monospacedDigit()
+            }
+        }
+    }
+
+    /// Live clock from payload fields only — the same rule as
+    /// MatchesView's rows: soccer's displayClock reads "67'";
+    /// NFL/NBA pair a period with the game clock ("Q3 2:14",
+    /// period 5+ = "OT"). Nil when the payload carries neither.
+    private var liveClockText: String? {
+        let clock = match.displayClock?.trimmingCharacters(in: .whitespaces)
+        let hasClock = clock != nil && clock != "0.0" && !(clock?.isEmpty ?? true)
+        guard let period = match.period, period > 0 else {
+            return hasClock ? clock : nil
+        }
+        let periodLabel = period <= 4 ? "Q\(period)" : "OT"
+        return hasClock ? "\(periodLabel) \(clock!)" : periodLabel
     }
 }
 

@@ -117,6 +117,11 @@ struct SeriesView: View {
 
     @State private var showingCategoryPicker = false
     @State private var pendingScrollTarget: String? = nil
+    // Build 61 fixer (O9): scroll restoration for the Series shelf
+    // list — the category shelf at the top anchor, persisted per
+    // playlist via ScrollAnchorStore. Applies to the All (shelves)
+    // chip only; the Newest grid keeps its own behaviour.
+    @State private var scrollAnchorID: String? = nil
 
     var body: some View {
         Group {
@@ -222,6 +227,21 @@ struct SeriesView: View {
                             pendingScrollTarget = nil
                         }
                     }
+                    // Build 61 fixer (O9): persisted first-visible
+                    // shelf anchor (see ScrollAnchorStore). Setting
+                    // the binding jumps without animation. Guarded
+                    // to the All chip — in the Newest grid the same
+                    // ScrollView tracks series IDs, which must never
+                    // be persisted as the shelf anchor.
+                    .scrollPosition(id: $scrollAnchorID, anchor: .top)
+                    .onChange(of: scrollAnchorID) { _, newValue in
+                        if selectedChip == .all, let newValue {
+                            ScrollAnchorStore.save(newValue, surface: "series", playlistId: playlist.id)
+                        }
+                    }
+                    .onAppear { restoreScrollAnchor() }
+                    .onChange(of: displayCategories.map(\.id)) { _, _ in restoreScrollAnchor() }
+                    .onChange(of: selectedChip) { _, _ in restoreScrollAnchor() }
                 }
             }
         }
@@ -277,6 +297,19 @@ struct SeriesView: View {
             SeriesDetailView(playlist: playlist, series: series)
         }
         .cinematicBackground()
+    }
+
+    /// O9 restore: once the shelves exist (All chip), jump back to
+    /// the persisted first-visible shelf — only when it is still in
+    /// the list and the position is not already there.
+    private func restoreScrollAnchor() {
+        guard selectedChip == .all,
+              !displayCategories.isEmpty,
+              let saved = ScrollAnchorStore.anchor(surface: "series", playlistId: playlist.id),
+              saved != scrollAnchorID,
+              displayCategories.contains(where: { $0.id == saved })
+        else { return }
+        scrollAnchorID = saved
     }
 
     /// Round 5 elite header, reordered in round 7 by the owner's direct

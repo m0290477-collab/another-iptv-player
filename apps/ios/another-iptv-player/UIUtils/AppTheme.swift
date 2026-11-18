@@ -340,7 +340,13 @@ struct ShelfCardAppearModifier: ViewModifier {
     /// render already-shown (no fade, no rise, no stagger).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var animates: Bool { index < 12 && !reduceMotion }
+    // Build 61 fixer (X3→Q21): routed through EffectsGate like the
+    // other effects — Q21 (`appearance.reduceEffects`) and the
+    // motion-intensity setting now also still this entrance
+    // (critic F-5); Reduce Motion behaviour is unchanged.
+    private var animates: Bool {
+        index < 12 && EffectsGate.allowsHeavyEffects(reduceMotion: reduceMotion)
+    }
 
     func body(content: Content) -> some View {
         content
