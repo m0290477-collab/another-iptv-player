@@ -93,6 +93,8 @@ final class ICloudSyncService: NSObject {
     private var database: CKDatabase { container.privateCloudDatabase }
 
     private let queue = DispatchQueue(label: "com.irqus.superx.icloud-sync")
+    /// Re-entrancy marker for `queue` (see `onSyncQueue`).
+    private static let queueSpecificKey = DispatchSpecificKey<Void>()
     private var started = false
     private var isAvailable = false
     private var favoritesSyncInFlight = false
@@ -112,7 +114,29 @@ final class ICloudSyncService: NSObject {
     private static let lastSyncKey = "icloud.favoritesLastSyncAt"
     private static let historyLastSyncKey = "icloud.historyLastSyncAt"
 
-    private override init() { super.init() }
+    private override init() {
+        super.init()
+        queue.setSpecific(key: Self.queueSpecificKey, value: ())
+    }
+
+    /// Runs `work` on the serial sync queue — or inline when the
+    /// caller is ALREADY on it. A plain `queue.sync` issued from
+    /// queue-resident code traps in libdispatch
+    /// (__DISPATCH_WAIT_FOR_QUEUE__): build 61 crashed ~3s after
+    /// every launch because the defaults-change debounce work item
+    /// (scheduled with `queue.asyncAfter`, so running ON this queue)
+    /// reached `pushSettingsToKVS()`, whose `syncEnabled` read was a
+    /// `queue.sync` onto the same queue. Every queue-guarded access
+    /// in this service goes through here so the pattern cannot
+    /// recur: off-queue callers keep the exact old `queue.sync`
+    /// semantics; on-queue callers execute inline under the
+    /// serialization they already hold.
+    private func onSyncQueue<T>(_ work: () -> T) -> T {
+        if DispatchQueue.getSpecific(key: Self.queueSpecificKey) != nil {
+            return work()
+        }
+        return queue.sync(execute: work)
+    }
 
     // MARK: - Lifecycle
 
@@ -139,7 +163,7 @@ final class ICloudSyncService: NSObject {
             Log.info("ICloudSync", "iCloud account not available (status \(status.rawValue)) — sync off")
             return
         }
-        queue.sync { isAvailable = true }
+        onSyncQueue { isAvailable = true }
 
         startSettingsSync()
         startFavoriteObservations()
@@ -164,7 +188,7 @@ final class ICloudSyncService: NSObject {
     }
 
     private var syncEnabled: Bool {
-        queue.sync { isAvailable }
+        onSyncQueue { isAvailable }
     }
 
     // MARK: - Favorites (CloudKit)
@@ -206,7 +230,7 @@ final class ICloudSyncService: NSObject {
     /// private database. Last-writer-wins by modification date.
     func syncFavorites() async {
         guard syncEnabled else { return }
-        let shouldRun: Bool = queue.sync {
+        let shouldRun: Bool = onSyncQueue {
             if favoritesSyncInFlight {
                 favoritesSyncPending = true
                 return false
@@ -216,7 +240,7 @@ final class ICloudSyncService: NSObject {
         }
         guard shouldRun else { return }
         defer {
-            let rerun: Bool = queue.sync {
+            let rerun: Bool = onSyncQueue {
                 favoritesSyncInFlight = false
                 let pending = favoritesSyncPending
                 favoritesSyncPending = false
@@ -584,7 +608,7 @@ final class ICloudSyncService: NSObject {
     /// discipline as the favorites merge above.
     func syncWatchHistory() async {
         guard syncEnabled else { return }
-        let shouldRun: Bool = queue.sync {
+        let shouldRun: Bool = onSyncQueue {
             if historySyncInFlight {
                 historySyncPending = true
                 return false
@@ -594,7 +618,7 @@ final class ICloudSyncService: NSObject {
         }
         guard shouldRun else { return }
         defer {
-            let rerun: Bool = queue.sync {
+            let rerun: Bool = onSyncQueue {
                 historySyncInFlight = false
                 let pending = historySyncPending
                 historySyncPending = false
