@@ -84,8 +84,8 @@ struct EPGProgrammeDetailSheet: View {
                                 url: url,
                                 width: geo.size.width,
                                 height: 190,
-                                contentMode: .fill,
                                 cornerRadius: AppTheme.cornerRadius,
+                                contentMode: .fill,
                                 iconName: "photo"
                             )
                         }

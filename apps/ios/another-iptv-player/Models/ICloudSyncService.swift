@@ -765,7 +765,7 @@ final class ICloudSyncService: NSObject {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(kvsDidChangeExternally(_:)),
-            name: NSUbiquitousKeyValueStoreDidChangeExternallyNotification,
+            name: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
             object: store
         )
         NotificationCenter.default.addObserver(

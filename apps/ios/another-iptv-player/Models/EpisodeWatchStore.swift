@@ -28,11 +28,11 @@ final class EpisodeWatchStore: ObservableObject {
     /// The C5 auto-watched threshold.
     static let autoWatchedThreshold = 0.90
 
-    private static func watchedKey(playlistId: UUID) -> String {
+    nonisolated private static func watchedKey(playlistId: UUID) -> String {
         "episodes.manually_watched.\(playlistId.uuidString)"
     }
 
-    private static func unwatchedKey(playlistId: UUID) -> String {
+    nonisolated private static func unwatchedKey(playlistId: UUID) -> String {
         "episodes.manually_unwatched.\(playlistId.uuidString)"
     }
 

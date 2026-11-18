@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 
 /// Build 61 (B10, Q14 + F2): the ONE persisted search-history
 /// store. Recent global-search queries, newest first, capped.

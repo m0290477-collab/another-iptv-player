@@ -118,6 +118,146 @@ struct DownloadsView: View {
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 
+    // Build 61 fix round: the List content is split into three
+    // @ViewBuilder groups — the single ~130-line List builder timed
+    // out the compiler's type checker. Same sections, same order.
+    @ViewBuilder
+    private var listHeaderSections: some View {
+        // B2 (build 61, T4): Wi-Fi-only pause state +
+        // storage cap. The Wi-Fi-only TOGGLE itself
+        // stays in Settings (O6 single-instance) — this
+        // is the visible STATE of the pause, plus the
+        // cap picker whose only home is here.
+        if manager.isWaitingForWifi {
+            Section {
+                Label(L("download.wifi_waiting"), systemImage: "wifi.slash")
+                    .font(.subheadline)
+                    .foregroundStyle(.orange)
+            }
+        }
+        Section {
+            Picker(L("downloadcap.title"), selection: $storageCapGB) {
+                ForEach([2, 5, 10, 20], id: \.self) { gb in
+                    Text("\(gb) GB").tag(gb)
+                }
+            }
+            HStack {
+                Text(L("downloadcap.used"))
+                Spacer()
+                Text(ByteCountFormatter.string(fromByteCount: StorageService.downloadsSizeBytes(), countStyle: .file))
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        // Round 14 (B3): total size + delete-watched.
+        Section {
+            HStack {
+                Text(L("download.storage_used"))
+                Spacer()
+                Text(ByteCountFormatter.string(fromByteCount: totalDownloadsBytes, countStyle: .file))
+                    .foregroundStyle(.secondary)
+            }
+            if !watchedDownloads.isEmpty {
+                Button(role: .destructive) {
+                    showDeleteWatchedAlert = true
+                } label: {
+                    Text(L("download.delete_watched"))
+                }
+            }
+        }
+
+        // B2 (build 61, Z9): queue controls — Pause All
+        // suspends the active transfers in place and
+        // blocks the queue; Resume All restarts them in
+        // queue order. Shown only when there is something
+        // to pause or resume.
+        if !inProgress.isEmpty || !queued.isEmpty {
+            Section(L("queue.title")) {
+                if manager.queuePaused {
+                    Label(L("queue.paused"), systemImage: "pause.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                    Button {
+                        manager.resumeAll()
+                    } label: {
+                        Label(L("queue.resume_all"), systemImage: "play.fill")
+                    }
+                } else {
+                    Button {
+                        manager.pauseAll()
+                    } label: {
+                        Label(L("queue.pause_all"), systemImage: "pause.fill")
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var listTransferSections: some View {
+        if !inProgress.isEmpty {
+            Section(L("download.status.downloading")) {
+                ForEach(inProgress) { item in
+                    if item.type == "recording" {
+                        recordingRow(item)
+                    } else {
+                        actionableRow(item)
+                    }
+                }
+            }
+        }
+        if !queued.isEmpty {
+            Section(L("download.status.queued")) {
+                ForEach(queued) { item in
+                    actionableRow(item)
+                }
+                // Z9: drag-to-reprioritize (in Edit
+                // mode). The new order is written back
+                // as the rows' queue order — the exact
+                // order DownloadManager's pump consumes.
+                .onMove { offsets, destination in
+                    var reordered = queued
+                    reordered.move(fromOffsets: offsets, toOffset: destination)
+                    let ids = reordered.map(\.id)
+                    Task { await manager.reprioritize(orderedIds: ids) }
+                }
+            }
+        }
+        if !failed.isEmpty {
+            Section(L("download.status.failed")) {
+                ForEach(failed) { item in
+                    actionableRow(item)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var listCompletedSections: some View {
+        if !completedMovies.isEmpty {
+            Section(L("dashboard.movies")) {
+                ForEach(completedMovies) { item in
+                    actionableRow(item)
+                }
+            }
+        }
+        if !completedRecordings.isEmpty {
+            Section(L("record.title")) {
+                ForEach(completedRecordings) { item in
+                    actionableRow(item)
+                }
+            }
+        }
+
+        ForEach(completedEpisodeGroups, id: \.title) { group in
+            Section(group.title) {
+                ForEach(group.episodes) { item in
+                    actionableRow(item)
+                }
+            }
+        }
+    }
+
     var body: some View {
         Group {
             if items.isEmpty {
@@ -130,132 +270,9 @@ struct DownloadsView: View {
                 ContentUnavailableView.search(text: searchText)
             } else {
                 List {
-                    // B2 (build 61, T4): Wi-Fi-only pause state +
-                    // storage cap. The Wi-Fi-only TOGGLE itself
-                    // stays in Settings (O6 single-instance) — this
-                    // is the visible STATE of the pause, plus the
-                    // cap picker whose only home is here.
-                    if manager.isWaitingForWifi {
-                        Section {
-                            Label(L("download.wifi_waiting"), systemImage: "wifi.slash")
-                                .font(.subheadline)
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                    Section {
-                        Picker(L("downloadcap.title"), selection: $storageCapGB) {
-                            ForEach([2, 5, 10, 20], id: \.self) { gb in
-                                Text("\(gb) GB").tag(gb)
-                            }
-                        }
-                        HStack {
-                            Text(L("downloadcap.used"))
-                            Spacer()
-                            Text(ByteCountFormatter.string(fromByteCount: StorageService.downloadsSizeBytes(), countStyle: .file))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    // Round 14 (B3): total size + delete-watched.
-                    Section {
-                        HStack {
-                            Text(L("download.storage_used"))
-                            Spacer()
-                            Text(ByteCountFormatter.string(fromByteCount: totalDownloadsBytes, countStyle: .file))
-                                .foregroundStyle(.secondary)
-                        }
-                        if !watchedDownloads.isEmpty {
-                            Button(role: .destructive) {
-                                showDeleteWatchedAlert = true
-                            } label: {
-                                Text(L("download.delete_watched"))
-                            }
-                        }
-                    }
-
-                    // B2 (build 61, Z9): queue controls — Pause All
-                    // suspends the active transfers in place and
-                    // blocks the queue; Resume All restarts them in
-                    // queue order. Shown only when there is something
-                    // to pause or resume.
-                    if !inProgress.isEmpty || !queued.isEmpty {
-                        Section(L("queue.title")) {
-                            if manager.queuePaused {
-                                Label(L("queue.paused"), systemImage: "pause.circle")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.orange)
-                                Button {
-                                    manager.resumeAll()
-                                } label: {
-                                    Label(L("queue.resume_all"), systemImage: "play.fill")
-                                }
-                            } else {
-                                Button {
-                                    manager.pauseAll()
-                                } label: {
-                                    Label(L("queue.pause_all"), systemImage: "pause.fill")
-                                }
-                            }
-                        }
-                    }
-
-                    if !inProgress.isEmpty {
-                        Section(L("download.status.downloading")) {
-                            ForEach(inProgress) { item in
-                                if item.type == "recording" {
-                                    recordingRow(item)
-                                } else {
-                                    actionableRow(item)
-                                }
-                            }
-                        }
-                    }
-                    if !queued.isEmpty {
-                        Section(L("download.status.queued")) {
-                            ForEach(queued) { item in
-                                actionableRow(item)
-                            }
-                            // Z9: drag-to-reprioritize (in Edit
-                            // mode). The new order is written back
-                            // as the rows' queue order — the exact
-                            // order DownloadManager's pump consumes.
-                            .onMove { offsets, destination in
-                                var reordered = queued
-                                reordered.move(fromOffsets: offsets, toOffset: destination)
-                                let ids = reordered.map(\.id)
-                                Task { await manager.reprioritize(orderedIds: ids) }
-                            }
-                        }
-                    }
-                    if !failed.isEmpty {
-                        Section(L("download.status.failed")) {
-                            ForEach(failed) { item in
-                                actionableRow(item)
-                            }
-                        }
-                    }
-                    if !completedMovies.isEmpty {
-                        Section(L("dashboard.movies")) {
-                            ForEach(completedMovies) { item in
-                                actionableRow(item)
-                            }
-                        }
-                    }
-                    if !completedRecordings.isEmpty {
-                        Section(L("record.title")) {
-                            ForEach(completedRecordings) { item in
-                                actionableRow(item)
-                            }
-                        }
-                    }
-
-                    ForEach(completedEpisodeGroups, id: \.title) { group in
-                        Section(group.title) {
-                            ForEach(group.episodes) { item in
-                                actionableRow(item)
-                            }
-                        }
-                    }
+                    listHeaderSections
+                    listTransferSections
+                    listCompletedSections
                 }
                 .listStyle(.insetGrouped)
                 .cinematicScrollBackground()
@@ -677,7 +694,9 @@ struct DownloadsView: View {
     }
 
     private func play(_ item: DBDownloadedItem) {
-        Task {
+        // Explicit type: the bare `Task {` here is ambiguous against
+        // `Task.init(name:priority:operation:)` in the current SDK.
+        let _: Task<Void, Never> = Task {
             guard let localURL = try? DownloadStorage.absoluteURL(forRelativePath: item.localPath),
                   FileManager.default.fileExists(atPath: localURL.path) else {
                 // Silent swallowing: while the row looks "completed", nothing happening

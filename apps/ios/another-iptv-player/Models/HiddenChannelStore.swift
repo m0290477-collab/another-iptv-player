@@ -19,11 +19,11 @@ final class HiddenChannelStore: ObservableObject {
 
     private init() {}
 
-    private static func xtreamKey(playlistId: UUID) -> String {
+    nonisolated private static func xtreamKey(playlistId: UUID) -> String {
         "hidden_channels.\(playlistId.uuidString)"
     }
 
-    private static func m3uKey(playlistId: UUID) -> String {
+    nonisolated private static func m3uKey(playlistId: UUID) -> String {
         "hidden_m3u_channels.\(playlistId.uuidString)"
     }
 

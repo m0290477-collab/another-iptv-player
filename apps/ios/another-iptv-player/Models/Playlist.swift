@@ -53,6 +53,7 @@ struct Playlist: Identifiable, Codable, FetchableRecord, PersistableRecord, Equa
         serverURL: String,
         username: String = "",
         password: String = "",
+        createdAt: Date = Date(),
         filterAdultContent: Bool = false,
         type: PlaylistKind = .xtream,
         m3uEpgURL: String? = nil,
@@ -69,6 +70,7 @@ struct Playlist: Identifiable, Codable, FetchableRecord, PersistableRecord, Equa
         self.serverURL = serverURL
         self.username = username
         self.password = password
+        self.createdAt = createdAt
         self.filterAdultContent = filterAdultContent
         self.type = type.rawValue
         self.m3uEpgURL = m3uEpgURL

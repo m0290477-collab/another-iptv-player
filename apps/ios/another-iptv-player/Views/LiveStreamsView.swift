@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import GRDB
 import GRDBQuery
@@ -461,6 +462,9 @@ struct LiveStreamsView: View {
         }
     }
 
+    // @ViewBuilder: the two modes return different opaque view types;
+    // a plain `some View` body cannot branch between them.
+    @ViewBuilder
     private var contentList: some View {
         // Build 61 (B8, Z13): grid is the default browsing surface;
         // the shelf ("list") layout is one toolbar tap away.

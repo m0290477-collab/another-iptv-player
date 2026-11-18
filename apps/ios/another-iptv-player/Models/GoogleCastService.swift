@@ -49,7 +49,7 @@ final class GoogleCastService: NSObject {
         let criteria = GCKDiscoveryCriteria(applicationID: kGCKDefaultMediaReceiverApplicationID)
         let options = GCKCastOptions(discoveryCriteria: criteria)
         GCKCastContext.setSharedInstanceWith(options)
-        GCKCastContext.sharedInstance().sessionManager.addListener(self)
+        GCKCastContext.sharedInstance().sessionManager.add(self)
         isContextReady = true
     }
 

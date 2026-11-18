@@ -21,11 +21,11 @@ final class PinnedChannelStore: ObservableObject {
 
     private init() {}
 
-    private static func xtreamKey(playlistId: UUID) -> String {
+    nonisolated private static func xtreamKey(playlistId: UUID) -> String {
         "pinned.live.\(playlistId.uuidString)"
     }
 
-    private static func m3uKey(playlistId: UUID) -> String {
+    nonisolated private static func m3uKey(playlistId: UUID) -> String {
         "pinned.m3u.\(playlistId.uuidString)"
     }
 
