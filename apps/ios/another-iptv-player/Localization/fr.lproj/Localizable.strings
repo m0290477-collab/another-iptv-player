@@ -819,3 +819,95 @@
 "live.card.hide_category" = "Masquer \"%@\"";
 "epg.search.programmes" = "Programmes";
 "epg.search.no_results" = "Aucun programme ne correspond à votre recherche";
+
+// MARK: - Build 61 (b1)
+"epgsearch.programmes" = "Programmes";
+"epgsearch.scope" = "Programmes · Aujourd'hui et demain";
+
+// MARK: - Build 61 (b3)
+"settings.playback.title" = "Lecture";
+"settings.appearance.title" = "Apparence";
+"settings.appearance.system" = "Système";
+"settings.appearance.light" = "Clair";
+"settings.appearance.dark" = "Sombre";
+"settings.buffer.title" = "Taille du tampon";
+"settings.buffer.low" = "Faible";
+"settings.buffer.default" = "Par défaut";
+"settings.buffer.high" = "Élevée";
+"settings.play_last.title" = "Lire la dernière chaîne au lancement";
+"settings.play_last.desc" = "À l'ouverture de l'app, la chaîne en direct regardée le plus récemment reprend.";
+"parental.locked.title" = "Catégories verrouillées";
+"parental.locked.need_pin" = "Définissez d'abord un code PIN parental ci-dessus — les catégories verrouillées s'ouvrent avec ce code.";
+"parental.locked.empty" = "Aucune catégorie chargée pour cette playlist pour le moment.";
+"parental.locked.unlock_session" = "Tout déverrouiller pour cette session";
+"parental.locked.enter_pin" = "Cette catégorie est verrouillée. Saisissez le code PIN parental pour l'ouvrir.";
+"storage.title" = "Stockage";
+"storage.cache" = "Cache";
+"storage.clear_cache" = "Effacer";
+"subscription.title" = "Abonnements";
+"subscription.m3u_source" = "Playlist M3U — aucun compte fournisseur";
+"subscription.provider_format" = "Fournisseur : %@";
+"subscription.provider_unknown" = "Fournisseur Xtream";
+"subscription.expired_format" = "Expiré le %@";
+"subscription.active_format" = "Jusqu'au %@ · %@";
+"support.title" = "Assistance";
+"support.faq.title" = "Questions fréquentes";
+"support.faq.q1" = "Super X fournit-il des chaînes ou un abonnement ?";
+"support.faq.a1" = "Non. Super X est uniquement un lecteur et ne comprend ni chaînes, ni playlists, ni abonnements. Vous ajoutez la playlist ou le compte Xtream reçu de votre propre fournisseur, et Super X le lit pour vous.";
+"support.faq.q2" = "Où mes données sont-elles stockées ?";
+"support.faq.a2" = "Tout reste sur cet appareil : vos playlists, favoris, historique, téléchargements et réglages sont stockés localement dans l'app. Super X n'a aucun serveur et rien de ce que vous regardez n'est envoyé ni suivi.";
+"support.faq.q3" = "Une chaîne ou un film ne se lit pas. Que vérifier ?";
+"support.faq.a3" = "La plupart des problèmes de lecture viennent du fournisseur : abonnement expiré, limite de connexions de votre compte atteinte, ou serveur du fournisseur en panne. Vérifiez la date d'expiration sur la page Abonnements et lancez Tester la connexion dans les Réglages pour un résultat en langage clair.";
+"support.faq.q4" = "Que protège le code PIN parental ?";
+"support.faq.a4" = "Le code protège la désactivation du filtre de contenu adulte, la suppression de toutes les données de l'app, l'ouverture des Réglages lorsque leur verrouillage est actif, et toutes les catégories que vous verrouillez dans Catégories verrouillées. Une catégorie verrouillée ne peut pas s'ouvrir sans la saisie du code. Le code est stocké uniquement dans le trousseau de cet appareil et n'est jamais inclus dans une sauvegarde.";
+"support.faq.q5" = "Comment transférer ma configuration vers un nouvel appareil ?";
+"support.faq.a5" = "Dans les Réglages, utilisez la sauvegarde pour exporter vos réglages, playlists, favoris et votre liste À regarder plus tard dans un fichier, puis importez ce fichier sur le nouvel appareil. Par sécurité, l'export des réglages n'inclut pas les mots de passe des playlists — il vous sera demandé de les ressaisir lors de l'import. Il existe aussi une sauvegarde complète séparée qui inclut les mots de passe, et l'app vous avertit clairement avant de la créer.";
+"support.faq.q6" = "Pourquoi mon abonnement apparaît-il comme expiré ?";
+"support.faq.a6" = "La date et l'heure d'expiration proviennent du panneau de votre propre fournisseur — la même réponse que le fournisseur donne lorsque l'app se connecte. Une fois ce moment passé, le fournisseur arrête les flux, et Super X affiche l'abonnement comme expiré et bloque la lecture. Un renouvellement auprès de votre fournisseur met à jour la date lors de la prochaine vérification du compte par l'app.";
+"support.diagnostics.copy" = "Copier le diagnostic";
+"support.diagnostics.playlists_format" = "Playlists : %d (%d Xtream, %d M3U)";
+"support.diagnostics.language_format" = "Langue : %@";
+"danger.title" = "Zone de danger";
+"danger.continue" = "Continuer";
+"danger.sign_out_all" = "Se déconnecter de toutes les playlists";
+"danger.sign_out_all.desc" = "Supprime de cet appareil chaque playlist enregistrée et ses données. Vos réglages de l'app sont conservés.";
+"danger.sign_out_all.message" = "Chaque playlist enregistrée, son catalogue, ses favoris, son historique et ses téléchargements seront supprimés de cet appareil.";
+"danger.sign_out_all.final_title" = "Se déconnecter de toutes les playlists ?";
+"danger.sign_out_all.final_message" = "Ceci est la confirmation finale. Vous aurez besoin des identifiants de votre fournisseur pour vous reconnecter.";
+"danger.sign_out_all.final_confirm" = "Tout déconnecter";
+"danger.erase" = "Effacer toutes les données de l'app";
+"danger.erase.desc" = "Playlists, favoris, historique, téléchargements, le code PIN et chaque réglage — comme une installation neuve.";
+"danger.erase.message" = "Tout ce que l'app stocke sur cet appareil sera effacé : playlists et leur contenu, favoris, historique, fichiers téléchargés, catégories masquées et verrouillées, le code PIN parental et tous les réglages.";
+"danger.erase.final_title" = "Effacer toutes les données de l'app ?";
+"danger.erase.final_message" = "Ceci est la confirmation finale. Rien de ce qui est effacé ici ne pourra être récupéré.";
+"danger.erase.final_confirm" = "Tout effacer";
+"danger.error_message" = "Certaines données n'ont pas pu être supprimées. Veuillez réessayer.";
+"backup.import.summary_title" = "Importer cette sauvegarde ?";
+"backup.import.summary_format" = "Cette sauvegarde contient %d playlists, %d favoris, %d éléments À regarder plus tard et %d réglages. Rien n'est appliqué avant votre confirmation.";
+"backup.import.done_library_format" = "%d playlists importées · %d favoris · %d éléments À regarder plus tard";
+
+// MARK: - Build 61 (b4)
+"player.speed.title" = "Vitesse de lecture";
+"player.sleep.title" = "Minuteur de sommeil";
+"player.sleep.off" = "Désactivé";
+"player.sleep.minutes" = "%d min";
+"player.sleep.end_of_episode" = "Fin de l'épisode";
+"player.sleep.remaining" = "Pause dans %@";
+
+// MARK: - Build 61 (b5)
+"multiview.title" = "Multi-vue";
+"multiview.two_panes" = "Deux volets";
+"multiview.four_panes" = "Quatre volets";
+"multiview.no_channels" = "Aucune chaîne en direct n'est encore chargée. Chargez d'abord une playlist, puis ouvrez Multi-vue.";
+"multiview.select_channel" = "Choisir la chaîne";
+"multiview.search_channels" = "Rechercher des chaînes";
+"cast.button.title" = "Caster";
+"icloud.sync.title" = "Synchronisation iCloud";
+
+// MARK: - Build 61 (b6)
+"gate.subtitle" = "IPTV • Connexion à la playlist";
+"settings.accent.flame" = "Flamme";
+"home.expiry.expiring" = "Votre abonnement expire dans %d jours (%@)";
+"home.expiry.expired" = "Votre abonnement a expiré le %@";
+"home.expiry.dismiss" = "Ignorer";
+"splash.accessibility_label" = "Super X";

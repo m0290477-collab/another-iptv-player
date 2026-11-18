@@ -819,3 +819,95 @@
 "live.card.hide_category" = "\"%@\" ausblenden";
 "epg.search.programmes" = "Sendungen";
 "epg.search.no_results" = "Keine Sendungen entsprechen Ihrer Suche";
+
+// MARK: - Build 61 (b1)
+"epgsearch.programmes" = "Sendungen";
+"epgsearch.scope" = "Sendungen · Heute & morgen";
+
+// MARK: - Build 61 (b3)
+"settings.playback.title" = "Wiedergabe";
+"settings.appearance.title" = "Erscheinungsbild";
+"settings.appearance.system" = "System";
+"settings.appearance.light" = "Hell";
+"settings.appearance.dark" = "Dunkel";
+"settings.buffer.title" = "Puffergröße";
+"settings.buffer.low" = "Niedrig";
+"settings.buffer.default" = "Standard";
+"settings.buffer.high" = "Hoch";
+"settings.play_last.title" = "Letzten Sender beim Start abspielen";
+"settings.play_last.desc" = "Beim Öffnen der App wird der zuletzt gesehene Live-Sender fortgesetzt.";
+"parental.locked.title" = "Gesperrte Kategorien";
+"parental.locked.need_pin" = "Legen Sie oben zuerst eine Eltern-PIN fest — gesperrte Kategorien werden mit dieser PIN geöffnet.";
+"parental.locked.empty" = "Für diese Playlist sind noch keine Kategorien geladen.";
+"parental.locked.unlock_session" = "Alle für diese Sitzung entsperren";
+"parental.locked.enter_pin" = "Diese Kategorie ist gesperrt. Geben Sie die Eltern-PIN ein, um sie zu öffnen.";
+"storage.title" = "Speicher";
+"storage.cache" = "Cache";
+"storage.clear_cache" = "Leeren";
+"subscription.title" = "Abonnements";
+"subscription.m3u_source" = "M3U-Playlist — kein Anbieterkonto";
+"subscription.provider_format" = "Anbieter: %@";
+"subscription.provider_unknown" = "Xtream-Anbieter";
+"subscription.expired_format" = "Abgelaufen am %@";
+"subscription.active_format" = "Bis %@ · %@";
+"support.title" = "Support";
+"support.faq.title" = "Häufige Fragen";
+"support.faq.q1" = "Stellt Super X Sender oder ein Abonnement bereit?";
+"support.faq.a1" = "Nein. Super X ist nur ein Player und enthält keine Sender, Playlists oder Abonnements. Sie fügen die Playlist oder das Xtream-Konto hinzu, das Sie von Ihrem eigenen Anbieter erhalten haben, und Super X spielt es für Sie ab.";
+"support.faq.q2" = "Wo werden meine Daten gespeichert?";
+"support.faq.a2" = "Alles bleibt auf diesem Gerät: Ihre Playlists, Favoriten, der Verlauf, Downloads und Einstellungen werden lokal in der App gespeichert. Super X hat keine Server, und es wird nichts über Ihr Sehverhalten hochgeladen oder verfolgt.";
+"support.faq.q3" = "Ein Sender oder Film spielt nicht ab. Was soll ich prüfen?";
+"support.faq.a3" = "Die meisten Wiedergabeprobleme kommen vom Anbieter: ein abgelaufenes Abonnement, das Verbindungslimit Ihres Kontos ist erreicht, oder der Server des Anbieters ist ausgefallen. Prüfen Sie auf der Seite „Abonnements“ das Ablaufdatum und führen Sie in den Einstellungen „Verbindung testen“ aus, um ein Ergebnis in klarer Sprache zu sehen.";
+"support.faq.q4" = "Was schützt die Eltern-PIN?";
+"support.faq.a4" = "Die PIN schützt das Abschalten des Filters für Erwachseneninhalte, das Löschen aller App-Daten, das Öffnen der Einstellungen bei aktiver Einstellungssperre und alle Kategorien, die Sie unter „Gesperrte Kategorien“ sperren. Eine gesperrte Kategorie kann erst nach Eingabe der PIN geöffnet werden. Die PIN wird nur im Schlüsselbund dieses Geräts gespeichert und ist niemals in einem Backup enthalten.";
+"support.faq.q5" = "Wie übertrage ich meine Einrichtung auf ein neues Gerät?";
+"support.faq.a5" = "Verwenden Sie in den Einstellungen das Backup, um Ihre Einstellungen, Playlists, Favoriten und die Später-ansehen-Liste in eine Datei zu exportieren, und importieren Sie diese Datei auf dem neuen Gerät. Aus Sicherheitsgründen enthält der Einstellungsexport keine Playlist-Passwörter — Sie werden beim Import gebeten, sie erneut einzugeben. Es gibt auch ein separates vollständiges Backup mit Passwörtern, vor dessen Erstellung die App Sie deutlich warnt.";
+"support.faq.q6" = "Warum wird mein Abonnement als abgelaufen angezeigt?";
+"support.faq.a6" = "Ablaufdatum und -zeit stammen aus dem Panel Ihres eigenen Anbieters — dieselbe Antwort, die der Anbieter gibt, wenn sich die App anmeldet. Ist dieser Zeitpunkt vorbei, stoppt der Anbieter die Streams, und Super X zeigt das Abonnement als abgelaufen an und blockiert die Wiedergabe. Eine Verlängerung bei Ihrem Anbieter aktualisiert das Datum bei der nächsten Kontoprüfung der App.";
+"support.diagnostics.copy" = "Diagnose kopieren";
+"support.diagnostics.playlists_format" = "Playlists: %d (%d Xtream, %d M3U)";
+"support.diagnostics.language_format" = "Sprache: %@";
+"danger.title" = "Gefahrenzone";
+"danger.continue" = "Weiter";
+"danger.sign_out_all" = "Von allen Playlists abmelden";
+"danger.sign_out_all.desc" = "Entfernt jede gespeicherte Playlist und ihre Daten von diesem Gerät. Ihre App-Einstellungen bleiben.";
+"danger.sign_out_all.message" = "Jede gespeicherte Playlist, ihr Katalog, ihre Favoriten, ihr Verlauf und ihre Downloads werden von diesem Gerät entfernt.";
+"danger.sign_out_all.final_title" = "Von allen Playlists abmelden?";
+"danger.sign_out_all.final_message" = "Dies ist die letzte Bestätigung. Sie benötigen Ihre Anbieterdaten, um sich erneut anzumelden.";
+"danger.sign_out_all.final_confirm" = "Alle abmelden";
+"danger.erase" = "Alle App-Daten löschen";
+"danger.erase.desc" = "Playlists, Favoriten, Verlauf, Downloads, die PIN und jede Einstellung — wie eine Neuinstallation.";
+"danger.erase.message" = "Alles, was die App auf diesem Gerät speichert, wird gelöscht: Playlists und ihre Inhalte, Favoriten, Verlauf, heruntergeladene Dateien, ausgeblendete und gesperrte Kategorien, die Eltern-PIN und alle Einstellungen.";
+"danger.erase.final_title" = "Alle App-Daten löschen?";
+"danger.erase.final_message" = "Dies ist die letzte Bestätigung. Gelöschtes kann nicht wiederhergestellt werden.";
+"danger.erase.final_confirm" = "Alles löschen";
+"danger.error_message" = "Einige Daten konnten nicht entfernt werden. Bitte versuchen Sie es erneut.";
+"backup.import.summary_title" = "Dieses Backup importieren?";
+"backup.import.summary_format" = "Dieses Backup enthält %d Playlists, %d Favoriten, %d Später-ansehen-Einträge und %d Einstellungen. Es wird nichts angewendet, bis Sie bestätigen.";
+"backup.import.done_library_format" = "%d Playlists importiert · %d Favoriten · %d Später-ansehen-Einträge";
+
+// MARK: - Build 61 (b4)
+"player.speed.title" = "Wiedergabegeschwindigkeit";
+"player.sleep.title" = "Sleep-Timer";
+"player.sleep.off" = "Aus";
+"player.sleep.minutes" = "%d Min.";
+"player.sleep.end_of_episode" = "Ende der Episode";
+"player.sleep.remaining" = "Pausiert in %@";
+
+// MARK: - Build 61 (b5)
+"multiview.title" = "Multiview";
+"multiview.two_panes" = "Zwei Fenster";
+"multiview.four_panes" = "Vier Fenster";
+"multiview.no_channels" = "Noch keine Live-Kanäle geladen. Laden Sie zuerst eine Playlist und öffnen Sie dann Multiview.";
+"multiview.select_channel" = "Kanal auswählen";
+"multiview.search_channels" = "Kanäle suchen";
+"cast.button.title" = "Cast";
+"icloud.sync.title" = "iCloud-Sync";
+
+// MARK: - Build 61 (b6)
+"gate.subtitle" = "IPTV • Playlist-Anmeldung";
+"settings.accent.flame" = "Flamme";
+"home.expiry.expiring" = "Dein Abo läuft in %d Tagen ab (%@)";
+"home.expiry.expired" = "Dein Abo ist am %@ abgelaufen";
+"home.expiry.dismiss" = "Schließen";
+"splash.accessibility_label" = "Super X";

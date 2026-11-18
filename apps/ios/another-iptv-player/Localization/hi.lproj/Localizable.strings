@@ -819,3 +819,95 @@
 "live.card.hide_category" = "\"%@\" छिपाएँ";
 "epg.search.programmes" = "कार्यक्रम";
 "epg.search.no_results" = "कोई कार्यक्रम आपकी खोज से मेल नहीं खाता";
+
+// MARK: - Build 61 (b1)
+"epgsearch.programmes" = "कार्यक्रम";
+"epgsearch.scope" = "कार्यक्रम · आज और कल";
+
+// MARK: - Build 61 (b3)
+"settings.playback.title" = "प्लेबैक";
+"settings.appearance.title" = "दिखावट";
+"settings.appearance.system" = "सिस्टम";
+"settings.appearance.light" = "हल्का";
+"settings.appearance.dark" = "गहरा";
+"settings.buffer.title" = "बफ़र आकार";
+"settings.buffer.low" = "कम";
+"settings.buffer.default" = "डिफ़ॉल्ट";
+"settings.buffer.high" = "अधिक";
+"settings.play_last.title" = "खुलने पर आखिरी चैनल चलाएँ";
+"settings.play_last.desc" = "ऐप खुलने पर, सबसे हाल में देखा गया लाइव चैनल फिर से शुरू होता है।";
+"parental.locked.title" = "लॉक की गई श्रेणियाँ";
+"parental.locked.need_pin" = "पहले ऊपर अभिभावकीय PIN सेट करें — लॉक की गई श्रेणियाँ उसी PIN से खुलती हैं।";
+"parental.locked.empty" = "इस प्लेलिस्ट के लिए अभी कोई श्रेणी लोड नहीं हुई है।";
+"parental.locked.unlock_session" = "इस सत्र के लिए सभी अनलॉक करें";
+"parental.locked.enter_pin" = "यह श्रेणी लॉक है। इसे खोलने के लिए अभिभावकीय PIN डालें।";
+"storage.title" = "स्टोरेज";
+"storage.cache" = "कैश";
+"storage.clear_cache" = "साफ़ करें";
+"subscription.title" = "सदस्यताएँ";
+"subscription.m3u_source" = "M3U प्लेलिस्ट — कोई प्रदाता खाता नहीं";
+"subscription.provider_format" = "प्रदाता: %@";
+"subscription.provider_unknown" = "Xtream प्रदाता";
+"subscription.expired_format" = "%@ को समाप्त";
+"subscription.active_format" = "%@ तक · %@";
+"support.title" = "सहायता";
+"support.faq.title" = "अक्सर पूछे जाने वाले प्रश्न";
+"support.faq.q1" = "क्या Super X चैनल या सदस्यता देता है?";
+"support.faq.a1" = "नहीं। Super X केवल एक प्लेयर है और इसके साथ कोई चैनल, प्लेलिस्ट या सदस्यता नहीं आती। आप अपने प्रदाता से मिली प्लेलिस्ट या Xtream खाता जोड़ते हैं, और Super X उसे आपके लिए चलाता है।";
+"support.faq.q2" = "मेरा डेटा कहाँ सहेजा जाता है?";
+"support.faq.a2" = "सब कुछ इसी डिवाइस पर रहता है: आपकी प्लेलिस्ट, पसंदीदा, देखने का इतिहास, डाउनलोड और सेटिंग्स ऐप में स्थानीय रूप से सहेजे जाते हैं। Super X के कोई सर्वर नहीं हैं और आपकी देखने की जानकारी न अपलोड होती है, न ट्रैक।";
+"support.faq.q3" = "कोई चैनल या फ़िल्म नहीं चल रही। मैं क्या जाँचूँ?";
+"support.faq.a3" = "ज़्यादातर प्लेबैक समस्याएँ प्रदाता की ओर से होती हैं: सदस्यता समाप्त, आपके खाते की कनेक्शन सीमा पूरी, या प्रदाता का सर्वर बंद। सदस्यता पेज पर समाप्ति तारीख देखें और सेटिंग्स में कनेक्शन परीक्षण चलाकर साफ़ भाषा में परिणाम देखें।";
+"support.faq.q4" = "अभिभावकीय PIN क्या सुरक्षित रखता है?";
+"support.faq.a4" = "PIN वयस्क-सामग्री फ़िल्टर बंद करने, ऐप का सारा डेटा मिटाने, सेटिंग्स लॉक चालू होने पर सेटिंग्स खोलने, और लॉक की गई श्रेणियों में आपके द्वारा लॉक की गई किसी भी श्रेणी को सुरक्षित रखता है। लॉक श्रेणी PIN डाले बिना नहीं खुल सकती। PIN केवल इस डिवाइस के Keychain में सहेजा जाता है और कभी बैकअप में शामिल नहीं होता।";
+"support.faq.q5" = "मैं अपना सेटअप नए डिवाइस पर कैसे ले जाऊँ?";
+"support.faq.a5" = "सेटिंग्स में, बैकअप का उपयोग करके अपनी सेटिंग्स, प्लेलिस्ट, पसंदीदा और बाद में देखें सूची को एक फ़ाइल में निर्यात करें, फिर उस फ़ाइल को नए डिवाइस पर आयात करें। सुरक्षा के लिए, सेटिंग्स निर्यात में प्लेलिस्ट पासवर्ड शामिल नहीं होते — आयात के दौरान आपको वे फिर से डालने होंगे। पासवर्ड सहित एक अलग पूर्ण बैकअप भी मौजूद है, और ऐप उसे बनाने से पहले आपको साफ़ चेतावनी देता है।";
+"support.faq.q6" = "मेरी सदस्यता समाप्त क्यों दिखती है?";
+"support.faq.a6" = "समाप्ति की तारीख और समय आपके अपने प्रदाता के पैनल से आते हैं — वही जवाब जो प्रदाता ऐप के साइन इन करने पर देता है। वह समय बीत जाने पर प्रदाता स्ट्रीम रोक देता है, और Super X सदस्यता को समाप्त दिखाकर प्लेबैक रोक देता है। अपने प्रदाता से नवीनीकरण करने पर, अगली बार जब ऐप खाते की जाँच करेगा तो तारीख अपडेट हो जाएगी।";
+"support.diagnostics.copy" = "डायग्नोस्टिक्स कॉपी करें";
+"support.diagnostics.playlists_format" = "प्लेलिस्ट: %d (%d Xtream, %d M3U)";
+"support.diagnostics.language_format" = "भाषा: %@";
+"danger.title" = "ख़तरा क्षेत्र";
+"danger.continue" = "जारी रखें";
+"danger.sign_out_all" = "सभी प्लेलिस्ट से साइन आउट करें";
+"danger.sign_out_all.desc" = "इस डिवाइस से हर सहेजी गई प्लेलिस्ट और उसका डेटा हटा देता है। आपकी ऐप सेटिंग्स बनी रहती हैं।";
+"danger.sign_out_all.message" = "हर सहेजी गई प्लेलिस्ट, उसकी सूची, पसंदीदा, देखने का इतिहास और डाउनलोड इस डिवाइस से हटा दिए जाएँगे।";
+"danger.sign_out_all.final_title" = "सभी प्लेलिस्ट से साइन आउट करें?";
+"danger.sign_out_all.final_message" = "यह अंतिम पुष्टि है। फिर से साइन इन करने के लिए आपको अपने प्रदाता के विवरण की ज़रूरत होगी।";
+"danger.sign_out_all.final_confirm" = "सभी से साइन आउट";
+"danger.erase" = "ऐप का सारा डेटा मिटाएँ";
+"danger.erase.desc" = "प्लेलिस्ट, पसंदीदा, इतिहास, डाउनलोड, PIN और हर सेटिंग — बिल्कुल नए इंस्टॉल जैसा।";
+"danger.erase.message" = "ऐप इस डिवाइस पर जो कुछ भी सहेजता है वह मिट जाएगा: प्लेलिस्ट और उनकी सामग्री, पसंदीदा, देखने का इतिहास, डाउनलोड की गई फ़ाइलें, छिपी और लॉक श्रेणियाँ, अभिभावकीय PIN और सभी सेटिंग्स।";
+"danger.erase.final_title" = "ऐप का सारा डेटा मिटाएँ?";
+"danger.erase.final_message" = "यह अंतिम पुष्टि है। यहाँ मिटाई गई कोई चीज़ वापस नहीं मिल सकती।";
+"danger.erase.final_confirm" = "सब कुछ मिटाएँ";
+"danger.error_message" = "कुछ डेटा हटाया नहीं जा सका। कृपया फिर से कोशिश करें।";
+"backup.import.summary_title" = "यह बैकअप आयात करें?";
+"backup.import.summary_format" = "इस बैकअप में %d प्लेलिस्ट, %d पसंदीदा, %d बाद में देखें आइटम और %d सेटिंग्स हैं। जब तक आप पुष्टि नहीं करते, कुछ भी लागू नहीं होता।";
+"backup.import.done_library_format" = "%d प्लेलिस्ट आयात हुईं · %d पसंदीदा · %d बाद में देखें आइटम";
+
+// MARK: - Build 61 (b4)
+"player.speed.title" = "प्लेबैक गति";
+"player.sleep.title" = "स्लीप टाइमर";
+"player.sleep.off" = "बंद";
+"player.sleep.minutes" = "%d मिनट";
+"player.sleep.end_of_episode" = "एपिसोड के अंत में";
+"player.sleep.remaining" = "%@ में रुकेगा";
+
+// MARK: - Build 61 (b5)
+"multiview.title" = "मल्टीव्यू";
+"multiview.two_panes" = "दो पैन";
+"multiview.four_panes" = "चार पैन";
+"multiview.no_channels" = "अभी कोई लाइव चैनल लोड नहीं हुआ है। पहले प्लेलिस्ट लोड करें, फिर मल्टीव्यू खोलें।";
+"multiview.select_channel" = "चैनल चुनें";
+"multiview.search_channels" = "चैनल खोजें";
+"cast.button.title" = "कास्ट";
+"icloud.sync.title" = "iCloud सिंक";
+
+// MARK: - Build 61 (b6)
+"gate.subtitle" = "IPTV • प्लेलिस्ट लॉगिन";
+"settings.accent.flame" = "लौ";
+"home.expiry.expiring" = "आपकी सदस्यता %d दिनों में समाप्त हो रही है (%@)";
+"home.expiry.expired" = "आपकी सदस्यता %@ को समाप्त हो गई";
+"home.expiry.dismiss" = "बंद करें";
+"splash.accessibility_label" = "Super X";

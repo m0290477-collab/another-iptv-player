@@ -819,3 +819,95 @@
 "live.card.hide_category" = "Ocultar \"%@\"";
 "epg.search.programmes" = "Programas";
 "epg.search.no_results" = "Ningún programa coincide con tu búsqueda";
+
+// MARK: - Build 61 (b1)
+"epgsearch.programmes" = "Programas";
+"epgsearch.scope" = "Programas · Hoy y mañana";
+
+// MARK: - Build 61 (b3)
+"settings.playback.title" = "Reproducción";
+"settings.appearance.title" = "Apariencia";
+"settings.appearance.system" = "Sistema";
+"settings.appearance.light" = "Claro";
+"settings.appearance.dark" = "Oscuro";
+"settings.buffer.title" = "Tamaño del búfer";
+"settings.buffer.low" = "Bajo";
+"settings.buffer.default" = "Predeterminado";
+"settings.buffer.high" = "Alto";
+"settings.play_last.title" = "Reproducir el último canal al iniciar";
+"settings.play_last.desc" = "Al abrir la app, se reanuda el canal en directo que viste más recientemente.";
+"parental.locked.title" = "Categorías bloqueadas";
+"parental.locked.need_pin" = "Primero define un PIN parental arriba: las categorías bloqueadas se abren con ese PIN.";
+"parental.locked.empty" = "Aún no hay categorías cargadas para esta lista.";
+"parental.locked.unlock_session" = "Desbloquear todo para esta sesión";
+"parental.locked.enter_pin" = "Esta categoría está bloqueada. Introduce el PIN parental para abrirla.";
+"storage.title" = "Almacenamiento";
+"storage.cache" = "Caché";
+"storage.clear_cache" = "Borrar";
+"subscription.title" = "Suscripciones";
+"subscription.m3u_source" = "Lista M3U: sin cuenta de proveedor";
+"subscription.provider_format" = "Proveedor: %@";
+"subscription.provider_unknown" = "Proveedor Xtream";
+"subscription.expired_format" = "Venció el %@";
+"subscription.active_format" = "Hasta el %@ · %@";
+"support.title" = "Soporte";
+"support.faq.title" = "Preguntas frecuentes";
+"support.faq.q1" = "¿Super X proporciona canales o una suscripción?";
+"support.faq.a1" = "No. Super X es solo un reproductor y no incluye canales, listas ni suscripciones. Tú añades la lista o la cuenta Xtream que recibiste de tu propio proveedor, y Super X la reproduce por ti.";
+"support.faq.q2" = "¿Dónde se guardan mis datos?";
+"support.faq.a2" = "Todo permanece en este dispositivo: tus listas, favoritos, historial, descargas y ajustes se guardan localmente en la app. Super X no tiene servidores y no se sube ni se rastrea nada sobre lo que ves.";
+"support.faq.q3" = "Un canal o una película no se reproduce. ¿Qué debo revisar?";
+"support.faq.a3" = "La mayoría de los problemas de reproducción vienen del proveedor: una suscripción vencida, el límite de conexiones de tu cuenta alcanzado o el servidor del proveedor caído. Revisa la fecha de vencimiento en la página Suscripciones y ejecuta Probar conexión en Ajustes para ver un resultado en lenguaje claro.";
+"support.faq.q4" = "¿Qué protege el PIN parental?";
+"support.faq.a4" = "El PIN protege desactivar el filtro de contenido para adultos, borrar todos los datos de la app, abrir Ajustes cuando el bloqueo de ajustes está activado y cualquier categoría que bloquees en Categorías bloqueadas. Una categoría bloqueada no puede abrirse hasta introducir el PIN. El PIN se guarda solo en el llavero de este dispositivo y nunca se incluye en una copia de seguridad.";
+"support.faq.q5" = "¿Cómo traslado mi configuración a un dispositivo nuevo?";
+"support.faq.a5" = "En Ajustes, usa Copia de seguridad para exportar tus ajustes, listas, favoritos y la lista Ver más tarde a un archivo, e importa ese archivo en el nuevo dispositivo. Por seguridad, la exportación de ajustes no incluye las contraseñas de las listas: se te pedirá que las vuelvas a introducir durante la importación. Existe también una copia completa separada que sí incluye contraseñas, y la app te avisa claramente antes de crearla.";
+"support.faq.q6" = "¿Por qué mi suscripción aparece como vencida?";
+"support.faq.a6" = "La fecha y la hora de vencimiento vienen del panel de tu propio proveedor: la misma respuesta que da el proveedor cuando la app inicia sesión. Cuando ese momento pasa, el proveedor detiene las transmisiones, y Super X muestra la suscripción como vencida y bloquea la reproducción. Renovar con tu proveedor actualiza la fecha la próxima vez que la app verifique la cuenta.";
+"support.diagnostics.copy" = "Copiar diagnóstico";
+"support.diagnostics.playlists_format" = "Listas: %d (%d Xtream, %d M3U)";
+"support.diagnostics.language_format" = "Idioma: %@";
+"danger.title" = "Zona de peligro";
+"danger.continue" = "Continuar";
+"danger.sign_out_all" = "Cerrar sesión en todas las listas";
+"danger.sign_out_all.desc" = "Elimina de este dispositivo cada lista guardada y sus datos. Tus ajustes de la app se conservan.";
+"danger.sign_out_all.message" = "Se eliminarán de este dispositivo cada lista guardada, su catálogo, favoritos, historial y descargas.";
+"danger.sign_out_all.final_title" = "¿Cerrar sesión en todas las listas?";
+"danger.sign_out_all.final_message" = "Esta es la confirmación final. Necesitarás los datos de tu proveedor para volver a iniciar sesión.";
+"danger.sign_out_all.final_confirm" = "Cerrar sesión en todas";
+"danger.erase" = "Borrar todos los datos de la app";
+"danger.erase.desc" = "Listas, favoritos, historial, descargas, el PIN y cada ajuste: como una instalación nueva.";
+"danger.erase.message" = "Se borrará todo lo que la app guarda en este dispositivo: listas y su contenido, favoritos, historial, archivos descargados, categorías ocultas y bloqueadas, el PIN parental y todos los ajustes.";
+"danger.erase.final_title" = "¿Borrar todos los datos de la app?";
+"danger.erase.final_message" = "Esta es la confirmación final. Nada de lo borrado aquí podrá recuperarse.";
+"danger.erase.final_confirm" = "Borrar todo";
+"danger.error_message" = "Algunos datos no pudieron eliminarse. Inténtalo de nuevo.";
+"backup.import.summary_title" = "¿Importar esta copia de seguridad?";
+"backup.import.summary_format" = "Esta copia contiene %d listas, %d favoritos, %d elementos de Ver más tarde y %d ajustes. No se aplica nada hasta que confirmes.";
+"backup.import.done_library_format" = "%d listas importadas · %d favoritos · %d elementos de Ver más tarde";
+
+// MARK: - Build 61 (b4)
+"player.speed.title" = "Velocidad de reproducción";
+"player.sleep.title" = "Temporizador de apagado";
+"player.sleep.off" = "Desactivado";
+"player.sleep.minutes" = "%d min";
+"player.sleep.end_of_episode" = "Final del episodio";
+"player.sleep.remaining" = "Se pausa en %@";
+
+// MARK: - Build 61 (b5)
+"multiview.title" = "Multivista";
+"multiview.two_panes" = "Dos paneles";
+"multiview.four_panes" = "Cuatro paneles";
+"multiview.no_channels" = "Aún no hay canales en vivo cargados. Carga primero una lista de reproducción y luego abre Multivista.";
+"multiview.select_channel" = "Seleccionar canal";
+"multiview.search_channels" = "Buscar canales";
+"cast.button.title" = "Enviar";
+"icloud.sync.title" = "Sincronización de iCloud";
+
+// MARK: - Build 61 (b6)
+"gate.subtitle" = "IPTV • Acceso a la lista de reproducción";
+"settings.accent.flame" = "Llama";
+"home.expiry.expiring" = "Tu suscripción vence en %d días (%@)";
+"home.expiry.expired" = "Tu suscripción venció el %@";
+"home.expiry.dismiss" = "Descartar";
+"splash.accessibility_label" = "Super X";

@@ -819,3 +819,95 @@
 "live.card.hide_category" = "Ocultar \"%@\"";
 "epg.search.programmes" = "Programas";
 "epg.search.no_results" = "Nenhum programa corresponde à sua pesquisa";
+
+// MARK: - Build 61 (b1)
+"epgsearch.programmes" = "Programas";
+"epgsearch.scope" = "Programas · Hoje e amanhã";
+
+// MARK: - Build 61 (b3)
+"settings.playback.title" = "Reprodução";
+"settings.appearance.title" = "Aparência";
+"settings.appearance.system" = "Sistema";
+"settings.appearance.light" = "Claro";
+"settings.appearance.dark" = "Escuro";
+"settings.buffer.title" = "Tamanho do buffer";
+"settings.buffer.low" = "Baixo";
+"settings.buffer.default" = "Padrão";
+"settings.buffer.high" = "Alto";
+"settings.play_last.title" = "Reproduzir o último canal ao abrir";
+"settings.play_last.desc" = "Quando o app abre, retoma o canal ao vivo assistido mais recentemente.";
+"parental.locked.title" = "Categorias bloqueadas";
+"parental.locked.need_pin" = "Defina primeiro um PIN parental acima — as categorias bloqueadas abrem com esse PIN.";
+"parental.locked.empty" = "Ainda não há categorias carregadas para esta playlist.";
+"parental.locked.unlock_session" = "Desbloquear tudo nesta sessão";
+"parental.locked.enter_pin" = "Esta categoria está bloqueada. Insira o PIN parental para abri-la.";
+"storage.title" = "Armazenamento";
+"storage.cache" = "Cache";
+"storage.clear_cache" = "Limpar";
+"subscription.title" = "Assinaturas";
+"subscription.m3u_source" = "Playlist M3U — sem conta de provedor";
+"subscription.provider_format" = "Provedor: %@";
+"subscription.provider_unknown" = "Provedor Xtream";
+"subscription.expired_format" = "Expirou em %@";
+"subscription.active_format" = "Até %@ · %@";
+"support.title" = "Suporte";
+"support.faq.title" = "Perguntas frequentes";
+"support.faq.q1" = "O Super X fornece canais ou uma assinatura?";
+"support.faq.a1" = "Não. O Super X é apenas um reprodutor e não inclui canais, playlists nem assinaturas. Você adiciona a playlist ou a conta Xtream recebida do seu próprio provedor, e o Super X a reproduz para você.";
+"support.faq.q2" = "Onde meus dados são armazenados?";
+"support.faq.a2" = "Tudo fica neste dispositivo: suas playlists, favoritos, histórico, downloads e configurações são guardados localmente no app. O Super X não tem servidores e nada sobre o que você assiste é enviado ou rastreado.";
+"support.faq.q3" = "Um canal ou filme não reproduz. O que devo verificar?";
+"support.faq.a3" = "A maioria dos problemas de reprodução vem do provedor: assinatura expirada, limite de conexões da sua conta atingido ou o servidor do provedor fora do ar. Verifique a data de expiração na página Assinaturas e execute Testar conexão nas Configurações para ver um resultado em linguagem simples.";
+"support.faq.q4" = "O que o PIN parental protege?";
+"support.faq.a4" = "O PIN protege desativar o filtro de conteúdo adulto, apagar todos os dados do app, abrir as Configurações quando o bloqueio delas está ativo e qualquer categoria que você bloquear em Categorias bloqueadas. Uma categoria bloqueada não pode ser aberta até o PIN ser inserido. O PIN fica guardado apenas na Keychain deste dispositivo e nunca é incluído em um backup.";
+"support.faq.q5" = "Como transfiro minha configuração para um novo dispositivo?";
+"support.faq.a5" = "Nas Configurações, use o Backup para exportar suas configurações, playlists, favoritos e a lista Assistir mais tarde para um arquivo e importe esse arquivo no novo dispositivo. Por segurança, a exportação de configurações não inclui as senhas das playlists — você terá de digitá-las novamente durante a importação. Existe também um backup completo separado que inclui senhas, e o app avisa claramente antes de criá-lo.";
+"support.faq.q6" = "Por que minha assinatura aparece como expirada?";
+"support.faq.a6" = "A data e a hora de expiração vêm do painel do seu próprio provedor — a mesma resposta que o provedor dá quando o app faz login. Quando esse momento passa, o provedor interrompe os streams, e o Super X mostra a assinatura como expirada e bloqueia a reprodução. Renovar com o seu provedor atualiza a data na próxima verificação da conta pelo app.";
+"support.diagnostics.copy" = "Copiar diagnóstico";
+"support.diagnostics.playlists_format" = "Playlists: %d (%d Xtream, %d M3U)";
+"support.diagnostics.language_format" = "Idioma: %@";
+"danger.title" = "Zona de perigo";
+"danger.continue" = "Continuar";
+"danger.sign_out_all" = "Sair de todas as playlists";
+"danger.sign_out_all.desc" = "Remove deste dispositivo cada playlist salva e seus dados. Suas configurações do app permanecem.";
+"danger.sign_out_all.message" = "Cada playlist salva, seu catálogo, favoritos, histórico e downloads serão removidos deste dispositivo.";
+"danger.sign_out_all.final_title" = "Sair de todas as playlists?";
+"danger.sign_out_all.final_message" = "Esta é a confirmação final. Você precisará dos dados do seu provedor para entrar novamente.";
+"danger.sign_out_all.final_confirm" = "Sair de todas";
+"danger.erase" = "Apagar todos os dados do app";
+"danger.erase.desc" = "Playlists, favoritos, histórico, downloads, o PIN e cada configuração — como uma instalação nova.";
+"danger.erase.message" = "Tudo o que o app guarda neste dispositivo será apagado: playlists e seu conteúdo, favoritos, histórico, arquivos baixados, categorias ocultas e bloqueadas, o PIN parental e todas as configurações.";
+"danger.erase.final_title" = "Apagar todos os dados do app?";
+"danger.erase.final_message" = "Esta é a confirmação final. Nada do que for apagado aqui poderá ser recuperado.";
+"danger.erase.final_confirm" = "Apagar tudo";
+"danger.error_message" = "Alguns dados não puderam ser removidos. Tente novamente.";
+"backup.import.summary_title" = "Importar este backup?";
+"backup.import.summary_format" = "Este backup contém %d playlists, %d favoritos, %d itens de Assistir mais tarde e %d configurações. Nada é aplicado até você confirmar.";
+"backup.import.done_library_format" = "%d playlists importadas · %d favoritos · %d itens de Assistir mais tarde";
+
+// MARK: - Build 61 (b4)
+"player.speed.title" = "Velocidade de reprodução";
+"player.sleep.title" = "Temporizador de sono";
+"player.sleep.off" = "Desligado";
+"player.sleep.minutes" = "%d min";
+"player.sleep.end_of_episode" = "Fim do episódio";
+"player.sleep.remaining" = "Pausa em %@";
+
+// MARK: - Build 61 (b5)
+"multiview.title" = "Multivisão";
+"multiview.two_panes" = "Dois painéis";
+"multiview.four_panes" = "Quatro painéis";
+"multiview.no_channels" = "Ainda não há canais ao vivo carregados. Carregue primeiro uma playlist e depois abra a Multivisão.";
+"multiview.select_channel" = "Selecionar canal";
+"multiview.search_channels" = "Pesquisar canais";
+"cast.button.title" = "Transmitir";
+"icloud.sync.title" = "Sincronização do iCloud";
+
+// MARK: - Build 61 (b6)
+"gate.subtitle" = "IPTV • Login da playlist";
+"settings.accent.flame" = "Chama";
+"home.expiry.expiring" = "Sua assinatura expira em %d dias (%@)";
+"home.expiry.expired" = "Sua assinatura expirou em %@";
+"home.expiry.dismiss" = "Dispensar";
+"splash.accessibility_label" = "Super X";

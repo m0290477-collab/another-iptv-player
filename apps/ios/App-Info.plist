@@ -19,6 +19,10 @@
 	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Used to scan your provider's sign-in QR code.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_googlecast._tcp</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>To play via AirPlay, video is streamed to your Apple TV over the local network.</string>
 	<key>NSAppTransportSecurity</key>

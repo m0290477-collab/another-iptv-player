@@ -819,3 +819,95 @@
 "live.card.hide_category" = "隐藏\"%@\"";
 "epg.search.programmes" = "节目";
 "epg.search.no_results" = "没有与您的搜索匹配的节目";
+
+// MARK: - Build 61 (b1)
+"epgsearch.programmes" = "节目";
+"epgsearch.scope" = "节目 · 今天和明天";
+
+// MARK: - Build 61 (b3)
+"settings.playback.title" = "播放";
+"settings.appearance.title" = "外观";
+"settings.appearance.system" = "跟随系统";
+"settings.appearance.light" = "浅色";
+"settings.appearance.dark" = "深色";
+"settings.buffer.title" = "缓冲大小";
+"settings.buffer.low" = "低";
+"settings.buffer.default" = "默认";
+"settings.buffer.high" = "高";
+"settings.play_last.title" = "启动时播放上次的频道";
+"settings.play_last.desc" = "应用打开时，继续播放最近观看的直播频道。";
+"parental.locked.title" = "已锁定的分类";
+"parental.locked.need_pin" = "请先在上方设置家长 PIN——锁定的分类需要用该 PIN 打开。";
+"parental.locked.empty" = "此播放列表尚未加载任何分类。";
+"parental.locked.unlock_session" = "为本次会话解锁全部";
+"parental.locked.enter_pin" = "此分类已锁定。输入家长 PIN 以打开。";
+"storage.title" = "存储空间";
+"storage.cache" = "缓存";
+"storage.clear_cache" = "清除";
+"subscription.title" = "订阅";
+"subscription.m3u_source" = "M3U 播放列表——无提供商账户";
+"subscription.provider_format" = "提供商：%@";
+"subscription.provider_unknown" = "Xtream 提供商";
+"subscription.expired_format" = "已于 %@ 过期";
+"subscription.active_format" = "有效至 %@ · %@";
+"support.title" = "支持";
+"support.faq.title" = "常见问题";
+"support.faq.q1" = "Super X 提供频道或订阅吗？";
+"support.faq.a1" = "不提供。Super X 只是一个播放器，不包含任何频道、播放列表或订阅。您添加从自己的提供商处获得的播放列表或 Xtream 账户，Super X 为您播放。";
+"support.faq.q2" = "我的数据存储在哪里？";
+"support.faq.a2" = "一切都保存在本设备上：您的播放列表、收藏、观看历史、下载和设置都存储在应用本地。Super X 没有服务器，您的观看信息不会被上传或跟踪。";
+"support.faq.q3" = "某个频道或电影无法播放，我该检查什么？";
+"support.faq.a3" = "大多数播放问题来自提供商一侧：订阅已过期、账户连接数达到上限，或提供商服务器宕机。请在“订阅”页面查看到期日期，并在设置中运行“测试连接”，以通俗的语言查看结果。";
+"support.faq.q4" = "家长 PIN 保护什么？";
+"support.faq.a4" = "PIN 保护以下操作：关闭成人内容过滤、删除所有应用数据、在设置锁开启时打开设置，以及您在“已锁定的分类”中锁定的任何分类。锁定的分类在输入 PIN 之前无法打开。PIN 仅存储在本设备的钥匙串中，永远不会包含在备份中。";
+"support.faq.q5" = "如何将我的设置迁移到新设备？";
+"support.faq.a5" = "在设置中，使用备份将您的设置、播放列表、收藏和稍后观看列表导出为文件，然后在新设备上导入该文件。出于安全考虑，设置导出不包含播放列表密码——导入时系统会要求您重新输入。另有包含密码的完整备份，应用在创建前会明确警告您。";
+"support.faq.q6" = "为什么我的订阅显示已过期？";
+"support.faq.a6" = "到期日期和时间来自您自己的提供商面板——与应用登录时提供商给出的答复相同。该时刻过后，提供商会停止推流，Super X 会将订阅显示为已过期并阻止播放。向提供商续订后，应用下次验证账户时日期会自动更新。";
+"support.diagnostics.copy" = "复制诊断信息";
+"support.diagnostics.playlists_format" = "播放列表：%d（%d 个 Xtream，%d 个 M3U）";
+"support.diagnostics.language_format" = "语言：%@";
+"danger.title" = "危险区域";
+"danger.continue" = "继续";
+"danger.sign_out_all" = "退出所有播放列表";
+"danger.sign_out_all.desc" = "从本设备移除每个已保存的播放列表及其数据。应用设置会保留。";
+"danger.sign_out_all.message" = "每个已保存的播放列表、其目录、收藏、观看历史和下载都将从本设备移除。";
+"danger.sign_out_all.final_title" = "退出所有播放列表？";
+"danger.sign_out_all.final_message" = "这是最后一次确认。重新登录需要您的提供商信息。";
+"danger.sign_out_all.final_confirm" = "退出全部";
+"danger.erase" = "抹除所有应用数据";
+"danger.erase.desc" = "播放列表、收藏、历史、下载、PIN 和每一项设置——如同全新安装。";
+"danger.erase.message" = "应用在本设备上存储的一切都将被抹除：播放列表及其内容、收藏、观看历史、已下载文件、隐藏和锁定的分类、家长 PIN 以及所有设置。";
+"danger.erase.final_title" = "抹除所有应用数据？";
+"danger.erase.final_message" = "这是最后一次确认。在此抹除的内容无法恢复。";
+"danger.erase.final_confirm" = "抹除全部";
+"danger.error_message" = "部分数据无法移除。请重试。";
+"backup.import.summary_title" = "导入此备份？";
+"backup.import.summary_format" = "此备份包含 %d 个播放列表、%d 个收藏、%d 个稍后观看项目和 %d 项设置。在您确认之前不会应用任何内容。";
+"backup.import.done_library_format" = "已导入 %d 个播放列表 · %d 个收藏 · %d 个稍后观看项目";
+
+// MARK: - Build 61 (b4)
+"player.speed.title" = "播放速度";
+"player.sleep.title" = "睡眠定时器";
+"player.sleep.off" = "关闭";
+"player.sleep.minutes" = "%d 分钟";
+"player.sleep.end_of_episode" = "本集结束时";
+"player.sleep.remaining" = "%@ 后暂停";
+
+// MARK: - Build 61 (b5)
+"multiview.title" = "多画面";
+"multiview.two_panes" = "双画面";
+"multiview.four_panes" = "四画面";
+"multiview.no_channels" = "尚未加载直播频道。请先加载播放列表，然后打开多画面。";
+"multiview.select_channel" = "选择频道";
+"multiview.search_channels" = "搜索频道";
+"cast.button.title" = "投屏";
+"icloud.sync.title" = "iCloud 同步";
+
+// MARK: - Build 61 (b6)
+"gate.subtitle" = "IPTV • 播放列表登录";
+"settings.accent.flame" = "火焰";
+"home.expiry.expiring" = "您的订阅将在 %d 天后到期（%@）";
+"home.expiry.expired" = "您的订阅已于 %@ 到期";
+"home.expiry.dismiss" = "关闭";
+"splash.accessibility_label" = "Super X";

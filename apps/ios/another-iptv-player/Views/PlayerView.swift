@@ -956,6 +956,9 @@ private struct PlayerViewImpl: View {
             url: url, startSeconds: initialStartSeconds, isLiveStream: isLiveStream,
             userAgent: userAgent
         )
+        // Coordinator wiring (build 61, Item 9): keep a connected Cast
+        // receiver in sync with the stream this player just loaded.
+        GoogleCastService.shared.updateNowPlaying(url: url, title: title, isLive: isLiveStream)
         applySelectedAspectMode(force: true)
         player.setPlaybackPresentation(makePresentation())
         applySeriesEpisodeRemoteCommands()
@@ -1975,6 +1978,7 @@ private struct PlayerViewImpl: View {
         if isCompactWidth {
             favoriteTopChromeAction
             airPlayTopChromeAction
+            castTopChromeAction
             compactTopChromeMoreMenu
         } else {
             favoriteTopChromeAction
@@ -1992,6 +1996,8 @@ private struct PlayerViewImpl: View {
             }
 
             airPlayTopChromeAction
+
+            castTopChromeAction
 
             groupedCapsuleButton(systemName: "textformat.size") {
                 showSubtitleAppearance = true
@@ -2043,6 +2049,17 @@ private struct PlayerViewImpl: View {
             }
         }
     }
+
+    // === Coordinator wiring (build 61, Item 9): Google Cast button beside
+    // the AirPlay action above; the button view itself lives in
+    // KSPlayerSurfaceView.swift (B5's hunk). ===
+    @ViewBuilder
+    private var castTopChromeAction: some View {
+        GoogleCastButton()
+            .frame(width: 40, height: 34)
+            .accessibilityLabel("Google Cast")
+    }
+    // === End coordinator wiring (Item 9) ===
 
     private var compactTopChromeMoreMenu: some View {
         Menu {

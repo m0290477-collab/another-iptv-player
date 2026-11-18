@@ -837,3 +837,95 @@
 "live.card.hide_category" = "\"%@\" gizle";
 "epg.search.programmes" = "Programlar";
 "epg.search.no_results" = "Aramanızla eşleşen program yok";
+
+// MARK: - Build 61 (b1)
+"epgsearch.programmes" = "Programlar";
+"epgsearch.scope" = "Programlar · Bugün ve yarın";
+
+// MARK: - Build 61 (b3)
+"settings.playback.title" = "Oynatma";
+"settings.appearance.title" = "Görünüm";
+"settings.appearance.system" = "Sistem";
+"settings.appearance.light" = "Açık";
+"settings.appearance.dark" = "Koyu";
+"settings.buffer.title" = "Arabellek boyutu";
+"settings.buffer.low" = "Düşük";
+"settings.buffer.default" = "Varsayılan";
+"settings.buffer.high" = "Yüksek";
+"settings.play_last.title" = "Açılışta son kanalı oynat";
+"settings.play_last.desc" = "Uygulama açıldığında, en son izlediğiniz canlı kanal sürdürülür.";
+"parental.locked.title" = "Kilitli Kategoriler";
+"parental.locked.need_pin" = "Önce yukarıdan bir ebeveyn PIN'i belirleyin — kilitli kategoriler o PIN ile açılır.";
+"parental.locked.empty" = "Bu oynatma listesi için henüz kategori yüklenmedi.";
+"parental.locked.unlock_session" = "Bu oturum için tümünün kilidini aç";
+"parental.locked.enter_pin" = "Bu kategori kilitli. Açmak için ebeveyn PIN'ini girin.";
+"storage.title" = "Depolama";
+"storage.cache" = "Önbellek";
+"storage.clear_cache" = "Temizle";
+"subscription.title" = "Abonelikler";
+"subscription.m3u_source" = "M3U listesi — sağlayıcı hesabı yok";
+"subscription.provider_format" = "Sağlayıcı: %@";
+"subscription.provider_unknown" = "Xtream sağlayıcısı";
+"subscription.expired_format" = "%@ tarihinde sona erdi";
+"subscription.active_format" = "%@ tarihine kadar · %@";
+"support.title" = "Destek";
+"support.faq.title" = "Sık Sorulan Sorular";
+"support.faq.q1" = "Super X kanal veya abonelik sağlıyor mu?";
+"support.faq.a1" = "Hayır. Super X yalnızca bir oynatıcıdır; kanal, oynatma listesi veya abonelik içermez. Kendi sağlayıcınızdan aldığınız listeyi ya da Xtream hesabını eklersiniz, Super X de onu sizin için oynatır.";
+"support.faq.q2" = "Verilerim nerede saklanıyor?";
+"support.faq.a2" = "Her şey bu cihazda kalır: listeleriniz, favorileriniz, izleme geçmişiniz, indirilenler ve ayarlarınız uygulamada yerel olarak saklanır. Super X'in sunucusu yoktur ve izledikleriniz hakkında hiçbir şey yüklenmez veya izlenmez.";
+"support.faq.q3" = "Bir kanal veya film oynamıyor. Neyi kontrol etmeliyim?";
+"support.faq.a3" = "Oynatma sorunlarının çoğu sağlayıcı kaynaklıdır: süresi dolmuş bir abonelik, hesabınızın bağlantı sınırına ulaşılması veya sağlayıcının sunucusunun kapalı olması. Abonelikler sayfasından bitiş tarihini kontrol edin ve Ayarlar'daki Bağlantıyı Test Et'i çalıştırıp sonucu sade bir dille görün.";
+"support.faq.q4" = "Ebeveyn PIN'i neyi koruyor?";
+"support.faq.a4" = "PIN; yetişkin içerik filtresini kapatmayı, tüm uygulama verilerini silmeyi, ayarlar kilidi açıkken Ayarlar'ı açmayı ve Kilitli Kategoriler altında kilitlediğiniz kategorileri korur. Kilitli bir kategori, PIN girilmeden açılamaz. PIN yalnızca bu cihazın Anahtar Zinciri'nde saklanır ve hiçbir yedeğe dahil edilmez.";
+"support.faq.q5" = "Kurulumumu yeni bir cihaza nasıl taşırım?";
+"support.faq.a5" = "Ayarlar'da Yedekleme'yi kullanarak ayarlarınızı, listelerinizi, favorilerinizi ve Daha Sonra İzle listenizi bir dosyaya aktarın, ardından o dosyayı yeni cihazda içe aktarın. Güvenlik için ayar dışa aktarımı liste parolalarını içermez — içe aktarırken onları yeniden girmeniz istenir. Parolaları içeren ayrı bir tam yedek de vardır ve uygulama onu oluşturmadan önce sizi açıkça uyarır.";
+"support.faq.q6" = "Aboneliğim neden süresi dolmuş görünüyor?";
+"support.faq.a6" = "Bitiş tarihi ve saati, kendi sağlayıcınızın panelinden gelir — uygulama oturum açtığında sağlayıcının verdiği yanıtın aynısıdır. O an geçtiğinde sağlayıcı yayınları durdurur; Super X de aboneliği süresi dolmuş olarak gösterir ve oynatmayı engeller. Sağlayıcınızdan yenileme yapmak, uygulama hesabı bir sonraki kez doğruladığında tarihi günceller.";
+"support.diagnostics.copy" = "Tanılamayı kopyala";
+"support.diagnostics.playlists_format" = "Listeler: %d (%d Xtream, %d M3U)";
+"support.diagnostics.language_format" = "Dil: %@";
+"danger.title" = "Tehlikeli Bölge";
+"danger.continue" = "Devam et";
+"danger.sign_out_all" = "Tüm listelerden çıkış yap";
+"danger.sign_out_all.desc" = "Kaydedilmiş her listeyi ve verilerini bu cihazdan kaldırır. Uygulama ayarlarınız kalır.";
+"danger.sign_out_all.message" = "Kaydedilmiş her liste, kataloğu, favorileri, izleme geçmişi ve indirilenleri bu cihazdan kaldırılacak.";
+"danger.sign_out_all.final_title" = "Tüm listelerden çıkış yapılsın mı?";
+"danger.sign_out_all.final_message" = "Bu son onaydır. Yeniden giriş için sağlayıcı bilgileriniz gerekecek.";
+"danger.sign_out_all.final_confirm" = "Tümünden çıkış yap";
+"danger.erase" = "Tüm uygulama verilerini sil";
+"danger.erase.desc" = "Listeler, favoriler, geçmiş, indirilenler, PIN ve her ayar — yeni kurulum gibi.";
+"danger.erase.message" = "Uygulamanın bu cihazda sakladığı her şey silinecek: listeler ve içerikleri, favoriler, izleme geçmişi, indirilen dosyalar, gizli ve kilitli kategoriler, ebeveyn PIN'i ve tüm ayarlar.";
+"danger.erase.final_title" = "Tüm uygulama verileri silinsin mi?";
+"danger.erase.final_message" = "Bu son onaydır. Burada silinen hiçbir şey geri getirilemez.";
+"danger.erase.final_confirm" = "Her şeyi sil";
+"danger.error_message" = "Bazı veriler kaldırılamadı. Lütfen yeniden deneyin.";
+"backup.import.summary_title" = "Bu yedek içe aktarılsın mı?";
+"backup.import.summary_format" = "Bu yedek %d liste, %d favori, %d Daha Sonra İzle öğesi ve %d ayar içeriyor. Siz onaylamadan hiçbir şey uygulanmaz.";
+"backup.import.done_library_format" = "%d liste içe aktarıldı · %d favori · %d Daha Sonra İzle öğesi";
+
+// MARK: - Build 61 (b4)
+"player.speed.title" = "Oynatma Hızı";
+"player.sleep.title" = "Uyku Zamanlayıcısı";
+"player.sleep.off" = "Kapalı";
+"player.sleep.minutes" = "%d dk";
+"player.sleep.end_of_episode" = "Bölümün sonu";
+"player.sleep.remaining" = "%@ sonra duraklatılır";
+
+// MARK: - Build 61 (b5)
+"multiview.title" = "Çoklu Görünüm";
+"multiview.two_panes" = "İki panel";
+"multiview.four_panes" = "Dört panel";
+"multiview.no_channels" = "Henüz canlı kanal yüklenmedi. Önce bir oynatma listesi yükleyin, ardından Çoklu Görünümü açın.";
+"multiview.select_channel" = "Kanal seç";
+"multiview.search_channels" = "Kanal ara";
+"cast.button.title" = "Yayınla";
+"icloud.sync.title" = "iCloud Senkronizasyonu";
+
+// MARK: - Build 61 (b6)
+"gate.subtitle" = "IPTV • Oynatma Listesi Girişi";
+"settings.accent.flame" = "Alev";
+"home.expiry.expiring" = "Aboneliğiniz %d gün içinde sona eriyor (%@)";
+"home.expiry.expired" = "Aboneliğiniz %@ tarihinde sona erdi";
+"home.expiry.dismiss" = "Kapat";
+"splash.accessibility_label" = "Super X";

@@ -837,3 +837,95 @@
 "live.card.hide_category" = "Hide \"%@\"";
 "epg.search.programmes" = "Programmes";
 "epg.search.no_results" = "No programmes match your search";
+
+// MARK: - Build 61 (b1)
+"epgsearch.programmes" = "Programmes";
+"epgsearch.scope" = "Programmes · Today & tomorrow";
+
+// MARK: - Build 61 (b3)
+"settings.playback.title" = "Playback";
+"settings.appearance.title" = "Appearance";
+"settings.appearance.system" = "System";
+"settings.appearance.light" = "Light";
+"settings.appearance.dark" = "Dark";
+"settings.buffer.title" = "Buffer size";
+"settings.buffer.low" = "Low";
+"settings.buffer.default" = "Default";
+"settings.buffer.high" = "High";
+"settings.play_last.title" = "Play last channel on launch";
+"settings.play_last.desc" = "When the app opens, resume the live channel you watched most recently.";
+"parental.locked.title" = "Locked Categories";
+"parental.locked.need_pin" = "Set a parental PIN above first — locked categories are opened with that PIN.";
+"parental.locked.empty" = "No categories loaded for this playlist yet.";
+"parental.locked.unlock_session" = "Unlock all for this session";
+"parental.locked.enter_pin" = "This category is locked. Enter the parental PIN to open it.";
+"storage.title" = "Storage";
+"storage.cache" = "Cache";
+"storage.clear_cache" = "Clear";
+"subscription.title" = "Subscriptions";
+"subscription.m3u_source" = "M3U playlist — no provider account";
+"subscription.provider_format" = "Provider: %@";
+"subscription.provider_unknown" = "Xtream provider";
+"subscription.expired_format" = "Expired on %@";
+"subscription.active_format" = "Until %@ · %@";
+"support.title" = "Support";
+"support.faq.title" = "Frequently Asked Questions";
+"support.faq.q1" = "Does Super X provide channels or a subscription?";
+"support.faq.a1" = "No. Super X is a player only and comes with no channels, playlists or subscriptions. You add the playlist or Xtream account you received from your own provider, and Super X plays it for you.";
+"support.faq.q2" = "Where is my data stored?";
+"support.faq.a2" = "Everything stays on this device: your playlists, favorites, watch history, downloads and settings are stored locally in the app. Super X has no servers and nothing about your viewing is uploaded or tracked.";
+"support.faq.q3" = "A channel or movie won't play. What should I check?";
+"support.faq.a3" = "Most playback problems come from the provider side: an expired subscription, the connection limit on your account being reached, or the provider's server being down. Check the Subscriptions page for the expiry date and run Test Connection in Settings to see a plain-language result.";
+"support.faq.q4" = "What does the parental PIN protect?";
+"support.faq.a4" = "The PIN guards turning off the adult-content filter, deleting all app data, opening Settings when the settings lock is on, and any categories you lock under Locked Categories. A locked category cannot be opened until the PIN is entered. The PIN is stored only in this device's Keychain and is never included in a backup.";
+"support.faq.q5" = "How do I move my setup to a new device?";
+"support.faq.a5" = "In Settings, use Backup to export your settings, playlists, favorites and watch-later list to a file, then import that file on the new device. For safety, the settings export does not include playlist passwords — you will be asked to re-enter them during import. A separate full backup that includes passwords also exists, and the app warns you plainly before creating it.";
+"support.faq.q6" = "Why does my subscription show as expired?";
+"support.faq.a6" = "The expiry date and time come from your provider's own panel — the same answer the provider gives when the app signs in. When that moment passes, the provider stops the streams, and Super X shows the subscription as expired and blocks playback. Renewing with your provider updates the date the next time the app verifies the account.";
+"support.diagnostics.copy" = "Copy diagnostics";
+"support.diagnostics.playlists_format" = "Playlists: %d (%d Xtream, %d M3U)";
+"support.diagnostics.language_format" = "Language: %@";
+"danger.title" = "Danger Zone";
+"danger.continue" = "Continue";
+"danger.sign_out_all" = "Sign out of all playlists";
+"danger.sign_out_all.desc" = "Removes every saved playlist and its data from this device. Your app settings stay.";
+"danger.sign_out_all.message" = "Every saved playlist, its catalog, favorites, watch history and downloads will be removed from this device.";
+"danger.sign_out_all.final_title" = "Sign out of all playlists?";
+"danger.sign_out_all.final_message" = "This is the final confirmation. You will need your provider details to sign in again.";
+"danger.sign_out_all.final_confirm" = "Sign out of all";
+"danger.erase" = "Erase all app data";
+"danger.erase.desc" = "Playlists, favorites, history, downloads, the PIN and every setting — like a fresh install.";
+"danger.erase.message" = "Everything the app stores on this device will be erased: playlists and their content, favorites, watch history, downloaded files, hidden and locked categories, the parental PIN and all settings.";
+"danger.erase.final_title" = "Erase all app data?";
+"danger.erase.final_message" = "This is the final confirmation. Nothing erased here can be recovered.";
+"danger.erase.final_confirm" = "Erase everything";
+"danger.error_message" = "Some data could not be removed. Please try again.";
+"backup.import.summary_title" = "Import this backup?";
+"backup.import.summary_format" = "This backup contains %d playlists, %d favorites, %d watch-later items and %d settings. Nothing is applied until you confirm.";
+"backup.import.done_library_format" = "%d playlists imported · %d favorites · %d watch-later items";
+
+// MARK: - Build 61 (b4)
+"player.speed.title" = "Playback Speed";
+"player.sleep.title" = "Sleep Timer";
+"player.sleep.off" = "Off";
+"player.sleep.minutes" = "%d min";
+"player.sleep.end_of_episode" = "End of episode";
+"player.sleep.remaining" = "Pauses in %@";
+
+// MARK: - Build 61 (b5)
+"multiview.title" = "Multiview";
+"multiview.two_panes" = "Two panes";
+"multiview.four_panes" = "Four panes";
+"multiview.no_channels" = "No live channels are loaded yet. Load a playlist first, then open Multiview.";
+"multiview.select_channel" = "Select channel";
+"multiview.search_channels" = "Search channels";
+"cast.button.title" = "Cast";
+"icloud.sync.title" = "iCloud Sync";
+
+// MARK: - Build 61 (b6)
+"gate.subtitle" = "IPTV • Playlist Login";
+"settings.accent.flame" = "Flame";
+"home.expiry.expiring" = "Your subscription expires in %d days (%@)";
+"home.expiry.expired" = "Your subscription expired on %@";
+"home.expiry.dismiss" = "Dismiss";
+"splash.accessibility_label" = "Super X";

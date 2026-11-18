@@ -819,3 +819,95 @@
 "live.card.hide_category" = "إخفاء \"%@\"";
 "epg.search.programmes" = "البرامج";
 "epg.search.no_results" = "لا توجد برامج مطابقة لبحثك";
+
+// MARK: - Build 61 (b1)
+"epgsearch.programmes" = "البرامج";
+"epgsearch.scope" = "البرامج · اليوم وغداً";
+
+// MARK: - Build 61 (b3)
+"settings.playback.title" = "التشغيل";
+"settings.appearance.title" = "المظهر";
+"settings.appearance.system" = "النظام";
+"settings.appearance.light" = "فاتح";
+"settings.appearance.dark" = "داكن";
+"settings.buffer.title" = "حجم التخزين المؤقت";
+"settings.buffer.low" = "منخفض";
+"settings.buffer.default" = "افتراضي";
+"settings.buffer.high" = "مرتفع";
+"settings.play_last.title" = "تشغيل آخر قناة عند الفتح";
+"settings.play_last.desc" = "عند فتح التطبيق، تُستأنف آخر قناة مباشرة شاهدتها.";
+"parental.locked.title" = "الفئات المقفلة";
+"parental.locked.need_pin" = "عيّن رمز PIN للرقابة الأبوية أعلاه أولاً — تُفتح الفئات المقفلة بذلك الرمز.";
+"parental.locked.empty" = "لا توجد فئات محمّلة لهذه القائمة بعد.";
+"parental.locked.unlock_session" = "فتح الكل لهذه الجلسة";
+"parental.locked.enter_pin" = "هذه الفئة مقفلة. أدخل رمز PIN للرقابة الأبوية لفتحها.";
+"storage.title" = "التخزين";
+"storage.cache" = "ذاكرة التخزين المؤقت";
+"storage.clear_cache" = "مسح";
+"subscription.title" = "الاشتراكات";
+"subscription.m3u_source" = "قائمة M3U — بدون حساب مزوّد";
+"subscription.provider_format" = "المزوّد: %@";
+"subscription.provider_unknown" = "مزوّد Xtream";
+"subscription.expired_format" = "انتهى في %@";
+"subscription.active_format" = "حتى %@ · %@";
+"support.title" = "الدعم";
+"support.faq.title" = "الأسئلة الشائعة";
+"support.faq.q1" = "هل يوفّر Super X قنوات أو اشتراكاً؟";
+"support.faq.a1" = "لا. Super X مشغّل فقط ولا يأتي بأي قنوات أو قوائم تشغيل أو اشتراكات. تضيف القائمة أو حساب Xtream الذي استلمته من مزوّدك، ويقوم Super X بتشغيله لك.";
+"support.faq.q2" = "أين تُحفظ بياناتي؟";
+"support.faq.a2" = "كل شيء يبقى على هذا الجهاز: قوائم التشغيل والمفضلة وسجل المشاهدة والتنزيلات والإعدادات تُحفظ محلياً داخل التطبيق. لا يملك Super X خوادم، ولا يُرفع أي شيء عن مشاهدتك ولا تُتتبَّع.";
+"support.faq.q3" = "قناة أو فيلم لا يعمل. ما الذي أتحقق منه؟";
+"support.faq.a3" = "معظم مشاكل التشغيل من جهة المزوّد: اشتراك منتهٍ، أو بلوغ حد الاتصالات في حسابك، أو توقف خادم المزوّد. تحقق من صفحة الاشتراكات لمعرفة تاريخ الانتهاء، وشغّل «اختبار الاتصال» في الإعدادات لرؤية نتيجة بلغة واضحة.";
+"support.faq.q4" = "ما الذي يحميه رمز PIN للرقابة الأبوية؟";
+"support.faq.a4" = "يحمي الرمز إيقاف مرشح محتوى البالغين، وحذف كل بيانات التطبيق، وفتح الإعدادات عند تفعيل قفل الإعدادات، وأي فئات تقفلها ضمن «الفئات المقفلة». لا يمكن فتح فئة مقفلة حتى يُدخل الرمز. يُحفظ الرمز فقط في سلسلة مفاتيح هذا الجهاز ولا يُضمَّن أبداً في نسخة احتياطية.";
+"support.faq.q5" = "كيف أنقل إعداداتي إلى جهاز جديد؟";
+"support.faq.a5" = "من الإعدادات، استخدم النسخ الاحتياطي لتصدير إعداداتك وقوائم التشغيل والمفضلة وقائمة المشاهدة لاحقاً إلى ملف، ثم استورد ذلك الملف على الجهاز الجديد. حفاظاً على الأمان، لا يتضمن تصدير الإعدادات كلمات سر القوائم — سيُطلب منك إعادة إدخالها أثناء الاستيراد. توجد أيضاً نسخة احتياطية كاملة منفصلة تتضمن كلمات السر، ويحذّرك التطبيق بوضوح قبل إنشائها.";
+"support.faq.q6" = "لماذا يظهر اشتراكي منتهياً؟";
+"support.faq.a6" = "يأتي تاريخ الانتهاء ووقته من لوحة مزوّدك نفسها — نفس الإجابة التي يعطيها المزوّد عندما يسجّل التطبيق الدخول. عند مرور ذلك الوقت يوقف المزوّد البث، ويعرض Super X الاشتراك منتهياً ويمنع التشغيل. التجديد لدى مزوّدك يحدّث التاريخ في المرة التالية التي يتحقق فيها التطبيق من الحساب.";
+"support.diagnostics.copy" = "نسخ التشخيصات";
+"support.diagnostics.playlists_format" = "قوائم التشغيل: %d (%d Xtream، %d M3U)";
+"support.diagnostics.language_format" = "اللغة: %@";
+"danger.title" = "منطقة الخطر";
+"danger.continue" = "متابعة";
+"danger.sign_out_all" = "تسجيل الخروج من كل القوائم";
+"danger.sign_out_all.desc" = "يزيل كل قائمة محفوظة وبياناتها من هذا الجهاز. تبقى إعدادات التطبيق.";
+"danger.sign_out_all.message" = "ستُزال من هذا الجهاز كل قائمة محفوظة وكتالوجها ومفضلتها وسجل مشاهدتها وتنزيلاتها.";
+"danger.sign_out_all.final_title" = "تسجيل الخروج من كل القوائم؟";
+"danger.sign_out_all.final_message" = "هذا هو التأكيد الأخير. ستحتاج إلى بيانات مزوّدك لتسجيل الدخول مجدداً.";
+"danger.sign_out_all.final_confirm" = "تسجيل خروج الكل";
+"danger.erase" = "مسح كل بيانات التطبيق";
+"danger.erase.desc" = "القوائم والمفضلة والسجل والتنزيلات ورمز PIN وكل إعداد — كتثبيت جديد.";
+"danger.erase.message" = "سيُمسح كل ما يخزّنه التطبيق على هذا الجهاز: القوائم ومحتواها، والمفضلة، وسجل المشاهدة، والملفات المنزّلة، والفئات المخفية والمقفلة، ورمز PIN للرقابة الأبوية، وكل الإعدادات.";
+"danger.erase.final_title" = "مسح كل بيانات التطبيق؟";
+"danger.erase.final_message" = "هذا هو التأكيد الأخير. لا يمكن استرجاع أي شيء يُمسح هنا.";
+"danger.erase.final_confirm" = "مسح كل شيء";
+"danger.error_message" = "تعذّرت إزالة بعض البيانات. حاول مرة أخرى.";
+"backup.import.summary_title" = "استيراد هذه النسخة الاحتياطية؟";
+"backup.import.summary_format" = "تحتوي هذه النسخة على %d قائمة تشغيل و%d عنصر مفضل و%d عنصر مشاهدة لاحقاً و%d إعداد. لا يُطبَّق أي شيء حتى تؤكد.";
+"backup.import.done_library_format" = "تم استيراد %d قائمة · %d مفضل · %d عنصر مشاهدة لاحقاً";
+
+// MARK: - Build 61 (b4)
+"player.speed.title" = "سرعة التشغيل";
+"player.sleep.title" = "مؤقت النوم";
+"player.sleep.off" = "إيقاف";
+"player.sleep.minutes" = "%d دقيقة";
+"player.sleep.end_of_episode" = "نهاية الحلقة";
+"player.sleep.remaining" = "يتوقف بعد %@";
+
+// MARK: - Build 61 (b5)
+"multiview.title" = "العرض المتعدد";
+"multiview.two_panes" = "نافذتان";
+"multiview.four_panes" = "أربع نوافذ";
+"multiview.no_channels" = "لا توجد قنوات مباشرة محمّلة بعد. حمّل قائمة تشغيل أولاً، ثم افتح العرض المتعدد.";
+"multiview.select_channel" = "اختيار القناة";
+"multiview.search_channels" = "بحث القنوات";
+"cast.button.title" = "الإرسال";
+"icloud.sync.title" = "مزامنة iCloud";
+
+// MARK: - Build 61 (b6)
+"gate.subtitle" = "IPTV • تسجيل الدخول إلى قائمة التشغيل";
+"settings.accent.flame" = "لهب";
+"home.expiry.expiring" = "ينتهي اشتراكك خلال %d أيام (%@)";
+"home.expiry.expired" = "انتهى اشتراكك في %@";
+"home.expiry.dismiss" = "إغلاق";
+"splash.accessibility_label" = "Super X";
