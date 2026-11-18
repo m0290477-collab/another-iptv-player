@@ -1205,8 +1205,6 @@ struct SeriesDetailView: View {
     @State private var selectedEpisode: (DBEpisode, DBWatchHistory?)?
     @State private var episodeNavPrevious: DBEpisode?
     @State private var episodeNavNext: DBEpisode?
-    /// F-58: the next episode's numbers for the T-50 card line,
-    /// resolved with the neighbors in `loadEpisodeNeighbors`.
     /// Round 10: the Episodes/About tab under the action bar.
     @State private var detailTab = 0
     /// The episode the watch history points at (for the
