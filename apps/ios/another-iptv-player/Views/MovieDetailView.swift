@@ -7,12 +7,29 @@ import GRDBQuery
 struct MovieDetailView: View {
     let playlist: Playlist
     var movie: DBVODStream
-    /// Oynatıcıda önceki/sonraki film için kuyruk. Boşsa tek film olarak açılır.
+    /// The queue for the previous/next movie in the player. If empty, it opens as a single movie.
     var queue: [DBVODStream] = []
 
     @Environment(\.posterMetrics) private var posterMetrics
+    @ObservedObject private var contentStore = PlaylistContentStore.shared
+    @ObservedObject private var watchlistStore = WatchlistStore.shared
     @State private var isLoading = false
-    @State private var errorMessage: String?
+    /// Round 14 (B7): a metadata fetch failure no longer replaces the
+    /// page with an error screen — the detail renders fully from the
+    /// local record and the failure only arms a quiet retry row.
+    @State private var metadataFetchFailed = false
+    /// Round 15 (C7) related-title computations (More Like This
+    /// scoring, franchise group, duplicate editions) run once per
+    /// movie in a task, never per body pass.
+    @State private var moreLikeThisItems: [DBVODStream] = []
+    @State private var franchiseItems: [DBVODStream] = []
+    @State private var editions: [DBVODStream] = []
+    /// C7: pre-download size from the server's Content-Length, when
+    /// it provides one (nil = unknown = row hidden, never estimated).
+    @State private var downloadSizeText: String?
+    /// One navigation route for genre + people browsing — a single
+    /// `navigationDestination(item:)` per type is all SwiftUI allows.
+    @State private var pendingRoute: MovieDetailRoute?
     @State private var enlargedImage: IdentifiableURL?
     @State private var showNavTitle: Bool = false
     @State private var pendingMovieDetail: DBVODStream?
@@ -36,8 +53,8 @@ struct MovieDetailView: View {
 
     private var resumeMs: Int? {
         guard let h = watchHistory, h.lastTimeMs > 5000 else { return nil }
-        // Bitmiş (≥%98) filmde "Devam et" son saniyelere ışınlıyordu; nil dönünce
-        // birincil aksiyon baştan izlemeye düşer (resumeProgress ile tutarlı).
+        // On a finished (≥98%) movie, "Continue" was teleporting to the last seconds; when it returns nil,
+        // the primary action falls back to watching from the start (consistent with resumeProgress).
         if h.durationMs > 0, Double(h.lastTimeMs) / Double(h.durationMs) >= 0.98 { return nil }
         return h.lastTimeMs
     }
@@ -48,77 +65,182 @@ struct MovieDetailView: View {
         return (p > 0.02 && p < 0.98) ? p : nil
     }
 
+    /// Round 15 (C7): the trailer tile appears ONLY when the stored
+    /// value actually validates as a YouTube reference — a full
+    /// youtube.com / youtu.be URL, or a bare 11-character video id.
+    /// Panel junk ("N/A", other hosts, arbitrary text) yields no tile.
     private var trailerURL: URL? {
         guard let raw = currentMovie.youtubeTrailer?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else {
             return nil
         }
-        if raw.lowercased().hasPrefix("http") { return URL(string: raw) }
+        if raw.lowercased().hasPrefix("http") {
+            guard let url = URL(string: raw),
+                  let host = url.host?.lowercased(),
+                  host.contains("youtube.com") || host.contains("youtu.be") else { return nil }
+            return url
+        }
+        let idCharset = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        guard raw.count == 11, raw.unicodeScalars.allSatisfy({ idCharset.contains($0) }) else { return nil }
         return URL(string: "https://www.youtube.com/watch?v=\(raw)")
     }
 
     private var heroConfig: DetailHeroConfig {
         DetailHeroConfig(
             title: currentMovie.name,
-            backdropURL: currentMovie.backdropPath.flatMap { URL(string: $0) },
+            backdropURL: currentMovie.backdropPath.flatMap { let t = $0.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : URL(string: t) },
             posterURL: currentMovie.streamIcon.flatMap { URL(string: $0) },
             year: DetailFormatting.year(from: currentMovie.releaseDate),
+            releaseDate: currentMovie.releaseDate,
             runtime: currentMovie.duration?.trimmingCharacters(in: .whitespaces),
-            rating10: currentMovie.rating5Based.map { $0 * 2 },
+            // Round 14 (B7): the hero reads the ONE normalization
+            // point — the same value the poster badge and the Top
+            // Movies ranking use.
+            rating10: ContentRating.normalizedRating10(
+                rating: currentMovie.rating,
+                rating5Based: currentMovie.rating5Based
+            ),
             ratingText: currentMovie.rating,
             posterIconName: "film",
             backdropIconName: "film"
         )
     }
 
-    var body: some View {
-        Group {
-            if isLoading && !currentMovie.metadataLoaded {
-                ProgressView(L("detail.loading_movie"))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let error = errorMessage {
-                errorView(error)
-            } else {
-                contentScroll
+    private var moreLikeThisSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            DetailSectionHeader(title: L("detail.more_like_this"))
+                .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(moreLikeThisItems) { item in
+                        Button {
+                            pendingMovieDetail = item
+                        } label: {
+                            VODStreamCard(
+                                playlistId: playlist.id,
+                                stream: item,
+                                posterWidth: posterMetrics.searchCardWidth,
+                                posterHeight: posterMetrics.searchCardHeight,
+                                imageLoadProfile: .shelf
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
             }
+            .scrollClipDisabled()
+            .shelfEdgeFade()
         }
-        .navigationTitle(showNavTitle ? currentMovie.name : "")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(action: toggleFavorite) {
-                    Image(systemName: isFavorite ? "star.fill" : "star")
-                        .foregroundColor(isFavorite ? .yellow : .primary)
+    }
+
+    /// C7 franchise shelf: the other entries of this movie's
+    /// collection (same normalized base title), in release order.
+    private var franchiseSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            DetailSectionHeader(title: L("detail.collection"))
+                .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(franchiseItems) { item in
+                        Button {
+                            pendingMovieDetail = item
+                        } label: {
+                            VODStreamCard(
+                                playlistId: playlist.id,
+                                stream: item,
+                                posterWidth: posterMetrics.searchCardWidth,
+                                posterHeight: posterMetrics.searchCardHeight,
+                                imageLoadProfile: .shelf
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .scrollClipDisabled()
+            .shelfEdgeFade()
+        }
+    }
+
+    /// C7 duplicate editions: the same normalized title + year exists
+    /// more than once in the catalog (different categories / file
+    /// types). Each row is labeled ONLY with real data — the edition's
+    /// own category name and container extension.
+    private var editionsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            DetailSectionHeader(title: L("detail.versions"))
+                .padding(.horizontal, 16)
+
+            VStack(spacing: 8) {
+                ForEach(editions) { edition in
+                    Button {
+                        if edition.streamId != currentMovie.streamId {
+                            pendingMovieDetail = edition
+                        }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: edition.streamId == currentMovie.streamId ? "checkmark.circle.fill" : "film")
+                                .foregroundStyle(edition.streamId == currentMovie.streamId ? AppTheme.accent : .secondary)
+                            Text(MovieCatalogNaming.categoryName(for: edition, in: contentStore) ?? "")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Spacer(minLength: 8)
+                            if let ext = edition.containerExtension?.trimmingCharacters(in: .whitespaces), !ext.isEmpty {
+                                Text(ext.uppercased())
+                                    .font(AppTheme.fontBadge)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius, style: .continuous)
+                                .fill(AppTheme.elevated)
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
+            .padding(.horizontal, 16)
         }
+    }
+
+    var body: some View {
+        // Round 14 (B7): the page ALWAYS renders from the local
+        // record — a slow or failed metadata fetch never blocks the
+        // detail page or playback.
+        contentScroll
+        .navigationTitle(showNavTitle ? currentMovie.name : "")
+        .navigationBarTitleDisplayMode(.inline)
+        // Round 10: the favorite action moved beside the Play
+        // button (DetailFavoriteDownloadRow) — the toolbar star is
+        // gone so the action exists exactly once on this page.
         .fullScreenCover(item: $enlargedImage) { wrapper in
             FullscreenImageViewer(url: wrapper.url)
         }
         .navigationDestination(item: $pendingMovieDetail) { nextMovie in
             MovieDetailView(playlist: playlist, movie: nextMovie, queue: queue)
         }
+        .navigationDestination(item: $pendingRoute) { route in
+            switch route {
+            case .genre(let genre):
+                MovieGenreGridView(playlist: playlist, initialGenre: genre)
+            case .person(let person):
+                PersonTitlesView(playlist: playlist, person: person)
+            }
+        }
         .task {
             if !currentMovie.metadataLoaded {
                 await fetchMovieInfo()
             }
         }
-    }
-
-    private func errorView(_ error: String) -> some View {
-        VStack(spacing: 16) {
-            Text(L("common.error"))
-                .font(.headline)
-            Text(error)
-                .foregroundColor(.red)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-            Button(L("common.try_again")) {
-                Task { await fetchMovieInfo() }
-            }
-            .buttonStyle(.borderedProminent)
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: currentMovie.streamId) { await computeRelated() }
+        .task(id: currentMovie.streamId) { await fetchDownloadSize() }
+        .cinematicBackground()
     }
 
     private var contentScroll: some View {
@@ -128,7 +250,11 @@ struct MovieDetailView: View {
                     enlargedImage = IdentifiableURL(url: url)
                 }
 
-                GenreChipRow(genres: DetailFormatting.genreList(currentMovie.genre))
+                // Round 14 (B1/B7): genre chips navigate to the
+                // Movies tab's genre-filtered grid.
+                GenreChipRow(genres: DetailFormatting.genreList(currentMovie.genre)) { genre in
+                    pendingRoute = .genre(genre)
+                }
 
                 DetailActionBar(
                     primaryTitle: resumeMs != nil ? L("detail.resume") : L("detail.watch_now"),
@@ -138,28 +264,73 @@ struct MovieDetailView: View {
                     onPrimary: { presentMoviePlayer(resume: true) },
                     restartTitle: resumeMs != nil ? L("detail.restart") : nil,
                     onRestart: resumeMs != nil ? { presentMoviePlayer(resume: false) } : nil,
-                    trailerURL: trailerURL
+                    // C7: the trailer renders as its own tile below
+                    // (backdrop + play badge) — not the action bar's
+                    // text link — so it exists exactly once here.
+                    trailerURL: nil
                 )
 
-                if let remoteURL = PlaybackURLBuilder(playlist: playlist).movieURL(
-                    streamId: currentMovie.streamId,
-                    containerExtension: currentMovie.containerExtension
-                ) {
-                    DownloadButton(
-                        id: DownloadManager.idFor(vod: playlist.id, streamId: currentMovie.streamId),
-                        playlistId: playlist.id,
-                        streamId: String(currentMovie.streamId),
-                        type: "vod",
-                        title: currentMovie.name,
-                        secondaryTitle: currentMovie.genre,
-                        imageURL: currentMovie.streamIcon,
-                        remoteURL: remoteURL,
+                // Round 10 (point 20): favorite + download sit
+                // beside Play as one row (was: a toolbar star plus a
+                // standalone download button below the action bar).
+                DetailFavoriteDownloadRow(isFavorite: isFavorite, onToggleFavorite: toggleFavorite) {
+                    if let remoteURL = PlaybackURLBuilder(playlist: playlist).movieURL(
+                        streamId: currentMovie.streamId,
                         containerExtension: currentMovie.containerExtension
-                    )
-                    .padding(.horizontal, 16)
-                    // Fragman satırıyla aynı sıkı aralık; VStack spacing 20'yi -10 ile nötrleyip
-                    // DetailActionBar içindeki 10pt ritme hizalar.
+                    ) {
+                        DownloadButton(
+                            id: DownloadManager.idFor(vod: playlist.id, streamId: currentMovie.streamId),
+                            playlistId: playlist.id,
+                            streamId: String(currentMovie.streamId),
+                            type: "vod",
+                            title: currentMovie.name,
+                            secondaryTitle: currentMovie.genre,
+                            imageURL: currentMovie.streamIcon,
+                            remoteURL: remoteURL,
+                            containerExtension: currentMovie.containerExtension
+                        )
+                    } else {
+                        EmptyView()
+                    }
+                }
+                // The same tight spacing as the trailer row; neutralizing the VStack spacing 20 with -10
+                // DetailActionBar içindeki 10pt ritme hizalar.
+                .padding(.top, -10)
+
+                // C7: Watchlist (bookmark) — a state SEPARATE from
+                // Favorites, with its own surface on the Movies tab.
+                watchlistRow
                     .padding(.top, -10)
+
+                if let downloadSizeText {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.down.circle")
+                            .font(.caption)
+                        Text(downloadSizeText)
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.top, -12)
+                }
+
+                if metadataFetchFailed && !currentMovie.metadataLoaded {
+                    // B7: non-blocking retry — a quiet row, never a
+                    // page takeover.
+                    Button {
+                        Task { await fetchMovieInfo() }
+                    } label: {
+                        Label(L("common.try_again"), systemImage: "arrow.clockwise")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AppTheme.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.top, -8)
+                }
+
+                if let trailerURL {
+                    trailerTile(url: trailerURL)
                 }
 
                 if let plot = currentMovie.plot?.trimmingCharacters(in: .whitespacesAndNewlines), !plot.isEmpty {
@@ -168,11 +339,39 @@ struct MovieDetailView: View {
                 }
 
                 if let director = currentMovie.director?.trimmingCharacters(in: .whitespacesAndNewlines), !director.isEmpty {
-                    DetailInfoTextBlock(label: L("movie.director"), value: director)
+                    // C7: director names are tappable — they browse
+                    // that person's titles in this catalog.
+                    DetailInfoTextBlock(label: L("movie.director"), value: director) { person in
+                        pendingRoute = .person(person)
+                    }
                 }
 
                 if let cast = currentMovie.cast?.trimmingCharacters(in: .whitespacesAndNewlines), !cast.isEmpty {
-                    DetailInfoTextBlock(label: L("movie.cast"), value: cast, lineLimit: 3)
+                    // C7: cast names are tappable chips (the full
+                    // list scrolls — nothing is clipped away), which
+                    // also covers B7's "cast must not dead-end at 3
+                    // lines" complaint.
+                    DetailInfoTextBlock(label: L("movie.cast"), value: cast) { person in
+                        pendingRoute = .person(person)
+                    }
+                }
+
+                // B7: the container extension is real record data —
+                // shown on the detail page.
+                if let ext = currentMovie.containerExtension?.trimmingCharacters(in: .whitespaces), !ext.isEmpty {
+                    DetailInfoTextBlock(label: L("movie.format"), value: ext.uppercased())
+                }
+
+                if editions.count > 1 {
+                    editionsSection
+                }
+
+                if !franchiseItems.isEmpty {
+                    franchiseSection
+                }
+
+                if !moreLikeThisItems.isEmpty {
+                    moreLikeThisSection
                 }
             }
             .padding(.bottom, 48)
@@ -188,6 +387,186 @@ struct MovieDetailView: View {
         .ignoresSafeArea(edges: .top)
     }
 
+    /// C7 watchlist toggle row: bookmark state, distinct from the
+    /// favorite star beside Play.
+    private var watchlistRow: some View {
+        let inList = watchlistStore.contains(playlistId: playlist.id, streamId: currentMovie.streamId)
+        return Button {
+            watchlistStore.toggle(playlistId: playlist.id, streamId: currentMovie.streamId)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: inList ? "bookmark.fill" : "bookmark")
+                    .font(.footnote.weight(.semibold))
+                Text(inList ? L("watchlist.in_list") : L("watchlist.add"))
+                    .font(.footnote.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+            }
+            .foregroundStyle(inList ? AppTheme.accent : Color.primary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .fill(AppTheme.elevated)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .strokeBorder(AppTheme.cardBorderColor, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .accessibilityLabel(L("watchlist.title"))
+    }
+
+    /// C7 trailer tile: the movie's real backdrop (poster fallback)
+    /// with a play badge; opens the validated YouTube URL externally.
+    private func trailerTile(url: URL) -> some View {
+        Link(destination: url) {
+            ZStack {
+                CachedImage(
+                    url: currentMovie.backdropPath.flatMap { let t = $0.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : URL(string: t) } ?? currentMovie.streamIcon.flatMap { URL(string: $0) },
+                    width: UIScreen.main.bounds.width - 32,
+                    height: 160,
+                    cornerRadius: AppTheme.cornerRadius,
+                    contentMode: .fill,
+                    iconName: "film",
+                    loadProfile: .standard
+                )
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .frame(width: 56, height: 56)
+                Image(systemName: "play.fill")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.white)
+                VStack {
+                    Spacer()
+                    HStack {
+                        Text(L("detail.trailer"))
+                            .font(AppTheme.fontBadge)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(Color.black.opacity(0.55)))
+                        Spacer()
+                    }
+                    .padding(10)
+                }
+            }
+            .frame(height: 160)
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+    }
+
+    /// C7 computations over the in-memory catalog, run once per
+    /// movie off the main thread:
+    /// - More Like This scoring: shared genres (3 pts each) + shared
+    ///   cast/director (2 pts each) + year proximity (up to 2 pts,
+    ///   decaying over a decade); ties break by normalized rating,
+    ///   then recency. THE one More Like This implementation.
+    /// - Franchise group: same normalized base title, ≥2 members.
+    /// - Duplicate editions: same normalized title + release year.
+    private func computeRelated() async {
+        let snapshot = contentStore.vodStreams.map(\.stream)
+        let source = currentMovie
+        let result = await Task.detached(priority: .utility) {
+            () -> (more: [DBVODStream], franchise: [DBVODStream], editions: [DBVODStream]) in
+            let myGenres = Set(DetailFormatting.genreList(source.genre).map { $0.lowercased() })
+            let myPeople = Set(
+                (DetailFormatting.peopleList(source.cast) + DetailFormatting.peopleList(source.director))
+                    .map { $0.lowercased() }
+            )
+            let myYear = DetailFormatting.releaseYear(from: source.releaseDate)
+            let myCategory = source.categoryId
+
+            var scored: [(movie: DBVODStream, score: Double, rating: Double, added: Int)] = []
+            scored.reserveCapacity(64)
+            for candidate in snapshot where candidate.streamId != source.streamId {
+                var score = 0.0
+                let genres = Set(DetailFormatting.genreList(candidate.genre).map { $0.lowercased() })
+                score += 3.0 * Double(genres.intersection(myGenres).count)
+                let people = Set(
+                    (DetailFormatting.peopleList(candidate.cast) + DetailFormatting.peopleList(candidate.director))
+                        .map { $0.lowercased() }
+                )
+                score += 2.0 * Double(people.intersection(myPeople).count)
+                if let myYear, let year = DetailFormatting.releaseYear(from: candidate.releaseDate) {
+                    let diff = abs(myYear - year)
+                    if diff < 10 { score += 2.0 * (1.0 - Double(diff) / 10.0) }
+                }
+                // Same provider category stays a weak signal (the
+                // round-10 relation), far below a real genre match.
+                if let myCategory, candidate.categoryId == myCategory { score += 0.5 }
+                guard score > 0 else { continue }
+                scored.append((
+                    movie: candidate,
+                    score: score,
+                    rating: ContentRating.normalizedRating10(rating: candidate.rating, rating5Based: candidate.rating5Based) ?? -1,
+                    added: candidate.added.flatMap(Int.init) ?? Int.min
+                ))
+            }
+            scored.sort { a, b in
+                if a.score != b.score { return a.score > b.score }
+                if a.rating != b.rating { return a.rating > b.rating }
+                return a.added > b.added
+            }
+            let more = Array(scored.prefix(15).map(\.movie))
+
+            let base = MovieCatalogNaming.franchiseBase(source.name)
+            var franchise: [DBVODStream] = []
+            if !base.isEmpty {
+                franchise = snapshot
+                    .filter { $0.streamId != source.streamId && MovieCatalogNaming.franchiseBase($0.name) == base }
+                    .sorted { a, b in
+                        let ya = DetailFormatting.releaseYear(from: a.releaseDate) ?? Int.max
+                        let yb = DetailFormatting.releaseYear(from: b.releaseDate) ?? Int.max
+                        if ya != yb { return ya < yb }
+                        return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+                    }
+            }
+
+            let nameKey = MovieCatalogNaming.normalizedTitle(source.name)
+            var editions: [DBVODStream] = []
+            if !nameKey.isEmpty {
+                editions = snapshot
+                    .filter {
+                        MovieCatalogNaming.normalizedTitle($0.name) == nameKey
+                            && DetailFormatting.releaseYear(from: $0.releaseDate) == myYear
+                    }
+                    .sorted { $0.streamId < $1.streamId }
+            }
+            return (more, franchise, editions)
+        }.value
+        guard !Task.isCancelled else { return }
+        moreLikeThisItems = result.more
+        franchiseItems = result.franchise
+        editions = result.editions
+    }
+
+    /// C7: one HEAD request for the movie's remote file; the size is
+    /// shown only when the server actually sends a Content-Length.
+    private func fetchDownloadSize() async {
+        downloadSizeText = nil
+        guard let url = PlaybackURLBuilder(playlist: playlist).movieURL(
+            streamId: currentMovie.streamId,
+            containerExtension: currentMovie.containerExtension
+        ) else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 8
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              http.expectedContentLength > 0 else { return }
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        let size = formatter.string(fromByteCount: http.expectedContentLength)
+        guard !Task.isCancelled else { return }
+        downloadSizeText = L("download.file_size_format", size)
+    }
+
     private func presentMoviePlayer(resume: Bool) {
         Task {
             let localURL = await DownloadManager.shared.localURL(
@@ -200,8 +579,8 @@ struct MovieDetailView: View {
     }
 
     private func presentMoviePlayer(resume: Bool, localOverrideURL: URL?) {
-        // resumeMs sınırlı (bitmiş film → nil); ham lastTimeMs kullanmak bitmiş filmde
-        // "İzle"ye basınca bile sona sıçratıyordu.
+        // resumeMs is limited (finished movie → nil); using the raw lastTimeMs was jumping to the end
+        // even when "Watch" was pressed on a finished movie.
         let r = resume ? resumeMs : nil
         let originStreamId = currentMovie.streamId
         let navigateToDetail: (String, String) -> Void = { type, id in
@@ -227,7 +606,7 @@ struct MovieDetailView: View {
                 }
             }
         }
-        // İndirilmiş dosya varsa queue'yu atla, tek film olarak local dosyadan oyna.
+        // If there is a downloaded file, skip the queue and play as a single movie from the local file.
         if localOverrideURL == nil, !queue.isEmpty {
             playerOverlay.present(playlistId: playlist.id) {
                 VODPlayerShell(
@@ -268,14 +647,14 @@ struct MovieDetailView: View {
 
     private func fetchMovieInfo() async {
         isLoading = true
-        errorMessage = nil
+        metadataFetchFailed = false
         let client = XtreamAPIClient(playlist: playlist)
         do {
             let response = try await client.getVODInfo(vodId: movie.streamId)
 
-            // @Query destekli currentMovie'yi MAIN actor'da kopyala: write closure'ı
-            // GRDB'nin arka plan writer kuyruğunda koşar ve SwiftUI property-wrapper
-            // state'ini oradan okumak veri yarışıdır.
+            // Copy the @Query-backed currentMovie on the MAIN actor: the write closure
+            // runs on GRDB's background writer queue, and reading SwiftUI property-wrapper
+            // state from there is a data race.
             let base = await MainActor.run { currentMovie }
             let saved: DBVODStream = try await AppDatabase.shared.write { db in
                 var updatedMovie = base
@@ -289,13 +668,21 @@ struct MovieDetailView: View {
                     updatedMovie.rating = i.rating
                     updatedMovie.backdropPath = i.backdropPath?.first
                     updatedMovie.youtubeTrailer = i.youtubeTrailer
-                    updatedMovie.duration = i.duration
+                    // Round 14 (B7): runtime is formatted from the
+                    // panel's real `duration_secs`; the raw duration
+                    // string is only a fallback.
+                    if let formatted = DetailFormatting.runtimeFromSeconds(i.durationSecs) {
+                        updatedMovie.duration = formatted
+                    } else {
+                        updatedMovie.duration = i.duration
+                    }
                     updatedMovie.tmdbId = i.tmdbId
                     updatedMovie.kinopoiskURL = i.kinopoiskURL
-                    
-                    if let rString = i.rating, let rDouble = Double(rString) {
-                         updatedMovie.rating5Based = rDouble / 2.0
-                    }
+                    // Round 14 (B7): the provider's own `rating5Based`
+                    // is NEVER overwritten with a value derived from
+                    // the 0–10 `rating` string — the old code halved
+                    // `rating` into it, corrupting the one
+                    // normalization point for every fetched movie.
                 }
                 try updatedMovie.update(db)
                 return updatedMovie
@@ -306,8 +693,11 @@ struct MovieDetailView: View {
                 self.isLoading = false
             }
         } catch {
+            // Round 14 (B7): failure is non-blocking — the page keeps
+            // rendering from the local record; only the quiet retry
+            // row appears.
             await MainActor.run {
-                self.errorMessage = error.localizedDescription
+                self.metadataFetchFailed = true
                 self.isLoading = false
             }
         }
@@ -327,7 +717,7 @@ struct MovieDetailView: View {
                     }
                 }
             } catch {
-                print("Failed to toggle favorite: \(error)")
+                Log.error("MovieDetail", "Failed to toggle favorite: \(error.localizedDescription)")
             }
         }
     }

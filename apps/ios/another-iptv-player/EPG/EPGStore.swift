@@ -57,9 +57,26 @@ final class EPGStore: ObservableObject {
     private var configured = false                    // active playlist has a successful epgSource
     private var version = 0
 
+    /// C10 (Round 15): fingerprint of the last published now/next
+    /// snapshot. The 60 s tick re-queries every minute, but a new
+    /// snapshot is published ONLY when the now/next assignment actually
+    /// changed — previously every tick bumped `version` and republished,
+    /// re-rendering every EPG-reading card once a minute for nothing.
+    private var lastSnapshotFingerprint: Int?
     private var tickTask: Task<Void, Never>?
     private var activeRefreshTasks: [UUID: Task<Void, Never>] = [:]
     private var observers: [NSObjectProtocol] = []
+
+    /// Round 14 (B10): when the store was created, and whether the
+    /// first-launch settle window has already been honored. The
+    /// dashboards call `refreshIfStale` from their root `.task`, i.e.
+    /// during the very first render — starting a full XMLTV download
+    /// + parse there competes with that render on a cold launch.
+    private let createdAt = Date()
+    private var didHonorFirstLaunchSettle = false
+    /// How long after store creation the first stale-refresh waits
+    /// before touching the network (only while no snapshot exists).
+    private static let firstLaunchSettleDelay: TimeInterval = 2.5
 
     private init() {}
 
@@ -111,13 +128,38 @@ final class EPGStore: ObservableObject {
 
     // MARK: - Timer
 
+    /// Round 15 (C10): the player stamps this UserDefaults key
+    /// with the current time while fullscreen playback is active
+    /// (refreshed on a heartbeat, so a crashed/killed app can't
+    /// leave it set). While it is fresh, the minute tick below is
+    /// lengthened to 5 minutes: rebuilding the now/next index
+    /// every 60 s competes with fullscreen video decode, and a
+    /// programme boundary crossed mid-playback is not worth that
+    /// cost — the index is rebuilt on the normal cadence as soon
+    /// as playback ends or shrinks to the mini player.
+    nonisolated static let fullscreenPlaybackStampKey = "epg.fullscreenPlaybackActiveAt"
+    private static let fullscreenTickInterval: TimeInterval = 300
+    private static let fullscreenStampFreshness: TimeInterval = 90
+
+    private static var isFullscreenPlaybackActive: Bool {
+        let stamp = UserDefaults.standard.double(forKey: fullscreenPlaybackStampKey)
+        guard stamp > 0 else { return false }
+        return Date().timeIntervalSince1970 - stamp < fullscreenStampFreshness
+    }
+
     private func startTimerIfActive() {
         guard activePlaylistId != nil, tickTask == nil else { return }
         tickTask = Task { [weak self] in
             while !Task.isCancelled {
                 let now = Date()
                 let nextBoundary = (now.timeIntervalSince1970 / 60.0).rounded(.down) * 60 + 60
-                let delay = max(1, nextBoundary - now.timeIntervalSince1970)
+                var delay = max(1, nextBoundary - now.timeIntervalSince1970)
+                // Round 15 (C10): lengthen (never fully pause, so
+                // a stale stamp still recovers) during fullscreen
+                // playback — see `fullscreenPlaybackStampKey`.
+                if Self.isFullscreenPlaybackActive {
+                    delay = max(delay, Self.fullscreenTickInterval)
+                }
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 if Task.isCancelled { break }
                 await self?.tick()
@@ -136,16 +178,31 @@ final class EPGStore: ObservableObject {
         nowDate = Date()
         guard let pid = activePlaylistId else { snapshot = nil; return }
         let now = Int64(Date().timeIntervalSince1970)
-        let lookahead = now + Int64(EPGConstants.nowNextLookahead)
 
+        // C10 (Round 15): the tick query is narrowed to NOW/NEXT per
+        // channel only. The old query fetched EVERY programme starting
+        // within the 12 h lookahead for every channel (thousands of
+        // rows on a big guide) just to pick the first current and the
+        // first future row per channel. Two arms: (1) the programme on
+        // air now, (2) the single earliest future programme per channel
+        // via a correlated MIN(startTs).
         let rows: [DBEPGProgramme]
         do {
             rows = try await AppDatabase.shared.read { db in
                 try DBEPGProgramme.fetchAll(db, sql: """
                     SELECT * FROM epgProgramme
-                    WHERE playlistId = ? AND stopTs > ? AND startTs < ?
+                    WHERE playlistId = ? AND startTs <= ? AND stopTs > ?
+                    UNION ALL
+                    SELECT * FROM epgProgramme AS p
+                    WHERE p.playlistId = ? AND p.startTs > ?
+                      AND p.startTs = (
+                          SELECT MIN(q.startTs) FROM epgProgramme AS q
+                          WHERE q.playlistId = p.playlistId
+                            AND q.channelKey = p.channelKey
+                            AND q.startTs > ?
+                      )
                     ORDER BY channelKey, startTs
-                    """, arguments: [pid, now, lookahead])
+                    """, arguments: [pid, now, now, pid, now, now])
             }
         } catch {
             return
@@ -172,12 +229,29 @@ final class EPGStore: ObservableObject {
         }
 
         if dict.isEmpty && !configured {
-            snapshot = nil
+            if snapshot != nil { snapshot = nil }
+            lastSnapshotFingerprint = nil
             return
         }
-        // Publish once per minute even while now/next titles are unchanged. Card
-        // progress bars derive their fraction from the current time and therefore
-        // need a new snapshot version to redraw.
+        // C10 (Round 15): publish ONLY on change. The fingerprint
+        // covers exactly what a snapshot consumer can see — per channel,
+        // the now/next programmes' start/stop/title. `nowDate` above
+        // still advances every tick, so time-driven UI (progress bars)
+        // keeps its clock without a whole-snapshot republish.
+        var hasher = Hasher()
+        for key in dict.keys.sorted() {
+            hasher.combine(key)
+            if let entry = dict[key] {
+                hasher.combine(entry.now?.start)
+                hasher.combine(entry.now?.stop)
+                hasher.combine(entry.now?.title)
+                hasher.combine(entry.next?.start)
+                hasher.combine(entry.next?.title)
+            }
+        }
+        let fingerprint = hasher.finalize()
+        guard fingerprint != lastSnapshotFingerprint else { return }
+        lastSnapshotFingerprint = fingerprint
         version += 1
         snapshot = EPGSnapshot(version: version, byChannelKey: dict)
     }
@@ -398,7 +472,24 @@ final class EPGStore: ObservableObject {
         }
         // M3U with no configured source → nothing to do.
         if playlist.kind == .m3u, playlist.effectiveEPGURL == nil { return }
+        // Round 14 (B10): defer the network refresh until the first
+        // render settles on a cold launch (see `createdAt`). Only the
+        // stale path pays this — `forceRefresh` stays immediate.
+        await waitForFirstLaunchSettleIfNeeded()
+        guard !Task.isCancelled else { return }
         await runRefresh(playlist: playlist)
+    }
+
+    /// Sleeps out the remainder of the settle window exactly once
+    /// per store lifetime, and only while no snapshot has been
+    /// published yet (a warm store with data on screen never waits).
+    private func waitForFirstLaunchSettleIfNeeded() async {
+        guard !didHonorFirstLaunchSettle else { return }
+        didHonorFirstLaunchSettle = true
+        guard snapshot == nil else { return }
+        let remaining = Self.firstLaunchSettleDelay - Date().timeIntervalSince(createdAt)
+        guard remaining > 0 else { return }
+        try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
     }
 
     func forceRefresh(playlist: Playlist) async {

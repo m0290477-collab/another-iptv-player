@@ -6,18 +6,27 @@ private enum M3UFormField: Hashable {
     case name, url
 }
 
-/// M3U/M3U8 türü playlist için ayrı ekleme ekranı. Xtream akışı etkilenmez.
+/// A separate edit screen for an M3U/M3U8-type playlist. The Xtream flow is unaffected.
+///
+/// Round 8 (F-5): edit-only, like AddPlaylistView — creation lives on
+/// the playlist gate (round 4), so the new-playlist branches here were
+/// unreachable and are removed (`editingPlaylist` is non-optional now;
+/// the Xtream auto-detection branch and its `addAsXtream` helper went
+/// with them). Round 16 (F2): the save pipelines themselves are no
+/// longer copies at all — the gate and both sheets run the one shared
+/// PlaylistSaveService. The only call site is ContentView's gate
+/// edit sheet.
 struct AddM3UPlaylistView: View {
     @Environment(\.dismiss) private var dismiss
 
-    let editingPlaylist: Playlist?
+    let editingPlaylist: Playlist
 
     @FocusState private var focusedField: M3UFormField?
 
     @State private var name: String
     @State private var url: String
 
-    /// Yerel dosya yüklenmiş mi? (URL modu ile karşılıklı.)
+    /// Has a local file been uploaded? (Mutually exclusive with URL mode.)
     @State private var localFileName: String? = nil
     @State private var localContent: String? = nil
 
@@ -28,10 +37,10 @@ struct AddM3UPlaylistView: View {
     @State private var errorMessage: String?
     @State private var showError = false
 
-    init(editingPlaylist: Playlist? = nil) {
+    init(editingPlaylist: Playlist) {
         self.editingPlaylist = editingPlaylist
-        _name = State(initialValue: editingPlaylist?.name ?? "")
-        _url = State(initialValue: editingPlaylist?.serverURL ?? "")
+        _name = State(initialValue: editingPlaylist.name)
+        _url = State(initialValue: editingPlaylist.serverURL)
     }
 
     private var hasLocalFile: Bool { localContent != nil }
@@ -40,65 +49,86 @@ struct AddM3UPlaylistView: View {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty, !isLoading else { return false }
         if hasLocalFile { return true }
         let trimmedURL = url.trimmingCharacters(in: .whitespaces)
-        // Düzenlemede kaynak değişmediyse yalnız ad güncellenir; yerel dosyadan
-        // eklenmiş playlist'lerde serverURL boştur, boş URL kaydı engellememeli.
-        if let editing = editingPlaylist, trimmedURL == editing.serverURL { return true }
+        // In editing, if the source hasn't changed only the name is updated; on playlists added from a local file
+        // serverURL is empty — an empty URL must not block the record.
+        if trimmedURL == editingPlaylist.serverURL { return true }
         return !trimmedURL.isEmpty
     }
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section(header: Text(L("add_playlist.section.info"))) {
-                    TextField(L("add_m3u.name_placeholder"), text: $name)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.words)
-                        .focused($focusedField, equals: .name)
-                        .submitLabel(.next)
-                        .onSubmit { focusedField = .url }
-                }
-
-                Section(header: Text(L("add_m3u.section.source")), footer: Text(L("add_m3u.section.source_footer"))) {
-                    TextField(L("add_m3u.url_placeholder"), text: $url)
-                        .keyboardType(.URL)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .focused($focusedField, equals: .url)
-                        .submitLabel(.done)
-                        .disabled(hasLocalFile)
-                        .foregroundColor(hasLocalFile ? .secondary : .primary)
-
-                    HStack {
-                        Button {
-                            focusedField = nil
-                            showFileImporter = true
-                        } label: {
-                            Label(hasLocalFile ? L("add_m3u.pick_another_file") : L("add_m3u.pick_file"),
-                                  systemImage: "doc.badge.plus")
-                        }
-
-                        Spacer()
-
-                        if let local = localFileName {
-                            Text(local)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
+            // Round 14 (B11): rebuilt on the ELITE SettingsComponents
+            // / AppTheme system instead of the classic Form look.
+            // Save/validation logic below is unchanged.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    SettingsGroupHeader(title: L("add_playlist.section.info"))
+                    SettingsFormCard {
+                        VStack(alignment: .leading, spacing: 6) {
+                            SettingsFieldLabel(title: L("gate.field.name"))
+                            TextField(L("add_m3u.name_placeholder"), text: $name)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.words)
+                                .focused($focusedField, equals: .name)
+                                .submitLabel(.next)
+                                .onSubmit { focusedField = .url }
+                                .settingsFieldChrome()
                         }
                     }
 
-                    if hasLocalFile {
-                        Button(role: .destructive) {
-                            localFileName = nil
-                            localContent = nil
-                        } label: {
-                            Label(L("add_m3u.remove_file"), systemImage: "xmark.circle")
+                    SettingsGroupHeader(title: L("add_m3u.section.source"))
+                    SettingsFormCard {
+                        VStack(alignment: .leading, spacing: 6) {
+                            SettingsFieldLabel(title: L("gate.field.playlist_url"))
+                            TextField(L("add_m3u.url_placeholder"), text: $url)
+                                .keyboardType(.URL)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .focused($focusedField, equals: .url)
+                                .submitLabel(.done)
+                                .disabled(hasLocalFile)
+                                .foregroundColor(hasLocalFile ? .secondary : .primary)
+                                .settingsFieldChrome()
                         }
+
+                        HStack {
+                            Button {
+                                focusedField = nil
+                                showFileImporter = true
+                            } label: {
+                                Label(hasLocalFile ? L("add_m3u.pick_another_file") : L("add_m3u.pick_file"),
+                                      systemImage: "doc.badge.plus")
+                            }
+
+                            Spacer()
+
+                            if let local = localFileName {
+                                Text(local)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        }
+
+                        if hasLocalFile {
+                            Button(role: .destructive) {
+                                localFileName = nil
+                                localContent = nil
+                            } label: {
+                                Label(L("add_m3u.remove_file"), systemImage: "xmark.circle")
+                            }
+                        }
+
+                        Text(L("add_m3u.section.source_footer"))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                 }
+                .padding(16)
             }
-            .navigationTitle(editingPlaylist == nil ? L("add_m3u.title_new") : L("add_m3u.title_edit"))
+            .cinematicBackground()
+            .navigationTitle(L("add_m3u.title_edit"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -127,8 +157,8 @@ struct AddM3UPlaylistView: View {
                             .multilineTextAlignment(.center)
                     }
                     .padding(24)
-                    .background(Color(.systemBackground).opacity(0.9))
-                    .cornerRadius(12)
+                    .background(AppTheme.elevated.opacity(0.95))
+                    .cornerRadius(AppTheme.cornerRadius)
                     .shadow(radius: 20)
                 }
             }
@@ -138,8 +168,8 @@ struct AddM3UPlaylistView: View {
                 Text(errorMessage ?? L("common.unknown_error"))
             })
         }
-        // Uzun import sırasında yanlışlıkla aşağı kaydırma sheet'i kapatıp Task'ı
-        // görünmez şekilde arka planda bırakıyordu.
+        // During a long import, accidentally scrolling down closed the sheet and left the Task
+        // running invisibly in the background.
         .interactiveDismissDisabled(isLoading)
     }
 
@@ -176,53 +206,6 @@ struct AddM3UPlaylistView: View {
         }
     }
 
-    // MARK: - Xtream auto-detection
-
-    /// Tries to add the detected Xtream credentials as an Xtream playlist.
-    /// Returns `true` when the save flow was handled here (success or a surfaced sync
-    /// error); `false` when the panel doesn't answer the Xtream API and the caller
-    /// should fall back to downloading the link as plain M3U.
-    private func addAsXtream(credentials: XtreamLinkDetector.Credentials, name: String) async -> Bool {
-        await MainActor.run { progressMessage = L("add_m3u.xtream_detected") }
-
-        let playlist = Playlist(
-            name: name,
-            serverURL: credentials.serverURL,
-            username: credentials.username,
-            password: credentials.password,
-            type: .xtream
-        )
-        let client = XtreamAPIClient(playlist: playlist)
-
-        do {
-            _ = try await client.verify()
-        } catch {
-            // get.php link without a working player_api — treat as a regular M3U link.
-            return false
-        }
-
-        do {
-            try await XtreamImporter.syncAndSave(playlist: playlist, client: client) { message in
-                self.progressMessage = message
-            }
-            await MainActor.run {
-                self.isLoading = false
-                self.progressMessage = nil
-                self.dismiss()
-            }
-        } catch {
-            // Account verified but sync failed: surface the error instead of falling
-            // back, since get.php is likely blocked on such panels anyway.
-            await MainActor.run {
-                self.errorMessage = error.localizedDescription
-                self.showError = true
-                self.isLoading = false
-                self.progressMessage = nil
-            }
-        }
-        return true
-    }
-
     // MARK: - Save
 
     private func savePlaylist() async {
@@ -237,8 +220,8 @@ struct AddM3UPlaylistView: View {
         // the always-empty URL of local-file playlists): only update the name. Without
         // this, local-file playlists could never be renamed at all, and URL playlists
         // re-downloaded the entire list just to change the name.
-        if let editing = editingPlaylist, !hasLocalFile, trimmedURL == editing.serverURL {
-            var updated = editing
+        if !hasLocalFile, trimmedURL == editingPlaylist.serverURL {
+            var updated = editingPlaylist
             updated.name = trimmedName
             do {
                 try await AppDatabase.shared.write { db in
@@ -260,46 +243,37 @@ struct AddM3UPlaylistView: View {
             return
         }
 
-        // Xtream-style get.php links get connected through the Xtream API when possible:
-        // many panels block get.php downloads, and the API unlocks VOD/series/EPG anyway.
-        // Only for new playlists — converting an existing M3U playlist would orphan its
-        // favorites and watch history. Falls back to the plain M3U flow below.
-        if editingPlaylist == nil, !hasLocalFile,
-           let credentials = XtreamLinkDetector.detect(urlString: trimmedURL),
-           await addAsXtream(credentials: credentials, name: trimmedName) {
-            return
-        }
-
+        // Round 8 (F-5): the Xtream auto-detection branch that used to
+        // sit here ran only for NEW playlists (`editingPlaylist == nil`)
+        // — unreachable since the gate took over creation, and removed.
+        // Editing an M3U playlist never converts it (that would orphan
+        // its favorites and watch history); a changed source simply
+        // re-imports under the same playlist id below.
         let newPlaylist = Playlist(
-            id: editingPlaylist?.id ?? UUID(),
+            id: editingPlaylist.id,
             name: trimmedName,
             serverURL: hasLocalFile ? "" : trimmedURL,
             username: "",
             password: "",
-            filterAdultContent: editingPlaylist?.filterAdultContent ?? false,
+            filterAdultContent: editingPlaylist.filterAdultContent,
             type: .m3u,
             m3uEpgURL: nil
         )
 
         do {
-            let rawContent: String
-            if let local = localContent {
-                rawContent = local
-            } else {
-                progressMessage = L("add_m3u.downloading")
-                rawContent = try await M3UService().fetchRemote(urlString: trimmedURL)
-            }
-
-            progressMessage = L("add_m3u.parsing")
-            let parsed = try await M3UParser.parseAsync(rawContent)
-
-            progressMessage = L("add_m3u.saving_db")
-            try await M3UImporter.replace(
+            // Round 16 (F2): fetch → parse → replace is the shared
+            // PlaylistSaveService pipeline (identical to the gate's);
+            // this sheet's copy never checked cancellation between
+            // steps, so checkCancellation stays false here.
+            try await PlaylistSaveService.importM3U(
                 playlist: newPlaylist,
-                channels: parsed.channels,
-                epgURL: parsed.epgURL,
-                clearServerURL: hasLocalFile
-            )
+                localContent: localContent,
+                remoteURLString: trimmedURL,
+                clearServerURL: hasLocalFile,
+                checkCancellation: false
+            ) { message in
+                self.progressMessage = message
+            }
 
             await MainActor.run {
                 self.isLoading = false
@@ -315,8 +289,4 @@ struct AddM3UPlaylistView: View {
             }
         }
     }
-}
-
-#Preview {
-    AddM3UPlaylistView()
 }

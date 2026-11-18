@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 /// Programme detail popover: title, time, description, and context-appropriate
 /// play actions (play the live channel, watch-from-start, or catch-up playback).
@@ -11,10 +12,38 @@ struct EPGProgrammeDetailSheet: View {
     let channelIcon: URL?
     /// Xtream live stream for this channel — enables live play + catch-up. nil for M3U.
     let liveStream: DBLiveStream?
+    /// Finisher wiring: forwarded to catch-up playback as the player's
+    /// `onNavigateToDetail`, so tapping the player title goes to this
+    /// channel's detail/schedule. Supplied by presenters that HAVE a
+    /// channel-detail destination (the guide pushes
+    /// `ChannelEPGDetailView`); left nil by presenters that are already
+    /// showing that destination (ChannelEPGDetailView itself), where
+    /// the title tap stays inert rather than pushing a copy of the
+    /// screen the user is already on.
+    var onNavigateToChannelDetail: ((DBLiveStream) -> Void)? = nil
 
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
     @StateObject private var catchup = CatchupPlaybackController()
     @Environment(\.dismiss) private var dismiss
+
+    // B3 (Round 14): programme reminders. The two AppStorage keys are
+    // owned by Settings (reminders toggle + lead-time picker live
+    // there); this sheet only READS them. Defaults: enabled, 10 min.
+    @AppStorage("reminders.enabled") private var remindersEnabled = true
+    @AppStorage("reminders.leadTimeMinutes") private var reminderLeadMinutes = 10
+    @State private var reminderSet = false
+    /// C12 (Round 15): staggered sheet entrance (transform/opacity only).
+    @State private var entranceShown = false
+
+    private var reminderIdentifier: String {
+        "epg.reminder.\(programme.channelKey)|\(Int(programme.start.timeIntervalSince1970))"
+    }
+    /// A reminder only makes sense for a programme that has not
+    /// started yet, with the lead time still in the future.
+    private var canRemind: Bool {
+        remindersEnabled
+            && programme.start.addingTimeInterval(-Double(reminderLeadMinutes) * 60) > Date()
+    }
 
     private var now: Date { Date() }
     private var isCurrent: Bool { programme.isCurrent(at: now) }
@@ -33,9 +62,11 @@ struct EPGProgrammeDetailSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack(spacing: 12) {
-                        CachedImage(url: channelIcon, width: 44, height: 44, cornerRadius: 8, iconName: "tv")
+                        CachedImage(url: channelIcon, width: 44, height: 44, cornerRadius: AppTheme.smallCornerRadius, iconName: "tv")
                         Text(channelName).font(.headline)
                     }
+                    .opacity(entranceShown ? 1 : 0)
+                    .offset(y: entranceShown ? 0 : 10)
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text(programme.title).font(.title3.bold())
@@ -58,12 +89,20 @@ struct EPGProgrammeDetailSheet: View {
                     }
 
                     playButtons
+                        .opacity(entranceShown ? 1 : 0)
+                        .offset(y: entranceShown ? 0 : 10)
 
                     if let error = catchup.errorMessage {
                         Text(error).font(.footnote).foregroundColor(.red)
                     }
                 }
                 .padding()
+            }
+            .task {
+                let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
+                reminderSet = pending.contains { $0.identifier == reminderIdentifier }
+                // C12: staggered entrance — header, then body, then actions.
+                withAnimation(.easeOut(duration: 0.3).delay(0.05)) { entranceShown = true }
             }
             .navigationTitle(L("epg.programme_detail.title"))
             .navigationBarTitleDisplayMode(.inline)
@@ -78,6 +117,21 @@ struct EPGProgrammeDetailSheet: View {
     @ViewBuilder
     private var playButtons: some View {
         VStack(spacing: 10) {
+            // B3: "Remind me" — a real local notification at
+            // programme start minus the Settings lead time. Tapping
+            // again removes it. Authorization is requested at first
+            // use, never at launch.
+            if canRemind {
+                Button {
+                    Task { await toggleReminder() }
+                } label: {
+                    Label(reminderSet ? L("epg.reminder.set") : L("epg.reminder.action"),
+                          systemImage: reminderSet ? "bell.fill" : "bell")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+
             if liveStream != nil {
                 Button {
                     dismiss()
@@ -94,7 +148,12 @@ struct EPGProgrammeDetailSheet: View {
                     let programmeBridge = CatchupProgramme(title: programme.title, description: programme.desc,
                                                            startUTC: programme.start, stopUTC: programme.stop)
                     Task {
-                        await catchup.play(playlist: playlist, stream: stream, programme: programmeBridge, overlay: playerOverlay)
+                        await catchup.play(
+                            playlist: playlist, stream: stream, programme: programmeBridge, overlay: playerOverlay,
+                            onNavigateToDetail: onNavigateToChannelDetail == nil ? nil : { _, _ in
+                                onNavigateToChannelDetail?(stream)
+                            }
+                        )
                         // Only close once playback actually resolved; keep the sheet open to show the error otherwise.
                         if catchup.errorMessage == nil {
                             dismiss()
@@ -127,6 +186,47 @@ struct EPGProgrammeDetailSheet: View {
         playerOverlay.present(playlistId: playlist.id) {
             LivePlayerShell(playlist: playlist, queue: live.queue, sections: live.sections,
                             initialStream: stream, initialHistory: nil, subtitle: channelName)
+        }
+    }
+}
+
+// MARK: - B3 programme reminder scheduling
+
+private extension EPGProgrammeDetailSheet {
+    func toggleReminder() async {
+        let center = UNUserNotificationCenter.current()
+        if reminderSet {
+            center.removePendingNotificationRequests(withIdentifiers: [reminderIdentifier])
+            reminderSet = false
+            return
+        }
+        // First use: ask. A denial leaves the button a no-op rather
+        // than scheduling into the void.
+        let settings = await center.notificationSettings()
+        if settings.authorizationStatus == .notDetermined {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+        }
+        let refreshed = await center.notificationSettings()
+        guard refreshed.authorizationStatus == .authorized
+                || refreshed.authorizationStatus == .provisional else { return }
+
+        let fireDate = programme.start.addingTimeInterval(-Double(reminderLeadMinutes) * 60)
+        let interval = fireDate.timeIntervalSinceNow
+        guard interval > 0 else { return }
+        let content = UNMutableNotificationContent()
+        content.title = programme.title
+        content.body = channelName
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: reminderIdentifier,
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+        )
+        do {
+            try await center.add(request)
+            reminderSet = true
+        } catch {
+            reminderSet = false
         }
     }
 }

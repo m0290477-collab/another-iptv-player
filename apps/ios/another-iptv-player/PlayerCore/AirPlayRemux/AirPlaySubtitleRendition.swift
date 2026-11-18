@@ -23,10 +23,46 @@ enum AirPlaySubtitleRendition {
   /// Reads an SRT file and returns the WebVTT document. Returns nil for an unreadable
   /// or empty file (caller then skips the rendition and casts video-only).
   static func build(fromSRTFile url: URL, mpegtsClock: Int64 = 0) -> Built? {
-    guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-    let entries = SRTParser().parse(content: content)
+    build(fromSubtitleFile: url, mpegtsClock: mpegtsClock)
+  }
+
+  /// Round 15 (C2): reads an imported subtitle file (SRT or
+  /// WebVTT) and returns the WebVTT document for the rendition.
+  ///
+  /// Decoding: provider subtitle files in the wild are frequently
+  /// NOT UTF-8 — a strict UTF-8 read used to fail the whole
+  /// rendition (video-only cast, no explanation). The decode now
+  /// falls back UTF-8 → Windows-1256 (Arabic, the most common
+  /// legacy encoding for this app's subtitle sources) →
+  /// ISO-8859-1, which maps every byte and so always succeeds.
+  ///
+  /// Parsing: WebVTT files (by extension or the `WEBVTT` header)
+  /// route to the WebVTT parser below, NOT `SRTParser` — SRT
+  /// parsing breaks on VTT cue settings and header blocks.
+  static func build(fromSubtitleFile url: URL, mpegtsClock: Int64 = 0) -> Built? {
+    guard let content = decodeSubtitleText(at: url) else { return nil }
+    let isWebVTT = url.pathExtension.lowercased() == "vtt"
+      || content.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("WEBVTT")
+    let entries = isWebVTT ? WebVTTParser.parse(content: content) : SRTParser().parse(content: content)
     guard !entries.isEmpty else { return nil }
     return build(from: entries, mpegtsClock: mpegtsClock)
+  }
+
+  /// UTF-8 → Windows-1256 → ISO-8859-1 decode chain (see above).
+  private static func decodeSubtitleText(at url: URL) -> String? {
+    if let utf8 = try? String(contentsOf: url, encoding: .utf8) {
+      return utf8
+    }
+    guard let data = try? Data(contentsOf: url) else { return nil }
+    // kCFStringEncodingWindowsArabic (0x0506) — no direct
+    // String.Encoding case exists for Windows-1256.
+    let windows1256 = String.Encoding(
+      rawValue: CFStringConvertEncodingToNSStringEncoding(0x0506)
+    )
+    if let arabic = String(data: data, encoding: windows1256) {
+      return arabic
+    }
+    return String(data: data, encoding: .isoLatin1)
   }
 
   static func build(from entries: [SubtitleEntry], mpegtsClock: Int64 = 0) -> Built {
@@ -104,5 +140,76 @@ enum AirPlaySubtitleRendition {
     value.replacingOccurrences(of: "\"", with: "")
       .replacingOccurrences(of: "\n", with: " ")
       .replacingOccurrences(of: ",", with: " ")
+  }
+}
+
+/// Minimal WebVTT cue parser for the AirPlay path (round 15, C2):
+/// handles the `WEBVTT` header block, NOTE/STYLE/REGION blocks,
+/// optional cue identifiers, cue settings after the end time
+/// (ignored), and both `HH:MM:SS.mmm` and `MM:SS.mmm` timestamps.
+/// Produces the same `SubtitleEntry` values `SRTParser` returns so
+/// the rendition builder doesn't care which format the file was.
+enum WebVTTParser {
+  static func parse(content: String) -> [SubtitleEntry] {
+    var text = content
+    if text.hasPrefix("\u{FEFF}") { text.removeFirst() }
+    let normalized = text
+      .replacingOccurrences(of: "\r\n", with: "\n")
+      .replacingOccurrences(of: "\r", with: "\n")
+    // Blocks are separated by blank lines.
+    let blocks = normalized.components(separatedBy: "\n\n")
+    var entries: [SubtitleEntry] = []
+    for rawBlock in blocks {
+      let lines = rawBlock.components(separatedBy: "\n")
+      // Find the timing line; everything before it in the block is
+      // the header (first block) or a cue identifier — both skipped.
+      guard let timingIndex = lines.firstIndex(where: { $0.contains("-->") }) else { continue }
+      let timing = lines[timingIndex]
+      let parts = timing.components(separatedBy: "-->")
+      guard parts.count == 2,
+            let start = parseTimestamp(parts[0]),
+            let end = parseTimestamp(parts[1])
+      else { continue }
+      let textLines = lines[(timingIndex + 1)...]
+        .map { stripTags($0) }
+        .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+      guard !textLines.isEmpty else { continue }
+      entries.append(
+        SubtitleEntry(startTime: start, endTime: end, text: textLines.joined(separator: "\n"))
+      )
+    }
+    return entries
+  }
+
+  /// Parses one side of a timing line, dropping any cue settings
+  /// that follow the timestamp (`… align:start position:0%`).
+  private static func parseTimestamp(_ raw: String) -> TimeInterval? {
+    let token = raw
+      .trimmingCharacters(in: .whitespaces)
+      .components(separatedBy: .whitespaces)
+      .first ?? ""
+    let components = token.components(separatedBy: ":")
+    switch components.count {
+    case 3:
+      guard let h = Double(components[0]),
+            let m = Double(components[1]),
+            let s = Double(components[2]) else { return nil }
+      return h * 3600 + m * 60 + s
+    case 2:
+      guard let m = Double(components[0]),
+            let s = Double(components[1]) else { return nil }
+      return m * 60 + s
+    default:
+      return nil
+    }
+  }
+
+  private static func stripTags(_ line: String) -> String {
+    guard line.contains("<") else { return line }
+    return line.replacingOccurrences(
+      of: "</?(i|b|u|c|v|font)[^>]*>",
+      with: "",
+      options: [.regularExpression, .caseInsensitive]
+    )
   }
 }

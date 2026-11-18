@@ -217,14 +217,14 @@ nonisolated struct AppDatabase {
             try db.create(index: "idx_category_playlist_type_sort", on: "category",  columns: ["playlistId", "type", "sortIndex"], ifNotExists: true)
         }
 
-        // EPG kaldırıldı: eski kurulumlarda disk'i ve index referanslarını temizle.
+        // EPG removed: in old installs, clean the disk and the index references.
         migrator.registerMigration("dropLegacyEPGTables") { db in
             try db.execute(sql: "DROP TABLE IF EXISTS xmltvGuideCache")
             try db.execute(sql: "DROP TABLE IF EXISTS epgShortCache")
         }
 
-        // M3U / M3U8 playlist desteği: Xtream şeması dışına dokunmadan
-        // playlist türü ayrımı ve m3uChannel tablosu eklenir.
+        // M3U / M3U8 playlist support: without touching the Xtream schema,
+        // a playlist-type distinction and the m3uChannel table are added.
         migrator.registerMigration("addM3USupport") { db in
             try db.alter(table: "playlist") { t in
                 t.add(column: "type", .text).notNull().defaults(to: "xtream")
@@ -253,8 +253,8 @@ nonisolated struct AppDatabase {
             )
         }
 
-        // M3U favoriler: mevcut `favorite` tablosu INTEGER streamId kullandığı için M3U UUID'leri
-        // için uygun değil. Ayrı tablo.
+        // M3U favorites: because the existing `favorite` table uses INTEGER streamId, it is not suitable
+        // for M3U UUIDs. Separate table.
         migrator.registerMigration("addM3UFavorites") { db in
             try db.create(table: "m3uFavorite") { t in
                 t.column("channelId", .text).notNull()
@@ -320,20 +320,20 @@ nonisolated struct AppDatabase {
             )
         }
 
-        // Sezon/bölüm PK'ları playlist kapsamına alındı (bkz. DBSeason.scopedId): eski
-        // çıplak "\(seriesId)_\(seasonNum)" anahtarlı satırlar playlist'ler arası REPLACE
-        // çakışması taşıyor. Temizle ve seasonsLoaded'ı sıfırla — sezonlar ilk açılışta
-        // panelden yeniden çekilir; izleme geçmişi (panel episodeId ile) etkilenmez.
+        // Season/episode PKs were scoped to the playlist (see DBSeason.scopedId): old
+        // rows keyed by the bare "\(seriesId)_\(seasonNum)" carry a REPLACE collision risk
+        // across playlists. Clean them and reset seasonsLoaded — seasons are re-fetched
+        // from the panel on first open; watch history (keyed by panel episodeId) is unaffected.
         migrator.registerMigration("scopeSeasonEpisodeIdsByPlaylist") { db in
             try db.execute(sql: "DELETE FROM episode")
             try db.execute(sql: "DELETE FROM season")
             try db.execute(sql: "UPDATE series SET seasonsLoaded = 0")
         }
 
-        // SQLite FK child kolonlarını otomatik indekslemez. season/episode cascade FK'leri
-        // indekssiz kalınca her series silmesi tüm season tablosunu, her season silmesi tüm
-        // episode tablosunu tarıyordu (refresh ve playlist silme O(n²)). EpisodesRequest'in
-        // seasonId filtresi de aynı indeksi kullanır.
+        // SQLite does not auto-index FK child columns. Without an index on the season/episode cascade FKs,
+        // every series deletion scanned the whole season table, and every season deletion scanned the whole
+        // episode table (refresh and playlist deletion were O(n²)). EpisodesRequest's
+        // seasonId filter uses the same index.
         migrator.registerMigration("addSeasonEpisodeFKIndexes") { db in
             try db.create(
                 index: "idx_season_series_playlist",
@@ -483,6 +483,28 @@ nonisolated extension AppDatabase {
     func read<T>(_ value: @escaping (Database) throws -> T) async throws -> T {
         try await dbWriter.read { db in
             try value(db)
+        }
+    }
+}
+
+// MARK: - C10 (Round 15) watch-history pruning
+
+nonisolated extension AppDatabase {
+    /// Prunes watch history to the latest ~500 rows PER PLAYLIST.
+    /// History grows one row per title/episode forever; the Continue
+    /// Watching surfaces only ever read the newest few hundred. The
+    /// correlated subquery keeps each playlist's own newest 500.
+    func pruneWatchHistory(limitPerPlaylist: Int = 500) async {
+        _ = try? await write { db in
+            try db.execute(sql: """
+                DELETE FROM watchHistory
+                WHERE id NOT IN (
+                    SELECT id FROM watchHistory AS w2
+                    WHERE w2.playlistId = watchHistory.playlistId
+                    ORDER BY w2.lastWatchedAt DESC
+                    LIMIT ?
+                )
+                """, arguments: [limitPerPlaylist])
         }
     }
 }

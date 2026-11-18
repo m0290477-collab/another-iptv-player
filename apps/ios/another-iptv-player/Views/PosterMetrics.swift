@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// iPad 11" (portrait kısa kenar ~834 pt) tasarım ölçüsü; daha dar ekranlarda posterler orantılı küçülür.
+/// The iPad 11" (portrait short edge ~834 pt) design measure; on narrower screens the posters shrink proportionally.
 struct PosterMetrics: Equatable, Sendable {
     /// 1.0 = referans cihaz; telefonlarda ~0.5–0.65.
     let layoutScale: CGFloat
@@ -46,21 +46,23 @@ struct PosterMetrics: Equatable, Sendable {
     var searchGridSpacing: CGFloat { scaled(12) }
     var searchSectionRowSpacing: CGFloat { scaled(16) }
 
-    /// Raf satırı: poster + başlık alanı (yaklaşık 2 satır caption).
+    /// Shelf row: poster + title area (about 2 lines of caption).
     var shelfRowTotalHeight: CGFloat { shelfPosterHeight + scaled(64) }
 
-    /// Kategori detay grid'i için prefetch boyutu (.grid profiliyle eşleşir)
+    /// The prefetch size for the category detail grid (matches the .grid profile)
+    /// Round 5: CachedImage now uses the full device scale (the 2x cover was
+    /// removed — the blurry-logo fix); these helpers match too.
     func prefetchCategoryDecodePixelSize() -> CGSize {
-        let s = min(UIScreen.main.scale, 2)
+        let s = UIScreen.main.scale
         return CGSize(
             width: ceil(categoryGridPosterWidth * s),
             height: ceil(categoryGridPosterHeight * s)
         )
     }
 
-    /// Yatay raf önizlemesi için prefetch boyutu (.shelf profiliyle eşleşir)
+    /// The prefetch size for the horizontal shelf preview (matches the .shelf profile)
     func prefetchShelfDecodePixelSize() -> CGSize {
-        let s = min(UIScreen.main.scale, 2)
+        let s = UIScreen.main.scale
         return CGSize(
             width: ceil(shelfPosterWidth * s),
             height: ceil(shelfPosterHeight * s)

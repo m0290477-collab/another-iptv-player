@@ -8,16 +8,14 @@ struct ContentView: View {
     init() {
         _playlists = Query(PlaylistRequest(), in: \.appDatabase)
     }
-    @State private var showingTypePicker = false
-    @State private var showingAddXtreamPlaylist = false
-    @State private var showingAddM3UPlaylist = false
-    @State private var playlistToEdit: Playlist?
-    @State private var offsetsToDelete: IndexSet?
-    @State private var showingDeleteAlert = false
     @State private var selectedPlaylist: Playlist?
     @State private var hasAttemptedAutoLoad = false
+    /// Round 11: an explicit sign-out (the dashboards' onDismiss)
+    /// suppresses auto-load for the rest of the session, so the user
+    /// actually lands on the gate; a fresh launch always auto-enters
+    /// when a saved playlist exists.
+    @State private var suppressAutoLoad = false
     @State private var showStorageWarning = false
-    @Environment(\.appDatabase) private var appDatabase
 
     private let lastPlaylistKey = "lastPlaylistId"
 
@@ -43,97 +41,75 @@ struct ContentView: View {
             if let playlist = selectedPlaylist {
                 Group {
                     if playlist.kind == .m3u {
-                        M3UDashboardView(playlist: playlist) {
+                        M3UDashboardView(playlist: playlist, onDismiss: {
+                            // Round 15 (C13): remember the NAME ONLY
+                            // for the gate's "Continue with" row.
+                            UserDefaults.standard.set(playlist.name, forKey: "gate.lastPlaylistName")
                             UserDefaults.standard.removeObject(forKey: lastPlaylistKey)
-                            withAnimation(.easeInOut(duration: 0.3)) {
+                            suppressAutoLoad = true
+                            withAnimation(Motion.animate(.easeInOut(duration: 0.35))) {
                                 selectedPlaylist = nil
                             }
-                            // Seçiciye dönünce dev katalog kopyalarını bırak.
+                            // Drop the large catalog copies when returning to the picker.
                             M3UContentStore.shared.unload()
                             EPGStore.shared.setActivePlaylist(nil)
-                        }
+                        }, onSwitchPlaylist: { newPlaylist in
+                            switchPlaylist(to: newPlaylist)
+                        })
                     } else {
-                        DashboardView(playlist: playlist) {
+                        DashboardView(playlist: playlist, onDismiss: {
+                            // Round 15 (C13): NAME ONLY, as above.
+                            UserDefaults.standard.set(playlist.name, forKey: "gate.lastPlaylistName")
                             UserDefaults.standard.removeObject(forKey: lastPlaylistKey)
-                            withAnimation(.easeInOut(duration: 0.3)) {
+                            suppressAutoLoad = true
+                            withAnimation(Motion.animate(.easeInOut(duration: 0.35))) {
                                 selectedPlaylist = nil
                             }
                             PlaylistContentStore.shared.unload()
                             EPGStore.shared.setActivePlaylist(nil)
-                        }
+                        }, onSwitchPlaylist: { newPlaylist in
+                            switchPlaylist(to: newPlaylist)
+                        })
                     }
                 }
-                .transition(.asymmetric(
-                    insertion: .move(edge: .trailing),
-                    removal: .move(edge: .trailing)
-                ))
+                // Round 15 (C12): a successful gate entry
+                // CROSS-DISSOLVES into the dashboard (opacity both
+                // ways; duration 0 when Motion is reduced/off).
+                .transition(.opacity)
                 .onAppear {
-                    // Bir playlist dashboard'una ulaşmak = başarılı oturum.
+                    // Round 15 (C3, Features): refresh the widget
+                    // snapshot when a dashboard is entered (covers
+                    // both dashboards; the Xtream dashboard refreshes
+                    // again after its catalog load).
+                    Task { await WidgetSnapshotStore.refresh(playlist: playlist) }
+                    // Reaching a playlist dashboard = a successful session.
                     RatingManager.shared.registerSuccessfulSession()
                     Task {
-                        // Kullanıcıyı karşılama anında bölmemek için kısa gecikme.
+                        // A short delay so the user is not interrupted at the greeting moment.
                         try? await Task.sleep(for: .seconds(8))
                         RatingManager.shared.requestReviewIfAppropriate()
                     }
                 }
             } else if let playlists = playlists {
-                NavigationStack {
-                    Group {
-                        if playlists.isEmpty {
-                            emptyState
-                        } else {
-                            playlistList
-                        }
-                    }
-                    .navigationTitle(L("playlists.title"))
-                    .toolbar {
-                        ToolbarItem(placement: .primaryAction) {
-                            Button {
-                                showingTypePicker = true
-                            } label: {
-                                Image(systemName: "plus")
-                            }
-                        }
-                    }
-                    .sheet(isPresented: $showingTypePicker) {
-                        PlaylistTypeSelectionView(
-                            onSelectXtream: { showingAddXtreamPlaylist = true },
-                            onSelectM3U: { showingAddM3UPlaylist = true }
-                        )
-                    }
-                    .sheet(isPresented: $showingAddXtreamPlaylist) {
-                        AddPlaylistView()
-                    }
-                    .sheet(isPresented: $showingAddM3UPlaylist) {
-                        AddM3UPlaylistView()
-                    }
-                    .sheet(item: $playlistToEdit) { playlist in
-                        if playlist.kind == .m3u {
-                            AddM3UPlaylistView(editingPlaylist: playlist)
-                        } else {
-                            AddPlaylistView(editingPlaylist: playlist)
-                        }
-                    }
-                    .alert(L("playlists.delete.title"), isPresented: $showingDeleteAlert) {
-                        Button(L("common.delete"), role: .destructive) {
-                            if let offsets = offsetsToDelete {
-                                performDelete(offsets: offsets)
-                            }
-                        }
-                        Button(L("common.cancel"), role: .cancel) {
-                            offsetsToDelete = nil
-                        }
-                    } message: {
-                        Text(L("playlists.delete.message"))
-                    }
-                }
+                // Round 4: the branded gate takes over the playlist
+                // picker's role at this exact decision point.
+                // Round 11: the gate is a clean sign-in form only —
+                // its old saved-playlist list (and the edit/delete
+                // flow that hung off it) is gone; selection happens
+                // through auto-load below or the gate's own sign-in,
+                // and management lives in Settings ▸ My Playlists.
+                PlaylistGateView(
+                    playlists: playlists,
+                    onSelect: selectPlaylist
+                )
+                .cinematicBackground()
                 .transition(.asymmetric(
                     insertion: .opacity,
                     removal: .opacity
                 ))
             } else {
-                // Initial check in progress, show system background to prevent flicker
-                Color(UIColor.systemBackground)
+                // Initial check in progress, show app background to prevent flicker
+                AppTheme.background
                     .ignoresSafeArea()
             }
         }
@@ -151,132 +127,70 @@ struct ContentView: View {
     
     private func attemptAutoLoad(_ list: [Playlist]) {
         guard !hasAttemptedAutoLoad else { return }
-        
+
         // If the query has returned (even if empty), we finalize the check
         hasAttemptedAutoLoad = true
-        
-        if let lastIdString = UserDefaults.standard.string(forKey: lastPlaylistKey),
-           let lastId = UUID(uuidString: lastIdString),
-           let playlist = list.first(where: { $0.id == lastId }) {
-            selectedPlaylist = playlist
+
+        // Round 11 (owner): a returning user with a saved playlist
+        // is NEVER blocked by the gate. Only an explicit in-session
+        // sign-out (suppressAutoLoad) or an empty library leaves the
+        // gate on screen.
+        // Round 15 (C13): the pick order is — non-expired first
+        // (the shared expiry verdict on the recorded exp_date),
+        // then the marked default, then the last-used playlist,
+        // then the user's saved order / newest. When EVERY saved
+        // subscription is expired the gate stays up with its
+        // explicit "All subscriptions expired" state instead of
+        // blind-entering a dead playlist.
+        guard !suppressAutoLoad, !list.isEmpty else { return }
+
+        let lastId = UserDefaults.standard.string(forKey: lastPlaylistKey)
+            .flatMap(UUID.init(uuidString:))
+        let ordered = PlaylistLibraryStore.sorted(list)
+        let ranked = ordered.sorted { a, b in
+            let aExpired = ProviderExpiryStore.isExpired(expiryDate: ProviderExpiryStore.expiryDate(playlistId: a.id))
+            let bExpired = ProviderExpiryStore.isExpired(expiryDate: ProviderExpiryStore.expiryDate(playlistId: b.id))
+            if aExpired != bExpired { return !aExpired }
+            let aDefault = PlaylistLibraryStore.defaultId == a.id
+            let bDefault = PlaylistLibraryStore.defaultId == b.id
+            if aDefault != bDefault { return aDefault }
+            let aLast = lastId == a.id
+            let bLast = lastId == b.id
+            if aLast != bLast { return aLast }
+            return false // stable: keep the saved library order
         }
+        guard let pick = ranked.first,
+              !ProviderExpiryStore.isExpired(expiryDate: ProviderExpiryStore.expiryDate(playlistId: pick.id)) else {
+            return // all expired → the gate's all-expired state
+        }
+        selectedPlaylist = pick
     }
-    
+
     private func selectPlaylist(_ playlist: Playlist) {
-        withAnimation(.easeInOut(duration: 0.3)) {
+        suppressAutoLoad = false
+        // Round 15 (C12): cross-dissolve into the dashboard,
+        // Motion-safe (duration collapses to 0 when reduced/off).
+        withAnimation(Motion.animate(.easeInOut(duration: 0.35))) {
             selectedPlaylist = playlist
             UserDefaults.standard.set(playlist.id.uuidString, forKey: lastPlaylistKey)
         }
     }
-    
-    private var emptyState: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "tv.badge.wifi")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 80, height: 80)
-                .foregroundColor(.accentColor)
-            
-            Text(L("playlists.empty.title"))
-                .font(.title2)
-                .fontWeight(.semibold)
 
-            Text(L("playlists.empty.message"))
-                .multilineTextAlignment(.center)
-                .foregroundColor(.secondary)
-                .padding(.horizontal)
-
-            Button {
-                showingTypePicker = true
-            } label: {
-                Text(L("playlists.empty.add_button"))
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color.accentColor)
-                    .cornerRadius(10)
-                    .padding(.horizontal, 40)
+    /// Round 10: switch the active playlist from inside a dashboard
+    /// (Settings ▸ My Playlists ▸ Activate / Add & Activate). The
+    /// outgoing playlist's in-memory catalog is released exactly like
+    /// the back-to-gate path; the incoming dashboard's `.task(id:)`
+    /// loads the new playlist and rebinds the EPG store.
+    private func switchPlaylist(to newPlaylist: Playlist) {
+        if let current = selectedPlaylist, current.id != newPlaylist.id {
+            if current.kind == .m3u {
+                M3UContentStore.shared.unload()
+            } else {
+                PlaylistContentStore.shared.unload()
             }
-            .padding(.top, 10)
+            EPGStore.shared.setActivePlaylist(nil)
         }
-    }
-    
-
-    
-    private var playlistList: some View {
-        List {
-            if let playlists = playlists {
-                ForEach(playlists) { playlist in
-                    Button {
-                        selectPlaylist(playlist)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    HStack(spacing: 8) {
-                                        Text(playlist.name)
-                                            .font(.headline)
-                                        Text(playlist.kind == .m3u ? "M3U" : "Xtream")
-                                            .font(.caption2.weight(.semibold))
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(Color.accentColor.opacity(0.15))
-                                            .foregroundColor(.accentColor)
-                                            .cornerRadius(4)
-                                    }
-                                    Text(playlist.serverURL.isEmpty ? L("playlists.local_file") : playlist.serverURL)
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .foregroundColor(.primary)
-                    .swipeActions(edge: .leading) {
-                        Button {
-                            playlistToEdit = playlist
-                        } label: {
-                            Label(L("common.edit"), systemImage: "pencil")
-                        }
-                        .tint(.orange)
-                    }
-                }
-                .onDelete(perform: deletePlaylists)
-            }
-        }
-    }
-    
-    private func deletePlaylists(offsets: IndexSet) {
-        offsetsToDelete = offsets
-        showingDeleteAlert = true
-    }
-    
-    private func performDelete(offsets: IndexSet) {
-        Task {
-            do {
-                guard let playlists = playlists else { return }
-                let idsToDelete = offsets.map { playlists[$0].id }
-                _ = try await appDatabase.write { db in
-                    try Playlist.deleteAll(db, ids: idsToDelete)
-                }
-                for id in idsToDelete {
-                    HiddenCategoryStore.shared.removeAll(playlistId: id)
-                    DownloadManager.shared.cleanupPlaylist(playlistId: id)
-                    ImportedSubtitleStore.removeAll(playlistId: id)
-                }
-            } catch {
-                print("Failed to delete playlist: \(error)")
-            }
-            offsetsToDelete = nil
-        }
+        selectPlaylist(newPlaylist)
     }
 }
 

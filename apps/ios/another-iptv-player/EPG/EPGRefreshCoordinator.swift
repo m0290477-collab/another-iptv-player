@@ -37,7 +37,7 @@ nonisolated struct EPGRefreshCoordinator {
 
         do {
             let wanted = try await gatherWanted(playlist: playlist)
-            let offsetSeconds = await defaultOffsetSeconds(playlist: playlist)
+            let guideTimeZone = await defaultTimeZone(playlist: playlist)
             let now = Date()
             let pastWindow = pastRetention(kind: playlist.kind, maxArchiveDays: wanted.maxArchiveDays)
             let pastCutoff = Int64(now.addingTimeInterval(-pastWindow).timeIntervalSince1970)
@@ -73,7 +73,7 @@ nonisolated struct EPGRefreshCoordinator {
                         let counts = try parseIntoDatabase(
                             fileURL: xmlURL, playlistId: playlist.id,
                             wanted: wanted, pastCutoff: pastCutoff, futureCutoff: futureCutoff,
-                            offsetSeconds: offsetSeconds
+                            timeZone: guideTimeZone
                         )
                         guard counts.programmes > 0 || counts.channels > 0 else {
                             throw EPGError.emptyGuide
@@ -81,6 +81,14 @@ nonisolated struct EPGRefreshCoordinator {
                         try await recordSuccess(playlistId: playlist.id, sourceType: sourceType,
                                                 url: url, etag: etag, lastModified: lastModified,
                                                 programmeCount: counts.programmes, channelCount: counts.channels)
+                        // C10 (Round 15): a guide replacement frees
+                        // thousands of pages; hand them back
+                        // incrementally (auto_vacuum=INCREMENTAL is set
+                        // in the DB configuration) instead of letting
+                        // the file grow monotonically.
+                        try? await AppDatabase.shared.write { db in
+                            try db.execute(sql: "PRAGMA incremental_vacuum")
+                        }
                         return RefreshResult(programmeCount: counts.programmes,
                                              channelCount: counts.channels, notModified: false)
                     }
@@ -129,10 +137,22 @@ nonisolated struct EPGRefreshCoordinator {
         }
     }
 
-    private func defaultOffsetSeconds(playlist: Playlist) async -> Int {
-        guard playlist.kind == .xtream else { return 0 }   // M3U offset-less → UTC
-        let tz = await PanelTimeZoneResolver.resolve(playlist: playlist)
-        return tz.secondsFromGMT(for: Date())
+    /// C2 (Round 15): the zone offset-less guide datetimes are read in,
+    /// resolved PER PROGRAMME DATE by the parser (DST-aware) — the old
+    /// code froze one offset at refresh time, and M3U guides without
+    /// offsets were blindly forced to UTC even when the playlist's
+    /// panel timezone was known (`Playlist.serverTimezone`, persisted
+    /// at add/verify time). Unknown zone → UTC, as before.
+    private func defaultTimeZone(playlist: Playlist) async -> TimeZone {
+        switch playlist.kind {
+        case .xtream:
+            return await PanelTimeZoneResolver.resolve(playlist: playlist)
+        case .m3u:
+            if let tz = PanelTimeZoneResolver.timeZone(fromIANA: playlist.serverTimezone) {
+                return tz
+            }
+            return .gmt
+        }
     }
 
     // MARK: - Wanted channels
@@ -169,7 +189,7 @@ nonisolated struct EPGRefreshCoordinator {
     // MARK: - Parse + write
 
     private func parseIntoDatabase(fileURL: URL, playlistId: UUID, wanted: Wanted,
-                                   pastCutoff: Int64, futureCutoff: Int64, offsetSeconds: Int) throws -> (programmes: Int, channels: Int) {
+                                   pastCutoff: Int64, futureCutoff: Int64, timeZone: TimeZone) throws -> (programmes: Int, channels: Int) {
         // Build the replacement in staging. The live guide remains readable while
         // XML parsing and batched inserts are in progress.
         try AppDatabase.shared.writeSync { db in
@@ -187,7 +207,8 @@ nonisolated struct EPGRefreshCoordinator {
             wantedDisplayNames: wanted.names,
             pastCutoffTs: pastCutoff,
             futureCutoffTs: futureCutoff,
-            defaultUTCOffsetSeconds: offsetSeconds
+            defaultUTCOffsetSeconds: timeZone.secondsFromGMT(for: Date()),
+            defaultTimeZone: timeZone
         )
 
         let parser = EPGXMLTVParser(

@@ -1,13 +1,19 @@
 import SwiftUI
 
 struct SubtitleAppearanceSheet: View {
-    @ObservedObject var player: VideoPlayerController
+    /// Round 14 (B4): the player is OPTIONAL so Settings ▸ Player can
+    /// present this same sheet with no active playback. With a player,
+    /// changes apply live exactly as before; without one, Apply simply
+    /// persists through `SubtitleAppearancePersistence` — the very
+    /// store `VideoPlayerController.applySubtitleAppearanceSettings`
+    /// writes — and the next playback loads the saved appearance.
+    let player: VideoPlayerController?
     @Environment(\.dismiss) private var dismiss
 
     @State private var draft: SubtitleAppearanceSettings
     @State private var initial: SubtitleAppearanceSettings
 
-    init(player: VideoPlayerController) {
+    init(player: VideoPlayerController?) {
         self.player = player
         let loaded = SubtitleAppearancePersistence.load()
         _draft = State(initialValue: loaded)
@@ -41,21 +47,28 @@ struct SubtitleAppearanceSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L("subtitle.apply")) {
                         didApply = true
-                        player.applySubtitleAppearanceSettings(draft)
+                        if let player {
+                            player.applySubtitleAppearanceSettings(draft)
+                        } else {
+                            // No live player (opened from Settings):
+                            // persist only — the same save the player
+                            // path performs first.
+                            SubtitleAppearancePersistence.save(draft)
+                        }
                         dismiss()
                     }
                     .disabled(draft == initial)
                 }
             }
             .onChange(of: draft.delaySeconds) { _, new in
-                player.applySubtitleDelaySeconds(new)
+                player?.applySubtitleDelaySeconds(new)
             }
-            // Gecikme slider'ı canlı önizleme için anında mpv'ye gider; Apply'sız
-            // kapanışta eski değere dönmezsek oynatma, sheet'in bir daha göstermeyeceği
-            // bir gecikmeyle kalıyordu.
+            // The delay slider goes to mpv instantly for live preview; if on an Apply-less
+            // close we don't return to the old value, playback stayed with a delay
+            // the sheet would never show again.
             .onDisappear {
                 if !didApply {
-                    player.applySubtitleDelaySeconds(initial.delaySeconds)
+                    player?.applySubtitleDelaySeconds(initial.delaySeconds)
                 }
             }
         }

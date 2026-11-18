@@ -1,47 +1,66 @@
 import SwiftUI
 
+/// The app's ONE search system (opened from every tab's search
+/// entry and from Home's top bar).
+///
+/// Round 10 redesign (owner, build 46 — the STRONG model): a big
+/// Search title, ONE in-view search field, section pills
+/// (Movie / Series / Live) and results in the app's card
+/// language — poster cards for movies/series, logo rows for
+/// channels. The old build used `.searchable`, whose field mounted
+/// TWICE on focus (the doubled-field glitch in the owner's
+/// recording); the field is now the shared `CatalogSearchField`.
+/// Tapping a movie/series result opens its DETAIL page; tapping a
+/// channel plays it and dismisses the search sheet cleanly.
 struct SearchView: View {
     let playlist: Playlist
     @Binding var searchText: String
     @State private var debouncedQuery = ""
     @State private var debounceTask: Task<Void, Never>?
-    @State private var selectedFilter: SearchFilter = .all
+    @State private var selectedFilter: SearchFilter = .movies
 
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var playerOverlay: PlayerOverlayController
+
+    /// The section pills exactly as specified: Movie / Series /
+    /// Live. (The old build's extra "All" grouping is gone.)
     enum SearchFilter: String, CaseIterable {
-        case all, live, movies, series
+        case movies, series, live
 
         var displayName: String {
             switch self {
-            case .all:    return L("search.all")
-            case .live:   return L("dashboard.live")
             case .movies: return L("dashboard.movies")
             case .series: return L("dashboard.series")
+            case .live:   return L("dashboard.live")
             }
         }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(SearchFilter.allCases, id: \.self) { filter in
-                        Button {
-                            selectedFilter = filter
-                        } label: {
-                            Text(filter.displayName)
-                                .font(.subheadline)
-                                .fontWeight(selectedFilter == filter ? .semibold : .regular)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(selectedFilter == filter ? Color.accentColor : Color(.systemGray5))
-                                .foregroundColor(selectedFilter == filter ? .white : .primary)
-                                .cornerRadius(20)
+            VStack(alignment: .leading, spacing: 14) {
+                Text(L("search.title"))
+                    .font(.largeTitle.weight(.bold))
+                    .foregroundStyle(.primary)
+
+                CatalogSearchField(text: $searchText, placeholder: L("search.placeholder"))
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(SearchFilter.allCases, id: \.self) { filter in
+                            PillChipButton(
+                                title: filter.displayName,
+                                isSelected: selectedFilter == filter
+                            ) {
+                                selectedFilter = filter
+                            }
                         }
                     }
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 10)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 12)
 
             Divider()
 
@@ -60,13 +79,12 @@ struct SearchView: View {
                     playlist: playlist,
                     query: debouncedQuery,
                     filter: selectedFilter,
-                    onSelectFilter: { selectedFilter = $0 }
+                    onPlayLive: { item, queue, sections in
+                        playLive(item, queue: queue, sections: sections)
+                    }
                 )
             }
         }
-        .navigationTitle(L("search.title"))
-        .navigationBarTitleDisplayMode(.large)
-        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: L("search.placeholder"))
         .onChange(of: searchText) { _, raw in
             debounceTask?.cancel()
             let q = raw.trimmingCharacters(in: .whitespaces)
@@ -78,258 +96,304 @@ struct SearchView: View {
             }
         }
         .onDisappear { debounceTask?.cancel() }
-    }
-}
-
-// MARK: - Results
-
-private struct SearchResult {
-    enum Kind { case live(LiveStreamWithCategory), movie(VODWithCategory), series(SeriesWithCategory) }
-    let kind: Kind
-    var name: String {
-        switch kind {
-        case .live(let x): x.stream.name
-        case .movie(let x): x.stream.name
-        case .series(let x): x.series.name
-        }
-    }
-    var categoryName: String {
-        switch kind {
-        case .live(let x): x.categoryName
-        case .movie(let x): x.categoryName
-        case .series(let x): x.categoryName
-        }
-    }
-    var iconURL: URL? {
-        switch kind {
-        case .live(let x): x.stream.streamIcon.flatMap { URL(string: $0) }
-        case .movie(let x): x.stream.streamIcon.flatMap { URL(string: $0) }
-        case .series(let x): x.series.cover.flatMap { URL(string: $0) }
-        }
-    }
-    var typeLabel: String {
-        switch kind {
-        case .live: L("dashboard.live")
-        case .movie: L("stream.vod")
-        case .series: L("stream.series")
-        }
-    }
-    var typeIcon: String {
-        switch kind {
-        case .live: "tv"
-        case .movie: "film"
-        case .series: "play.tv"
-        }
-    }
-}
-
-nonisolated private func search(_ q: String, in text: String) -> Bool {
-    q.split(separator: " ").allSatisfy { text.localizedCaseInsensitiveContains($0) }
-}
-
-private struct SearchResultsView: View {
-    let playlist: Playlist
-    let query: String
-    let filter: SearchView.SearchFilter
-    let onSelectFilter: (SearchView.SearchFilter) -> Void
-
-    @ObservedObject private var contentStore = PlaylistContentStore.shared
-    @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
-    @EnvironmentObject private var playerOverlay: PlayerOverlayController
-
-    @State private var liveResults: [LiveStreamWithCategory] = []
-    @State private var movieResults: [VODWithCategory] = []
-    @State private var seriesResults: [SeriesWithCategory] = []
-
-    private var allLiveShown: Bool { filter == .live }
-    private var allMoviesShown: Bool { filter == .movies }
-    private var allSeriesShown: Bool { filter == .series }
-
-    var body: some View {
-        List {
-            // Live
-            if filter == .all || filter == .live {
-                if !liveResults.isEmpty {
-                    Section {
-                        let visible = allLiveShown ? liveResults : Array(liveResults.prefix(4))
-                        ForEach(visible) { item in
-                            Button { playLive(item) } label: {
-                                ResultRow(name: item.stream.name,
-                                          subtitle: item.categoryName,
-                                          iconURL: item.stream.streamIcon.flatMap { URL(string: $0) },
-                                          typeIcon: "tv")
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        if !allLiveShown && liveResults.count > 4 {
-                            Button { onSelectFilter(.live) } label: {
-                                Text(L("search.more_results_format", liveResults.count - 4))
-                                    .font(.footnote).foregroundColor(.accentColor)
-                            }
-                        }
-                    } header: { SectionLabel(title: L("dashboard.live"), count: liveResults.count, icon: "tv") }
-                }
-            }
-
-            // Movies
-            if filter == .all || filter == .movies {
-                if !movieResults.isEmpty {
-                    Section {
-                        let visible = allMoviesShown ? movieResults : Array(movieResults.prefix(4))
-                        ForEach(visible) { item in
-                            NavigationLink {
-                                MovieDetailView(playlist: playlist, movie: item.stream)
-                            } label: {
-                                ResultRow(name: item.stream.name,
-                                          subtitle: item.categoryName,
-                                          iconURL: item.stream.streamIcon.flatMap { URL(string: $0) },
-                                          typeIcon: "film")
-                            }
-                        }
-                        if !allMoviesShown && movieResults.count > 4 {
-                            Button { onSelectFilter(.movies) } label: {
-                                Text(L("search.more_results_format", movieResults.count - 4))
-                                    .font(.footnote).foregroundColor(.accentColor)
-                            }
-                        }
-                    } header: { SectionLabel(title: L("dashboard.movies"), count: movieResults.count, icon: "film") }
-                }
-            }
-
-            // Series
-            if filter == .all || filter == .series {
-                if !seriesResults.isEmpty {
-                    Section {
-                        let visible = allSeriesShown ? seriesResults : Array(seriesResults.prefix(4))
-                        ForEach(visible) { item in
-                            NavigationLink {
-                                SeriesDetailView(playlist: playlist, series: item.series)
-                            } label: {
-                                ResultRow(name: item.series.name,
-                                          subtitle: item.categoryName,
-                                          iconURL: item.series.cover.flatMap { URL(string: $0) },
-                                          typeIcon: "play.tv")
-                            }
-                        }
-                        if !allSeriesShown && seriesResults.count > 4 {
-                            Button { onSelectFilter(.series) } label: {
-                                Text(L("search.more_results_format", seriesResults.count - 4))
-                                    .font(.footnote).foregroundColor(.accentColor)
-                            }
-                        }
-                    } header: { SectionLabel(title: L("dashboard.series"), count: seriesResults.count, icon: "play.tv") }
-                }
-            }
-
-            if liveResults.isEmpty && movieResults.isEmpty && seriesResults.isEmpty {
-                if !contentStore.streamsLoaded {
-                    // Katalog hâlâ yükleniyor: yanlış "sonuç yok" göstermek kullanıcıya
-                    // içeriği kaybolmuş gibi görünür. streamsLoaded olunca aşağıdaki
-                    // .task tekrar arar.
-                    HStack {
-                        Spacer()
-                        VStack(spacing: 12) {
-                            ProgressView()
-                            Text(L("common.loading"))
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                    }
-                    .listRowBackground(Color.clear)
-                } else {
-                    ContentUnavailableView.search(text: query)
-                }
-            }
-        }
-        .listStyle(.insetGrouped)
-        .task(id: query) { await runSearch() }
-        .task(id: hiddenStore.version) { await runSearch() }
-        .task(id: contentStore.streamsLoaded) { await runSearch() }
+        .cinematicBackground()
     }
 
-    private func runSearch() async {
-        let live = contentStore.liveStreams
-        let vod = contentStore.vodStreams
-        let ser = contentStore.seriesItems
-        let q = query
-        let hiddenLive = hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")
-        let hiddenVod = hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod")
-        let hiddenSeries = hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")
-
-        async let liveTask = Task.detached(priority: .userInitiated) {
-            live.filter { !hiddenLive.contains($0.stream.categoryId ?? "") && search(q, in: $0.stream.name) }
-                .sorted { $0.stream.name.localizedCaseInsensitiveCompare($1.stream.name) == .orderedAscending }
-        }.value
-        async let vodTask = Task.detached(priority: .userInitiated) {
-            vod.filter { !hiddenVod.contains($0.stream.categoryId ?? "") && search(q, in: $0.stream.name) }
-                .sorted { $0.stream.name.localizedCaseInsensitiveCompare($1.stream.name) == .orderedAscending }
-        }.value
-        async let serTask = Task.detached(priority: .userInitiated) {
-            ser.filter { !hiddenSeries.contains($0.series.categoryId ?? "") && search(q, in: $0.series.name) }
-                .sorted { $0.series.name.localizedCaseInsensitiveCompare($1.series.name) == .orderedAscending }
-        }.value
-
-        let (l, v, s) = await (liveTask, vodTask, serTask)
-        guard !Task.isCancelled else { return }
-        liveResults = l
-        movieResults = v
-        seriesResults = s
-    }
-
-    private func playLive(_ item: LiveStreamWithCategory) {
-        // Tek geçişte grupla (O(N)); kategori başına filter+first taraması geniş
-        // sorgularda tap anında main thread'i milyonlarca karşılaştırmayla kilitliyordu.
-        let sections: [LiveChannelCategorySection] = {
-            var seen = Set<String>()
-            var ids: [String] = []
-            for i in liveResults {
-                let cid = i.stream.categoryId ?? "other"
-                if seen.insert(cid).inserted { ids.append(cid) }
-            }
-            let grouped = Dictionary(grouping: liveResults) { $0.stream.categoryId ?? "other" }
-            return ids.compactMap { cid -> LiveChannelCategorySection? in
-                guard let items = grouped[cid], let first = items.first else { return nil }
-                return LiveChannelCategorySection(id: cid, title: first.categoryName, streams: items.map(\.stream))
-            }
-        }()
+    /// Play a channel result: present the player on the dashboard
+    /// overlay, then dismiss the search sheet — the player is never
+    /// left hidden behind the sheet (the old build presented without
+    /// dismissing).
+    private func playLive(
+        _ item: LiveStreamWithCategory,
+        queue: [DBLiveStream],
+        sections: [LiveChannelCategorySection]
+    ) {
         playerOverlay.present(playlistId: playlist.id) {
             LivePlayerShell(
                 playlist: playlist,
-                queue: liveResults.map(\.stream),
+                queue: queue,
                 sections: sections,
                 initialStream: item.stream,
                 initialHistory: nil,
                 subtitle: nil
             )
         }
+        dismiss()
     }
 }
 
-private struct ResultRow: View {
-    let name: String
-    let subtitle: String
-    let iconURL: URL?
-    let typeIcon: String
+// MARK: - Results
+
+private struct SearchResultsView: View {
+    let playlist: Playlist
+    let query: String
+    let filter: SearchView.SearchFilter
+    let onPlayLive: (LiveStreamWithCategory, [DBLiveStream], [LiveChannelCategorySection]) -> Void
+
+    @ObservedObject private var contentStore = PlaylistContentStore.shared
+    @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
+    @Environment(\.posterMetrics) private var posterMetrics
+
+    @State private var liveResults: [LiveStreamWithCategory] = []
+    @State private var movieResults: [VODWithCategory] = []
+    @State private var seriesResults: [SeriesWithCategory] = []
+
+    /// The play queue handed to the player shell: every live result.
+    private var liveQueue: [DBLiveStream] { liveResults.map(\.stream) }
+
+    /// Category sections for the player's channel browser, grouped
+    /// in result order (single O(N) pass at tap time).
+    private var liveSections: [LiveChannelCategorySection] {
+        var seen = Set<String>()
+        var ids: [String] = []
+        for item in liveResults {
+            let cid = item.stream.categoryId ?? "other"
+            if seen.insert(cid).inserted { ids.append(cid) }
+        }
+        let grouped = Dictionary(grouping: liveResults) { $0.stream.categoryId ?? "other" }
+        return ids.compactMap { cid -> LiveChannelCategorySection? in
+            guard let items = grouped[cid], let first = items.first else { return nil }
+            return LiveChannelCategorySection(id: cid, title: first.categoryName, streams: items.map(\.stream))
+        }
+    }
+
+    private var posterColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: posterMetrics.categoryGridPosterWidth), spacing: posterMetrics.gridSpacing)]
+    }
+
+    /// Whether the SELECTED section has no matches (the empty
+    /// state is per-section, matching the pill model).
+    private var selectedIsEmpty: Bool {
+        switch filter {
+        case .movies: return movieResults.isEmpty
+        case .series: return seriesResults.isEmpty
+        case .live:   return liveResults.isEmpty
+        }
+    }
 
     var body: some View {
-        HStack(spacing: 12) {
-            CachedImage(url: iconURL, width: 44, height: 44, iconName: typeIcon, loadProfile: .grid)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name).font(.body).lineLimit(1)
-                Text(subtitle).font(.caption).foregroundColor(.secondary).lineLimit(1)
+        Group {
+            if selectedIsEmpty {
+                if !contentStore.streamsLoaded {
+                    // The catalog is still loading: showing a false "no results" makes it look to the user
+                    // as if the content has disappeared. When streamsLoaded [becomes true], the [real state] below
+                    // .task tekrar arar.
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text(L("common.loading"))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ContentUnavailableView.search(text: query)
+                }
+            } else {
+                switch filter {
+                case .movies: movieGrid
+                case .series: seriesGrid
+                case .live:   liveList
+                }
             }
         }
-        .padding(.vertical, 2)
+        .task(id: query) { await runSearch() }
+        .task(id: filter) { await runSearch() }
+        .task(id: hiddenStore.version) { await runSearch() }
+        .task(id: contentStore.streamsLoaded) { await runSearch() }
     }
-}
 
-private struct SectionLabel: View {
-    let title: String
-    let count: Int
-    let icon: String
-    var body: some View {
-        Label("\(title) (\(count))", systemImage: icon)
+    // MARK: Single-type sections
+
+    private var movieGrid: some View {
+        ScrollView {
+            LazyVGrid(columns: posterColumns, spacing: posterMetrics.gridRowSpacing) {
+                ForEach(movieResults) { item in
+                    NavigationLink {
+                        // Round 14 (B1): pass the search-result list
+                        // as the player queue — the same context the
+                        // category grids pass — so prev/next in the
+                        // player walk the results the user came from,
+                        // not a single isolated movie.
+                        MovieDetailView(
+                            playlist: playlist,
+                            movie: item.stream,
+                            queue: movieResults.map(\.stream)
+                        )
+                    } label: {
+                        VODStreamCard(
+                            playlistId: playlist.id,
+                            stream: item.stream,
+                            categoryName: item.categoryName,
+                            posterWidth: posterMetrics.categoryGridPosterWidth,
+                            posterHeight: posterMetrics.categoryGridPosterHeight,
+                            imageLoadProfile: .grid
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding()
+        }
+    }
+
+    private var seriesGrid: some View {
+        ScrollView {
+            LazyVGrid(columns: posterColumns, spacing: posterMetrics.gridRowSpacing) {
+                ForEach(seriesResults) { item in
+                    NavigationLink {
+                        SeriesDetailView(playlist: playlist, series: item.series)
+                    } label: {
+                        SeriesCard(
+                            playlistId: playlist.id,
+                            stream: item.series,
+                            categoryName: item.categoryName,
+                            posterWidth: posterMetrics.categoryGridPosterWidth,
+                            posterHeight: posterMetrics.categoryGridPosterHeight,
+                            imageLoadProfile: .grid
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding()
+        }
+    }
+
+    private var liveList: some View {
+        ScrollView {
+            LazyVStack(spacing: 2) {
+                ForEach(liveResults) { item in
+                    liveRow(item)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
+    }
+
+    // MARK: Rows
+
+    /// A channel row: the logo WHOLE (aspect-fit — the same clarity
+    /// rule as Continue Watching), name + category, tap to play.
+    private func liveRow(_ item: LiveStreamWithCategory) -> some View {
+        Button {
+            onPlayLive(item, liveQueue, liveSections)
+        } label: {
+            HStack(spacing: 12) {
+                CachedImage(
+                    url: item.stream.streamIcon.flatMap { URL(string: $0) },
+                    width: 64,
+                    height: 44,
+                    cornerRadius: AppTheme.smallCornerRadius,
+                    contentMode: .fit,
+                    iconName: "tv",
+                    loadProfile: .grid
+                )
+                .background {
+                    RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius, style: .continuous)
+                        .fill(AppTheme.surface)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.stream.name)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(item.categoryName)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "play.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(AppTheme.accent)
+            }
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Search engine
+
+    /// Round 14 (B10): result cap for the selected section. The grids
+    /// render lazily, but an uncapped match list on a ~100k-row
+    /// catalog still costs a full sort + array per keystroke.
+    private static var resultCap: Int { 300 }
+
+    /// Round 14 (B10): only the SELECTED content type is searched
+    /// (the old engine filtered and alphabetically sorted all three
+    /// types on every keystroke, then showed one). Matching and
+    /// ordering now use the catalog's existing relevance machinery
+    /// (`CatalogTextSearch` — exact/prefix matches first), the same
+    /// sort the store's per-category search applies, and results are
+    /// capped at `resultCap`. Hidden categories stay excluded.
+    private func runSearch() async {
+        let q = query
+        switch filter {
+        case .movies:
+            let source = contentStore.vodStreams
+            let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod")
+            let result = await Task.detached(priority: .userInitiated) {
+                // Round 15 (C7): people names match too — a movie
+                // whose cast/director list contains the query joins
+                // the results after the title matches (relevance
+                // sort still leads with title hits).
+                let titleMatches = source.filter {
+                    !hidden.contains($0.stream.categoryId ?? "")
+                        && CatalogTextSearch.matches(search: q, text: $0.stream.name)
+                }
+                let titleIds = Set(titleMatches.map(\.stream.streamId))
+                let peopleMatches = source.filter { item in
+                    !hidden.contains(item.stream.categoryId ?? "")
+                        && !titleIds.contains(item.stream.streamId)
+                        && (DetailFormatting.peopleList(item.stream.cast) + DetailFormatting.peopleList(item.stream.director))
+                            .contains { CatalogTextSearch.matches(search: q, text: $0) }
+                }
+                let ordered = CatalogTextSearch.sortVODByRelevance(titleMatches, search: q) + peopleMatches
+                return Array(ordered.prefix(Self.resultCap))
+            }.value
+            guard !Task.isCancelled else { return }
+            movieResults = result
+            liveResults = []
+            seriesResults = []
+        case .series:
+            let source = contentStore.seriesItems
+            let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")
+            let result = await Task.detached(priority: .userInitiated) {
+                // Round 15 (C7): people names match too, as above.
+                let titleMatches = source.filter {
+                    !hidden.contains($0.series.categoryId ?? "")
+                        && CatalogTextSearch.matches(search: q, text: $0.series.name)
+                }
+                let titleIds = Set(titleMatches.map(\.series.seriesId))
+                let peopleMatches = source.filter { item in
+                    !hidden.contains(item.series.categoryId ?? "")
+                        && !titleIds.contains(item.series.seriesId)
+                        && (DetailFormatting.peopleList(item.series.cast) + DetailFormatting.peopleList(item.series.director))
+                            .contains { CatalogTextSearch.matches(search: q, text: $0) }
+                }
+                let ordered = CatalogTextSearch.sortSeriesByRelevance(titleMatches, search: q) + peopleMatches
+                return Array(ordered.prefix(Self.resultCap))
+            }.value
+            guard !Task.isCancelled else { return }
+            seriesResults = result
+            liveResults = []
+            movieResults = []
+        case .live:
+            let source = contentStore.liveStreams
+            let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")
+            let result = await Task.detached(priority: .userInitiated) {
+                let filtered = source.filter {
+                    !hidden.contains($0.stream.categoryId ?? "")
+                        && CatalogTextSearch.matches(search: q, text: $0.stream.name)
+                }
+                return Array(CatalogTextSearch.sortLiveByRelevance(filtered, search: q).prefix(Self.resultCap))
+            }.value
+            guard !Task.isCancelled else { return }
+            liveResults = result
+            movieResults = []
+            seriesResults = []
+        }
     }
 }

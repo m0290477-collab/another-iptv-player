@@ -1,16 +1,99 @@
 import SwiftUI
+import Nuke
 
 class AppDelegate: NSObject, UIApplicationDelegate {
-    /// Varsayılan: tüm yönler. `LiveChannelBrowserScreen` açıkken `.landscape` yapılır.
-    static var orientationLock: UIInterfaceOrientationMask = .allButUpsideDown
+    /// Round 9 (owner recording, build 45): the browse/tab interface is
+    /// PORTRAIT-ONLY on iPhone — in landscape the Live tab's sections
+    /// overlapped, the hero/logo cards stretched and a leftover player
+    /// pane clung to the edge, because those screens were never laid
+    /// out for landscape. Landscape now exists ONLY inside the video
+    /// player: `PlayerView` raises the lock to `.allButUpsideDown`
+    /// while fullscreen and restores this browse mask when it exits
+    /// or docks to the mini player. (`LiveChannelBrowserScreen` —
+    /// defined in PlayerView.swift, currently unreferenced — assigns
+    /// this same lock directly to force `.landscape` while open and
+    /// restore the player's mask on the way out, so it stays
+    /// compatible if it is ever re-wired.) iPad keeps free rotation
+    /// everywhere (its layouts are width-driven).
+    static var orientationLock: UIInterfaceOrientationMask = AppDelegate.browseOrientationLock
+
+    /// The mask every non-player surface lives under.
+    static var browseOrientationLock: UIInterfaceOrientationMask {
+        UIDevice.current.userInterfaceIdiom == .pad ? .allButUpsideDown : .portrait
+    }
+
+    /// Sets the lock and makes the system re-evaluate it NOW (a static
+    /// change alone only applies at the next presentation). When
+    /// `forceOrientation` is given (locking back to portrait), a
+    /// geometry update is also requested so a phone still physically
+    /// held in landscape rotates its UI back immediately.
+    static func setOrientationLock(
+        _ mask: UIInterfaceOrientationMask,
+        forceOrientation: UIInterfaceOrientationMask? = nil
+    ) {
+        orientationLock = mask
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive })
+            ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first
+        else { return }
+        // Round 10: poke EVERY window's root controller, not just the
+        // key window's — with the player overlay up, the key window is
+        // not guaranteed to be the one hosting the interface, and a
+        // missed poke leaves the system consulting the stale mask.
+        for window in scene.windows {
+            window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        }
+        if let forceOrientation {
+            let request = {
+                scene.requestGeometryUpdate(
+                    UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: forceOrientation)
+                ) { _ in }
+            }
+            request()
+            // Round 10 (owner video, build 46): exiting the player
+            // while the phone is still physically sideways left the
+            // browse UI stuck in landscape. A geometry request issued
+            // mid-rotation (the exit swipe usually starts while the
+            // interface is still turning) can be dropped by the
+            // system with the error swallowed above. Re-issue ONCE,
+            // shortly after, if the interface orientation still isn't
+            // inside the forced mask.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                let current = scene.interfaceOrientation
+                guard current != .unknown else { return }
+                let currentMask = UIInterfaceOrientationMask(rawValue: 1 << UInt(current.rawValue))
+                if !forceOrientation.contains(currentMask) {
+                    request()
+                }
+            }
+        }
+    }
 
     func application(_ application: UIApplication,
                      supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
         return AppDelegate.orientationLock
     }
 
-    /// Background URLSession olayları için sistem çağırır. Completion handler'ı DownloadManager'a iletiriz;
-    /// tüm delegate çağrıları dağıtılınca `urlSessionDidFinishEvents` tetikler.
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // Cinematic Dark chrome for UIKit-backed bars (tab bar / nav bar).
+        AppChrome.apply()
+        // C2 (Round 15): memory-warning response — trim the IMAGE
+        // memory cache only; the catalog and all DB state stay. (The
+        // pipeline itself lives in CachedImage.swift, which is not the
+        // app file's to edit; the hookup lives here.)
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil, queue: .main
+        ) { _ in
+            ImagePipeline.shared.cache.removeAll()
+        }
+        return true
+    }
+
+    /// The system calls it for background URLSession events. We forward the completion handler to DownloadManager;
+    /// when all delegate calls are delivered, it triggers `urlSessionDidFinishEvents`.
     func application(_ application: UIApplication,
                      handleEventsForBackgroundURLSession identifier: String,
                      completionHandler: @escaping () -> Void) {
@@ -30,8 +113,11 @@ struct another_iptv_playerApp: App {
 
     init() {
         IPTVRemoteImagePipeline.installAsShared()
-        _ = AppDatabase.shared
-        MockFixture.seedIfNeeded()
+        // C10 (Round 15): cold start — DB touch and fixture seeding are
+        // DEFERRED until after the first frame (see the `.task` on
+        // AppRootView). The old init synchronously opened/migrated the
+        // DB and seeded fixtures before the window existed, adding
+        // that whole cost to time-to-first-frame.
         UserDefaults.standard.register(defaults: [
             "player.pipEnabled": true,
             "player.continuePlayingInBackground": true,
@@ -47,18 +133,35 @@ struct another_iptv_playerApp: App {
     }
 }
 
-/// Uygulama kökü dil seçimini gözler: değişimde `.id` tüm hiyerarşiyi yeniden kurar,
-/// böylece L() ile çözülen her metin anında yeni dile geçer (yalnızca 3-4 view'ın
-/// manager'ı gözlemesine güvenmek çoğu ekranı eski dilde bırakıyordu). `.locale` ve
-/// `.layoutDirection` da seçime göre ayarlanır — Arapça'da sayı/tarih biçimleri ve
-/// RTL yerleşim cihaz diline değil, seçilen dile uyar.
+/// The app root observes the language choice: on a change, `.id` rebuilds the whole hierarchy,
+/// so every text resolved via L() immediately switches to the new language (trusting only 3-4 views' observing
+/// the manager was leaving most screens in the old language). `.locale` and
+/// `.layoutDirection` are also set according to the choice — in Arabic, number/date formats and
+/// the RTL layout follow the chosen language, not the device language.
 private struct AppRootView: View {
     @ObservedObject private var localization = LocalizationManager.shared
+    // Round 7: observing the accent store re-renders the hierarchy on a
+    // picker change; the environment accent below routes every
+    // `Color.accentColor` / control tint in the app to the chosen color
+    // (the AccentColor asset remains only as the pre-root fallback).
+    @ObservedObject private var accentTheme = AccentThemeStore.shared
 
     var body: some View {
         let code = localization.effectiveLanguageCode
         let isRTL = Locale.Language(identifier: code).characterDirection == .rightToLeft
         ContentView()
+            // C10: runs after the first frame is committed — first DB
+            // touch, fixture seed, and the ~500-per-playlist history
+            // prune all happen here, off the launch path.
+            .task {
+                _ = AppDatabase.shared
+                MockFixture.seedIfNeeded()
+                await AppDatabase.shared.pruneWatchHistory()
+            }
+            // Cinematic Dark is the app's only appearance.
+            .preferredColorScheme(.dark)
+            .accentColor(accentTheme.color)
+            .tint(accentTheme.color)
             .environment(\.appDatabase, .shared)
             .environment(\.locale, Locale(identifier: code))
             .environment(\.layoutDirection, isRTL ? .rightToLeft : .leftToRight)

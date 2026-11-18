@@ -5,10 +5,14 @@ struct GlassSystemIconButton: View {
     var pointSize: CGFloat
     var weight: Font.Weight = .semibold
     var buttonSize: CGFloat
+    /// Round 15 (C1): VoiceOver label, supplied by the caller with
+    /// a translated key. Optional so existing icon-only call sites
+    /// keep compiling; player call sites all pass one.
+    var accessibilityLabel: String? = nil
     var action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        let button = Button(action: action) {
             ZStack {
                 Circle()
                     .fill(.ultraThinMaterial)
@@ -25,5 +29,12 @@ struct GlassSystemIconButton: View {
             .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
         }
         .buttonStyle(.plain)
+        // Only override the label when the caller supplied one —
+        // other call sites keep their existing VoiceOver behavior.
+        if let accessibilityLabel {
+            button.accessibilityLabel(accessibilityLabel)
+        } else {
+            button
+        }
     }
 }

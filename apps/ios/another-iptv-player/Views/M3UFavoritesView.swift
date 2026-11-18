@@ -2,8 +2,8 @@ import SwiftUI
 
 /// M3U favorileri grid görünümü. `M3UFavoriteStore` üstünden reaktif günceller.
 ///
-/// 310K+ kanallık kataloglarda body başına tam liste taraması yapmamak için favori ve
-/// arama sonuçları @State'te tutulur, `.task(id:)` ile (debounce'lu) yeniden hesaplanır.
+/// To avoid scanning the full list per body in catalogs of 310K+ channels, the favorite and
+/// search results are kept in @State and recomputed with `.task(id:)` (debounced).
 struct M3UFavoritesView: View {
     let playlist: Playlist
 
@@ -17,32 +17,59 @@ struct M3UFavoritesView: View {
     @State private var favoriteChannels: [DBM3UChannel] = []
     @State private var filtered: [DBM3UChannel] = []
 
-    /// Favori kümesi veya katalog değişince yeniden hesaplama tetiği.
+    /// The recomputation trigger when the favorite set or the catalog changes.
     private var recomputeKey: String {
         "\(favorites.favoriteIds.count)-\(favorites.favoriteIds.hashValue)-\(store.channels.count)-\(debouncedQuery)"
     }
 
     var body: some View {
-        Group {
-            if favoriteChannels.isEmpty {
-                ContentUnavailableView(
-                    L("favorites.empty.title"),
-                    systemImage: "star",
-                    description: Text(L("favorites.empty.message"))
-                )
-            } else if filtered.isEmpty {
-                ContentUnavailableView(
-                    L("favorites.empty.no_result.title"),
-                    systemImage: "magnifyingglass",
-                    description: Text(L("category_picker.not_found.message"))
-                )
-            } else {
-                M3UGroupGridContent(items: filtered) { channel in
-                    present(channel)
+        VStack(spacing: 0) {
+            // Round 10: the shared in-view search field replaces
+            // `.searchable` here too — the same double-mount glitch
+            // family as Search/Favorites (point 5/8).
+            CatalogSearchField(text: $searchText, placeholder: L("favorites.search_placeholder"))
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
+
+            Group {
+                if favoriteChannels.isEmpty {
+                    // C9: styled surface card empty state with accent icon.
+                    VStack(spacing: 14) {
+                        Image(systemName: "star")
+                            .font(.system(size: 28, weight: .semibold))
+                            .foregroundStyle(AppTheme.accent)
+                            .frame(width: 72, height: 72)
+                            .background(Circle().fill(AppTheme.elevated))
+                        Text(L("favorites.empty.title"))
+                            .font(AppTheme.fontCardTitle)
+                        Text(L("favorites.empty.message"))
+                            .font(AppTheme.fontMetadata)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(24)
+                    .background(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous).fill(AppTheme.surface))
+                    .padding(.horizontal, 32)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if filtered.isEmpty {
+                    ContentUnavailableView(
+                        L("favorites.empty.no_result.title"),
+                        systemImage: "magnifyingglass",
+                        description: Text(L("category_picker.not_found.message"))
+                    )
+                } else {
+                    M3UGroupGridContent(items: filtered, onChannelSelected: { channel in
+                        present(channel)
+                    }, onRemoveFavorite: { channel in
+                        // C1: unfavorite directly from the favorites
+                        // grid (existing M3UFavoriteStore toggle).
+                        Task { await favorites.toggle(channel: channel) }
+                    })
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .searchable(text: $searchText, prompt: L("favorites.search_placeholder"))
         .onChange(of: searchText) { _, new in
             debounceTask?.cancel()
             let trimmed = new.trimmingCharacters(in: .whitespaces)
@@ -61,6 +88,7 @@ struct M3UFavoritesView: View {
         .navigationTitle(L("favorites.title"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
+        .cinematicBackground()
     }
 
     private func recompute() async {
@@ -68,7 +96,7 @@ struct M3UFavoritesView: View {
         let ids = favorites.favoriteIds
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         let result = await Task.detached(priority: .userInitiated) { () -> ([DBM3UChannel], [DBM3UChannel]) in
-            // Sıralama: DB'deki kanal listesindeki orijinal sıra (sortIndex) korunur.
+            // Ordering: the original order in the DB channel list (sortIndex) is preserved.
             let favs = channels.filter { ids.contains($0.id) }
             let filteredList = q.isEmpty
                 ? favs
@@ -82,7 +110,7 @@ struct M3UFavoritesView: View {
 
     private func present(_ channel: DBM3UChannel) {
         guard M3UParser.sanitizedURL(from: channel.url) != nil else { return }
-        // Favorilerden oynatırken queue = favori listesi (prev/next favoriler arasında geçer).
+        // When playing from favorites, the queue = the favorites list (prev/next moves between favorites).
         playerOverlay.present {
             M3UPlayerShell(
                 playlist: playlist,

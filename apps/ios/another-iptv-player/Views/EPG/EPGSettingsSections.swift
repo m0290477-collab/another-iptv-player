@@ -53,7 +53,10 @@ struct EPGRefreshStatusView: View {
 
 // MARK: - M3U section (editable XMLTV URL)
 
-struct M3UEPGSettingsSection: View {
+/// The M3U EPG rows without a `Section` wrapper, so the settings
+/// screens can embed them inside a larger group (round 6). (The
+/// standalone Section wrapper was removed in round 16, R2.)
+struct M3UEPGSettingsRows: View {
     @State private var playlist: Playlist
     @State private var epgURLDraft: String
     @State private var saveError: String?
@@ -64,7 +67,7 @@ struct M3UEPGSettingsSection: View {
     }
 
     var body: some View {
-        Section {
+        Group {
             TextField(L("epg.settings.url_placeholder"), text: $epgURLDraft, axis: .vertical)
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
@@ -80,10 +83,6 @@ struct M3UEPGSettingsSection: View {
             if let saveError {
                 Text(saveError).font(.footnote).foregroundColor(.red)
             }
-        } header: {
-            Text(L("epg.settings.section_title"))
-        } footer: {
-            Text(L("epg.settings.url_footer"))
         }
     }
 
@@ -108,9 +107,16 @@ struct M3UEPGSettingsSection: View {
     }
 }
 
+// Round 16 (R2): the orphaned M3UEPGSettingsSection wrapper is removed —
+// zero call sites; the settings screens embed the Rows
+// variant directly (the live path, unchanged).
+
 // MARK: - Xtream section (enable toggle + refresh)
 
-struct XtreamEPGSettingsSection: View {
+/// The Xtream EPG rows without a `Section` wrapper, so the settings
+/// screens can embed them inside a larger group (round 6). (The
+/// standalone Section wrapper was removed in round 16, R2.)
+struct XtreamEPGSettingsRows: View {
     let playlist: Playlist
     @State private var epgEnabled: Bool
     @State private var matchedChannels: Int?
@@ -122,7 +128,7 @@ struct XtreamEPGSettingsSection: View {
     }
 
     var body: some View {
-        Section {
+        Group {
             Toggle(L("epg.settings.enable"), isOn: $epgEnabled)
                 .onChange(of: epgEnabled) { _, newValue in
                     Task { await saveEnabled(newValue) }
@@ -138,8 +144,6 @@ struct XtreamEPGSettingsSection: View {
                     }
                 }
             }
-        } header: {
-            Text(L("epg.settings.section_title"))
         }
         .task { await loadMatchedChannels() }
         .onChange(of: epgStore.refreshState[playlist.id]) { oldValue, newValue in
@@ -164,3 +168,7 @@ struct XtreamEPGSettingsSection: View {
         }
     }
 }
+
+// Round 16 (R2): the orphaned XtreamEPGSettingsSection wrapper is removed —
+// zero call sites; the settings screens embed the Rows
+// variant directly (the live path, unchanged).

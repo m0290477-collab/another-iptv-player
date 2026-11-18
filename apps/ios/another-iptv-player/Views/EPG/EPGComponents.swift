@@ -118,9 +118,15 @@ struct PlayerProgrammeStrip: View {
 // MARK: - Time formatting
 
 enum EPGTimeFormat {
-    /// "20:30" in the device locale/timezone (24h or 12h per locale).
+    /// "20:30" in the APP's chosen language (C9 one-locale law,
+    /// finisher wiring): the formatter binds to `AppTheme.appLocale`,
+    /// never the device locale (24h or 12h per that locale).
     static func time(_ date: Date) -> String {
-        date.formatted(.dateTime.hour().minute())
+        let formatter = DateFormatter()
+        formatter.locale = AppTheme.appLocale
+        // "j" = the locale's own hour cycle (12h with AM/PM or 24h).
+        formatter.setLocalizedDateFormatFromTemplate("j:mm")
+        return formatter.string(from: date)
     }
 
     /// "20:30 – 21:00"

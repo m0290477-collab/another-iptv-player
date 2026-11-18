@@ -1,15 +1,15 @@
 import Foundation
 
-/// Bir AirPlay remux oturumunun yaşam döngüsü: temp dizin + FFmpeg remux yazıcısı +
-/// yerel HTTP sunucusu. `localPlaylistURL` hazır olunca AVPlayer'a verilir; Apple TV
+/// The life cycle of an AirPlay remux session: temp directory + FFmpeg remux writer +
+/// local HTTP server. When `localPlaylistURL` is ready it is given to AVPlayer; on Apple TV
 /// segmentleri telefonun LAN adresinden çeker.
 final class AirPlayRemuxSession {
   let sourceURL: URL
-  /// Remux'un kaynak içinde başladığı saniye — oynatma konumu = offset + yerel konum.
+  /// The second at which the remux started inside the source — playback position = offset + local position.
   let startOffsetSeconds: TimeInterval
   let isLive: Bool
-  /// VOD'da oynatma başlamadan biriktirilecek içerik (sn). İlk başlatmada yüksek
-  /// (tekleme koruması), seek yenilemesinde düşük (kullanıcı aktif bekliyor).
+  /// Content to accumulate before playback starts on VOD (sec). High on first start
+  /// (stall protection), low on seek refresh (the user is actively waiting).
   let minimumBufferSeconds: Double
 
   private let directory: URL
@@ -20,14 +20,14 @@ final class AirPlayRemuxSession {
 
   var onError: ((Error) -> Void)?
 
-  /// Yerel sunucuya erişim bir kez doğrulandıysa sonraki oturumlarda uzun retry gereksiz.
+  /// Once access to the local server has been verified once, long retries are unnecessary in later sessions.
   private static var hasVerifiedLocalNetwork = false
 
-  /// Bir önceki oturum: yeni writer, bunun kaynak bağlantısı kapanana dek beklemeli
-  /// (bağlantı-limitli panelde çift açılış çakışması). start tamamlanınca serbest kalır.
+  /// A previous session: the new writer must wait until this one's source connection closes
+  /// (a double-open collision on a connection-limited panel). It is released when start completes.
   private var previousToDrain: AirPlayRemuxSession?
 
-  /// Bu oturumun kaynak bağlantısı fiilen kapandı mı (writer döngüsü çözüldü)?
+  /// Has this session's source connection actually closed (the writer loop resolved)?
   var isSourceClosed: Bool { writer.isClosed }
 
   init(
@@ -47,13 +47,13 @@ final class AirPlayRemuxSession {
     self.isLive = isLive
     self.minimumBufferSeconds = minimumBufferSeconds
     self.previousToDrain = previousToDrain
-    // Paylaşılan sunucunun kökü altında oturuma özel alt dizin: zapping'de listener ve
-    // yerel-ağ doğrulaması yeniden kurulmaz.
+    // A per-session subdirectory under the shared server's root: on zapping, the listener and the
+    // local-network verification are not rebuilt.
     server = LocalHTTPServer.shared
     sessionPathComponent = "s\(UUID().uuidString.prefix(8))"
     directory = server.directory.appendingPathComponent(sessionPathComponent, isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    // `self` strong tutar; closure zayıf yakalar → döngü yok, ama beklerken canlı kalır.
+    // `self` holds it strongly; the closure captures weakly → no cycle, but it stays alive while waiting.
     let readyToOpen: (() -> Bool)? = previousToDrain.map { prev in
       { [weak prev] in prev?.isSourceClosed ?? true }
     }
@@ -71,14 +71,14 @@ final class AirPlayRemuxSession {
     )
   }
 
-  /// Güvenlik ağı: referans stop() çağrılmadan düşerse (state machine hatası vb.)
-  /// başıboş writer'ın panel bağlantısını sonsuza dek tutması engellenir.
+  /// Safety net: if the reference is dropped without stop() being called (a state machine bug, etc.),
+  /// a stray writer is prevented from holding the panel connection forever.
   deinit {
     writer.cancel()
   }
 
-  /// Sunucu + remux'u başlatır; playlist ilk segmentiyle diske düşünce completion çağrılır.
-  /// Playlist ~10 sn içinde oluşmazsa hata döner (kaynak açılamadı vb.).
+  /// Starts the server + remux; the completion is called when the playlist hits disk with its first segment.
+  /// If the playlist does not form within ~10 sec, it returns an error (source could not be opened, etc.).
   func start(completion: @escaping (Result<URL, Error>) -> Void) {
     do {
       try server.start()
@@ -97,9 +97,9 @@ final class AirPlayRemuxSession {
     }
     let playlistPath = writer.playlistURL.path
     let baseURL = "http://\(ip):\(server.port)/\(sessionPathComponent)"
-    // Playlist üretimi ve erişilebilirlik doğrulaması PARALEL koşar; ikisi de bitince
-    // tamamlanır. Canlıda ilk segment gerçek zamanlı dolduğundan süre payı geniş tutulur.
-    // VOD'da tampon birikmesi beklenir (aşağıda) — 4K'da indirme ~gerçek zamanlı olabilir.
+    // Playlist production and accessibility verification run in PARALLEL; it completes when
+    // both finish. On live, the margin is kept wide because the first segment fills in real time.
+    // On VOD, buffer accumulation is awaited (below) — at 4K the download can be ~real-time.
     let deadline = Date().addingTimeInterval(25)
     var playlistReady = false
     var serverVerified = false
@@ -107,7 +107,7 @@ final class AirPlayRemuxSession {
     let finishIfReady = {
       guard playlistReady, serverVerified, !finished else { return }
       finished = true
-      self.previousToDrain = nil  // writer artık açtı; drenaj referansını bırak
+      self.previousToDrain = nil  // the writer has now opened it; drop the drain reference
       // If a subtitle rendition was requested, the writer has upgraded the client
       // playlist to the subtitle master by now (written on the first segment; readiness
       // needs many more). Otherwise this is still the raw video playlist.
@@ -148,79 +148,77 @@ final class AirPlayRemuxSession {
           ))
       }
     }
-    // /ping playlist'ten bağımsız hemen 200 döner; ilk istek iOS "Yerel Ağ" izin
-    // diyaloğunu tetikleyebilir — kullanıcı yanıtlayana kadar retry gerekir.
+    // /ping returns 200 immediately, independent of the playlist; the first request can trigger the iOS "Local Network" permission
+    // dialog — retries are needed until the user answers.
     let attempts = Self.hasVerifiedLocalNetwork ? 5 : 20
-    verifyReachable(
-      url: URL(string: "http://\(ip):\(server.port)/ping")!,
-      attemptsLeft: attempts
-    ) { reachable in
-      if reachable {
-        Self.hasVerifiedLocalNetwork = true
-        serverVerified = true
-        finishIfReady()
-      } else {
-        failOnce(
-          NSError(
-            domain: "AirPlayRemux", code: 3,
-            userInfo: [
-              NSLocalizedDescriptionKey:
-                "Local server unreachable (local network permission denied?)"
-            ]
-          ))
+    let pingURL = URL(string: "http://\(ip):\(server.port)/ping")!
+    Task { [weak self] in
+      guard let self else { return }
+      // Round 15 (C11): async/await reachability probe (was a
+      // recursive completion-handler data task).
+      let reachable = await self.verifyReachable(url: pingURL, attemptsLeft: attempts)
+      DispatchQueue.main.async {
+        if reachable {
+          Self.hasVerifiedLocalNetwork = true
+          serverVerified = true
+          finishIfReady()
+        } else {
+          failOnce(
+            NSError(
+              domain: "AirPlayRemux", code: 3,
+              userInfo: [
+                NSLocalizedDescriptionKey:
+                  "Local server unreachable (local network permission denied?)"
+              ]
+            ))
+        }
       }
     }
   }
 
   var sourceDurationSeconds: TimeInterval { writer.sourceDurationSeconds }
 
-  /// Girdi seek'inin gerçekte düştüğü konum; seek edilemeyen kaynakta 0'a düşer.
-  /// Zaman çizelgesi muhasebesi istenen offset yerine bunu kullanmalı.
+  /// The position the input seek actually landed at; on an unseekable source it falls to 0.
+  /// The timeline accounting must use this instead of the requested offset.
   var effectiveStartOffsetSeconds: TimeInterval { writer.effectiveStartSeconds }
 
-  /// Cast oynatıcısının kaynak-zamanı konumu — yazıcının VOD pacing kapısını besler.
+  /// The cast player's source-time position — feeds the writer's VOD pacing gate.
   func updatePlaybackPosition(_ seconds: TimeInterval) {
     writer.updatePlaybackPosition(seconds)
   }
 
-  private func verifyReachable(
-    url: URL,
-    attemptsLeft: Int,
-    completion: @escaping (Bool) -> Void
-  ) {
+  /// Round 15 (C11): async/await probe — same semantics as the
+  /// old completion-handler recursion: HTTP 200 = reachable, one
+  /// retry per second until the attempt budget runs out.
+  private func verifyReachable(url: URL, attemptsLeft: Int) async -> Bool {
     var request = URLRequest(url: url)
     request.timeoutInterval = 2
-    let task = URLSession.shared.dataTask(with: request) { _, response, _ in
-      if (response as? HTTPURLResponse)?.statusCode == 200 {
-        DispatchQueue.main.async { completion(true) }
-      } else if attemptsLeft > 1 {
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1) {
-          self.verifyReachable(url: url, attemptsLeft: attemptsLeft - 1, completion: completion)
-        }
-      } else {
-        DispatchQueue.main.async { completion(false) }
-      }
+    if let (_, response) = try? await URLSession.shared.data(for: request),
+       (response as? HTTPURLResponse)?.statusCode == 200 {
+      return true
     }
-    task.resume()
+    guard attemptsLeft > 1 else { return false }
+    try? await Task.sleep(nanoseconds: 1_000_000_000)
+    return await verifyReachable(url: url, attemptsLeft: attemptsLeft - 1)
   }
 
   func stop() {
     writer.cancel()
-    // Paylaşılan sunucu durdurulmaz; yalnız bu oturumun dizini temizlenir. Silme
-    // GECİKMELİ: içerik değişiminde Apple TV eski playlist'i bir süre daha
-    // yoklayabiliyor — dizin 1 sn'de silinince 404'ler item'ı .failed'a itip
-    // sağlıklı devri öldürüyordu. Pacing sayesinde dizin ~25-35 sn medya kadar.
+    // The shared server is not stopped; only this session's directory is cleaned. Deletion is
+    // DELAYED: during a content change, Apple TV may keep probing the old playlist for a while
+    // — when the directory was deleted in 1 sec, 404s pushed the item to .failed and
+    // killed a healthy handover. Thanks to pacing, the directory holds ~25-35 sec of media.
     let dir = directory
     DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 30) {
       try? FileManager.default.removeItem(at: dir)
     }
   }
 
-  /// Cast'in başlamasına yetecek içerik playlist'te birikti mi? Canlı: 3 segment
-  /// yeter (gerçek zamanlı dolar). VOD: AVPlayer yazıcının dibinde koşmasın diye
-  /// tampon biriksin — 4K'da indirme gerçek zamana yakınken tampon olmadan TV'de
-  /// tekleme kaçınılmaz. ENDLIST (kısa içerik/remux bitti) her durumda yeterlidir.
-  /// Saf fonksiyon: 13-14. tur düzeltmelerinin (tampon kapıları) regresyon kilidi.
+  /// Has enough content accumulated in the playlist for cast to start? Live: 3 segments
+  /// are enough (they fill in real time). VOD: let a buffer accumulate so AVPlayer doesn't run at the writer's tail
+  /// — when a 4K download is near real-time, stalls on the TV are inevitable without a buffer.
+  /// ENDLIST (short content/remux finished) is sufficient in every case.
+  /// Pure function: the regression lock for the round 13-14 fixes (buffer gates).
   static func playlistReady(
     content: String,
     isLive: Bool,

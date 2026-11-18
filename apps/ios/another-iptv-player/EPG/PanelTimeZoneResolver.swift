@@ -23,13 +23,38 @@ enum PanelTimeZoneResolver {
         }
 
         // 3. Derive a fixed offset from time_now vs timestamp_now.
-        if let offset = derivedOffsetSeconds(timeNow: serverInfo?.timeNow, timestampNow: serverInfo?.timestampNow),
-           let tz = TimeZone(secondsFromGMT: offset) {
-            return tz
+        // C2 (Round 15): the fallback used to be a FIXED-offset zone, so
+        // every future/past date inherited the offset in force at the
+        // refresh moment — programmes after a DST transition landed an
+        // hour off. Prefer a real IANA zone whose offset matches the
+        // derived offset TODAY: that zone carries its own DST rules, so
+        // per-date offset resolution stays correct across transitions.
+        // Only when no known zone matches do we fall back to the fixed
+        // offset (documented ambiguity: several zones share an offset;
+        // the first match is a heuristic, still strictly better than a
+        // frozen offset because its DST pattern is real).
+        if let offset = derivedOffsetSeconds(timeNow: serverInfo?.timeNow, timestampNow: serverInfo?.timestampNow) {
+            if let tz = dstAwareZone(matchingOffset: offset, at: Date()) {
+                return tz
+            }
+            if let tz = TimeZone(secondsFromGMT: offset) {
+                return tz
+            }
         }
 
         // 4. UTC.
         return .gmt
+    }
+
+    /// C2 (Round 15): first known IANA zone whose GMT offset at `date`
+    /// equals `offset`. Deterministic (identifier-sorted) so the choice
+    /// is stable across launches.
+    static func dstAwareZone(matchingOffset offset: Int, at date: Date) -> TimeZone? {
+        for identifier in TimeZone.knownTimeZoneIdentifiers.sorted() {
+            guard let tz = TimeZone(identifier: identifier) else { continue }
+            if tz.secondsFromGMT(for: date) == offset { return tz }
+        }
+        return nil
     }
 
     static func timeZone(fromIANA raw: String?) -> TimeZone? {

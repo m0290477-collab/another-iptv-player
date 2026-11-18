@@ -44,6 +44,10 @@ nonisolated final class EPGXMLTVParser: NSObject, XMLParserDelegate {
         var pastCutoffTs: Int64
         var futureCutoffTs: Int64
         var defaultUTCOffsetSeconds: Int       // policy for offset-less datetimes
+        /// C2 (Round 15): when set, offset-less datetimes resolve their
+        /// offset PER PROGRAMME DATE from this zone (DST-aware) instead
+        /// of the single refresh-moment `defaultUTCOffsetSeconds`.
+        var defaultTimeZone: TimeZone? = nil
         var batchSize: Int = EPGConstants.parseBatchSize
     }
 
@@ -148,13 +152,13 @@ nonisolated final class EPGXMLTVParser: NSObject, XMLParserDelegate {
                 skipProgramme = true
                 return
             }
-            guard let start = Self.parseXMLTVTimestamp(attributeDict["start"], defaultOffsetSeconds: options.defaultUTCOffsetSeconds) else {
+            guard let start = Self.parseTimestamp(attributeDict["start"], options: options) else {
                 diagnostics.malformedDates += 1
                 skipProgramme = true
                 return
             }
             // Missing/blank stop → assume a nominal 1h slot so the row is usable.
-            let stop = Self.parseXMLTVTimestamp(attributeDict["stop"], defaultOffsetSeconds: options.defaultUTCOffsetSeconds) ?? (start + 3600)
+            let stop = Self.parseTimestamp(attributeDict["stop"], options: options) ?? (start + 3600)
             guard stop > options.pastCutoffTs, start < options.futureCutoffTs else {
                 diagnostics.skippedOutOfWindow += 1
                 skipProgramme = true
@@ -281,13 +285,27 @@ nonisolated final class EPGXMLTVParser: NSObject, XMLParserDelegate {
     /// Parses an XMLTV datetime ("YYYYMMDDHHMMSS ±HHMM", tolerating truncation to
     /// YYYYMMDDHHMM and a missing offset) into unix epoch seconds (UTC). Offset-less
     /// values are interpreted with `defaultOffsetSeconds` (the feed's assumed zone).
-    static func parseXMLTVTimestamp(_ raw: String?, defaultOffsetSeconds: Int) -> Int64? {
+    /// C2 (Round 15): timestamp entry point honoring the per-date zone
+    /// when the feed omits offsets. Explicit offsets in the string
+    /// always win (handled inside the core parser).
+    static func parseTimestamp(_ raw: String?, options: Options) -> Int64? {
+        if let tz = options.defaultTimeZone {
+            return parseXMLTVTimestamp(raw, defaultOffsetSeconds: options.defaultUTCOffsetSeconds) { wallEpoch in
+                tz.secondsFromGMT(for: Date(timeIntervalSince1970: TimeInterval(wallEpoch)))
+            }
+        }
+        return parseXMLTVTimestamp(raw, defaultOffsetSeconds: options.defaultUTCOffsetSeconds)
+    }
+
+    static func parseXMLTVTimestamp(_ raw: String?, defaultOffsetSeconds: Int,
+                                    defaultOffsetForWallEpoch: ((Int64) -> Int)? = nil) -> Int64? {
         guard let raw else { return nil }
         // Split digits (datetime) from an optional trailing signed offset.
         let bytes = Array(raw.utf8)
         var digits: [Int] = []
         digits.reserveCapacity(14)
         var offsetSeconds = defaultOffsetSeconds
+        var hasExplicitOffset = false
         var i = 0
         // Leading whitespace.
         while i < bytes.count, bytes[i] == 0x20 { i += 1 }
@@ -313,9 +331,11 @@ nonisolated final class EPGXMLTVParser: NSObject, XMLParserDelegate {
                 let oh = offDigits[0] * 10 + offDigits[1]
                 let om = offDigits[2] * 10 + offDigits[3]
                 offsetSeconds = sign * (oh * 3600 + om * 60)
+                hasExplicitOffset = true
             } else if offDigits.count >= 2 {
                 let oh = offDigits[0] * 10 + offDigits[1]
                 offsetSeconds = sign * (oh * 3600)
+                hasExplicitOffset = true
             }
         }
 
@@ -331,11 +351,32 @@ nonisolated final class EPGXMLTVParser: NSObject, XMLParserDelegate {
         let hour = num(8, 2)
         let minute = num(10, 2)
         let second = digits.count >= 14 ? num(12, 2) : 0
-        guard month >= 1, month <= 12, day >= 1, day <= 31, hour < 24, minute < 60, second < 60 else { return nil }
+        // C2 (Round 15): reject IMPOSSIBLE dates — the old `day <= 31`
+        // check let "Feb 30" / "Apr 31" through, and days_from_civil
+        // silently rolled them into the next month, landing programmes
+        // on the wrong day. Validate against the real month length
+        // (proleptic Gregorian leap rule, matching daysFromCivil).
+        guard month >= 1, month <= 12, day >= 1, day <= Self.daysInMonth(year: year, month: month),
+              hour < 24, minute < 60, second < 60 else { return nil }
 
         let days = daysFromCivil(year: year, month: month, day: day)
-        let epoch = Int64(days) * 86_400 + Int64(hour) * 3600 + Int64(minute) * 60 + Int64(second) - Int64(offsetSeconds)
-        return epoch
+        let wallEpoch = Int64(days) * 86_400 + Int64(hour) * 3600 + Int64(minute) * 60 + Int64(second)
+        // C2: no explicit offset + a zone was supplied → resolve the
+        // offset for THIS programme's wall-clock date (DST-aware).
+        if !hasExplicitOffset, let resolver = defaultOffsetForWallEpoch {
+            offsetSeconds = resolver(wallEpoch)
+        }
+        return wallEpoch - Int64(offsetSeconds)
+    }
+
+    /// C2 (Round 15): month length for the impossible-date validation.
+    static func daysInMonth(year: Int, month: Int) -> Int {
+        switch month {
+        case 1, 3, 5, 7, 8, 10, 12: return 31
+        case 4, 6, 9, 11: return 30
+        case 2: return ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0) ? 29 : 28
+        default: return 0
+        }
     }
 
     /// Howard Hinnant's `days_from_civil`: days since 1970-01-01 for a proleptic

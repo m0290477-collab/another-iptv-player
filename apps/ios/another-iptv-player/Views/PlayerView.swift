@@ -28,9 +28,9 @@ extension LiveChannelCategorySection {
     }
 }
 
-/// Kanal panelinin Xtream `DBLiveStream` veya M3U `DBM3UChannel` gibi farklı kaynaklarla çalışabilmesi için
-/// hafif bir görüntüleme modelidir. Tıklamalar item `id`'sini callback'e verir; aranması/akışın seçilmesi
-/// çağıranın sorumluluğundadır.
+/// It is a lightweight display model so the channel panel can work with different sources such as an Xtream `DBLiveStream` or an M3U `DBM3UChannel`.
+/// Taps give the item's `id` to the callback; looking it up / selecting the stream
+/// is the caller's responsibility.
 struct ChannelPanelItem: Identifiable, Equatable {
     let id: String
     let name: String
@@ -43,7 +43,7 @@ struct ChannelPanelSection: Identifiable, Equatable {
     let items: [ChannelPanelItem]
 }
 
-/// Kanal tarayıcısı kapandıktan sonra ana mpv/UIKit köprüsünü tazelemek için iç gövdeyi `.id` ile yeniden oluşturur.
+/// After the channel browser closes, it recreates the inner body with `.id` to refresh the main mpv/UIKit bridge.
 struct PlayerView: View {
     let url: URL
     let title: String
@@ -57,7 +57,7 @@ struct PlayerView: View {
     var seriesId: String? = nil
     var resumeTimeMs: Int? = nil
     var containerExtension: String? = nil
-    /// M3U kanal bazlı User-Agent (#EXTVLCOPT / #KODIPROP); motora load'da geçirilir.
+    /// M3U per-channel User-Agent (#EXTVLCOPT / #KODIPROP); passed to the engine at load.
     var userAgent: String? = nil
     /// EPG lookup key for the live channel; drives the in-player now-playing strip.
     var epgChannelKey: String? = nil
@@ -68,6 +68,11 @@ struct PlayerView: View {
     var canGoToNextEpisode: Bool = false
     var onPreviousEpisode: (() -> Void)? = nil
     var onNextEpisode: (() -> Void)? = nil
+    /// Round 15 (C8): the NEXT episode's season/episode numbers,
+    /// shown on the T-50 next-episode card when the caller knows
+    /// them (nil = the line is omitted, never invented).
+    var nextEpisodeSeason: Int? = nil
+    var nextEpisodeEpisode: Int? = nil
     var canGoToPreviousChannel: Bool = false
     var canGoToNextChannel: Bool = false
     var onPreviousChannel: (() -> Void)? = nil
@@ -80,7 +85,11 @@ struct PlayerView: View {
     var onVideoSurfaceTap: (() -> Void)? = nil
     var onNavigateToDetail: ((String, String) -> Void)? = nil
 
-    /// Favori UI — nil ise buton gizli (Xtream şu an kullanmıyor).
+    /// Favorite UI — shells may supply the state + toggle (the
+    /// Live/M3U shells do). When both are nil, PlayerViewImpl
+    /// derives the star from the same DBFavorite rows the detail
+    /// screens write (round 16, F1) — the button is hidden only
+    /// when no favorite identity can be derived either.
     var isFavorite: Bool? = nil
     var onToggleFavorite: (() -> Void)? = nil
 
@@ -108,6 +117,8 @@ struct PlayerView: View {
             canGoToNextEpisode: canGoToNextEpisode,
             onPreviousEpisode: onPreviousEpisode,
             onNextEpisode: onNextEpisode,
+            nextEpisodeSeason: nextEpisodeSeason,
+            nextEpisodeEpisode: nextEpisodeEpisode,
             canGoToPreviousChannel: canGoToPreviousChannel,
             canGoToNextChannel: canGoToNextChannel,
             onPreviousChannel: onPreviousChannel,
@@ -141,16 +152,24 @@ private struct PlayerViewImpl: View {
     var userAgent: String? = nil
     var epgChannelKey: String? = nil
     var suppressWatchHistory: Bool = false
-
-    /// Opsiyonel favori butonu — yalnız ikisi de set ise topChrome'da gösterilir.
+    /// Optional favorite button — shown in the quick-actions row
+    /// when the shell sets both, or when a favorite identity can be
+    /// derived from the playback itself (round 16, F1, below).
     var isFavorite: Bool? = nil
     var onToggleFavorite: (() -> Void)? = nil
 
-    /// Dizi oynatırken playlist sırasına göre önceki / sonraki bölüm (UI + Kontrol Merkezi).
+    /// Round 16 (F1): state for the derived favorite path.
+    @State private var derivedFavorite = false
+
+    /// Previous / next episode in playlist order while playing a series (UI + Control Center).
     var canGoToPreviousEpisode: Bool = false
     var canGoToNextEpisode: Bool = false
     var onPreviousEpisode: (() -> Void)? = nil
     var onNextEpisode: (() -> Void)? = nil
+    /// Round 15 (C8): next episode's season/episode numbers for
+    /// the T-50 card's "Season N • Episode M" line.
+    var nextEpisodeSeason: Int? = nil
+    var nextEpisodeEpisode: Int? = nil
     var canGoToPreviousChannel: Bool = false
     var canGoToNextChannel: Bool = false
     var onPreviousChannel: (() -> Void)? = nil
@@ -186,38 +205,96 @@ private struct PlayerViewImpl: View {
     }
 
     @State private var showControls = true
+    /// Round 19 (R19-1a): controls lock (STRONG top-bar lock icon) —
+    /// while locked every chrome control is hidden and inert; only
+    /// the standalone unlock button remains on screen.
+    @State private var controlsLocked = false
     @State private var timer: Timer?
     @State private var saveHistoryTimer: Timer?
     @State private var hasInitialSeeked = false
-    @AppStorage("player.debugOverlayEnabled") private var showDebugOverlay = false
     @AppStorage("player.videoAspectMode") private var videoAspectModeRaw = VideoAspectMode.fit.rawValue
     @AppStorage("player.pipEnabled") private var pipEnabled = true
     @AppStorage("player.continuePlayingInBackground") private var continuePlayingInBackground = true
     @AppStorage("player.speedUpOnLongPress") private var speedUpOnLongPress = true
     @AppStorage("player.autoPlayNextEpisode") private var autoPlayNextEpisode = true
+    // Round 11: the Player settings group is wired for real here —
+    // the Skip Intro visibility + jump length, and the default
+    // sleep timer armed on open. Round 14 (A4): the old post-end
+    // "Next-episode timer" AppStorage is GONE from the player —
+    // the T-50 card (below) replaces that behavior entirely; the
+    // Auto-Play Next Episode toggle above remains the master switch.
+    @AppStorage("player.showSkipIntro") private var showSkipIntro = true
+    @AppStorage("player.skipIntroLengthSeconds") private var skipIntroLengthSeconds = 85
+    @AppStorage("player.defaultSleepTimerMinutes") private var defaultSleepTimerMinutes = 0
+    @State private var didApplyDefaultSleepTimer = false
 
     @State private var isScrubbing = false
     @State private var scrubValue: Double = 0
     @State private var lockedSliderValue: Double?
     @State private var sliderUnlockGeneration = 0
     @State private var showTrackSettings = false
-    @State private var showSubtitleAppearance = false
+    /// Round 8: which section the track sheet opens scrolled to
+    /// (Audio / Subtitles quick-action buttons deep-link into it).
+    @State private var trackSheetFocus: PlaybackTrackSettingsSheet.SectionFocus = .all
+    /// Round 8: REAL sleep timer — the chosen minutes while armed, and
+    /// the one-shot Timer that pauses playback when they elapse.
+    /// Nothing is persisted: leaving the player disarms it, and the
+    /// only effect it ever has is pausing this playback.
+    @State private var sleepTimerMinutes: Int?
+    /// Round 14 (B1): when the armed sleep timer fires — the Sleep
+    /// button's caption shows the REMAINING minutes, computed from
+    /// this date (refreshed by a TimelineView in the button).
+    @State private var sleepTimerEndsAt: Date?
+    @State private var sleepCountdownTimer: Timer?
     @State private var isFastForwarding = false
+    /// The surface's manual-PiP trigger input. Round 9 removed the
+    /// capsule's PiP button; round 14 (B1) restores manual PiP as a
+    /// button in the ONE quick-actions row, which increments this.
     @State private var pipManualSignal = 0
+    /// Original AirPlay flow state (restored round 18): the remux
+    /// preparation spinner and the hidden route-picker trigger the
+    /// pre-restyle top capsule used.
     @State private var isPreparingAirPlay = false
     @State private var airPlayPickerSignal = 0
-    @State private var bitrateSamples: [(time: Date, bps: Double)] = []
     @State private var aspectToastText: String?
     @State private var aspectToastToken: UInt64 = 0
 
-    /// Dizi bölümü bitince sonraki bölüme otomatik geçiş geri sayımı. Token, iptal sonrası
-    /// gecikmiş tick'lerin sayacı yeniden canlandırmasını engeller; `handled` bayrağı kullanıcı
-    /// iptal ettiğinde aynı `.ended` durumu için sayacın tekrar başlamasını önler.
-    @State private var autoAdvanceSecondsRemaining: Int?
-    @State private var autoAdvanceToken: UInt64 = 0
-    @State private var autoAdvanceHandledForCurrentEnd = false
+    /// Round 14 (A4): the T-50 next-episode card state. The card is
+    /// COMPUTED from the live position (see
+    /// `nextEpisodeRemainingSeconds`); these flags carry only what
+    /// the position can't say: Cancel was pressed for this ending
+    /// (re-arms when the user seeks back out of the 50 s zone), and
+    /// an auto-advance is in flight (so the identity change it
+    /// causes isn't mistaken for a manual episode switch).
+    @State private var nextEpisodeCardDismissed = false
+    @State private var autoAdvanceInFlight = false
+    /// Round 15 (C8): "Still watching?" — consecutive auto-advances
+    /// with zero user interaction. At 3, the next card shows but
+    /// does NOT auto-play at 0; it waits for an explicit tap. Any
+    /// user interaction (everything funnels through `resetTimer`)
+    /// resets the counter. Local state only, never persisted.
+    @State private var consecutiveAutoAdvances = 0
+    @State private var stillWatchingHold = false
+    /// Round 14 (A2): the failure message the user already closed
+    /// the failure card for — a NEW failure (different message)
+    /// re-shows the card.
+    @State private var dismissedFailureMessage: String?
+    /// Round 14 (B12): the ±10 s double-tap seek indicator
+    /// (direction + token so a stale clear can't hide a fresh one).
+    @State private var skipIndicatorDirection: Int?
+    @State private var skipIndicatorToken: UInt64 = 0
+    /// Round 14 (B3): last channel-zap time — the pull-down
+    /// dismiss gesture stays out of a zap swipe's way briefly.
+    @State private var lastZapAt: Date?
+    // NOTE (round 15, owner phone-first order 2026-11-16 04:28 PT):
+    // iPad keyboard shortcuts from C1 are DEFERRED to the later
+    // iPad round — not implemented in this build.
+    /// Round 15 (C10): last EPG fullscreen-stamp heartbeat write.
+    @State private var lastEPGStampAt: Date = .distantPast
 
-    /// Tam ekran kapak: kenardan geri (pop) ve aşağı çekerek kapatma.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Fullscreen cover: back from the edge (pop) and pull-down-to-close.
     private enum InteractiveDismissAxis {
         case edgeBack
         case pullDown
@@ -239,10 +316,10 @@ private struct PlayerViewImpl: View {
 
     private var isMiniCommitted: Bool { overlayMode == .mini }
 
-    /// İki parmak pinch: 1x–4x; yakınlaştırınca tek parmakla sürükleyerek kadraj kaydırılabilir.
-    /// Pinch & pan UIKit tarafında (`PlayerMediaKitTouchContainerView`); koordinat sistemi
-    /// scaled view'a bağlı olmadığı için drag güvenilir. Pinch midpoint anchor için aşağıdaki
-    /// `pinchAnchorState` kullanılır.
+    /// Two-finger pinch: 1x–4x; when zoomed in, the frame can be shifted by dragging with one finger.
+    /// Pinch & pan are on the UIKit side (`PlayerMediaKitTouchContainerView`); because the coordinate system
+    /// is not bound to the scaled view, dragging is reliable. For the pinch midpoint anchor, the
+    /// `pinchAnchorState` below is used.
     @State private var videoPinchBase: CGFloat = 1
     /// Live-only pinch/pan values, isolated in an ObservableObject like `cardDrag` so
     /// per-frame gesture updates re-render only `VideoZoomPanLayer`, not this whole body.
@@ -254,8 +331,6 @@ private struct PlayerViewImpl: View {
     /// The full container (screen) size the surface is centered in. Pan bounds are the
     /// overflow of the rendered surface past this, so panning never exposes the background.
     @State private var videoContainerSize: CGSize = .zero
-    /// Extra scale applied in `.fill` mode to cover the screen (crop). 1 in fit/center.
-    /// Kept in sync with the container size so the pan-clamp math uses the true render scale.
     @State private var videoAspectFillScale: CGFloat = 1
     @State private var pinchAnchorState: PinchAnchorState?
 
@@ -263,10 +338,10 @@ private struct PlayerViewImpl: View {
     /// is wrong on external displays / multi-window and can collapse the surface to 1×1.
     @Environment(\.displayScale) private var displayScale
 
-    /// Pinch başlarken çekilen snapshot: zoomu pinch midpoint'ten yapmak için offset
-    /// hesaplamasına ihtiyaç duyulan tüm sabit değerler.
+    /// The snapshot taken when the pinch starts: all the constant values needed for the offset calculation
+    /// to do the zoom from the pinch midpoint.
     private struct PinchAnchorState: Equatable {
-        let screenMidpoint: CGPoint  // UIKit container (= playerChrome) koordinatları
+        let screenMidpoint: CGPoint  // UIKit container (= playerChrome) coordinates
         let containerCenter: CGPoint
         let startScale: CGFloat
         let startPanCommitted: CGSize
@@ -299,6 +374,10 @@ private struct PlayerViewImpl: View {
             min(max(pinchBase * model.pinchLive, 1), zoomMax)
         }
 
+        // Round 18 (R18-2): the original arrangement — the `.fill`
+        // cover factor is a transform on the fitted-size layer, as
+        // in the pre-restyle player (round 10's render-size layout
+        // is reverted with the rest of the display restore).
         private var effectiveScale: CGFloat {
             aspectFillScale * zoomScale
         }
@@ -342,13 +421,16 @@ private struct PlayerViewImpl: View {
         }
     }
 
-    /// Son yüklenen içerik; `streamId`/URL değişince önce bununla geçmiş kaydedilir (yeni struct alanları henüz güncellenmiş olabilir).
+    /// The last loaded content; when `streamId`/URL changes, history is first saved with this (the new struct's fields may not have updated yet).
     @State private var historySaveTags: WatchHistoryTags?
     @State private var appliedPlaybackIdentity: String?
-    /// Altyazı `update()` binary search + eşitlik kontrolü yapıyor, ama yine de her 120ms
-    /// tetiklemek onChange closure kadar küçük bir yük. 200ms pencere imperceptible.
+    /// The subtitle `update()` does a binary search + equality check, but still, every 120ms
+    /// triggering it is a load as small as an onChange closure. The 200ms window is imperceptible.
 
-    private let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "another-iptv-player", category: "Playback")
+    // Round 16 (R9): logger fallback names this app's own bundle id
+    // (was the upstream project's name; never executes in the
+    // shipped app, where the bundle identifier is always present).
+    private let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.irqus.superx", category: "Playback")
 
     private let videoZoomMax: CGFloat = 4
 
@@ -359,6 +441,9 @@ private struct PlayerViewImpl: View {
     /// The true on-screen render scale of the video: the user pinch-zoom multiplied by the
     /// `.fill` cover scale. All pan-clamp / pinch-anchor math uses this so bounds are correct
     /// whether the extra scale came from a pinch or from fill-mode cropping.
+    /// (Build-33 form, restored in round 20: round 10's render-frame
+    /// semantics — zoom only — were an incomplete round-18 revert
+    /// remnant and disagreed with the zoom layer's transform.)
     private var effectiveVideoScale: CGFloat {
         videoAspectFillScale * videoZoomScale
     }
@@ -374,9 +459,9 @@ private struct PlayerViewImpl: View {
         )
     }
 
-    /// Yalnızca committed + live pan'ı valid range'e clamp eder. `VideoZoomPanLayer.effectiveOffset` tüm
-    /// bileşenleri birleşik şekilde clamp ettiği için gesture sırasında kullanılmaz; pinch end'de
-    /// committed pan'ı tekrar clamp etmek için `commitVideoPanClamp` kullanır.
+    /// It only clamps the committed + live pan to the valid range. `VideoZoomPanLayer.effectiveOffset` [clamps] all
+    /// components clamp in a unified way, it is not used during the gesture; at pinch end,
+    /// it uses `commitVideoPanClamp` to clamp the committed pan again.
     private var videoPanClamped: CGSize {
         let maxX = videoPanBounds.width
         let maxY = videoPanBounds.height
@@ -390,23 +475,23 @@ private struct PlayerViewImpl: View {
         )
     }
 
-    /// Pinch anchor (pinch midpoint'ten zoomlamak için) compensating offset.
-    /// Scale center'dan olduğu için, parmak altında kalması istenen noktayı sabitlemek üzere
-    /// delta döner. Pinch end'de değer `videoPanCommitted`'a bake edilir ve bu fonksiyon sıfır döner.
+    /// Pinch anchor compensating offset (to zoom from the pinch midpoint).
+    /// Because the scale is from the center, it returns the delta to fix the point that should stay
+    /// under the finger. At pinch end, the value is baked into `videoPanCommitted` and this function returns zero.
     private var videoPinchZoomOffset: CGSize {
         guard let s = pinchAnchorState else { return .zero }
         let M = s.screenMidpoint
         let C = s.containerCenter
         let S0 = s.startScale
         let O0 = s.startPanCommitted
-        // Pinch başındaki content noktası (center'a göreli, unscaled):
+        // The content point at the start of the pinch (relative to the center, unscaled):
         let Px = (M.x - C.x - O0.width) / S0
         let Py = (M.y - C.y - O0.height) / S0
-        // Yeni ölçekte noktayı aynı ekran konumunda tutmak için gereken mutlak offset:
+        // The absolute offset needed to keep the point at the same screen position at the new scale:
         let S = effectiveVideoScale
         let Ox = M.x - C.x - S * Px
         let Oy = M.y - C.y - S * Py
-        // `videoPanCommitted` start değerine göre delta:
+        // The delta relative to the `videoPanCommitted` start value:
         return CGSize(width: Ox - O0.width, height: Oy - O0.height)
     }
 
@@ -431,12 +516,13 @@ private struct PlayerViewImpl: View {
         !isLiveStream && type == "vod" && (onPreviousChannel != nil || onNextChannel != nil)
     }
 
+    /// Round 17 (R17-3): channel (live) / queue-item (VOD) prev/
     private var hasPlaybackFailure: Bool {
         !(player.playbackFailureMessage ?? "").isEmpty
     }
 
-    /// Orta tuşta bekleme göstergesi: mpv `pause=no` olsa bile gerçek pipeline (`FILE_LOADED` / `PLAYBACK_RESTART`) gelene kadar.
-    /// Bitişte `END_FILE` kurulum bayrağını sıfırlar; bu durumda yükleniyor değil yeniden oynat gösterilir.
+    /// Waiting indicator on the center button: even if mpv is `pause=no`, until the real pipeline (`FILE_LOADED` / `PLAYBACK_RESTART`) arrives.
+    /// At the end, `END_FILE` resets the setup flag; in that case it shows play-again, not loading.
     private var isCenterTransportLoading: Bool {
         if hasPlaybackFailure { return false }
         if player.state == .ended { return false }
@@ -453,8 +539,17 @@ private struct PlayerViewImpl: View {
         // an endless spinner on the handset.
         if player.isAirPlayPlaybackActive { return false }
         if !player.engine.isReady { return true }
+        if !player.engine.isPlaybackEstablished {
+            // Round 18 (R18-1): before establishment, the loading
+            // state ends the moment frames actually render
+            // (`hasRenderedFirstFrame`) — `isSecondOpen` puts
+            // picture on screen before `readyToPlay`, and keying
+            // on establishment alone left the spinner drawn over
+            // playing video. After establishment the buffering
+            // state below drives the stall spinner as before.
+            return !player.engine.hasRenderedFirstFrame
+        }
         if player.state == .buffering { return true }
-        if !player.engine.isPlaybackEstablished { return true }
         return false
     }
 
@@ -514,7 +609,7 @@ private struct PlayerViewImpl: View {
         return max(viewport.width / fitted.width, viewport.height / fitted.height)
     }
 
-    /// Aynı `PlayerView` örneğinde başka videoya geçişi tanır (`onAppear` yalnızca ilk açılışta çalışır).
+    /// Recognizes a switch to another video in the same `PlayerView` instance (`onAppear` only runs on first open).
     private var playbackIdentity: String {
         "\(streamId)\u{1e}\(url.absoluteString)"
     }
@@ -531,75 +626,91 @@ private struct PlayerViewImpl: View {
         !isLiveStream && player.isSeekable
     }
 
-    private var playbackDebugResolutionText: String {
-        guard player.videoWidth > 0, player.videoHeight > 0 else { return "--" }
-        return "\(player.videoWidth)x\(player.videoHeight)"
-    }
-
-    private var playbackDebugFpsText: String {
-        let render = player.renderFPS
-        let stream = player.streamFPS
-        if render > 0, stream > 0 {
-            return String(format: "%.2f/%.2f", render, stream)
-        }
-        if render > 0 { return String(format: "%.2f", render) }
-        if stream > 0 { return String(format: "%.2f", stream) }
-        return "--"
-    }
-
-    private var playbackDebugBitrateText: String {
-        let values = bitrateSamples.map(\.bps).filter { $0 > 0 }
-        guard !values.isEmpty else { return "--" }
-        let avg = values.reduce(0, +) / Double(values.count)
-        let minV = values.min() ?? avg
-        let maxV = values.max() ?? avg
-        return "\(formatBitrate(avg)) (\(formatBitrate(minV))-\(formatBitrate(maxV)))"
-    }
-
-    private var playbackDebugFramesText: String {
-        "D:\(player.droppedFrameCount) R:\(player.delayedFrameCount)"
-    }
-
-    private var playbackDebugCacheText: String {
-        let pct = max(0, min(100, player.cacheBufferingState))
-        let sec = max(player.cacheDurationSeconds, 0)
-        let ahead = max(player.cacheAheadSeconds, 0)
-        let state: String
-        switch player.state {
-        case .buffering: state = "REFILL"
-        case .playing: state = "OK"
-        default: state = "IDLE"
-        }
-        return String(format: "BUF %@ A:%.1fs C:%.1fs %.0f%%", state, ahead, sec, pct)
-    }
-
-    private var playbackDebugAvSyncText: String {
-        String(format: "AV %+0.3fs", player.avSyncSeconds)
-    }
-
-    private var playbackDebugNetText: String {
-        let bps = max(player.networkSpeedBps, 0)
-        return "NET \(formatBitrate(bps))/s"
-    }
-
-    private var playbackDebugCodecText: String {
-        let hw = player.hwdecCurrent.isEmpty ? "sw" : player.hwdecCurrent
-        let codec = player.videoCodecName.isEmpty ? "--" : player.videoCodecName
-        let audio = player.audioCodecName.isEmpty ? "--" : player.audioCodecName
-        let airPlay = player.isAirPlayVideoCapable ? "AP✓" : "AP✗"
-        return "DEC \(hw) \(codec)/\(audio) \(airPlay)"
-    }
-
-    private var playbackDebugSeekText: String {
-        let ms = player.seekLatencyMs
-        return ms >= 0 ? "SEEK \(ms)ms" : "SEEK --"
-    }
+    // Round 16 (R6): the nine playbackDebug*Text properties that
+    // fed the dead debug overlay are removed with it, along with
+    // the bitrate sampler that only the overlay read.
 
     private var sliderBinding: Binding<Double> {
         Binding(
             get: { displayedSliderPosition },
             set: { newVal in if isScrubbing { scrubValue = newVal } }
         )
+    }
+
+    // MARK: - Round 16 (F1): derived favorite state
+
+    /// The DBFavorite key for the derived path; nil when this
+    /// playback has no DBFavorite identity. Series favorites key on
+    /// the SERIES id (the same row SeriesView's own favorite button
+    /// writes), movies/live on the stream id + type. M3U playback
+    /// never lands here — its shell supplies M3UFavoriteStore state.
+    private var derivedFavoriteKey: (streamId: Int, type: String)? {
+        if type == "series" {
+            guard let seriesId, let id = Int(seriesId) else { return nil }
+            return (id, "series")
+        }
+        if type == "vod" || type == "live" {
+            guard let id = Int(streamId) else { return nil }
+            return (id, type)
+        }
+        return nil
+    }
+
+    private var usesDerivedFavorite: Bool {
+        isFavorite == nil && onToggleFavorite == nil && derivedFavoriteKey != nil
+    }
+
+    private var effectiveIsFavorite: Bool? {
+        isFavorite ?? (usesDerivedFavorite ? derivedFavorite : nil)
+    }
+
+    private var effectiveOnToggleFavorite: (() -> Void)? {
+        onToggleFavorite ?? (usesDerivedFavorite ? { toggleDerivedFavorite() } : nil)
+    }
+
+    private var derivedFavoriteTaskID: String {
+        guard usesDerivedFavorite, let key = derivedFavoriteKey else { return "none" }
+        return "\(playlistId.uuidString)-\(key.streamId)-\(key.type)"
+    }
+
+    private func refreshDerivedFavorite() async {
+        guard usesDerivedFavorite, let key = derivedFavoriteKey else { return }
+        let value = (try? await AppDatabase.shared.read { db in
+            try DBFavorite
+                .filter(Column("streamId") == key.streamId
+                    && Column("playlistId") == playlistId
+                    && Column("type") == key.type)
+                .fetchCount(db) > 0
+        }) ?? false
+        // A zap / episode hop may have replaced the item mid-read.
+        if derivedFavoriteKey?.streamId == key.streamId, derivedFavoriteKey?.type == key.type {
+            derivedFavorite = value
+        }
+    }
+
+    private func toggleDerivedFavorite() {
+        guard let key = derivedFavoriteKey else { return }
+        let nextValue = !derivedFavorite
+        derivedFavorite = nextValue
+        Task {
+            do {
+                try await AppDatabase.shared.write { db in
+                    if nextValue {
+                        try DBFavorite(
+                            streamId: key.streamId, playlistId: playlistId, type: key.type
+                        ).insert(db)
+                    } else {
+                        try DBFavorite
+                            .filter(Column("streamId") == key.streamId
+                                && Column("playlistId") == playlistId
+                                && Column("type") == key.type)
+                            .deleteAll(db)
+                    }
+                }
+            } catch {
+                derivedFavorite = !nextValue
+            }
+        }
     }
 
     private func performPlayerDismiss() {
@@ -711,12 +822,37 @@ private struct PlayerViewImpl: View {
                 }
             }
             .frame(width: containerSize.width, height: containerSize.height)
-            // iPad / geniş yatay düzende durum çubuğunu kontrollerle aç-kapa yapmak üst güvenli alanı
-            // değiştirir; GeometryReader yüksekliği sıçrar. Telefonda (compact) eski davranış korunur.
-            // Mini kartta durum çubuğu her zaman görünür.
+            // Round 15 (C12): exit parallax — during the edge-back
+            // dismiss drag the whole player surface scales down a
+            // touch (≤5%) as it fades, so the exit feels layered
+            // instead of a flat slide. Transform only; Reduce
+            // Motion pins it to 1.
+            .scaleEffect(exitParallaxScale)
+            // On iPad / wide landscape layouts, toggling the status bar with the controls changes the top safe area;
+            // the GeometryReader height jumps. On the phone (compact) the old behavior is preserved.
+            // On the mini card, the status bar is always visible.
             .statusBarHidden(statusBarHiddenInCurrentMode)
+        // Round 16 (F1): keep the derived favorite star in sync
+        // with the current playback identity — channel zaps and
+        // episode hops re-read the DBFavorite row for the new item.
+        .task(id: derivedFavoriteTaskID) {
+            await refreshDerivedFavorite()
+        }
         .onAppear {
             log.info("Opening player: \(title, privacy: .public)")
+            // Round 9: landscape is allowed ONLY inside the fullscreen
+            // player (see AppDelegate.browseOrientationLock).
+            syncOrientationLockForPlayerMode()
+            // Round 15 (C10): opening fullscreen starts the EPG
+            // tick-lengthening stamp (heartbeat in the timeMs
+            // handler keeps it fresh; mini/disappear clear it).
+            if overlayMode == .fullscreen {
+                lastEPGStampAt = Date()
+                UserDefaults.standard.set(
+                    Date().timeIntervalSince1970,
+                    forKey: EPGStore.fullscreenPlaybackStampKey
+                )
+            }
             resetTimer()
             player.setupAudioHandler()
             // Defer to the next run loop: the KSPlayer surface's view setup and
@@ -724,6 +860,7 @@ private struct PlayerViewImpl: View {
             DispatchQueue.main.async {
                 applyPlaybackTransitionIfNeeded()
                 applySelectedAspectMode(force: true)
+                applyDefaultSleepTimerIfNeeded()
                 applySeriesEpisodeRemoteCommands()
                 if let v = volumeBackupDuringChannelBrowser {
                     player.setVolume(v)
@@ -732,7 +869,7 @@ private struct PlayerViewImpl: View {
             }
         }
         .onChange(of: playbackIdentity) { _, _ in
-            cancelAutoAdvanceCountdown(resetEndHandling: true)
+            handlePlaybackIdentityChange()
             applyPlaybackTransitionIfNeeded()
         }
         .onChange(of: overlayPresentationID) { _, _ in
@@ -740,7 +877,6 @@ private struct PlayerViewImpl: View {
             // AirPlay AVPlayer survives a source switch. Observe the host's explicit
             // presentation revision as a reliable handoff trigger; the identity guard
             // inside applyPlaybackTransitionIfNeeded prevents duplicate loads.
-            cancelAutoAdvanceCountdown(resetEndHandling: true)
             applyPlaybackTransitionIfNeeded()
         }
         .onChange(of: videoAspectModeRaw) { _, _ in
@@ -766,48 +902,80 @@ private struct PlayerViewImpl: View {
             player.setPlaybackPresentation(makePresentation())
         }
         .onDisappear {
+            // Round 9: leaving the player restores the portrait browse
+            // lock (with a forced rotation back when the phone is still
+            // physically held in landscape — no leftover landscape UI).
+            restoreBrowseOrientationLock()
+            // Round 15 (C10): fullscreen playback is over — the EPG
+            // tick returns to its normal minute cadence.
+            UserDefaults.standard.set(0, forKey: EPGStore.fullscreenPlaybackStampKey)
             timer?.invalidate()
             saveHistoryTimer?.invalidate()
+            sleepCountdownTimer?.invalidate()
+            sleepCountdownTimer = nil
             // Save under the applied playback identity, not the (possibly newer)
             // incoming props — mirrors the timer path above.
             saveWatchHistory(tags: historySaveTags)
             player.teardown()
         }
-        .sheet(isPresented: $showTrackSettings) {
-            PlaybackTrackSettingsSheet(player: player, showDebugOverlay: $showDebugOverlay, streamURL: url)
-                .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $showSubtitleAppearance) {
-            SubtitleAppearanceSheet(player: player)
-                .presentationDragIndicator(.visible)
-        }
+        // Round 12 (point 2): the tracks panel is NO LONGER a
+        // sheet — it renders as a compact floating overlay inside
+        // `playerChromeAndVideo` (see `trackSettingsOverlay`), so
+        // the video stays visible around it and a tap outside
+        // dismisses it. The state + focus plumbing is unchanged.
         .onChange(of: showTrackSettings) { _, isOpen in
             if isOpen { resetInteractiveDismissTracking() }
         }
-        .onChange(of: showSubtitleAppearance) { _, isOpen in
-            if isOpen { resetInteractiveDismissTracking() }
-        }
+        // Round 19 (R19-1a): the subtitle-appearance sheet has NO
+        // entry in the reference chrome (round 9 removed its "AA"
+        // button; round 18's capsule presenter is superseded). The
+        // sheet type and the saved appearance values remain in the
+        // tree and still apply to subtitle rendering.
         .onChange(of: player.isSeekable) { _, _ in checkAndPerformResume() }
         .onChange(of: player.durationMs) { _, _ in checkAndPerformResume() }
-        .onAppear { startSaveHistoryTimer() }
+        .onAppear { startSaveHistoryTimer(); migratePersistedAspectModeIfNeeded() }
         .onChange(of: seriesRemoteCommandsKey) { _, _ in
             applySeriesEpisodeRemoteCommands()
         }
-        .onChange(of: player.videoBitrate) { _, newValue in
-            appendBitrateSample(newValue)
-        }
         .onChange(of: player.state) { _, newState in
+            // Round 14 (A4): the post-end countdown timer is GONE.
+            // Reaching the end with the T-50 flow armed (card not
+            // cancelled, no still-watching hold) advances at once —
+            // the card's countdown WAS the last 50 seconds.
             if newState == .ended {
-                startAutoAdvanceCountdownIfEligible()
-            } else {
-                cancelAutoAdvanceCountdown(resetEndHandling: true)
+                handlePlaybackEnded()
             }
+        }
+        .onChange(of: player.isPlaying) { _, isPlaying in
+            // Round 15 (C10): pause is a progress-save safety net
+            // (with close + transition saves), which is what makes
+            // the relaxed 30 s periodic interval safe.
+            if !isPlaying { saveWatchHistory() }
+        }
+        .onChange(of: player.timeMs) { _, _ in
+            // Round 15 (C10): EPG fullscreen-stamp heartbeat
+            // (throttled to ~20 s) while playback runs fullscreen.
+            if overlayMode == .fullscreen,
+               Date().timeIntervalSince(lastEPGStampAt) > 20 {
+                lastEPGStampAt = Date()
+                UserDefaults.standard.set(
+                    Date().timeIntervalSince1970,
+                    forKey: EPGStore.fullscreenPlaybackStampKey
+                )
+            }
+            updateNextEpisodeCardForPosition()
         }
         .onChange(of: overlayMode) { _, newMode in
             expandControlsGeneration &+= 1
             let gen = expandControlsGeneration
             switch newMode {
             case .mini:
+                // Round 9: docked to the mini card the user is back in
+                // the browse interface — portrait lock returns.
+                restoreBrowseOrientationLock()
+                // Round 15 (C10): mini playback no longer lengthens
+                // the EPG tick.
+                UserDefaults.standard.set(0, forKey: EPGStore.fullscreenPlaybackStampKey)
                 // The gesture path already animated `miniProgress`; here only settle chrome.
                 // Covers any external minimize too.
                 timer?.invalidate()
@@ -816,6 +984,15 @@ private struct PlayerViewImpl: View {
                     withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { miniProgress = 1 }
                 }
             case .fullscreen:
+                // Round 9: growing back to fullscreen re-opens rotation.
+                AppDelegate.setOrientationLock(.allButUpsideDown)
+                // Round 15 (C10): fullscreen again — restamp the EPG
+                // flag (the timeMs heartbeat keeps it fresh).
+                lastEPGStampAt = Date()
+                UserDefaults.standard.set(
+                    Date().timeIntervalSince1970,
+                    forKey: EPGStore.fullscreenPlaybackStampKey
+                )
                 cardDrag.offset = .zero
                 cardDrag.dismissOpacity = 1
                 // Keep the (heavy) fullscreen chrome hidden during the grow so its layout doesn't
@@ -835,53 +1012,112 @@ private struct PlayerViewImpl: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Otomatik geçiş yalnız dizilerde ve gerçekten gidilecek bir sonraki bölüm varken.
+    /// Automatic transition only for series and only when there really is a next episode to go to.
     private var isAutoAdvanceEligible: Bool {
         autoPlayNextEpisode && type == "series" && !isLiveStream
             && canGoToNextEpisode && onNextEpisode != nil
     }
 
-    private func startAutoAdvanceCountdownIfEligible() {
-        guard isAutoAdvanceEligible, !autoAdvanceHandledForCurrentEnd,
-              autoAdvanceSecondsRemaining == nil else { return }
-        autoAdvanceHandledForCurrentEnd = true
-        autoAdvanceToken &+= 1
-        let token = autoAdvanceToken
-        withAnimation(.easeOut(duration: 0.25)) {
-            autoAdvanceSecondsRemaining = 5
-        }
-        scheduleAutoAdvanceTick(token: token)
+    // MARK: - Round 14 (A4): next-episode card at T-50 s
+
+    /// Seconds left in the current episode, when the T-50 card's
+    /// conditions hold (series + Auto-Play toggle ON + a next
+    /// episode exists + a real duration). The card shows while
+    /// this is ≤ 50; the pill's N is this value, live.
+    private var nextEpisodeRemainingSeconds: Double? {
+        guard isAutoAdvanceEligible, player.durationMs > 0 else { return nil }
+        return Double(player.durationMs - player.timeMs) / 1000.0
     }
 
-    private func scheduleAutoAdvanceTick(token: UInt64) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            guard token == autoAdvanceToken,
-                  let remaining = autoAdvanceSecondsRemaining else { return }
-            if remaining <= 1 {
-                triggerAutoAdvance()
-            } else {
-                autoAdvanceSecondsRemaining = remaining - 1
-                scheduleAutoAdvanceTick(token: token)
-            }
-        }
+    private var nextEpisodeCardVisible: Bool {
+        guard let remaining = nextEpisodeRemainingSeconds else { return false }
+        return remaining <= 50 && !nextEpisodeCardDismissed && !hasPlaybackFailure
     }
 
-    private func triggerAutoAdvance() {
-        autoAdvanceToken &+= 1
-        withAnimation(.easeOut(duration: 0.2)) {
-            autoAdvanceSecondsRemaining = nil
+    /// Whole seconds shown on the pill (ceil so it reads 50…1 and
+    /// reaches 0 only at the true end).
+    private var nextEpisodeCountdownSeconds: Int {
+        guard let remaining = nextEpisodeRemainingSeconds else { return 0 }
+        return max(0, Int(remaining.rounded(.up)))
+    }
+
+    /// Runs on every position tick: re-arms a cancelled card when
+    /// the user seeks back OUT of the 50 s zone, and fires the
+    /// advance the moment the countdown reaches ~0 while playing
+    /// (the `.ended` state change is the backstop). Round 15
+    /// (C8): with the still-watching hold, 0 does NOT auto-play —
+    /// the card stays up waiting for an explicit tap.
+    private func updateNextEpisodeCardForPosition() {
+        guard let remaining = nextEpisodeRemainingSeconds else { return }
+        if remaining > 50 {
+            if nextEpisodeCardDismissed { nextEpisodeCardDismissed = false }
+            return
         }
+        guard remaining <= 0.3, player.isPlaying, nextEpisodeCardVisible,
+              !stillWatchingHold else { return }
+        fireNextEpisode(auto: true)
+    }
+
+    private func handlePlaybackEnded() {
+        saveWatchHistory()
+        guard isAutoAdvanceEligible, !nextEpisodeCardDismissed,
+              !stillWatchingHold else { return }
+        fireNextEpisode(auto: true)
+    }
+
+    private func fireNextEpisode(auto: Bool) {
+        // Settings contract (round 14/15): "player.nextEpisode
+        // CardMode" — "auto" (default) lets the T-50 countdown
+        // auto-play at 0; "ask" means the countdown NEVER
+        // auto-plays and only the pill's explicit tap (auto ==
+        // false) may start the next episode. Read fresh here, at
+        // trigger time — this is the single choke point both
+        // auto paths (position tick + `.ended` backstop) pass
+        // through.
+        if auto,
+           UserDefaults.standard.string(forKey: "player.nextEpisodeCardMode") == "ask" {
+            return
+        }
+        // Position ticks keep arriving until the identity actually
+        // changes — an advance already in flight must not re-fire.
+        if auto, autoAdvanceInFlight { return }
+        autoAdvanceInFlight = auto
+        if !auto { noteUserInteraction() }
         onNextEpisode?()
     }
 
-    private func cancelAutoAdvanceCountdown(resetEndHandling: Bool = false) {
-        autoAdvanceToken &+= 1
-        if autoAdvanceSecondsRemaining != nil {
-            withAnimation(.easeOut(duration: 0.2)) {
-                autoAdvanceSecondsRemaining = nil
-            }
+    /// The card's Cancel pill: hides the card for THIS ending. It
+    /// re-arms only if the user seeks back before the 50 s zone
+    /// (see `updateNextEpisodeCardForPosition`).
+    private func dismissNextEpisodeCard() {
+        noteUserInteraction()
+        nextEpisodeCardDismissed = true
+    }
+
+    /// A new playback identity (episode/channel switch): the card
+    /// re-arms for the new ending, and the still-watching counter
+    /// advances ONLY when the switch was an auto-advance — a
+    /// manual switch is itself user interaction.
+    private func handlePlaybackIdentityChange() {
+        nextEpisodeCardDismissed = false
+        if autoAdvanceInFlight {
+            autoAdvanceInFlight = false
+            consecutiveAutoAdvances += 1
+            if consecutiveAutoAdvances >= 3 { stillWatchingHold = true }
+        } else {
+            consecutiveAutoAdvances = 0
+            stillWatchingHold = false
         }
-        if resetEndHandling { autoAdvanceHandledForCurrentEnd = false }
+    }
+
+    /// Round 15 (C8): any real user interaction resets the
+    /// still-watching counter. Interaction funnels through
+    /// `resetTimer()` (every control calls it), which invokes
+    /// this; gesture-only paths (zap, double-tap seek) call it
+    /// directly.
+    private func noteUserInteraction() {
+        if consecutiveAutoAdvances != 0 { consecutiveAutoAdvances = 0 }
+        if stillWatchingHold { stillWatchingHold = false }
     }
 
     private func applySeriesEpisodeRemoteCommands() {
@@ -894,14 +1130,19 @@ private struct PlayerViewImpl: View {
                 onNext: onNextEpisode
             )
         default:
-            // Canlı TV: kanal atlama için skip'i kapat, prev/next göster.
-            // Filmler (vod): skip her zaman açık; prev/next film kuyruğu Control Center'a yansımaz.
+            // Live TV: turn skip off for channel hopping, show prev/next.
+            // Round 20 (R20-2): a movie opened WITH a queue mirrors
+            // series exactly — its prev/next queue navigation also
+            // replaces skip in Control Center. A movie with no
+            // queue (and catch-up, which passes no channel
+            // callbacks) keeps skip, exactly like a series playback
+            // with no episode callbacks.
             player.configureSeriesEpisodeSkipping(
                 canPrevious: canGoToPreviousChannel,
                 canNext: canGoToNextChannel,
                 onPrevious: onPreviousChannel,
                 onNext: onNextChannel,
-                swapSkipForNav: isLiveStream
+                swapSkipForNav: isLiveStream || showVODQueueSkip
             )
         }
     }
@@ -930,7 +1171,6 @@ private struct PlayerViewImpl: View {
         let usesFFmpegStartTime = KSPlayerEngine.prefersFFmpegFirst(for: url)
         let shouldStartFromResume = !isLiveStream && (resumeTimeMs ?? 0) > 5000
         hasInitialSeeked = shouldStartFromResume && usesFFmpegStartTime
-        bitrateSamples.removeAll()
         isScrubbing = false
         scrubValue = 0
         lockedSliderValue = nil
@@ -973,7 +1213,13 @@ private struct PlayerViewImpl: View {
 
     private func startSaveHistoryTimer() {
         saveHistoryTimer?.invalidate()
-        saveHistoryTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+        // Round 15 (C10): periodic progress saves relax from 5 s to
+        // 30 s — a DB write every 5 s for hours of playback was
+        // pure churn. The safety nets make the gap harmless: saves
+        // also happen on pause, on episode/content transition, at
+        // playback end, and on player close (all verified in this
+        // file), so at most ~30 s of progress can ever be lost.
+        saveHistoryTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
             // The closure captures the view struct from onAppear, freezing plain props
             // (streamId, title, …) at first render. historySaveTags is @State, so it
             // stays live across in-place episode switches — without it, episode 2's
@@ -1001,6 +1247,9 @@ private struct PlayerViewImpl: View {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
             isFastForwarding = false
         }
+        // Round 20 (R20-4): build-33 speed-hold semantics restored —
+        // releasing the hold returns to 1.0 (round 8's
+        // restore-previous-rate behavior is removed).
         player.setRate(1.0)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
@@ -1033,8 +1282,8 @@ private struct PlayerViewImpl: View {
         }
     }
 
-    /// Aşağı çekerek kapatmayı yalnızca jestin başladığı nokta “krom” bölgelerindeyse bastır (yan parlaklık/ses,
-    /// üst/alt düğme ve zaman çubuğu). Ortadan aşağı kaydırma kontroller açıkken de çalışır.
+    /// Suppress pull-down-to-close only if the point where the gesture started is in a "chrome" region (side brightness/volume,
+    /// top/bottom buttons and the time bar). A downward swipe from the middle works even while the controls are open.
     private func interactiveDismissShouldSuppressPullDown(
         start: CGPoint,
         containerWidth: CGFloat,
@@ -1066,7 +1315,7 @@ private struct PlayerViewImpl: View {
         return false
     }
 
-    /// Üst kenar: Kontrol Merkezi / Bildirimler / durum alanı jestleri; oynatıcı kapatmayı tetiklemesin.
+    /// Top edge: Control Center / Notifications / status-area gestures; they must not trigger the player closing.
     private func interactiveDismissTopSystemGestureBandHeight(
         safeAreaTop: CGFloat,
         containerHeight: CGFloat
@@ -1086,6 +1335,15 @@ private struct PlayerViewImpl: View {
             safeAreaTop: safeAreaTop,
             containerHeight: containerHeight
         )
+    }
+
+    /// Round 15 (C12): exit-parallax scale for the edge-back
+    /// drag (see the body). The pull-down axis has its own morph
+    /// (the mini-card transform), which already parallaxes.
+    private var exitParallaxScale: CGFloat {
+        guard !reduceMotion else { return 1 }
+        let progress = min(abs(interactiveDismissOffset.width) / 400, 1)
+        return 1 - 0.05 * progress
     }
 
     /// Fade only for the horizontal edge-back swipe. The pull-down axis no longer fades;
@@ -1300,7 +1558,7 @@ private struct PlayerViewImpl: View {
         DragGesture(minimumDistance: 22, coordinateSpace: .local)
             .onChanged { value in
                 if isMiniCommitted { return }  // mini card handles its own gestures
-                if showTrackSettings || showSubtitleAppearance { return }
+                if showTrackSettings { return }
                 if videoZoomScale > 1.02 || isScrubbing { return }
                 // While a 2x speed-hold is active it owns the touch until finger-up; the
                 // dismiss drag must not fight it (was the "drag-down vs long-press" conflict).
@@ -1328,6 +1586,11 @@ private struct PlayerViewImpl: View {
                         }
                     }
                     if interactiveDismissAxis == nil,
+                       // Round 14 (B3): a downward channel-zap swipe
+                       // must not ALSO start the pull-down minimize —
+                       // the zap handler stamps `lastZapAt`, and the
+                       // pull-down stays out of its way for 0.5 s.
+                       Date().timeIntervalSince(lastZapAt ?? .distantPast) > 0.5,
                        FullscreenPlayerPullDownPolicy.shouldActivate(translation: t),
                        !interactiveDismissShouldSuppressPullDown(
                         start: start,
@@ -1365,7 +1628,7 @@ private struct PlayerViewImpl: View {
             }
             .onEnded { value in
                 if isMiniCommitted { return }
-                if showTrackSettings || showSubtitleAppearance {
+                if showTrackSettings {
                     resetInteractiveDismissTracking()
                     return
                 }
@@ -1444,6 +1707,22 @@ private struct PlayerViewImpl: View {
 
     private func playerChromeAndVideo(outerSafeAreaInsets: EdgeInsets) -> some View {
         GeometryReader { geo in
+            // Round 16 (P1): the chrome's insets are read from THIS
+            // reader, not from the body-level reader passed in. The
+            // outer insets travel through the mini-morph container
+            // (drag layer + mask/scale/offset transforms); on the
+            // owner's phone in build 50 they no longer matched the
+            // visible screen, so every edge-anchored control (close
+            // button, edge sliders, scrubber labels) rendered
+            // partially off-screen in portrait while the video —
+            // sized by this same local reader — stayed correct.
+            // Sourcing the insets locally restores the build-49
+            // behavior: all chrome inside the real safe area, in
+            // portrait and landscape, VOD and live.
+            let outerSafeAreaInsets = geo.safeAreaInsets
+            // Round 18 (R18-2): the surface is laid out at the
+            // aspect-FITTED size, as in the original player; `.fill`
+            // covers via the zoom layer's transform scale.
             let fittedSize = fittedVideoSize(in: geo.size)
             ZStack {
                 MPVolumeViewHost(bridge: systemVolumeBridge)
@@ -1491,11 +1770,11 @@ private struct PlayerViewImpl: View {
                 // that was adding jank on open / pull-down) is skipped in fit/center.
                 .frame(width: geo.size.width, height: geo.size.height)
                 .modifier(ConditionalClip(active: selectedAspectMode == .fill))
-                .allowsHitTesting(false)  // tüm touch UIKit overlay'de; video katmanı hit-test almaz
+                .allowsHitTesting(false)  // all touch is in the UIKit overlay; the video layer receives no hit-testing
                 .zIndex(0)
 
                 // Tap/pinch/pan UIKit overlay'inde. Pinch midpoint callback ile zoom anchor
-                // offset hesaplanır; pan yalnızca zoomluyken enabled.
+                // the offset is calculated; pan is enabled only while zoomed.
                 PlayerMediaKitStyleTouchOverlay(
                     showControls: $showControls,
                     isSeekDisabled: isCenterTransportLoading,
@@ -1504,10 +1783,18 @@ private struct PlayerViewImpl: View {
                     isSpeedHoldEnabled: speedUpOnLongPress
                         && player.isPlaying
                         && interactiveDismissAxis == nil,
-                    edgeSliderTrackSize: CGSize(
-                        width: isCompactWidth ? 52 : 64,
-                        height: isCompactWidth ? 160 : 180
-                    ),
+                    // Round 14 (B12): double-tap ±10 s seek on
+                    // seekable content; (B3): vertical-swipe channel
+                    // zap on fullscreen live with a channel queue.
+                    seekEnabled: effectiveSeekable && !hasPlaybackFailure,
+                    onDoubleTapSeek: { forward in handleDoubleTapSeek(forward: forward) },
+                    channelZapEnabled: isLiveStream
+                        && (onNextChannel != nil || onPreviousChannel != nil),
+                    onChannelZap: { direction in handleChannelZap(direction: direction) },
+                    // Round 9: ONE source for the capsule size — the
+                    // rendered sliders read the same helper, so the
+                    // exclusion rect can never drift from the visual.
+                    edgeSliderTrackSize: PlayerControlCenterStyleEdgeSliders.trackSize(isCompactWidth: isCompactWidth),
                     edgeSliderLeadingInset: 16 + outerSafeAreaInsets.leading,
                     edgeSliderTrailingInset: 16 + outerSafeAreaInsets.trailing,
                     interactionEnabled: miniProgress < 0.02,
@@ -1531,8 +1818,30 @@ private struct PlayerViewImpl: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .zIndex(1)
 
+                if controlsLocked {
+                    // Round 19: while the controls lock is on, this
+                    // unlock button is the ONLY chrome on screen —
+                    // rendered outside the showControls stack so it
+                    // survives the chrome being hidden.
+                    VStack(spacing: 0) {
+                        HStack {
+                            Spacer()
+                            glassIconButton(systemName: "lock.fill", size: 44) {
+                                toggleControlsLock()
+                            }
+                            .accessibilityLabel(L("player.controls_unlock"))
+                        }
+                        .padding(.top, 16)
+                        Spacer()
+                    }
+                    .padding(.leading, 12 + outerSafeAreaInsets.leading)
+                    .padding(.trailing, 12 + outerSafeAreaInsets.trailing)
+                    .padding(.top, outerSafeAreaInsets.top)
+                    .zIndex(31)
+                }
+
                 if showControls {
-                    // iOS native player gibi okunabilirlik için üst/alt koyu gradient.
+                    // top/bottom dark gradient for readability, like the iOS native player.
                     VStack(spacing: 0) {
                         LinearGradient(
                             colors: [
@@ -1571,14 +1880,15 @@ private struct PlayerViewImpl: View {
                     .padding(.trailing, 12 + outerSafeAreaInsets.trailing)
                     .padding(.top, outerSafeAreaInsets.top)
                     .padding(.bottom, 12 + outerSafeAreaInsets.bottom)
-                    // Kontroller güvenli alanın dışına çıkmasın — home indicator / app switcher
-                    // jest bölgesinde scrub bar yanlışlıkla seek tetiklemesin diye alt safe area korunur.
-                    .opacity(fullChromeOpacity)
+                    // The controls must not leave the safe area — the bottom safe area is preserved so the scrub bar
+                    // doesn't accidentally trigger a seek in the home indicator / app switcher gesture region.
+                    .opacity(controlsLocked ? 0 : fullChromeOpacity)
                     // Invisible (opacity ~0) but still-hittable fullscreen chrome must not
                     // intercept taps during the minimize/expand morph — otherwise a stray tap
                     // on the scaled-down invisible close/play button could tear down or pause.
-                    // Only interactive when essentially fullscreen.
-                    .allowsHitTesting(miniProgress < 0.02)
+                    // Only interactive when essentially fullscreen — and never while the
+                    // controls lock is on (round 19).
+                    .allowsHitTesting(!controlsLocked && miniProgress < 0.02)
                     .zIndex(30)
 
                     if isLiveStream, let programme = currentNowNext?.now {
@@ -1611,10 +1921,10 @@ private struct PlayerViewImpl: View {
                     .zIndex(32)
                 }
 
-                // Kontroller gizliyken de yükleme/buffering geri bildirimi: yavaş panel
-                // açılışında 5 sn sonra kontroller kaybolunca kullanıcı simsiyah ekranla
-                // baş başa kalıyordu. Kontroller açıkken ortadaki buton zaten spinner
-                // gösterdiği için burada yalnızca !showControls durumunda çizilir.
+                // Loading/buffering feedback even while the controls are hidden: on a slow panel
+                // opening, after the controls disappeared after 5 sec, the user was left alone
+                // with a pitch-black screen. While the controls are open, the center button already shows a spinner,
+                // so here it is drawn only in the !showControls state.
                 if isCenterTransportLoading && !showControls {
                     ProgressView()
                         .progressViewStyle(.circular)
@@ -1627,38 +1937,32 @@ private struct PlayerViewImpl: View {
                         .zIndex(25)
                 }
 
-                if showControls && showDebugOverlay {
-                    // Debug panel top-trailing, volume slider'ın ÜSTÜNDE render edilir
-                    // (zIndex slider'dan yüksek). topChrome'un altında, sağda ses slider'ını
-                    // kaplar.
-                    VStack {
-                        HStack {
+                // Round 14 (B12): ±10 s double-tap seek indicator —
+                // a big arrow + seconds glyph on the tapped side,
+                // shown briefly alongside the rigid haptic the seek
+                // fires (see `handleDoubleTapSeek`).
+                if let direction = skipIndicatorDirection {
+                    HStack {
+                        if direction < 0 {
+                            skipSeekIndicator(forward: false)
                             Spacer()
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text("RES \(playbackDebugResolutionText)")
-                                Text("FPS \(playbackDebugFpsText)")
-                                Text("BR \(playbackDebugBitrateText)")
-                                Text(playbackDebugFramesText)
-                                Text(playbackDebugCacheText)
-                                Text(playbackDebugAvSyncText)
-                                Text(playbackDebugNetText)
-                                Text(playbackDebugCodecText)
-                                Text(playbackDebugSeekText)
-                            }
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        } else {
+                            Spacer()
+                            skipSeekIndicator(forward: true)
                         }
-                        .padding(.top, 78 + outerSafeAreaInsets.top)
-                        .padding(.trailing, 16 + outerSafeAreaInsets.trailing)
-                        Spacer()
                     }
+                    .padding(.horizontal, 96)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)
-                    .opacity(fullChromeOpacity)
-                    .zIndex(33)
+                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
+                    .zIndex(38)
                 }
+
+                // Round 16 (R6): the dead debug overlay render block is
+                // removed — its toggle was deleted in round 14, the
+                // @AppStorage flag could never be set true again, and
+                // the panel could never appear. The Playback Tracks
+                // panel Stats section (real engine values) replaces it.
 
                 if let aspectToastText {
                     VStack {
@@ -1687,50 +1991,168 @@ private struct PlayerViewImpl: View {
                     .allowsHitTesting(false)
                 }
 
-                if let seconds = autoAdvanceSecondsRemaining {
-                    HStack(spacing: 10) {
-                        Button {
-                            cancelAutoAdvanceCountdown()
-                        } label: {
-                            Text(L("common.cancel"))
+                // Round 12 (point 2): Playback Tracks as a compact
+                // floating panel over the video (was a full sheet).
+                // Topmost layer; its backdrop tap dismisses, and it
+                // fades/scales in (point 7) without touching the
+                // video surface or the chrome underneath.
+                if showTrackSettings {
+                    trackSettingsOverlay(containerSize: geo.size)
+                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                        .zIndex(60)
+                }
+
+                // Round 14 (A4): the next-episode card at T-50 s —
+                // the SAME Netflix-style pills the post-end countdown
+                // used, now driven by the live position: they appear
+                // when 50 s remain, N counts the seconds left to the
+                // episode's end, and at 0 the next episode starts
+                // (see `updateNextEpisodeCardForPosition`). Cancel
+                // hides the card for this ending. Round 15 (C8):
+                // with the still-watching hold the countdown still
+                // shows, but at 0 the pill switches to a plain
+                // "Next episode" and waits for a tap; the season /
+                // episode line renders only when the caller supplied
+                // the next episode's real numbers.
+                Group {
+                if nextEpisodeCardVisible {
+                    VStack(alignment: .trailing, spacing: 8) {
+                        if let season = nextEpisodeSeason, let episode = nextEpisodeEpisode {
+                            Text(L("player.autonext.season_episode", season, episode))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
+                        }
+                        HStack(spacing: 10) {
+                            Button {
+                                dismissNextEpisodeCard()
+                            } label: {
+                                Text(L("common.cancel"))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                    .background(.ultraThinMaterial, in: Capsule())
+                                    .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.5))
+                            }
+                            .buttonStyle(PressScaleButtonStyle())
+
+                            Button {
+                                fireNextEpisode(auto: false)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "play.fill")
+                                        .font(.footnote.weight(.bold))
+                                    if stillWatchingHold || nextEpisodeCountdownSeconds <= 0 {
+                                        Text(L("player.autonext.play_next"))
+                                    } else {
+                                        Text(L("player.autonext.countdown", nextEpisodeCountdownSeconds))
+                                    }
+                                }
                                 .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.black)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 10)
-                                .background(.ultraThinMaterial, in: Capsule())
-                                .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.5))
-                        }
-
-                        Button {
-                            triggerAutoAdvance()
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "play.fill")
-                                    .font(.footnote.weight(.bold))
-                                Text(L("player.autonext.countdown", seconds))
+                                .background(.white, in: Capsule())
                             }
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(.white, in: Capsule())
+                            .buttonStyle(PressScaleButtonStyle())
                         }
                     }
                     .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                    .padding(.trailing, 16 + outerSafeAreaInsets.trailing)
+                    // Round 10: the padding now comes BEFORE the
+                    // full-size frame (see the Skip Intro note below) —
+                    // the round-9 order halved the effective inset and
+                    // left both pills sitting on the volume capsule.
+                    .padding(.trailing, pillTrailingPadding(outerSafeAreaInsets))
                     .padding(.bottom, (showControls ? 92 : 16) + outerSafeAreaInsets.bottom)
-                    // Krom görünürlüğü animasyonsuz (Transaction.disablesAnimations)
-                    // değişebildiği için padding'i kendi animasyonuyla sür — kullanıcı
-                    // "İptal"e uzanırken butonlar 76pt ışınlanıyordu.
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    // Because the chrome visibility can change without animation (Transaction.disablesAnimations),
+                    // drive the padding with its own animation — while the user was reaching for
+                    // "Cancel", the buttons were teleporting 76pt.
                     .animation(.easeInOut(duration: 0.2), value: showControls)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                     .opacity(fullChromeOpacity)
-                    .zIndex(41)
+                }
+                }
+                // Value-scoped animation drives the card's
+                // slide+fade entrance; nothing else animates on
+                // this change.
+                .animation(
+                    reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.85),
+                    value: nextEpisodeCardVisible
+                )
+                .zIndex(41)
+
+                // Round 8: Skip Intro — STRONG's fixed model, exactly.
+                // The app has NO intro metadata (no intro field exists
+                // in the Xtream/M3U models or the DB), so the pill does
+                // NOT detect anything: while a seekable VOD stream is
+                // inside its intro window, the pill offers ONE jump of
+                // the configured length through the same relative seek
+                // the ±10 s buttons use. An earlier draft gated this
+                // on a metadata parameter no caller could ever supply,
+                // which made the pill dead UI; the fixed skip is the
+                // feature.
+                //
+                // Round 11 (owner, build 47): three changes. (1) The
+                // pill moves to the BOTTOM-LEFT — rounds 9–10 kept it
+                // bottom-right clear of the volume capsule by inset
+                // math alone and it still crowded on the owner's
+                // phone; the left side's only capsule is the
+                // brightness one, and the pill now starts a full
+                // 20 pt right of IT, so no gesture bar can touch it
+                // in any orientation (the auto-advance pill below
+                // stays bottom-right — series only, and it already
+                // clears via pillTrailingPadding). (2) Settings ▸
+                // Player ▸ "Show Skip Intro" gates the pill. (3) The
+                // window and the jump use Settings ▸ Player ▸
+                // "Skip-intro length" (default 85 s, as before).
+                // Round 14 (B12): the pill now SLIDES in from the
+                // leading edge (it used to pop in instantly when its
+                // time-window condition flipped) — it stays in the
+                // hierarchy for VOD and its visibility is driven by
+                // offset + opacity with a spring. Round 15 (C8):
+                // the window and the jump use the PER-SERIES LEARNED
+                // landing position when one exists for this series
+                // (stored when the user last pressed Skip Intro in
+                // it), else the generic Settings length exactly as
+                // before.
+                if showSkipIntro, !isLiveStream {
+                    Button {
+                        resetTimer()
+                        performSkipIntro()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "forward.end.fill")
+                                .font(.footnote.weight(.bold))
+                            Text(L("player.skip_intro"))
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(.white, in: Capsule())
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                    .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
+                    // Padding FIRST, framing second (round 10's
+                    // modifier-order fix) — the inset is exact.
+                    .padding(.leading, pillLeadingPadding(outerSafeAreaInsets))
+                    .padding(.bottom, (showControls ? 168 : 72) + outerSafeAreaInsets.bottom)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .animation(.easeInOut(duration: 0.2), value: showControls)
+                    .offset(x: skipIntroVisible || reduceMotion ? 0 : -180)
+                    .opacity(skipIntroVisible ? fullChromeOpacity : 0)
+                    .allowsHitTesting(skipIntroVisible)
+                    .animation(
+                        reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.85),
+                        value: skipIntroVisible
+                    )
+                    .zIndex(42)
                 }
 
-                // Not: PiP placeholder UI kaldırıldı — sistem `AVPictureInPictureController`
-                // kendi "playing in picture in picture" mesajını otomatik gösteriyor.
+                // Note: the PiP placeholder UI was removed — the system `AVPictureInPictureController`
+                // automatically shows its own "playing in picture in picture" message.
 
                 if isFastForwarding {
                     VStack {
@@ -1753,37 +2175,68 @@ private struct PlayerViewImpl: View {
                     .zIndex(10)
                 }
 
-                // Hata banner'ı krom görünürlüğünden bağımsız: 5 sn auto-hide sonrası
-                // patlayan yayında kullanıcı sessiz siyah ekranla kalmasın.
-                if hasPlaybackFailure, let msg = player.playbackFailureMessage {
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "wifi.exclamationmark")
-                            .font(.caption.weight(.bold))
-                            .accessibilityHidden(true)
-                        Text(msg)
-                            .font(.caption2.weight(.semibold))
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(3)
-                            .fixedSize(horizontal: false, vertical: true)
+                // Round 14 (A2): the failure surface — a CENTERED,
+                // dismissible card with the real cause and a Close
+                // button, replacing both the endless spinner and
+                // the old bottom-left banner (whose hard-coded red
+                // is gone with it; the card's accent is
+                // AppTheme.live — round 15, B9). If the account is
+                // expired, the EXPIRED state is presented instead of
+                // the generic failure. An error haptic fires when
+                // the surface appears (round 14, B12), and the
+                // entrance is slide + fade (round 15, C12).
+                Group {
+                    if showFailureCard, let msg = player.playbackFailureMessage {
+                        Group {
+                            if let expired = ProviderExpiryStore.blockedExpiry(playlistId: playlistId) {
+                                SubscriptionExpiredView(
+                                    expiryDate: expired,
+                                    onOpenSettings: { performPlayerDismiss() },
+                                    onClose: { performPlayerDismiss() }
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                                .shadow(color: .black.opacity(0.45), radius: 24, y: 10)
+                                .padding(.horizontal, 28)
+                            } else {
+                                playbackFailureCard(message: msg)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black.opacity(0.45))
+                        .transition(
+                            reduceMotion
+                                ? .opacity
+                                : .move(edge: .bottom).combined(with: .opacity)
+                        )
+                        .onAppear {
+                            UINotificationFeedbackGenerator().notificationOccurred(.error)
+                        }
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .frame(maxWidth: max(0, min(geo.size.width - 24, 280)), alignment: .leading)
-                    .background(
-                        Color(red: 0.72, green: 0.12, blue: 0.14).opacity(0.94),
-                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                    .padding(.leading, 12)
-                    .padding(.bottom, (showControls ? 92 : 12) + outerSafeAreaInsets.bottom)
-                    .allowsHitTesting(false)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel(L("player.playback_error"))
-                    .accessibilityValue(msg)
-                    .opacity(fullChromeOpacity)
-                    .zIndex(25)
                 }
+                // Value-scoped animation drives the slide+fade
+                // entrance (round 15, C12) and nothing else.
+                .animation(
+                    reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86),
+                    value: showFailureCard
+                )
+                .zIndex(45)
+
+                // Round 15 (B8): end-of-series state — the LAST
+                // episode ended (no next episode exists): instead
+                // of a frozen frame, a clear finished state with
+                // Back / Watch again.
+                Group {
+                    if player.state == .ended, type == "series",
+                       !canGoToNextEpisode, onNextEpisode == nil,
+                       !hasPlaybackFailure {
+                        endOfSeriesCard
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(Color.black.opacity(0.45))
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.25), value: player.state)
+                .zIndex(44)
 
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -1793,8 +2246,8 @@ private struct PlayerViewImpl: View {
             .onChange(of: videoAspectModeRaw) { _, _ in syncVideoLayout(container: geo.size) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Video yüzeyi ekranın kenarlarına kadar uzansın. Kontroller ayrıca `outerSafeAreaInsets`
-        // kullanarak güvenli alana saygı gösterir (aşağıda controls VStack padding'i).
+        // Let the video surface extend to the edges of the screen. The controls separately use `outerSafeAreaInsets`
+        // to respect the safe area (the controls VStack padding below).
         .ignoresSafeArea()
     }
 
@@ -1808,7 +2261,7 @@ private struct PlayerViewImpl: View {
     }
 
     private func handleVideoPinchGestureEnded() {
-        // Pinch end: önce compensating zoom offset'i committed pan'a bake et, sonra state'i temizle.
+        // Pinch end: first bake the compensating zoom offset into the committed pan, then clear the state.
         let zoomDelta = videoPinchZoomOffset
         pinchAnchorState = nil
         videoPanCommitted = CGSize(
@@ -1852,6 +2305,10 @@ private struct PlayerViewImpl: View {
     /// Recomputes the fitted frame + `.fill` cover scale for a container size and re-clamps
     /// the pan. Called on appear, container resize, source-ratio change, and mode change.
     private func syncVideoLayout(container: CGSize) {
+        // Round 20 (R20-4): build-33 body restored — round 10's
+        // orientation-flip transform reset is removed; the surface
+        // is laid out at the aspect-FITTED size and `.fill` covers
+        // via the zoom layer's `aspectFillScale` transform.
         let fitted = fittedVideoSize(in: container)
         videoViewportSize = fitted
         videoContainerSize = container
@@ -1890,8 +2347,8 @@ private struct PlayerViewImpl: View {
         )
         let currentTime = Int(player.timeMs)
         let duration = Int(player.durationMs)
-        // Canlı yayında mpv duration çoğunlukla 0 kalır; guard'ı canlıda atlamazsak
-        // "son izlenen kanallar" hiç dolmaz. VOD/dizide geçerli süre şartı sürer.
+        // On live broadcasts, the mpv duration mostly stays 0; if we don't skip the guard on live,
+        // the "recently watched channels" never fills. On VOD/series, the valid-duration requirement continues.
         guard duration > 0 || resolvedTags.type == "live" else { return }
 
         let history = DBWatchHistory(
@@ -1922,6 +2379,16 @@ private struct PlayerViewImpl: View {
 
     // MARK: - Chrome
 
+    // Round 19 (R19-1a): the top bar follows the arrangement of the
+    // owner's STRONG reference photos, realized with Super X styling
+    // (his Super X photo): ONE close button + title on the left —
+    // live streams show a red-dot "Live" line under the title
+    // instead of the subtitle — and on the right, in order: AirPlay,
+    // controls lock, dock-to-mini (exit fullscreen; only where a
+    // mini-player host exists). Nothing else. The grouped capsule
+    // (round 18) is gone, as in round 9: no favorite star, no aspect
+    // button, no PiP button, no "AA", no gear up here — aspect,
+    // tracks, speed and sleep live in the ONE bottom row below.
     private var topChrome: some View {
         HStack(alignment: .center, spacing: 12) {
             glassIconButton(systemName: "xmark", size: 44) { performPlayerDismiss() }
@@ -1934,7 +2401,17 @@ private struct PlayerViewImpl: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                     .shadow(color: .black.opacity(0.45), radius: 4, y: 1)
-                if let subtitle, !subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if isLiveStream {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 7, height: 7)
+                        Text(L("player.live_badge"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+                    }
+                } else if let subtitle, !subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(subtitle)
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.white.opacity(0.78))
@@ -1955,157 +2432,87 @@ private struct PlayerViewImpl: View {
                 }
             }
 
-            HStack(spacing: 2) {
-                topChromeActions
-            }
-            .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 4)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.2), radius: 8, y: 3)
+            topBarActions
         }
-        // The containing chrome already has 12pt + safe-area padding. A second
-        // 20pt inset made the live-TV toolbar overflow on compact phones.
         .padding(.horizontal, isCompactWidth ? 0 : 20)
         .padding(.top, 16)
     }
 
-    @ViewBuilder
-    private var topChromeActions: some View {
-        if isCompactWidth {
-            favoriteTopChromeAction
-            airPlayTopChromeAction
-            compactTopChromeMoreMenu
-        } else {
-            favoriteTopChromeAction
+    private var topBarActions: some View {
+        HStack(spacing: 10) {
+            airPlayTopBarAction
 
-            groupedCapsuleButton(systemName: selectedAspectMode.iconName) {
-                cycleVideoAspectMode()
+            glassIconButton(systemName: controlsLocked ? "lock.fill" : "lock.open.fill", size: 44) {
+                toggleControlsLock()
             }
-            .accessibilityLabel(selectedAspectMode.accessibilityLabel)
+            .accessibilityLabel(L(controlsLocked ? "player.controls_unlock" : "player.controls_lock"))
 
-            if canShowPiPTopChromeAction {
-                groupedCapsuleButton(systemName: "pip") {
-                    requestPictureInPicture()
+            if playerOverlayMinimize != nil {
+                glassIconButton(systemName: "arrow.down.right.and.arrow.up.left", size: 44) {
+                    requestDockToMini()
                 }
-                .accessibilityLabel(L("player.a11y.pip"))
-            }
-
-            airPlayTopChromeAction
-
-            groupedCapsuleButton(systemName: "textformat.size") {
-                showSubtitleAppearance = true
-            }
-            .accessibilityLabel(L("player.a11y.subtitle_appearance"))
-
-            // Hide track settings only once playback is actually on the AirPlay
-            // target (local engine stopped -> empty track list). Stays visible
-            // through the remux prepare/picker window so the toolbar does not
-            // collapse the instant the AirPlay button is tapped.
-            if !player.isAirPlayPlaybackActive {
-                groupedCapsuleButton(systemName: "gearshape") {
-                    openTrackSettings()
-                }
-                .accessibilityLabel(L("player.a11y.track_settings"))
+                .accessibilityLabel(L("player.dock_to_mini"))
             }
         }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     @ViewBuilder
-    private var favoriteTopChromeAction: some View {
-        if let isFav = isFavorite, let toggle = onToggleFavorite {
-            groupedCapsuleButton(systemName: isFav ? "star.fill" : "star") {
-                toggle()
-            }
-            .accessibilityLabel(isFav ? L("favorites.remove") : L("favorites.add"))
-        }
-    }
-
-    @ViewBuilder
-    private var airPlayTopChromeAction: some View {
+    private var airPlayTopBarAction: some View {
         if player.isAirPlayVideoCapable {
             if player.needsAirPlayPreparation {
                 // UHF akışı: önce remux hazırlanır (loading), sonra seçici açılır.
                 if isPreparingAirPlay {
                     ProgressView()
                         .tint(.white)
-                        .frame(width: 40, height: 34)
+                        .frame(width: 44, height: 44)
                 } else {
-                    groupedCapsuleButton(systemName: "airplay.video") {
+                    glassIconButton(systemName: "airplay.video", size: 44) {
                         prepareAndPresentAirPlay()
                     }
                     .accessibilityLabel("AirPlay")
                 }
             } else {
-                AirPlayRoutePickerButton()
-                    .frame(width: 40, height: 34)
-                    .accessibilityLabel("AirPlay")
-            }
-        }
-    }
-
-    private var compactTopChromeMoreMenu: some View {
-        Menu {
-            Button {
-                resetTimer()
-                cycleVideoAspectMode()
-            } label: {
-                Label(selectedAspectMode.accessibilityLabel, systemImage: selectedAspectMode.iconName)
-            }
-
-            if canShowPiPTopChromeAction {
-                Button {
-                    resetTimer()
-                    requestPictureInPicture()
-                } label: {
-                    Label(L("player.a11y.pip"), systemImage: "pip")
+                ZStack {
+                    Circle().fill(.ultraThinMaterial)
+                    Circle().strokeBorder(.white.opacity(0.14), lineWidth: 0.5)
+                    AirPlayRoutePickerButton()
+                        .frame(width: 44, height: 44)
                 }
-            }
-
-            Button {
-                resetTimer()
-                showSubtitleAppearance = true
-            } label: {
-                Label(L("player.a11y.subtitle_appearance"), systemImage: "textformat.size")
-            }
-
-            if !player.isAirPlayPlaybackActive {
-                Button {
-                    resetTimer()
-                    openTrackSettings()
-                } label: {
-                    Label(L("player.a11y.track_settings"), systemImage: "gearshape")
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.96))
-                .shadow(color: .black.opacity(0.25), radius: 2, y: 0.5)
                 .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+                .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
+                .accessibilityLabel("AirPlay")
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(L("detail.show_more"))
     }
 
-    private var canShowPiPTopChromeAction: Bool {
-        AVPictureInPictureController.isPictureInPictureSupported()
-            && pipEnabled
-            // Hide PiP only once the video is actually on the AirPlay target
-            // (local surface shows the placeholder). Keep it available while the
-            // remux cast is still preparing / awaiting device selection.
-            && !player.isAirPlayPlaybackActive
+    private func toggleControlsLock() {
+        controlsLocked.toggle()
+        if controlsLocked {
+            timer?.invalidate()
+            showControls = false
+        } else {
+            showControls = true
+            resetTimer()
+        }
+    }
+
+    /// The STRONG top-bar fullscreen icon, realized as our real
+    /// "exit fullscreen": dock into the mini player through the same
+    /// host closure the pull-down gesture commits to.
+    private func requestDockToMini() {
+        guard let minimize = playerOverlayMinimize else { return }
+        timer?.invalidate()
+        showControls = false
+        withAnimation(.interpolatingSpring(stiffness: 320, damping: 30)) {
+            miniProgress = 1
+        }
+        minimize()
     }
 
     private func cycleVideoAspectMode() {
         resetVideoTransformForAspectSwitch()
         videoAspectModeRaw = nextAspectMode.rawValue
-    }
-
-    private func requestPictureInPicture() {
-        guard canEnterPiPNow else { return }
-        pipManualSignal += 1
     }
 
     private func prepareAndPresentAirPlay() {
@@ -2116,33 +2523,541 @@ private struct PlayerViewImpl: View {
         }
     }
 
-    private func openTrackSettings() {
+    // MARK: - Round 19 quick-actions row (Audio / Audio Track / Subtitles / Guide / Speed / Fill / Sleep)
+
+    /// One circular quick-action visual: 48pt glass circle (Super X
+    /// blue accent fill when active) with a caption under it — the
+    /// button row of the owner's reference photos.
+    private func quickActionVisual(systemName: String, caption: String, isActive: Bool) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: systemName)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.96))
+                .frame(width: 48, height: 48)
+                .background {
+                    if isActive {
+                        Circle().fill(AppTheme.accent)
+                    } else {
+                        Circle().fill(.ultraThinMaterial)
+                    }
+                }
+                .overlay(Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.25), radius: 5, y: 1)
+            Text(caption)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(isActive ? AppTheme.accent : .white.opacity(0.88))
+                .shadow(color: .black.opacity(0.4), radius: 2, y: 0.5)
+                .lineLimit(1)
+        }
+        .contentShape(Rectangle())
+    }
+
+    /// The ONE bottom row, evenly spaced across the full width
+    /// (STRONG measurements). Content adapts by type, arrangement
+    /// and sizing never do (R19-1b):
+    /// - Movies / Series (VOD): Audio, Audio Track, Subtitles,
+    ///   Speed, Fill, Sleep.
+    /// - Live: Audio, Audio Track, Guide, Fit, Sleep (no subtitle
+    ///   or speed controls on a broadcast; Guide opens the channel
+    ///   side panel and renders only where that panel exists).
+    /// "Audio" opens the track sheet on its audio section (audio
+    /// settings incl. delay); "Audio Track" is the quick menu of the
+    /// stream's real audio tracks; "Subtitles" is the quick menu of
+    /// the real subtitle tracks (with Off) — both menus end in
+    /// "More Options" into the same sheet, so nothing is duplicated.
+    private var quickActionsRow: some View {
+        HStack(spacing: 10) {
+            Button {
+                resetTimer()
+                openTrackSettings(focus: .audio)
+            } label: {
+                quickActionVisual(systemName: "speaker.wave.2.fill", caption: L("player.tracks.audio"), isActive: false)
+            }
+            .buttonStyle(PressScaleButtonStyle())
+            .accessibilityLabel(L("player.tracks.audio"))
+            .frame(maxWidth: .infinity)
+
+            Menu {
+                audioTrackMenuItems
+            } label: {
+                quickActionVisual(systemName: "waveform", caption: L("player.tracks.audio_track"), isActive: false)
+            }
+            .buttonStyle(PressScaleButtonStyle())
+            .accessibilityLabel(L("player.tracks.audio_track"))
+            .frame(maxWidth: .infinity)
+
+            if isLiveStream {
+                if showLiveChannelListButton, let toggle = onToggleLiveChannelSidePanel {
+                    Button {
+                        resetTimer()
+                        toggle()
+                    } label: {
+                        quickActionVisual(systemName: "rectangle.grid.1x2", caption: L("player.guide"), isActive: isLiveChannelSidePanelVisible)
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                    .accessibilityLabel(L("player.guide"))
+                    .frame(maxWidth: .infinity)
+                }
+            } else {
+                Menu {
+                    subtitleMenuItems
+                } label: {
+                    quickActionVisual(systemName: "captions.bubble.fill", caption: L("player.tracks.subtitle"), isActive: player.currentSubtitleTrackId >= 0)
+                }
+                .buttonStyle(PressScaleButtonStyle())
+                .accessibilityLabel(L("player.tracks.subtitle"))
+                .frame(maxWidth: .infinity)
+
+                Menu {
+                    ForEach(Self.playbackRates, id: \.self) { rate in
+                        Button {
+                            resetTimer()
+                            player.setRate(rate)
+                        } label: {
+                            if abs(player.rate - rate) < 0.001 {
+                                Label(Self.rateCaption(rate), systemImage: "checkmark")
+                            } else {
+                                Text(Self.rateCaption(rate))
+                            }
+                        }
+                    }
+                } label: {
+                    quickActionVisual(
+                        systemName: "gauge",
+                        caption: abs(player.rate - 1) < 0.001 ? L("player.speed") : Self.rateCaption(player.rate),
+                        isActive: abs(player.rate - 1) >= 0.001
+                    )
+                }
+                .buttonStyle(PressScaleButtonStyle())
+                .accessibilityLabel(L("player.speed"))
+                .frame(maxWidth: .infinity)
+            }
+
+            Button {
+                resetTimer()
+                cycleVideoAspectMode()
+            } label: {
+                quickActionVisual(systemName: selectedAspectMode.iconName, caption: aspectCaption, isActive: selectedAspectMode == .fill)
+            }
+            .buttonStyle(PressScaleButtonStyle())
+            .accessibilityLabel(selectedAspectMode.accessibilityLabel)
+            .frame(maxWidth: .infinity)
+
+            Menu {
+                Button {
+                    resetTimer()
+                    armSleepTimer(minutes: nil)
+                } label: {
+                    if sleepTimerMinutes == nil {
+                        Label(L("player.sleep_timer.off"), systemImage: "checkmark")
+                    } else {
+                        Text(L("player.sleep_timer.off"))
+                    }
+                }
+                ForEach(Self.sleepTimerOptions, id: \.self) { minutes in
+                    Button {
+                        resetTimer()
+                        armSleepTimer(minutes: minutes)
+                    } label: {
+                        if sleepTimerMinutes == minutes {
+                            Label(L("player.sleep_timer.minutes", minutes), systemImage: "checkmark")
+                        } else {
+                            Text(L("player.sleep_timer.minutes", minutes))
+                        }
+                    }
+                }
+            } label: {
+                quickActionVisual(
+                    systemName: sleepTimerMinutes == nil ? "moon.fill" : "moon.zzz.fill",
+                    caption: sleepTimerMinutes.map { L("player.sleep_timer.minutes", $0) } ?? L("player.sleep_timer.short"),
+                    isActive: sleepTimerMinutes != nil
+                )
+            }
+            .buttonStyle(PressScaleButtonStyle())
+            .accessibilityLabel(L("player.sleep_timer"))
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 12)
+        .onAppear { player.updateTracks() }
+    }
+
+    @ViewBuilder
+    private var audioTrackMenuItems: some View {
+        if player.audioTracks.isEmpty {
+            Text(L("player.tracks.empty.audio"))
+        } else {
+            ForEach(player.audioTracks) { track in
+                Button {
+                    resetTimer()
+                    player.selectAudioTrack(id: track.id)
+                } label: {
+                    if player.currentAudioTrackId == track.id {
+                        Label(track.title, systemImage: "checkmark")
+                    } else {
+                        Text(track.title)
+                    }
+                }
+            }
+        }
+        Divider()
+        Button {
+            resetTimer()
+            openTrackSettings(focus: .audio)
+        } label: {
+            Label(L("player.tracks.more"), systemImage: "slider.horizontal.3")
+        }
+    }
+
+    @ViewBuilder
+    private var subtitleMenuItems: some View {
+        ForEach(player.subtitleTracks) { track in
+            Button {
+                resetTimer()
+                player.selectSubtitleTrack(id: track.id)
+            } label: {
+                if player.currentSubtitleTrackId == track.id {
+                    Label(track.title, systemImage: "checkmark")
+                } else {
+                    Text(track.title)
+                }
+            }
+        }
+        Divider()
+        Button {
+            resetTimer()
+            openTrackSettings(focus: .subtitle)
+        } label: {
+            Label(L("player.tracks.more"), systemImage: "slider.horizontal.3")
+        }
+    }
+
+    /// The Fill/Fit button's caption is the CURRENT mode's localized
+    /// name — tapping cycles fit → fill → 1:1 (the aspect cycle).
+    private var aspectCaption: String {
+        switch selectedAspectMode {
+        case .fit: return L("player.aspect_fit")
+        case .fill: return L("player.aspect_fill")
+        case .center: return L("player.aspect_native")
+        }
+    }
+
+    private static let playbackRates: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+    private static let sleepTimerOptions: [Int] = [15, 30, 45, 60]
+
+    private static func rateCaption(_ rate: Float) -> String {
+        rate.truncatingRemainder(dividingBy: 1) == 0
+            ? "\(Int(rate))×"
+            : String(format: "%g×", Double(rate))
+    }
+
+    /// Round 11 (kept): Settings ▸ Player ▸ "Default sleep timer" —
+    /// armed once when this player opens, and only when the user
+    /// has not already set a timer for this session.
+    private func applyDefaultSleepTimerIfNeeded() {
+        guard !didApplyDefaultSleepTimer else { return }
+        didApplyDefaultSleepTimer = true
+        guard defaultSleepTimerMinutes > 0, sleepTimerMinutes == nil else { return }
+        armSleepTimer(minutes: defaultSleepTimerMinutes)
+    }
+
+    /// Arms (or disarms, with nil) the REAL sleep timer: a one-shot
+    /// Timer that pauses playback when the chosen minutes elapse.
+    private func armSleepTimer(minutes: Int?) {
+        sleepCountdownTimer?.invalidate()
+        sleepCountdownTimer = nil
+        sleepTimerMinutes = minutes
+        sleepTimerEndsAt = minutes.map { Date().addingTimeInterval(TimeInterval($0 * 60)) }
+        guard let minutes else { return }
+        sleepCountdownTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(minutes * 60), repeats: false) { _ in
+            Task { @MainActor in
+                if player.isPlaying { player.togglePlayPause() }
+                sleepTimerMinutes = nil
+                sleepTimerEndsAt = nil
+                sleepCountdownTimer = nil
+                showControls = true
+            }
+        }
+    }
+
+    /// Whole minutes remaining on the armed sleep timer.
+    private func sleepRemainingMinutes(now: Date) -> Int? {
+        guard let sleepTimerEndsAt else { return nil }
+        return max(1, Int(ceil(sleepTimerEndsAt.timeIntervalSince(now) / 60)))
+    }
+
+    private func openTrackSettings(focus: PlaybackTrackSettingsSheet.SectionFocus = .all) {
         player.updateTracks()
+        trackSheetFocus = focus
         showTrackSettings = true
     }
 
-    /// Top chrome sağ tarafında gruplu material capsule içinde kullanılan inline buton.
-    /// Kendi arka planı yoktur; parent capsule blur'u tüm grubun altındadır.
-    private func groupedCapsuleButton(
-        systemName: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button {
-            resetTimer()
-            action()
-        } label: {
-            Image(systemName: systemName)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.96))
-                .shadow(color: .black.opacity(0.25), radius: 2, y: 0.5)
-                .frame(width: 44, height: 44)  // HIG minimum dokunma hedefi
+    /// Round 12 (point 2): the Playback Tracks panel — a compact,
+    /// translucent floating card centered over the video (the owner
+    /// rejected the full-screen sheet/page outright). The dimmed
+    /// backdrop fills the player area and dismisses on tap; the
+    /// panel itself hosts the SAME `PlaybackTrackSettingsSheet`
+    /// content (every track/delay/subtitle/import/debug/stream-URL
+    /// control, unchanged), now with an injected close action.
+    /// Sized off the player geometry: at most 560 pt wide and ~62 %
+    /// of the height, always inside the frame with margin.
+    private func trackSettingsOverlay(containerSize: CGSize) -> some View {
+        ZStack {
+            Color.black.opacity(0.38)
+                .frame(width: containerSize.width, height: containerSize.height)
                 .contentShape(Rectangle())
+                .onTapGesture { showTrackSettings = false }
+
+            PlaybackTrackSettingsSheet(
+                player: player,
+                streamURL: url,
+                focus: trackSheetFocus,
+                onClose: { showTrackSettings = false }
+            )
+            .frame(
+                width: min(max(containerSize.width - 32, 0), 560),
+                height: min(containerSize.height * 0.62, max(containerSize.height - 32, 0))
+            )
+            .background {
+                ZStack {
+                    Rectangle().fill(.ultraThinMaterial)
+                    AppTheme.surface.opacity(0.88)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.white.opacity(0.14), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.45), radius: 24, y: 10)
         }
-        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.22), value: showTrackSettings)
     }
 
-    /// Compact horizontal size class'ta (iPhone) daha sıkı yerleşim — edge slider'lar için
-    /// yatayda boşluk bırakır. Regular'da (iPad) geniş orijinal düzen.
+    // MARK: - Round 14/15 player surfaces (failure, end-of-series, seeks, zaps, skip)
+
+    /// Round 14 (A2): the failure card is up when a failure
+    /// message exists that the user hasn't already closed the
+    /// player over. (Close dismisses the player itself, so the
+    /// card never needs a separate dismissed flag in practice;
+    /// `dismissedFailureMessage` covers the expired-view's own
+    /// close path if it is ever reused in place.)
+    private var showFailureCard: Bool {
+        hasPlaybackFailure
+            && (player.playbackFailureMessage ?? nil) != dismissedFailureMessage
+    }
+
+    /// The centered failure card: real cause (from the engine's
+    /// mapping — HTTP status / refusal / codec), plain language,
+    /// one Close that leaves the player. Accent is AppTheme.live
+    /// (round 15, B9 — no hard-coded reds in the player).
+    private func playbackFailureCard(message: String) -> some View {
+        VStack(spacing: 14) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 38))
+                .foregroundStyle(AppTheme.live)
+            Text(L("player.playback_error"))
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.white)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.75))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                performPlayerDismiss()
+            } label: {
+                Text(L("common.close"))
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(AppTheme.accent, in: Capsule())
+            }
+            .buttonStyle(PressScaleButtonStyle())
+        }
+        .padding(24)
+        .frame(maxWidth: 340)
+        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.45), radius: 24, y: 10)
+        .padding(.horizontal, 28)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(L("player.playback_error"))
+        .accessibilityValue(message)
+    }
+
+    /// Round 15 (B8): shown when the last episode of a series
+    /// ends. Watch again replays THIS episode from the start
+    /// (the engine's completed-state play seeks to 0 itself).
+    private var endOfSeriesCard: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 38))
+                .foregroundStyle(AppTheme.accent)
+            Text(L("player.series_finished.title"))
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+            HStack(spacing: 10) {
+                Button {
+                    performPlayerDismiss()
+                } label: {
+                    Text(L("common.back"))
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.5))
+                }
+                .buttonStyle(PressScaleButtonStyle())
+
+                Button {
+                    resetTimer()
+                    player.seekAbsolute(to: 0)
+                    if !player.isPlaying { player.togglePlayPause() }
+                    showControls = true
+                } label: {
+                    Text(L("player.series_finished.watch_again"))
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(AppTheme.accent, in: Capsule())
+                }
+                .buttonStyle(PressScaleButtonStyle())
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: 340)
+        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.45), radius: 24, y: 10)
+        .padding(.horizontal, 28)
+    }
+
+    /// Round 14 (B12): the double-tap seek indicator glyph —
+    /// arrow + seconds, matching the ±10 transport symbols.
+    private func skipSeekIndicator(forward: Bool) -> some View {
+        Image(systemName: forward ? "goforward.10" : "gobackward.10")
+            .font(.system(size: 40, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 84, height: 84)
+            .background(Color.black.opacity(0.35), in: Circle())
+            .shadow(color: .black.opacity(0.3), radius: 10, y: 4)
+    }
+
+    /// Round 14 (B12): double-tap seek — the same ±10 s jump and
+    /// the same rigid haptic as the center transport buttons,
+    /// plus the visual indicator above.
+    private func handleDoubleTapSeek(forward: Bool) {
+        guard effectiveSeekable, !hasPlaybackFailure else { return }
+        noteUserInteraction()
+        player.jump(seconds: forward ? 10 : -10)
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+        skipIndicatorToken &+= 1
+        let token = skipIndicatorToken
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
+            skipIndicatorDirection = forward ? 1 : -1
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 550_000_000)
+            guard token == skipIndicatorToken else { return }
+            withAnimation(.easeIn(duration: 0.2)) {
+                skipIndicatorDirection = nil
+            }
+        }
+    }
+
+    /// Round 14 (B3): fullscreen live channel zap — swipe up =
+    /// next channel, swipe down = previous, through the shell's
+    /// existing prev/next callbacks (same path as the on-screen
+    /// channel buttons). Settings contract (round 14/15), read
+    /// fresh at trigger time: "player.zappingEnabled" gates the
+    /// gesture (default ON — an unset key means enabled);
+    /// "player.zappingDirection" is "upNext" (default, swipe up
+    /// = next) or "downNext" (swipe DOWN = next, inverting the
+    /// incoming direction).
+    private func handleChannelZap(direction: Int) {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: "player.zappingEnabled") != nil,
+           !defaults.bool(forKey: "player.zappingEnabled") {
+            return
+        }
+        let effectiveDirection =
+            defaults.string(forKey: "player.zappingDirection") == "downNext"
+                ? -direction
+                : direction
+        if effectiveDirection > 0 {
+            guard let next = onNextChannel else { return }
+            next()
+        } else {
+            guard let previous = onPreviousChannel else { return }
+            previous()
+        }
+        noteUserInteraction()
+        lastZapAt = Date()
+        UISelectionFeedbackGenerator().selectionChanged()
+        // A zap swipe down also feeds the pull-down dismiss drag;
+        // snap any partial morph back so the zap reads as a zap.
+        if miniProgress > 0, !isMiniCommitted {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                miniProgress = 0
+            }
+        }
+    }
+
+    // MARK: - Round 15 (C8): per-series learned Skip Intro
+
+    private var learnedSkipKey: String? {
+        guard type == "series", let seriesId else { return nil }
+        return "player.learnedSkip.\(seriesId)"
+    }
+
+    /// The landing position (absolute seconds) learned for this
+    /// series, if the user has ever pressed Skip Intro in it.
+    private var learnedSkipSeconds: Double? {
+        guard let learnedSkipKey else { return nil }
+        let value = UserDefaults.standard.double(forKey: learnedSkipKey)
+        return value > 0 ? value : nil
+    }
+
+    /// Where Skip Intro lands: the learned per-series position
+    /// when present, else the generic Settings length from here.
+    private var skipIntroTargetSeconds: Double {
+        learnedSkipSeconds ?? Double(skipIntroLengthSeconds)
+    }
+
+    private var skipIntroVisible: Bool {
+        showSkipIntro && !isLiveStream && player.durationMs > 0
+            && Double(player.timeMs) / 1000.0 < skipIntroTargetSeconds
+            && !hasPlaybackFailure
+    }
+
+    private func performSkipIntro() {
+        if let learned = learnedSkipSeconds {
+            // Learned path: jump to the ABSOLUTE learned landing
+            // position for this series.
+            player.seekAbsolute(to: learned)
+            return
+        }
+        // Generic path (unchanged jump), and — for series only —
+        // LEARN the actual landing position for next time.
+        let landing = Double(player.timeMs) / 1000.0 + Double(skipIntroLengthSeconds)
+        player.jump(seconds: skipIntroLengthSeconds)
+        if let learnedSkipKey {
+            UserDefaults.standard.set(landing, forKey: learnedSkipKey)
+        }
+    }
+
+    /// In the compact horizontal size class (iPhone), a tighter layout — leaves horizontal
+    /// room for the edge sliders. On regular (iPad), the wide original layout.
     private var isCompactWidth: Bool { horizontalSizeClass == .compact }
     private var transportSpacing: CGFloat { isCompactWidth ? 22 : 56 }
     private var transportSkipHit: CGFloat { isCompactWidth ? 52 : 64 }
@@ -2150,20 +3065,76 @@ private struct PlayerViewImpl: View {
     private var transportPlayHit: CGFloat { isCompactWidth ? 84 : 96 }
     private var transportPlaySymbol: CGFloat { isCompactWidth ? 46 : 52 }
 
-    /// iOS native player stili: pill arka plan yok, sadece SF Symbols + shadow.
-    /// Alt gradient arkaplanı karartıyor, butonlar direkt üstünde durur.
+    /// Round 19 (R19-1a): the center transport follows the STRONG
+    /// arrangement, realized as in the owner's Super X photo:
+    /// [prev] [-10s] [BIG pause/play disc] [+10s] [next] — the
+    /// flanks are episode prev/next on series, channel prev/next on
+    /// live (where there are no +-10 skips: live is not seekable),
+    /// and — round 20 (R20-2) — queue prev/next on movies opened
+    /// with a queue, identical in form to the episode flanks.
+    /// The disc is the Super X dark-blur circle (ultraThinMaterial +
+    /// black 30% + white hairline), NOT STRONG's gold fill.
     private var centerTransport: some View {
-        HStack(spacing: transportSpacing) {
+        HStack(spacing: (showSeriesEpisodeSkip || showLiveChannelSkip || showVODQueueSkip) ? (isCompactWidth ? 14 : 26) : transportSpacing) {
+            if showLiveChannelSkip && !isCenterTransportLoading {
+                transparentTransportButton(
+                    systemName: "backward.end.fill",
+                    symbolSize: 24,
+                    hitFrame: 44
+                ) {
+                    onPreviousChannel?()
+                }
+                .accessibilityLabel(L("player.a11y.previous_channel"))
+                .disabled(!canGoToPreviousChannel || hasPlaybackFailure)
+                .opacity(!canGoToPreviousChannel || hasPlaybackFailure ? 0.38 : 1)
+            }
+
+            if showSeriesEpisodeSkip && !isCenterTransportLoading {
+                transparentTransportButton(
+                    systemName: "backward.end.fill",
+                    symbolSize: 24,
+                    hitFrame: 44
+                ) {
+                    onPreviousEpisode?()
+                }
+                .accessibilityLabel(L("player.a11y.previous_episode"))
+                .disabled(!canGoToPreviousEpisode || hasPlaybackFailure)
+                .opacity(!canGoToPreviousEpisode || hasPlaybackFailure ? 0.38 : 1)
+            }
+
+            // Round 20 (R20-2): the movie player is the series
+            // player — a movie opened with a queue (VODPlayerShell,
+            // M3U VOD queue) gets the SAME prev/next flanks in the
+            // SAME position, size and treatment as the series
+            // episode flanks above, driven by the queue callbacks
+            // those shells already pass. (Round 19 moved prev/next
+            // into the center transport but wired only the live
+            // and series flanks; `showVODQueueSkip` was left
+            // orphaned and the movie queue callbacks were dead
+            // on screen.)
+            if showVODQueueSkip && !isCenterTransportLoading {
+                transparentTransportButton(
+                    systemName: "backward.end.fill",
+                    symbolSize: 24,
+                    hitFrame: 44
+                ) {
+                    onPreviousChannel?()
+                }
+                .accessibilityLabel(L("player.a11y.previous_item"))
+                .disabled(!canGoToPreviousChannel || hasPlaybackFailure)
+                .opacity(!canGoToPreviousChannel || hasPlaybackFailure ? 0.38 : 1)
+            }
+
             if effectiveSeekable && !isCenterTransportLoading {
                 transparentTransportButton(
-                    systemName: "gobackward.15",
+                    systemName: "gobackward.10",
                     symbolSize: transportSkipSymbol,
                     hitFrame: transportSkipHit
                 ) {
-                    player.jump(seconds: -15)
+                    player.jump(seconds: -10)
                     UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
                 }
-                .accessibilityLabel(L("player.a11y.skip_back_15"))
+                .accessibilityLabel(L("player.a11y.skip_back_10"))
                 .disabled(hasPlaybackFailure)
                 .opacity(hasPlaybackFailure ? 0.4 : 1)
             }
@@ -2172,22 +3143,66 @@ private struct PlayerViewImpl: View {
 
             if effectiveSeekable && !isCenterTransportLoading {
                 transparentTransportButton(
-                    systemName: "goforward.15",
+                    systemName: "goforward.10",
                     symbolSize: transportSkipSymbol,
                     hitFrame: transportSkipHit
                 ) {
-                    player.jump(seconds: 15)
+                    player.jump(seconds: 10)
                     UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
                 }
-                .accessibilityLabel(L("player.a11y.skip_forward_15"))
+                .accessibilityLabel(L("player.a11y.skip_forward_10"))
                 .disabled(hasPlaybackFailure)
                 .opacity(hasPlaybackFailure ? 0.4 : 1)
+            }
+
+            if showSeriesEpisodeSkip && !isCenterTransportLoading {
+                transparentTransportButton(
+                    systemName: "forward.end.fill",
+                    symbolSize: 24,
+                    hitFrame: 44
+                ) {
+                    onNextEpisode?()
+                }
+                .accessibilityLabel(L("player.a11y.next_episode"))
+                .disabled(!canGoToNextEpisode || hasPlaybackFailure)
+                .opacity(!canGoToNextEpisode || hasPlaybackFailure ? 0.38 : 1)
+            }
+
+            // Round 20 (R20-2): next-movie flank — the mirror of
+            // the prev-movie flank above (see its note).
+            if showVODQueueSkip && !isCenterTransportLoading {
+                transparentTransportButton(
+                    systemName: "forward.end.fill",
+                    symbolSize: 24,
+                    hitFrame: 44
+                ) {
+                    onNextChannel?()
+                }
+                .accessibilityLabel(L("player.a11y.next_item"))
+                .disabled(!canGoToNextChannel || hasPlaybackFailure)
+                .opacity(!canGoToNextChannel || hasPlaybackFailure ? 0.38 : 1)
+            }
+
+            if showLiveChannelSkip && !isCenterTransportLoading {
+                transparentTransportButton(
+                    systemName: "forward.end.fill",
+                    symbolSize: 24,
+                    hitFrame: 44
+                ) {
+                    onNextChannel?()
+                }
+                .accessibilityLabel(L("player.a11y.next_channel"))
+                .disabled(!canGoToNextChannel || hasPlaybackFailure)
+                .opacity(!canGoToNextChannel || hasPlaybackFailure ? 0.38 : 1)
             }
         }
         .padding(.vertical, 8)
     }
 
     /// Orta: yüklenirken `ProgressView`, hazır olunca oynat / duraklat.
+    /// Round 19: play/pause is a BIG circular button — a dark blur
+    /// disc with a white glyph (the Super X photo's center anchor) —
+    /// instead of the bare symbol the pre-restyle player used.
     private var centerPlayPauseOrLoadingButton: some View {
         Group {
             if isCenterTransportLoading {
@@ -2198,13 +3213,25 @@ private struct PlayerViewImpl: View {
                     .frame(width: transportPlayHit, height: transportPlayHit)
                     .allowsHitTesting(false)
             } else {
-                transparentTransportButton(
-                    systemName: player.isPlaying ? "pause.fill" : "play.fill",
-                    symbolSize: transportPlaySymbol,
-                    hitFrame: transportPlayHit
-                ) {
+                Button {
+                    resetTimer()
                     player.togglePlayPause()
+                } label: {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: transportPlaySymbol, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: transportPlayHit, height: transportPlayHit)
+                        .background {
+                            ZStack {
+                                Circle().fill(.ultraThinMaterial)
+                                Circle().fill(Color.black.opacity(0.30))
+                            }
+                        }
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5))
+                        .shadow(color: .black.opacity(0.35), radius: 8, y: 2)
+                        .contentShape(Circle())
                 }
+                .buttonStyle(PressScaleButtonStyle())
                 .accessibilityLabel(player.isPlaying ? L("player.a11y.pause") : L("player.a11y.play"))
                 .disabled(hasPlaybackFailure)
                 .opacity(hasPlaybackFailure ? 0.4 : 1)
@@ -2234,80 +3261,16 @@ private struct PlayerViewImpl: View {
         .buttonStyle(.plain)
     }
 
-    /// Bölüm atlama ayrı; zaman çubuğu yalnızca `scrubTimelineCard` içinde.
+    /// Round 19 (R19-1a/1b): the bottom chrome is the ONE
+    /// quick-actions row above the scrub timeline (the arrangement
+    /// in the owner's photos), for every content type through this
+    /// single PlayerView. The old trailing glass rows (live channel
+    /// skip/list, series episode skip, VOD queue skip) are gone:
+    /// channel/episode prev/next moved into the center transport
+    /// and the channel list opens from the row's Guide button.
     private var bottomTransportChrome: some View {
         VStack(alignment: .trailing, spacing: 10) {
-            if showLiveChannelSkip || showLiveChannelListButton {
-                HStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    if showLiveChannelSkip {
-                        glassIconButton(systemName: "chevron.left.circle.fill", size: 44, symbolSize: 17) {
-                            onPreviousChannel?()
-                        }
-                        .accessibilityLabel(L("player.a11y.previous_channel"))
-                        .disabled(!canGoToPreviousChannel)
-                        .opacity(canGoToPreviousChannel ? 1 : 0.38)
-
-                        glassIconButton(systemName: "chevron.right.circle.fill", size: 44, symbolSize: 17) {
-                            onNextChannel?()
-                        }
-                        .accessibilityLabel(L("player.a11y.next_channel"))
-                        .disabled(!canGoToNextChannel)
-                        .opacity(canGoToNextChannel ? 1 : 0.38)
-                    }
-                    if showLiveChannelListButton, let toggle = onToggleLiveChannelSidePanel {
-                        glassIconButton(
-                            systemName: isLiveChannelSidePanelVisible ? "rectangle.bottomthird.inset.filled" : "rectangle.grid.1x2",
-                            size: 44,
-                            symbolSize: 17
-                        ) {
-                            toggle()
-                        }
-                        .accessibilityLabel(L("list.channel_list"))
-                    }
-                }
-                .padding(.horizontal, 12)
-            }
-
-            if showSeriesEpisodeSkip {
-                HStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    glassIconButton(systemName: "backward.end.fill", size: 44, symbolSize: 17) {
-                        onPreviousEpisode?()
-                    }
-                    .accessibilityLabel(L("player.a11y.previous_episode"))
-                    .disabled(!canGoToPreviousEpisode)
-                    .opacity(canGoToPreviousEpisode ? 1 : 0.38)
-
-                    glassIconButton(systemName: "forward.end.fill", size: 44, symbolSize: 17) {
-                        onNextEpisode?()
-                    }
-                    .accessibilityLabel(L("player.a11y.next_episode"))
-                    .disabled(!canGoToNextEpisode)
-                    .opacity(canGoToNextEpisode ? 1 : 0.38)
-                }
-                .padding(.horizontal, 12)
-            }
-
-            if showVODQueueSkip {
-                HStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    glassIconButton(systemName: "backward.end.fill", size: 44, symbolSize: 17) {
-                        onPreviousChannel?()
-                    }
-                    .accessibilityLabel(L("player.a11y.previous_item"))
-                    .disabled(!canGoToPreviousChannel)
-                    .opacity(canGoToPreviousChannel ? 1 : 0.38)
-
-                    glassIconButton(systemName: "forward.end.fill", size: 44, symbolSize: 17) {
-                        onNextChannel?()
-                    }
-                    .accessibilityLabel(L("player.a11y.next_item"))
-                    .disabled(!canGoToNextChannel)
-                    .opacity(canGoToNextChannel ? 1 : 0.38)
-                }
-                .padding(.horizontal, 12)
-            }
+            quickActionsRow
 
             if !isLiveStream {
                 scrubTimelineCard
@@ -2357,8 +3320,8 @@ private struct PlayerViewImpl: View {
             )
             .layoutPriority(1)
             // DragGesture VoiceOver altında erişilemez; kaydırıcıyı ayarlanabilir öğe
-            // olarak sun (yan parlaklık/ses slider'larıyla aynı desen). ±15 sn adım,
-            // mevcut goforward/gobackward.15 butonlarıyla tutarlı.
+            // olarak sun (yan parlaklık/ses slider'larıyla aynı desen). ±10 sn adım,
+            // round 19 center transport'un goforward/gobackward.10 butonlarıyla tutarlı.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(L("player.a11y.playback_position"))
             .accessibilityValue("\(formatMs(Int(player.timeMs))) / \(totalDurationLabel)")
@@ -2366,8 +3329,8 @@ private struct PlayerViewImpl: View {
                 guard effectiveSeekable else { return }
                 resetTimer()
                 switch direction {
-                case .increment: player.jump(seconds: 15)
-                case .decrement: player.jump(seconds: -15)
+                case .increment: player.jump(seconds: 10)
+                case .decrement: player.jump(seconds: -10)
                 @unknown default: break
                 }
             }
@@ -2396,39 +3359,23 @@ private struct PlayerViewImpl: View {
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
     }
 
-    private func appendBitrateSample(_ bps: Double) {
-        let now = Date()
-        if bps > 0 {
-            bitrateSamples.append((time: now, bps: bps))
-        }
-        let cutoff = now.addingTimeInterval(-5)
-        bitrateSamples.removeAll { $0.time < cutoff }
-    }
-
-    private func formatBitrate(_ bps: Double) -> String {
-        let mbps = bps / 1_000_000
-        if mbps >= 1 { return String(format: "%.2fM", mbps) }
-        let kbps = bps / 1_000
-        return String(format: "%.0fK", kbps)
-    }
-
-    private var canEnterPiPNow: Bool {
-        player.state == .playing
-            && player.isPlaying
-            && player.engine.isPlaybackEstablished
-            && !player.engine.isPaused
-            && !player.engine.isBuffering
-    }
+    // Round 16 (R6): appendBitrateSample / formatBitrate removed
+    // with the debug overlay — nothing else read the samples.
 
     private func glassIconButton(
         systemName: String, size: CGFloat,
         symbolSize: CGFloat? = nil,
+        // Round 15 (C1): every glass button in the player carries
+        // a translated VoiceOver label, passed through to
+        // `GlassSystemIconButton`.
+        accessibilityLabel: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
         GlassSystemIconButton(
             systemName: systemName,
             pointSize: symbolSize ?? size * 0.34,
             buttonSize: size,
+            accessibilityLabel: accessibilityLabel,
             action: {
                 resetTimer()
                 action()
@@ -2436,7 +3383,69 @@ private struct PlayerViewImpl: View {
         )
     }
 
+    // MARK: - Orientation (round 9)
+
+    /// Landscape exists ONLY inside the fullscreen player: fullscreen
+    /// raises the AppDelegate lock to free rotation; the mini card and
+    /// dismissal restore the portrait browse lock. (The unreferenced
+    /// `LiveChannelBrowserScreen` below assigns the lock directly to
+    /// force `.landscape` over the player and restores the player's
+    /// mask on exit — untouched by this change.)
+    private func syncOrientationLockForPlayerMode() {
+        if overlayMode == .fullscreen {
+            AppDelegate.setOrientationLock(.allButUpsideDown)
+        } else {
+            restoreBrowseOrientationLock()
+        }
+    }
+
+    private func restoreBrowseOrientationLock() {
+        let browse = AppDelegate.browseOrientationLock
+        AppDelegate.setOrientationLock(
+            browse,
+            forceOrientation: browse == .portrait ? .portrait : nil
+        )
+    }
+
+    /// Trailing clearance for the bottom-trailing pills (Skip Intro,
+    /// auto-advance): their right edge must stay LEFT of the volume
+    /// gesture capsule in every orientation, so the pill never sits on
+    /// the slider zone whether the chrome (and with it the sliders) is
+    /// shown or hidden — the pills' show/hide animation is vertical
+    /// only, this horizontal offset is constant.
+    private func pillTrailingPadding(_ insets: EdgeInsets) -> CGFloat {
+        // Round 10: the visible gap past the capsule grows 12 → 20 —
+        // with the inset now exact (see the Skip Intro fix), 12 pt
+        // still read as "touching" on the owner's recording.
+        16 + insets.trailing
+            + PlayerControlCenterStyleEdgeSliders.trackSize(isCompactWidth: isCompactWidth).width
+            + 20
+        
+    }
+
+    /// Leading clearance for the bottom-LEADING Skip Intro pill
+    /// (round 11): the mirror of `pillTrailingPadding` — the pill's
+    /// left edge starts past the brightness gesture capsule (edge
+    /// padding 16 + safe-area inset + capsule width) plus a 20 pt
+    /// gap, so the pill clears the left bar exactly as the
+    /// auto-advance pill clears the right one.
+    private func pillLeadingPadding(_ insets: EdgeInsets) -> CGFloat {
+        16 + insets.leading
+            + PlayerControlCenterStyleEdgeSliders.trackSize(isCompactWidth: isCompactWidth).width
+            + 20
+        
+    }
+
+    // Round 17 (R17-3): `transportRowTrailingClearance` was deleted
+    // with the floating bottom rows it served — nothing in the
+    // bottom chrome reaches toward the volume capsule anymore.
+
     private func resetTimer() {
+        // Round 15 (C8): every control in the player funnels its
+        // interaction through here — that makes this the single
+        // "the user is present" signal for the still-watching
+        // counter.
+        noteUserInteraction()
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { _ in
             // Never hide the chrome mid-scrub: removing the timeline cancels the drag
@@ -2461,6 +3470,39 @@ private struct PlayerViewImpl: View {
 
     private func applySelectedAspectMode(force: Bool = false) {
         player.setAspectMode(selectedAspectMode, force: force)
+    }
+
+    /// Round 20 (R20-3/R20-4): ONE-TIME migration of the persisted
+    /// aspect mode, superseding round 19's (whose flag is already
+    /// consumed on the owner's phone, so it can never run again).
+    /// Proven build-54 mechanism: the ONLY source of the series
+    /// zoom-crop is the persisted `player.videoAspectMode = "fill"`
+    /// — the surface's cover transform (`aspectFillScale`) is
+    /// non-1 only in `.fill`, the mode is read from this single key
+    /// by the one shared PlayerView for movies, series and live
+    /// alike (no shell or per-type override exists), and the
+    /// owner's own build-54 recording shows Settings ▸ "Default
+    /// video fit" = Fill, i.e. the stored value was "fill" on
+    /// build 54 despite round 19's migration. That migration was
+    /// one-time and player-appear-only, while the key keeps TWO
+    /// live writers pristine build 33 does not gate: the in-player
+    /// aspect cycle button and the round-14 Settings picker (plus
+    /// settings-backup import) — any one write of "fill" after the
+    /// flag was consumed re-persists Fill for every later open,
+    /// and the migration could never correct it again. This R20
+    /// migration therefore resets the persisted value to Fit
+    /// exactly once on build 55, so the phone starts in Fit
+    /// (whole frame) on ALL types like a fresh build-33 install.
+    /// The single source of truth stays this one AppStorage key,
+    /// exactly as in build 33: deliberate in-session cycling to
+    /// Fill afterwards still works and persists, unchanged.
+    private func migratePersistedAspectModeIfNeeded() {
+        let key = "player.aspectModeMigratedR20"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        if videoAspectModeRaw != VideoAspectMode.fit.rawValue {
+            videoAspectModeRaw = VideoAspectMode.fit.rawValue
+        }
     }
 
     private func showAspectToast() {
@@ -2567,11 +3609,11 @@ struct LiveChannelBrowserScreen: View {
         }
     }
 
-    /// Seçili kanal `currentStreams` içindeyse listeyle hizala (ilk açılış ve kategori değişimi).
+    /// If the selected channel is in `currentStreams`, align it with the list (first open and category change).
     private func scrollChannelListToHighlightedItem(proxy: ScrollViewProxy) {
         guard let stream = currentStreams.first(where: { $0.streamId == highlightedStreamId }) else { return }
         Task { @MainActor in
-            // LazyVStack ölçümü için kısa gecikme; aksi halde scrollTo bazen etkisiz kalıyor.
+            // A short delay for the LazyVStack measurement; otherwise scrollTo sometimes has no effect.
             try? await Task.sleep(nanoseconds: 100_000_000)
             withAnimation(.easeOut(duration: 0.25)) {
                 proxy.scrollTo(stream.id, anchor: .center)
@@ -2598,7 +3640,7 @@ struct LiveChannelBrowserScreen: View {
         }
     }
 
-    /// Başlığın altında yatay kaydırmalı kategoriler. Yatay ScrollView dikeyde şişmemesi için `fixedSize` kullanılır.
+    /// Horizontally scrolling categories under the heading. `fixedSize` is used so the horizontal ScrollView doesn't swell vertically.
     private var categoryHorizontalBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: 9) {
@@ -2614,7 +3656,7 @@ struct LiveChannelBrowserScreen: View {
                             .padding(.vertical, 7)
                             .background(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(selectedCategoryId == section.id ? Color.accentColor : Color.white.opacity(0.12))
+                                    .fill(selectedCategoryId == section.id ? AppTheme.accent : Color.white.opacity(0.12))
                             )
                     }
                     .buttonStyle(.plain)
@@ -2680,7 +3722,7 @@ struct LiveChannelBrowserScreen: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
-                        .background(Color.accentColor, in: Capsule())
+                        .background(AppTheme.accent, in: Capsule())
                 }
             }
             .padding(.horizontal, 8)
@@ -2696,8 +3738,8 @@ struct LiveChannelBrowserScreen: View {
     }
 }
 
-/// Canlı oynatıcıda oynatmayı kesmeden kanal listesi göstermek için kullanılan alt yatay panel.
-/// Üstte yatay kategori çipleri, altta yatay kaydırılan kanal kartları bulunur.
+/// The bottom horizontal panel used to show the channel list in the live player without interrupting playback.
+/// At the top there are horizontal category chips; at the bottom, horizontally scrolled channel cards.
 struct LiveChannelSidePanel: View {
     let sections: [ChannelPanelSection]
     let currentItemId: String?
@@ -2761,7 +3803,7 @@ struct LiveChannelSidePanel: View {
                                 .padding(.vertical, 5)
                                 .background(
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(selectedCategoryId == section.id ? Color.accentColor : Color.white.opacity(0.12))
+                                        .fill(selectedCategoryId == section.id ? AppTheme.accent : Color.white.opacity(0.12))
                                 )
                         }
                         .buttonStyle(.plain)

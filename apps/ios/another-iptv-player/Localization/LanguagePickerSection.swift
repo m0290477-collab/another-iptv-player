@@ -1,20 +1,23 @@
 import SwiftUI
 
-/// Form içinde kullanılan dil seçici satırı. NavigationLink üstünden liste ekranına açılır.
-struct LanguagePickerSection: View {
+// Round 16 (R1): the orphaned LanguagePickerSection wrapper is
+// removed (zero call sites — both settings screens embed
+// LanguagePickerRow directly inside their own groups).
+
+/// The language row itself (without a section header) — a separate struct so the settings screens can
+/// embed the row inside their own groups (round 6).
+struct LanguagePickerRow: View {
     @ObservedObject private var manager = LocalizationManager.shared
 
     var body: some View {
-        Section(header: Text(L("settings.language.section"))) {
-            NavigationLink {
-                LanguagePickerListView()
-            } label: {
-                HStack {
-                    Text(L("settings.language.title"))
-                    Spacer()
-                    Text(currentLanguageDisplayName)
-                        .foregroundColor(.secondary)
-                }
+        NavigationLink {
+            LanguagePickerListView()
+        } label: {
+            HStack {
+                Text(L("settings.language.title"))
+                Spacer()
+                Text(currentLanguageDisplayName)
+                    .foregroundColor(.secondary)
             }
         }
     }
@@ -26,7 +29,7 @@ struct LanguagePickerSection: View {
     }
 }
 
-/// Detail ekranında dil listesi + seçili dile tick.
+/// Language list on the detail screen + a tick on the selected language.
 struct LanguagePickerListView: View {
     @ObservedObject private var manager = LocalizationManager.shared
     @Environment(\.dismiss) private var dismiss

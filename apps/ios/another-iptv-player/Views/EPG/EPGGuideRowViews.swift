@@ -59,9 +59,16 @@ struct EPGProgrammeCell: View {
                     .background(Color(.tertiarySystemFill).opacity(0.4))
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.06), lineWidth: 0.5))
+        // C9: radius onto the 8/14/20 scale (was off-scale 6).
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius).stroke(AppTheme.cardBorderColor, lineWidth: 0.5))
         .padding(.horizontal, 1)
+        // C1 (Round 15): ONE accessibility element with the button
+        // trait and a "title, starts HH:MM" label, instead of the
+        // cell's inner texts being separate VoiceOver stops.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(cell.programme.map { "\($0.title), \(EPGTimeFormat.time($0.start))" } ?? L("epg.no_data.programme_cell"))
+        .accessibilityAddTraits(cell.programme != nil ? .isButton : [])
     }
 }
 
@@ -145,7 +152,7 @@ struct EPGChannelColumnCell: View, Equatable {
             // `.grid` profile: the request survives cell recycling (the default
             // `.standard` cancels on disappear, which starves logos as rows and
             // sticky labels churn during scroll/virtualization).
-            CachedImage(url: row.iconURL, width: 32, height: 32, cornerRadius: 6, iconName: "tv", loadProfile: .grid)
+            CachedImage(url: row.iconURL, width: 32, height: 32, cornerRadius: AppTheme.smallCornerRadius, iconName: "tv", loadProfile: .grid)
             Text(row.displayName)
                 .font(.caption)
                 .lineLimit(2)

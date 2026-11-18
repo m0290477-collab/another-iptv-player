@@ -1,0 +1,1343 @@
+import SwiftUI
+import UIKit
+import Nuke
+import GRDB
+import UniformTypeIdentifiers
+
+/// Small rounded icon tile at the leading edge of a settings row — the
+/// iOS-settings / elite treatment: a tinted rounded square with a white
+/// glyph. Shared by both playlist settings screens (round 6) so their
+/// rows read as one designed system instead of plain text rows.
+struct SettingsIconTile: View {
+    let systemImage: String
+    let tint: Color
+    var size: CGFloat = 28
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: size * 0.5, weight: .semibold))
+            .foregroundColor(.white)
+            .frame(width: size, height: size)
+            .background(tint, in: RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+    }
+}
+
+/// Round 11: a settings row with a trailing menu picker — STRONG's
+/// value rows ("Skip-intro length  85 s", "Default sleep timer
+/// 30 min"). The label carries the
+/// shared icon tile + title; the menu shows the current value at the
+/// trailing edge. Used by both playlist settings screens for the
+/// round-11 Player/App value settings.
+struct SettingsPickerRow<Value: Hashable, Options: View>: View {
+    let systemImage: String
+    let tint: Color
+    let title: String
+    @Binding var selection: Value
+    @ViewBuilder let options: () -> Options
+
+    var body: some View {
+        Picker(selection: $selection) {
+            options()
+        } label: {
+            HStack(spacing: 12) {
+                SettingsIconTile(systemImage: systemImage, tint: tint)
+                Text(title)
+            }
+        }
+        .pickerStyle(.menu)
+    }
+}
+
+/// Round 12 (point 6, owner's explicit order): the Activation
+/// section — STRONG's arrangement (header + card rows), placed after
+/// Playlists and before Player in BOTH settings screens. Every value
+/// is real: "Activated ✓" and "Lifetime Subscription" describe the
+/// app itself (free forever — never the word "currently"), and the
+/// Device ID / PIN come from `DeviceActivationStore` (generated once
+/// by the app, persisted, stable per install), each with a working
+/// copy button. No network call, no backend, nothing read from the
+/// owner's screenshots.
+struct ActivationSettingsSection: View {
+    private enum CopiedField { case deviceID, pin }
+
+    @State private var copiedField: CopiedField?
+    @State private var copyResetTask: Task<Void, Never>?
+
+    var body: some View {
+        // Round 14 (B4): ONE short purpose line under the group
+        // title — the card itself (name, "Activated ✓", Device ID /
+        // PIN, "Lifetime Subscription") is exactly as the owner
+        // ordered in round 12 and does not change.
+        Section(header: VStack(alignment: .leading, spacing: 3) {
+            Text(L("settings.group.activation"))
+            Text(L("settings.scope.whole_app"))
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .textCase(nil)
+            Text(L("settings.activation.purpose"))
+                .font(.caption)
+                .fontWeight(.regular)
+                .foregroundStyle(.secondary)
+                .textCase(nil)
+        }) {
+            HStack(spacing: 12) {
+                SettingsIconTile(systemImage: "checkmark.seal.fill", tint: .green)
+                Text(L("settings.activation.activated"))
+                    .font(.body.weight(.semibold))
+                Spacer()
+                Image(systemName: "checkmark")
+                    .font(.body.weight(.bold))
+                    .foregroundColor(.green)
+            }
+
+            activationValueRow(
+                systemImage: "doc.on.doc.fill",
+                tint: .orange,
+                label: L("settings.activation.device_id"),
+                value: DeviceActivationStore.deviceID,
+                field: .deviceID
+            )
+
+            activationValueRow(
+                systemImage: "lock.fill",
+                tint: .gray,
+                label: L("settings.activation.pin"),
+                value: DeviceActivationStore.pin,
+                field: .pin
+            )
+
+            HStack(spacing: 12) {
+                SettingsIconTile(systemImage: "infinity", tint: AppTheme.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("settings.activation.lifetime"))
+                    Text(L("settings.activation.lifetime_desc"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .onDisappear { copyResetTask?.cancel() }
+    }
+
+    private func activationValueRow(
+        systemImage: String, tint: Color, label: String, value: String, field: CopiedField
+    ) -> some View {
+        HStack(spacing: 12) {
+            SettingsIconTile(systemImage: systemImage, tint: tint)
+            Text(label)
+            Spacer()
+            Text(value)
+                .font(.subheadline.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Button {
+                copy(value, field: field)
+            } label: {
+                Image(systemName: copiedField == field ? "checkmark" : "doc.on.doc")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(copiedField == field ? Color.green : AppTheme.accent)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L("settings.activation.copy"))
+        }
+    }
+
+    private func copy(_ value: String, field: CopiedField) {
+        UIPasteboard.general.string = value
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        copiedField = field
+        copyResetTask?.cancel()
+        copyResetTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if !Task.isCancelled { copiedField = nil }
+        }
+    }
+}
+
+/// Round 14 (B4): Default video fit — bound to the SAME AppStorage
+/// key the player reads (`player.videoAspectMode`, values are the
+/// `VideoAspectMode` raw values), so the Settings choice and the
+/// in-player cycle can never disagree. Fit / Fill are the two
+/// user-facing presentations (the enum's third case, Center/1:1,
+/// stays reachable from the player's own cycle).
+struct VideoFitSettingsRow: View {
+    @AppStorage("player.videoAspectMode") private var videoAspectModeRaw = VideoAspectMode.fit.rawValue
+
+    var body: some View {
+        SettingsPickerRow(
+            systemImage: "rectangle.arrowtriangle.2.inward",
+            tint: .gray,
+            title: L("settings.player.video_fit.title"),
+            selection: $videoAspectModeRaw
+        ) {
+            Text(L("player.aspect_fit")).tag(VideoAspectMode.fit.rawValue)
+            Text(L("player.aspect_fill")).tag(VideoAspectMode.fill.rawValue)
+        }
+    }
+}
+
+/// Round 14 (B4): Subtitle Appearance row — presents the EXISTING
+/// `SubtitleAppearanceSheet` (previously orphaned: presented from no
+/// screen). Presented with no live player, so the sheet persists via
+/// `SubtitleAppearancePersistence` and the next playback picks the
+/// appearance up.
+struct SubtitleAppearanceSettingsRow: View {
+    @State private var showSheet = false
+
+    var body: some View {
+        Button {
+            showSheet = true
+        } label: {
+            HStack(spacing: 12) {
+                SettingsIconTile(systemImage: "captions.bubble.fill", tint: .gray)
+                Text(L("settings.player.subtitle_appearance"))
+                    .foregroundColor(.primary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showSheet) {
+            SubtitleAppearanceSheet(player: nil)
+        }
+    }
+}
+
+/// Round 14 (B4): Audio Delay row — the SAME storage the tracks
+/// panel uses (`AudioDelayPersistence`: load on appear, save on
+/// change, same range/step and the same millisecond display the
+/// PlaybackTrackSettingsSheet shows).
+struct AudioDelaySettingsRow: View {
+    @State private var audioDelaySeconds = AudioDelayPersistence.load()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                SettingsIconTile(systemImage: "waveform.path.ecg", tint: .gray)
+                Text(L("player.audio_delay.label"))
+                Spacer()
+                Text(audioDelayDisplay)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Slider(
+                value: $audioDelaySeconds,
+                in: AudioDelayPersistence.range,
+                step: AudioDelayPersistence.step
+            )
+            .padding(.leading, 40)
+        }
+        .padding(.vertical, 2)
+        .onChange(of: audioDelaySeconds) { _, new in
+            AudioDelayPersistence.save(new)
+        }
+    }
+
+    private var audioDelayDisplay: String {
+        let ms = Int((audioDelaySeconds * 1000).rounded())
+        if ms == 0 { return L("subtitle.no_delay") }
+        return ms > 0 ? "+\(ms) ms" : "\(ms) ms"
+    }
+}
+
+/// Round 14 (B11): ELITE form building blocks for the Add Playlist
+/// screens — a cinematic surface card, a group header and the
+/// field label / field chrome the playlist gate uses, so the Add /
+/// Edit screens share the gate's designed look instead of the
+/// classic Form rows.
+struct SettingsFormCard<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+        )
+    }
+}
+
+/// Round 14 (B11): group header for the ELITE Add/Edit forms.
+struct SettingsGroupHeader: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.headline)
+            .foregroundStyle(.primary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Round 14 (B11): small label above a form field.
+struct SettingsFieldLabel: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Round 14 (B11): the gate's field chrome — padded, elevated
+/// surface, design corner radius.
+struct SettingsFieldChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(12)
+            .background(AppTheme.elevated)
+            .cornerRadius(AppTheme.cornerRadius)
+    }
+}
+
+extension View {
+    func settingsFieldChrome() -> some View {
+        modifier(SettingsFieldChrome())
+    }
+}
+
+/// Accent color picker (round 7) — lives in the App group of both
+/// playlist settings screens, per the owner's order ("there must be an
+/// option to change the app's color"). A row of preset swatches; the
+/// selected one carries a checkmark and a bright ring. Tapping a swatch
+/// sets `AccentThemeStore.shared.preset`, which persists the choice and
+/// recolors the app accent everywhere (tab bar, Play buttons, "See
+/// all", Featured badge, toggles, gate sign-in — see the store). The
+/// LIVE badge red and the rating gold are semantic and do not follow.
+struct AccentColorPickerRow: View {
+    @ObservedObject private var theme = AccentThemeStore.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                SettingsIconTile(systemImage: "paintpalette.fill", tint: theme.color)
+                Text(L("settings.accent_color"))
+            }
+            HStack(spacing: 12) {
+                ForEach(AccentPreset.allCases, id: \.self) { preset in
+                    Button {
+                        theme.preset = preset
+                    } label: {
+                        Circle()
+                            .fill(preset.color)
+                            .frame(width: 30, height: 30)
+                            .overlay {
+                                if theme.preset == preset {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundStyle(.white)
+                                }
+                            }
+                            .overlay {
+                                Circle()
+                                    .strokeBorder(
+                                        .white.opacity(theme.preset == preset ? 0.9 : 0.15),
+                                        lineWidth: theme.preset == preset ? 2 : 1
+                                    )
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L(preset.nameKey))
+                }
+            }
+            .padding(.leading, 40)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+// MARK: - Round 15 (Part C) shared settings infrastructure
+
+/// C5: a section header carrying the explicit scope division —
+/// the group title plus a small "This playlist" / "Whole app"
+/// caption, so every group on both settings dashboards states
+/// which scope its rows belong to.
+struct ScopedSectionHeader: View {
+    let title: String
+    /// True → "This playlist"; false → "Whole app".
+    let thisPlaylist: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+            Text(L(thisPlaylist ? "settings.scope.this_playlist" : "settings.scope.whole_app"))
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .textCase(nil)
+        }
+    }
+}
+
+/// C5: settings search matching — a section stays visible while
+/// searching when the (already lowercased) query appears in its
+/// keyword string (localized titles + feature names). An empty
+/// query shows everything.
+func settingsSearchMatches(_ query: String, _ keywords: String) -> Bool {
+    let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !q.isEmpty else { return true }
+    return keywords.lowercased().contains(q)
+}
+
+/// C13: the last known reachability of a playlist, persisted per
+/// playlist from REAL verify/sync outcomes only (Settings account
+/// fetch, Test Connection, My Playlists refresh, gate verify).
+/// `unknown` = never checked — shown honestly as "Not checked yet".
+enum PlaylistHealth: String {
+    case responds, refused, expired, unknown
+}
+
+enum PlaylistHealthStore {
+    private static let key = "playlist.health.v1"
+
+    static func health(for playlistId: UUID) -> PlaylistHealth {
+        let dict = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        return PlaylistHealth(rawValue: dict[playlistId.uuidString] ?? "") ?? .unknown
+    }
+
+    static func record(_ health: PlaylistHealth, for playlistId: UUID) {
+        var dict = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        dict[playlistId.uuidString] = health.rawValue
+        UserDefaults.standard.set(dict, forKey: key)
+    }
+
+    /// Round 17 (R17-2/R17-5): removal for the shared account-data
+    /// deletion path — one playlist's verdict, or every verdict.
+    static func remove(for playlistId: UUID) {
+        var dict = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        guard dict.removeValue(forKey: playlistId.uuidString) != nil else { return }
+        UserDefaults.standard.set(dict, forKey: key)
+    }
+
+    static func clearAll() {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+
+    /// The health verdict after a successful verify: expired when
+    /// the shared expiry store says so, otherwise responding.
+    static func recordVerified(playlistId: UUID, expDate: String?) {
+        ProviderExpiryStore.record(playlistId: playlistId, expDate: expDate)
+        record(ProviderExpiryStore.isExpired(expDateString: expDate) ? .expired : .responds,
+               for: playlistId)
+    }
+}
+
+/// C13: the user's playlist library arrangement — the marked
+/// default and the drag-reorder order — persisted in UserDefaults
+/// (names/ids only; no credentials, so both backup flows may carry
+/// the default's id harmlessly, though neither does today).
+enum PlaylistLibraryStore {
+    private static let defaultKey = "playlist.defaultId"
+    private static let orderKey = "playlist.order"
+
+    static var defaultId: UUID? {
+        get { UserDefaults.standard.string(forKey: defaultKey).flatMap(UUID.init(uuidString:)) }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(newValue.uuidString, forKey: defaultKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: defaultKey)
+            }
+        }
+    }
+
+    static var order: [UUID] {
+        (UserDefaults.standard.stringArray(forKey: orderKey) ?? []).compactMap(UUID.init(uuidString:))
+    }
+
+    static func saveOrder(_ playlists: [Playlist]) {
+        UserDefaults.standard.set(playlists.map { $0.id.uuidString }, forKey: orderKey)
+    }
+
+    /// Round 17 (R17-2/R17-5): drop one playlist from the default /
+    /// order records (shared account-data deletion path).
+    static func remove(playlistId: UUID) {
+        if defaultId == playlistId { defaultId = nil }
+        let current = order
+        let filtered = current.filter { $0 != playlistId }
+        if filtered != current {
+            UserDefaults.standard.set(filtered.map(\.uuidString), forKey: orderKey)
+        }
+    }
+
+    /// Playlists in the user's saved order; ones missing from the
+    /// saved order (newly added) follow in creation order.
+    static func sorted(_ playlists: [Playlist]) -> [Playlist] {
+        let order = Self.order
+        return playlists.sorted { a, b in
+            let ia = order.firstIndex(of: a.id) ?? Int.max
+            let ib = order.firstIndex(of: b.id) ?? Int.max
+            if ia != ib { return ia < ib }
+            return a.createdAt < b.createdAt
+        }
+    }
+}
+
+// MARK: - Preference keys, Reset, Backup (C5 + C3)
+
+/// The app's REAL preference keys, enumerated from the tree's
+/// @AppStorage / UserDefaults usage. Reset to Defaults and the
+/// settings export/import operate on exactly this list — playlists,
+/// history, progress, downloads, the expiry records, the PIN and
+/// the gate's last-playlist name are NEVER in it.
+enum AppPreferenceKeys {
+    static let all: [String] = [
+        // Player
+        "player.pipEnabled", "player.continuePlayingInBackground",
+        "player.speedUpOnLongPress", "player.autoPlayNextEpisode",
+        "player.showSkipIntro", "player.skipIntroLengthSeconds",
+        "player.defaultSleepTimerMinutes",
+        "player.videoAspectMode",
+        // Round 16 (R6): "player.debugOverlayEnabled" and
+        // "player.nextEpisodeTimerSeconds" leave the list — both
+        // features are deleted (the overlay in this round, the
+        // post-end timer in round 14), so reset/export no longer
+        // carries their fossil keys.
+        // Round 20 (R20-2 cleanup): "player.enginePreference"
+        // leaves the list by the same rule — its picker is deleted
+        // and the R20-4 playback restoration removed its only
+        // reader, so reset/export no longer carries the fossil
+        // key. A stale value already stored on a device is inert
+        // (nothing reads it) and is simply never carried again.
+        // Round 15 player features
+        "player.zappingEnabled", "player.zappingDirection",
+        "player.nextEpisodeCardMode",
+        // Downloads
+        "download.wifi_only", "downloads.autoDownloadNextEpisode",
+        // Notifications & reminders
+        "notifications.expiryAlertsEnabled",
+        "reminders.enabled", "reminders.leadTimeMinutes",
+        // Appearance / motion / sound
+        "app.accent_preset", "app.selected_language",
+        "motion.intensity", "settings.uiSounds",
+        "dashboard_selected_tab",
+        // Playback detail stores (audio delay, subtitle look,
+        // per-kind track choices — all plain preferences)
+        "playback.audioDelaySeconds", "playback.subtitleAppearance.v2",
+        "playback.trackPreferences.v1",
+        // PIN behaviour (the PIN itself lives in the Keychain and
+        // is never reset from here)
+        "pin.lockSettings",
+        // Gate form drafts (non-sensitive fields only)
+        "gate.draft.xtream.name", "gate.draft.xtream.url", "gate.draft.xtream.username",
+        "gate.draft.m3u.name", "gate.draft.m3u.url"
+    ]
+
+    /// C5 Reset to Defaults: removes every preference above. The
+    /// accent store is also pushed back to its default so the UI
+    /// repaints immediately instead of at next launch.
+    static func resetToDefaults() {
+        for key in all { UserDefaults.standard.removeObject(forKey: key) }
+        AccentThemeStore.shared.preset = .blue
+    }
+}
+
+/// A JSON-friendly UserDefaults value for the backup file.
+enum BackupValue: Codable, Equatable {
+    case bool(Bool)
+    case int(Int)
+    case double(Double)
+    case string(String)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(Bool.self) { self = .bool(value); return }
+        if let value = try? container.decode(Int.self) { self = .int(value); return }
+        if let value = try? container.decode(Double.self) { self = .double(value); return }
+        self = .string(try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .bool(let v): try container.encode(v)
+        case .int(let v): try container.encode(v)
+        case .double(let v): try container.encode(v)
+        case .string(let v): try container.encode(v)
+        }
+    }
+
+    static func read(_ key: String) -> BackupValue? {
+        let defaults = UserDefaults.standard
+        guard let raw = defaults.object(forKey: key) else { return nil }
+        switch raw {
+        case let v as Bool: return .bool(v)
+        case let v as Int: return .int(v)
+        case let v as Double: return .double(v)
+        case let v as String: return .string(v)
+        default: return nil
+        }
+    }
+
+    func write(to key: String) {
+        switch self {
+        case .bool(let v): UserDefaults.standard.set(v, forKey: key)
+        case .int(let v): UserDefaults.standard.set(v, forKey: key)
+        case .double(let v): UserDefaults.standard.set(v, forKey: key)
+        case .string(let v): UserDefaults.standard.set(v, forKey: key)
+        }
+    }
+}
+
+/// One playlist inside a backup file. `password` is present ONLY in
+/// the C3 full backup (includesCredentials == true); the C5
+/// settings export always writes nil and import re-prompts.
+struct BackupPlaylistDTO: Codable, Equatable {
+    var name: String
+    var serverURL: String
+    var username: String
+    var password: String?
+    var kind: String
+    var filterAdultContent: Bool
+    var m3uEpgURL: String?
+    var epgURLOverride: String?
+    var epgEnabled: Bool
+
+    init(playlist: Playlist, includePassword: Bool) {
+        name = playlist.name
+        serverURL = playlist.serverURL
+        username = playlist.username
+        password = includePassword ? playlist.password : nil
+        kind = playlist.type
+        filterAdultContent = playlist.filterAdultContent
+        m3uEpgURL = playlist.m3uEpgURL
+        epgURLOverride = playlist.epgURLOverride
+        epgEnabled = playlist.epgEnabled
+    }
+
+    func makePlaylist(password: String) -> Playlist {
+        Playlist(
+            name: name, serverURL: serverURL, username: username,
+            password: password,
+            filterAdultContent: filterAdultContent,
+            type: PlaylistKind(rawValue: kind) ?? .xtream,
+            m3uEpgURL: m3uEpgURL, epgURLOverride: epgURLOverride,
+            epgEnabled: epgEnabled
+        )
+    }
+}
+
+/// The ONE backup file format behind both flows (C5 + C3): the C5
+/// settings JSON (includesCredentials == false, passwords absent,
+/// re-entered on import) and the C3 full backup (== true, warned in
+/// plain text in the export UI). Import accepts either.
+struct SuperXBackupFile: Codable {
+    var format = "superx-backup"
+    var version = 1
+    var includesCredentials: Bool
+    var settings: [String: BackupValue]
+    var playlists: [BackupPlaylistDTO]
+
+    static func make(playlists: [Playlist], includeCredentials: Bool) -> SuperXBackupFile {
+        var settings: [String: BackupValue] = [:]
+        for key in AppPreferenceKeys.all {
+            if let value = BackupValue.read(key) { settings[key] = value }
+        }
+        return SuperXBackupFile(
+            includesCredentials: includeCredentials,
+            settings: settings,
+            playlists: playlists.map { BackupPlaylistDTO(playlist: $0, includePassword: includeCredentials) }
+        )
+    }
+
+    func encodedData() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(self)
+    }
+
+    /// Applies the file's preference values (whitelisted keys only —
+    /// a file can never write an arbitrary UserDefaults key).
+    func applySettings() {
+        for (key, value) in settings where AppPreferenceKeys.all.contains(key) {
+            value.write(to: key)
+        }
+        if let raw = settings["app.accent_preset"], case .string(let name) = raw,
+           let preset = AccentPreset(rawValue: name) {
+            AccentThemeStore.shared.preset = preset
+        }
+    }
+}
+
+// MARK: - Parental PIN UI (C3 + C5 guards)
+
+/// PIN entry form: a numeric secure field + submit. Used inline by
+/// the settings lock screen and inside `PINEntrySheet` for the
+/// one-off guards (adult filter OFF, Delete Account).
+struct PINEntryForm: View {
+    var message: String?
+    let onSuccess: () -> Void
+
+    @State private var code = ""
+    @State private var showError = false
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 30))
+                .foregroundColor(AppTheme.accent)
+            Text(L("pin.enter"))
+                .font(.headline)
+            if let message {
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            SecureField(L("pin.enter"), text: $code)
+                .keyboardType(.numberPad)
+                .textContentType(.oneTimeCode)
+                .multilineTextAlignment(.center)
+                .font(.title3.monospacedDigit())
+                .padding(12)
+                .background(AppTheme.elevated)
+                .cornerRadius(AppTheme.cornerRadius)
+                .frame(maxWidth: 220)
+            if showError {
+                Text(L("pin.wrong"))
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+            Button {
+                if PINStore.verify(code) {
+                    onSuccess()
+                } else {
+                    showError = true
+                    code = ""
+                }
+            } label: {
+                Text(L("pin.unlock_settings"))
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: 220)
+                    .padding(.vertical, 12)
+                    .background(AppTheme.accent)
+                    .cornerRadius(AppTheme.cornerRadius)
+            }
+            .buttonStyle(.plain)
+            .disabled(code.count < 4)
+            .opacity(code.count < 4 ? 0.45 : 1)
+        }
+        .padding(24)
+    }
+}
+
+/// Sheet wrapper for the one-off PIN guards.
+struct PINEntrySheet: View {
+    var message: String?
+    let onSuccess: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack {
+            HStack {
+                Button(L("common.cancel")) { dismiss() }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            PINEntryForm(message: message) {
+                dismiss()
+                onSuccess()
+            }
+            Spacer()
+        }
+        .padding(.top, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppTheme.background.ignoresSafeArea())
+    }
+}
+
+/// The full-screen lock shown instead of a Settings form when
+/// "Lock settings with PIN" is on and a PIN exists (C3). No cancel:
+/// opening Settings requires the PIN, exactly as ordered.
+struct PINLockScreen: View {
+    let onUnlock: () -> Void
+
+    var body: some View {
+        PINEntryForm(message: L("pin.lock_settings.desc"), onSuccess: onUnlock)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(AppTheme.background.ignoresSafeArea())
+    }
+}
+
+/// Set / change PIN sheet: current PIN first (when one exists),
+/// then the new PIN twice. PINs are 4–6 digits.
+private struct PINSetupSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onDone: () -> Void
+
+    @State private var current = ""
+    @State private var newPIN = ""
+    @State private var confirmPIN = ""
+    @State private var errorText: String?
+
+    private var hasExistingPIN: Bool { PINStore.hasPIN }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if hasExistingPIN {
+                    Section {
+                        SecureField(L("pin.enter_current"), text: $current)
+                            .keyboardType(.numberPad)
+                    }
+                }
+                Section {
+                    SecureField(L("pin.enter_new"), text: $newPIN)
+                        .keyboardType(.numberPad)
+                    SecureField(L("pin.confirm_new"), text: $confirmPIN)
+                        .keyboardType(.numberPad)
+                }
+                if let errorText {
+                    Section {
+                        Text(errorText)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
+                }
+            }
+            .cinematicScrollBackground()
+            .navigationTitle(L("pin.title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L("common.cancel")) { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L("common.save")) { save() }
+                }
+            }
+        }
+    }
+
+    private func save() {
+        if hasExistingPIN, !PINStore.verify(current) {
+            errorText = L("pin.wrong")
+            return
+        }
+        let digits = newPIN.trimmingCharacters(in: .whitespaces)
+        guard (4...6).contains(digits.count), digits.allSatisfy(\.isNumber) else {
+            errorText = L("pin.wrong")
+            return
+        }
+        guard digits == confirmPIN.trimmingCharacters(in: .whitespaces) else {
+            errorText = L("pin.mismatch")
+            return
+        }
+        if PINStore.setPIN(digits) {
+            onDone()
+            dismiss()
+        } else {
+            errorText = L("common.unknown_error")
+        }
+    }
+}
+
+/// C3/C5: the Parental PIN group shared by both settings screens —
+/// set/change/remove the Keychain PIN and the "Lock settings with
+/// PIN" toggle. The guards themselves live where the guarded
+/// actions live (the screens' filter toggle, PrivacyLegalSection).
+struct ParentalPINSection: View {
+    @AppStorage("pin.lockSettings") private var lockSettings = false
+    @State private var hasPIN = PINStore.hasPIN
+    @State private var showSetup = false
+    @State private var showRemoveEntry = false
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("pin.title"), thisPlaylist: false)) {
+            if hasPIN {
+                Button {
+                    showSetup = true
+                } label: {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "lock.rotation", tint: .gray)
+                        Text(L("pin.change"))
+                            .foregroundColor(.primary)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Toggle(isOn: $lockSettings) {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "lock.fill", tint: AppTheme.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L("pin.lock_settings"))
+                            Text(L("pin.lock_settings.desc"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Button(role: .destructive) {
+                    showRemoveEntry = true
+                } label: {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "lock.open.fill", tint: .red)
+                        Text(L("pin.remove"))
+                    }
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button {
+                    showSetup = true
+                } label: {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "lock.fill", tint: AppTheme.accent)
+                        Text(L("pin.set"))
+                            .foregroundColor(.primary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .sheet(isPresented: $showSetup) {
+            PINSetupSheet { hasPIN = PINStore.hasPIN }
+        }
+        .sheet(isPresented: $showRemoveEntry) {
+            PINEntrySheet(message: L("pin.remove")) {
+                PINStore.clearPIN()
+                lockSettings = false
+                hasPIN = false
+            }
+        }
+        .onAppear { hasPIN = PINStore.hasPIN }
+    }
+}
+
+// MARK: - Image cache row (C5)
+
+/// C5: the image cache's real current size — Nuke's memory cache
+/// total cost plus its DataCache total size. Finisher verification
+/// (C4 follow-up): this row and `CachedImage` use the SAME pipeline
+/// instance — `IPTVRemoteImagePipeline.installAsShared()` runs in
+/// the app's `init()` (before any view) and assigns
+/// `ImagePipeline.shared` with the 10-connection loader, the 150 MB
+/// memory cache and the explicit DataCache "com.superx.images"
+/// capped at 300 MB; the row reads that same `ImagePipeline.shared`.
+/// Clear wipes BOTH caches through the pipeline, so the displayed
+/// (memory + disk) size actually returns to zero.
+struct ImageCacheSettingsRow: View {
+    @State private var sizeBytes: Int64 = 0
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SettingsIconTile(systemImage: "photo.stack", tint: .gray)
+            Text(L("settings.image_cache.title"))
+            Spacer()
+            Text(ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file))
+                .foregroundColor(.secondary)
+            Button(L("settings.image_cache.clear")) {
+                ImagePipeline.shared.cache.removeAll()
+                // The displayed size includes the disk DataCache;
+                // clearing only the memory cache would leave it
+                // non-zero. Wipe both (same shared pipeline).
+                (ImagePipeline.shared.configuration.dataCache as? DataCache)?.removeAll()
+                refreshSize()
+            }
+            .font(.subheadline.weight(.semibold))
+            .buttonStyle(.plain)
+            .foregroundColor(AppTheme.accent)
+            .disabled(sizeBytes == 0)
+        }
+        .onAppear { refreshSize() }
+    }
+
+    private func refreshSize() {
+        let pipeline = ImagePipeline.shared
+        let memory = (pipeline.configuration.imageCache as? ImageCache)?.totalCost ?? 0
+        let disk = (pipeline.configuration.dataCache as? DataCache)?.totalSize ?? 0
+        sizeBytes = Int64(memory) + Int64(disk)
+    }
+}
+
+// MARK: - New feature settings (C5)
+
+/// C5: the settings born with build 50's features, shared by both
+/// dashboards so each control exists exactly once per screen with
+/// the exact AppStorage keys the features read:
+/// - Reminders: "reminders.enabled" (separate from the expiry
+///   alerts toggle) + "reminders.leadTimeMinutes" (5/10/15/30).
+/// - Zapping: "player.zappingEnabled" (default ON) +
+///   "player.zappingDirection" ("upNext" / "downNext").
+/// - Motion intensity: "motion.intensity" ("full"/"reduced"/"off").
+/// - T-50 card mode: "player.nextEpisodeCardMode" ("auto"/"ask").
+/// - UI sounds: "settings.uiSounds" (default ON, C12's gate).
+/// Plus the image-cache row. (The auto-download-next toggle with
+/// key "downloads.autoDownloadNextEpisode", default OFF, already
+/// lives in both screens' Downloads groups — not duplicated here.)
+struct NewFeatureSettingsSection: View {
+    @AppStorage("reminders.enabled") private var remindersEnabled = true
+    @AppStorage("reminders.leadTimeMinutes") private var reminderLeadTimeMinutes = 10
+    @AppStorage("player.zappingEnabled") private var zappingEnabled = true
+    @AppStorage("player.zappingDirection") private var zappingDirection = "upNext"
+    @AppStorage("motion.intensity") private var motionIntensity = "full"
+    @AppStorage("player.nextEpisodeCardMode") private var nextEpisodeCardMode = "auto"
+    @AppStorage("settings.uiSounds") private var uiSounds = true
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("settings.group.advanced"), thisPlaylist: false)) {
+            Toggle(isOn: $remindersEnabled) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "bell.badge.fill", tint: .orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("reminders.enabled.title"))
+                        Text(L("reminders.enabled.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            SettingsPickerRow(
+                systemImage: "timer",
+                tint: .orange,
+                title: L("reminders.lead_time"),
+                selection: $reminderLeadTimeMinutes
+            ) {
+                ForEach([5, 10, 15, 30], id: \.self) { minutes in
+                    Text(L("player.sleep_timer.minutes", minutes)).tag(minutes)
+                }
+            }
+            .disabled(!remindersEnabled)
+            .opacity(remindersEnabled ? 1 : 0.45)
+
+            Toggle(isOn: $zappingEnabled) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "arrow.up.arrow.down", tint: AppTheme.accent)
+                    Text(L("player.zapping.enabled"))
+                }
+            }
+
+            SettingsPickerRow(
+                systemImage: "hand.draw.fill",
+                tint: AppTheme.accent,
+                title: L("player.zapping.direction"),
+                selection: $zappingDirection
+            ) {
+                Text(L("player.zapping.direction.up_next")).tag("upNext")
+                Text(L("player.zapping.direction.down_next")).tag("downNext")
+            }
+            .disabled(!zappingEnabled)
+            .opacity(zappingEnabled ? 1 : 0.45)
+
+            SettingsPickerRow(
+                systemImage: "wand.and.stars",
+                tint: .purple,
+                title: L("motion.intensity.title"),
+                selection: $motionIntensity
+            ) {
+                Text(L("motion.intensity.full")).tag("full")
+                Text(L("motion.intensity.reduced")).tag("reduced")
+                Text(L("common.off")).tag("off")
+            }
+
+            SettingsPickerRow(
+                systemImage: "forward.frame.fill",
+                tint: .teal,
+                title: L("player.next_episode_card.title"),
+                selection: $nextEpisodeCardMode
+            ) {
+                Text(L("player.next_episode_card.auto")).tag("auto")
+                Text(L("player.next_episode_card.ask")).tag("ask")
+            }
+
+            Toggle(isOn: $uiSounds) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "speaker.wave.2.fill", tint: .pink)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("settings.ui_sounds.title"))
+                        Text(L("settings.ui_sounds.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            ImageCacheSettingsRow()
+        }
+    }
+}
+
+// MARK: - Backup & Reset (C5 + C3)
+
+/// C5 + C3 as ONE coherent pair of flows over the single
+/// `SuperXBackupFile` format:
+/// - "Export settings (no passwords)": preferences + playlists as
+///   JSON, passwords EXCLUDED; import re-prompts for each Xtream
+///   password before the playlist becomes usable.
+/// - "Export full backup (with passwords)": the C3 local-file
+///   export — credentials included, behind a plain-text warning
+///   alert before the share sheet is even offered.
+/// Import accepts either file. Reset to Defaults sits here too.
+struct BackupSettingsSection: View {
+    let playlists: [Playlist]
+
+    @State private var settingsExportURL: URL?
+    @State private var fullExportURL: URL?
+    @State private var showFullWarning = false
+    @State private var fullExportReady = false
+    @State private var showImporter = false
+    @State private var importMessage: String?
+    @State private var showImportResult = false
+    @State private var pendingPasswordDTOs: [BackupPlaylistDTO] = []
+    @State private var enteredPasswords: [Int: String] = [:]
+    @State private var showPasswordPrompt = false
+    @State private var showResetConfirm = false
+    @State private var showResetDone = false
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("settings.backup.title"), thisPlaylist: false)) {
+            if let settingsExportURL {
+                ShareLink(item: settingsExportURL) {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "square.and.arrow.up", tint: AppTheme.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L("settings.backup.export_settings"))
+                                .foregroundColor(.primary)
+                            Text(L("settings.backup.export_settings.desc"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            Button {
+                showFullWarning = true
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "exclamationmark.lock.fill", tint: .orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("settings.backup.export_full"))
+                            .foregroundColor(.primary)
+                        Text(L("settings.backup.export_full.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            if fullExportReady, let fullExportURL {
+                ShareLink(item: fullExportURL) {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "square.and.arrow.up.fill", tint: .orange)
+                        Text(L("settings.backup.export_full.confirm"))
+                            .foregroundColor(AppTheme.accent)
+                    }
+                }
+            }
+
+            Button {
+                showImporter = true
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "square.and.arrow.down", tint: .green)
+                    Text(L("settings.backup.import"))
+                        .foregroundColor(.primary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Button(role: .destructive) {
+                showResetConfirm = true
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "arrow.counterclockwise", tint: .red)
+                    Text(L("settings.reset.title"))
+                }
+            }
+            .buttonStyle(.plain)
+        }
+        .task(id: playlists.count) { prepareSettingsExport() }
+        .alert(L("settings.backup.full_warning.title"), isPresented: $showFullWarning) {
+            Button(L("common.cancel"), role: .cancel) { }
+            Button(L("settings.backup.export_full.confirm")) {
+                prepareFullExport()
+                fullExportReady = true
+            }
+        } message: {
+            Text(L("settings.backup.full_warning.message"))
+        }
+        .alert(L("settings.reset.title"), isPresented: $showResetConfirm) {
+            Button(L("common.cancel"), role: .cancel) { }
+            Button(L("settings.reset.title"), role: .destructive) {
+                AppPreferenceKeys.resetToDefaults()
+                showResetDone = true
+            }
+        } message: {
+            Text(L("settings.reset.message"))
+        }
+        .alert(L("settings.reset.title"), isPresented: $showResetDone) {
+            Button(L("common.ok"), role: .cancel) { }
+        } message: {
+            Text(L("settings.reset.done"))
+        }
+        .alert(L("settings.backup.import"), isPresented: $showImportResult) {
+            Button(L("common.ok"), role: .cancel) { }
+        } message: {
+            Text(importMessage ?? "")
+        }
+        .fileImporter(
+            isPresented: $showImporter,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            handleImport(result)
+        }
+        .sheet(isPresented: $showPasswordPrompt) {
+            passwordPromptSheet
+        }
+    }
+
+    // MARK: Export preparation
+
+    private func writeTempFile(_ file: SuperXBackupFile, name: String) -> URL? {
+        guard let data = try? file.encodedData() else { return nil }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        guard (try? data.write(to: url, options: .atomic)) != nil else { return nil }
+        return url
+    }
+
+    private func prepareSettingsExport() {
+        let file = SuperXBackupFile.make(playlists: playlists, includeCredentials: false)
+        settingsExportURL = writeTempFile(file, name: "superx-settings.json")
+    }
+
+    private func prepareFullExport() {
+        let file = SuperXBackupFile.make(playlists: playlists, includeCredentials: true)
+        fullExportURL = writeTempFile(file, name: "superx-full-backup.json")
+    }
+
+    // MARK: Import
+
+    private func handleImport(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else {
+            importMessage = L("settings.backup.import.failed")
+            showImportResult = true
+            return
+        }
+        Task { await importFile(at: url) }
+    }
+
+    private func importFile(at url: URL) async {
+        let secured = url.startAccessingSecurityScopedResource()
+        defer { if secured { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url),
+              let file = try? JSONDecoder().decode(SuperXBackupFile.self, from: data),
+              file.format == "superx-backup" else {
+            importMessage = L("settings.backup.import.failed")
+            showImportResult = true
+            return
+        }
+        file.applySettings()
+
+        var importedCount = 0
+        var needsPassword: [BackupPlaylistDTO] = []
+        for dto in file.playlists {
+            if file.includesCredentials {
+                if await saveImported(dto.makePlaylist(password: dto.password ?? "")) {
+                    importedCount += 1
+                }
+            } else if dto.kind == PlaylistKind.m3u.rawValue {
+                if await saveImported(dto.makePlaylist(password: "")) {
+                    importedCount += 1
+                }
+            } else {
+                needsPassword.append(dto)
+            }
+        }
+        if needsPassword.isEmpty {
+            importMessage = L("settings.backup.import.done_format", importedCount)
+            showImportResult = true
+        } else {
+            pendingPasswordDTOs = needsPassword
+            enteredPasswords = [:]
+            showPasswordPrompt = true
+            if importedCount > 0 {
+                importMessage = L("settings.backup.import.done_format", importedCount)
+                showImportResult = true
+            }
+        }
+    }
+
+    /// Saves one imported playlist unless an identical record
+    /// (same kind + server + username) already exists. Returns
+    /// whether a row was written.
+    private func saveImported(_ playlist: Playlist) async -> Bool {
+        do {
+            let exists = try await AppDatabase.shared.read { db in
+                try Playlist.fetchAll(db).contains {
+                    $0.kind == playlist.kind
+                        && $0.serverURL == playlist.serverURL
+                        && $0.username == playlist.username
+                }
+            }
+            guard !exists else { return false }
+            try await AppDatabase.shared.write { db in try playlist.save(db) }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private var passwordPromptSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(L("settings.backup.import.passwords.message"))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                ForEach(Array(pendingPasswordDTOs.enumerated()), id: \.offset) { index, dto in
+                    Section(header: Text(dto.name)) {
+                        Text(dto.username)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        SecureField(L("settings.playlist.password"), text: Binding(
+                            get: { enteredPasswords[index] ?? "" },
+                            set: { enteredPasswords[index] = $0 }
+                        ))
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    }
+                }
+            }
+            .cinematicScrollBackground()
+            .navigationTitle(L("settings.backup.import.passwords_title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L("common.cancel")) { showPasswordPrompt = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L("common.save")) {
+                        Task {
+                            var count = 0
+                            for (index, dto) in pendingPasswordDTOs.enumerated() {
+                                let password = enteredPasswords[index] ?? ""
+                                if await saveImported(dto.makePlaylist(password: password)) {
+                                    count += 1
+                                }
+                            }
+                            showPasswordPrompt = false
+                            importMessage = L("settings.backup.import.done_format", count)
+                            showImportResult = true
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

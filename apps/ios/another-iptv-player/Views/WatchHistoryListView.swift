@@ -2,11 +2,11 @@ import SwiftUI
 import GRDBQuery
 import GRDB
 
-/// Tam izleme geçmişi grid ekranı.
+/// The full watch history grid screen.
 /// - Parameters:
-///   - `playlist`: kimin geçmişi
+///   - `playlist`: whose history it is
 ///   - `typeFilter`: `"live"` / `"vod"` / `"series"` / nil (M3U: tümü)
-///   - `onPlay`: öğeye tıklandığında çağrılır; her ekran kendi oynatma mantığını uygular.
+///   - `onPlay`: called when an item is tapped; every screen applies its own playback logic.
 struct WatchHistoryListView: View {
     let playlist: Playlist
     let typeFilter: String?
@@ -45,8 +45,8 @@ struct WatchHistoryListView: View {
     }
 
     var body: some View {
-        // Tek geçiş: `filtered` computed'ını hem isEmpty hem ForEach için ayrı ayrı
-        // okumak her render'da 500 satırı iki kez normalize edip tarıyordu.
+        // Single pass: reading the `filtered` computed property separately for both isEmpty and ForEach
+        // was normalizing and scanning 500 rows twice on every render.
         let results = filtered
         Group {
             if items.isEmpty {
@@ -70,6 +70,14 @@ struct WatchHistoryListView: View {
                         ForEach(results) { item in
                             HistoryCardGridItem(item: item) {
                                 onPlay(item)
+                            }
+                            // B3: remove this single history entry.
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    Task { await removeItem(item) }
+                                } label: {
+                                    Label(L("continue_watching.remove"), systemImage: "xmark.circle")
+                                }
                             }
                         }
                     }
@@ -115,6 +123,7 @@ struct WatchHistoryListView: View {
         } message: {
             Text(clearAlertMessage)
         }
+        .cinematicBackground()
     }
 
     private var clearAlertMessage: String {
@@ -123,6 +132,13 @@ struct WatchHistoryListView: View {
         case "vod":    return L("history.clear.message.vod")
         case "series": return L("history.clear.message.series")
         default:       return L("history.clear.message.all")
+        }
+    }
+
+    private func removeItem(_ item: DBWatchHistory) async {
+        let id = item.id
+        try? await appDatabase.write { db in
+            try DBWatchHistory.filter(Column("id") == id).deleteAll(db)
         }
     }
 
@@ -144,13 +160,13 @@ struct WatchHistoryListView: View {
                 }
             }
         } catch {
-            print("WatchHistory clear error: \(error)")
+            Log.error("WatchHistory", "clear error: \(error.localizedDescription)")
         }
     }
 }
 
-/// ContinueWatchingRow'daki `HistoryCard`'ın grid eş değeri — biraz daha büyük kart,
-/// sol altta progress; başlık + altyazı aşağıda.
+/// The grid equivalent of the `HistoryCard` in ContinueWatchingRow — a slightly larger card,
+/// progress at the bottom left; title + subtitle below.
 private struct HistoryCardGridItem: View {
     let item: DBWatchHistory
     let onTap: () -> Void
@@ -159,14 +175,27 @@ private struct HistoryCardGridItem: View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 6) {
                 ZStack(alignment: .bottom) {
-                    CachedImage(
-                        url: item.imageURL.flatMap { URL(string: $0) },
-                        width: 160,
-                        height: 95,
-                        cornerRadius: 10,
-                        contentMode: .fill,
-                        iconName: item.type == "live" ? "tv" : "film"
-                    )
+                    // Round 11: live logos get the same fitted-logo
+                    // treatment as the Home row (`LiveLogoArt`) —
+                    // this grid used `.fill` for every type, which
+                    // cropped channel logos at the card edges.
+                    if item.type == "live" {
+                        LiveLogoArt(
+                            url: item.imageURL.flatMap { URL(string: $0) },
+                            width: 160,
+                            height: 95,
+                            cornerRadius: AppTheme.smallCornerRadius
+                        )
+                    } else {
+                        CachedImage(
+                            url: item.imageURL.flatMap { URL(string: $0) },
+                            width: 160,
+                            height: 95,
+                            cornerRadius: 10,
+                            contentMode: .fill,
+                            iconName: "film"
+                        )
+                    }
 
                     if item.type != "live" && item.durationMs > 0 {
                         let progress = Double(item.lastTimeMs) / Double(item.durationMs)
@@ -175,13 +204,13 @@ private struct HistoryCardGridItem: View {
                                 .fill(.black.opacity(0.55))
                                 .frame(height: 3)
                             Rectangle()
-                                .fill(Color.accentColor)
+                                .fill(AppTheme.accent)
                                 .frame(width: 160 * min(max(progress, 0), 1), height: 3)
                         }
                     }
                 }
                 .frame(width: 160, height: 95)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .clipShape(RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius))
 
                 Text(item.title)
                     .font(.caption.weight(.semibold))

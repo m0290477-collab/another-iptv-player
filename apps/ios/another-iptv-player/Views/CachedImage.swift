@@ -4,8 +4,10 @@ import Nuke
 import NukeUI
 import UIKit
 
-/// Uzak kanal ikonu / poster URL’leri çoğu zaman ölü veya TLS hatalı; `URLSession.shared` fırtınası CFNetwork’ü konsola doldurur.
-/// Tamamen susturulamaz, ancak host başına bağlantı ve zaman aşımı ile satır sayısı ve gecikme azalır.
+/// Remote channel-icon / poster URLs are often dead or TLS-broken; a
+/// `URLSession.shared` storm floods the console via CFNetwork. It cannot
+/// be silenced entirely, but per-host connection limits and timeouts cut
+/// both the log volume and the latency.
 enum IPTVRemoteImagePipeline {
     private static let installLock = NSLock()
     private static var didInstall = false
@@ -17,36 +19,54 @@ enum IPTVRemoteImagePipeline {
         didInstall = true
 
         let urlConf = DataLoader.defaultConfiguration
-        urlConf.httpMaximumConnectionsPerHost = 4
-        urlConf.timeoutIntervalForRequest = 10
+        // Round 15 (C10): per-host connections raised to 10 (spec range
+        // 8-12) so poster grids fill in parallel instead of queueing.
+        urlConf.httpMaximumConnectionsPerHost = 10
+        // Round 20 (R20-5): per-request timeout 10s → 5s. This loader
+        // serves ONLY tile/poster art (small files); a poster that has
+        // not started arriving within 5s is, for scrolling purposes,
+        // dead — but at 10s each dead URL held one of the 10 per-host
+        // connections hostage while visible cells queued behind it
+        // (owner recording, build 54: placeholder fields lasting
+        // seconds during fast scrolls). A failed load is not
+        // negatively cached, so a slow-but-alive host still gets its
+        // poster on the next appearance/retry. The 20s resource
+        // timeout (whole-transfer bound) is unchanged.
+        urlConf.timeoutIntervalForRequest = 5
         urlConf.timeoutIntervalForResource = 20
         urlConf.waitsForConnectivity = false
         let loader = DataLoader(configuration: urlConf)
 
-        // Bellek önbelleğini sınırla: sınırsız bırakmak tüm RAM'i doldurabiliyor
+        // Cap the memory cache: left unbounded it can fill all of RAM.
         let memoryCache = ImageCache()
         memoryCache.costLimit = 150 * 1024 * 1024  // 150 MB
         memoryCache.countLimit = 1500
 
+        // Round 15 (C10): explicit disk DataCache capped at ~300 MB
+        // (previously Nuke's implicit default governed disk use).
+        let dataCache = try? DataCache(name: "com.superx.images")
+        dataCache?.sizeLimit = 300 * 1024 * 1024
+
         ImagePipeline.shared = ImagePipeline {
             $0.dataLoader = loader
             $0.imageCache = memoryCache
-            if #available(iOS 15.0, *) {
-                $0.isUsingPrepareForDisplay = true
-            }
+            $0.dataCache = dataCache
+            // Round 15 (C11): the dead #available(iOS 15) guard is gone
+            // — the deployment target is iOS 18.
+            $0.isUsingPrepareForDisplay = true
         }
     }
 }
 
-/// Nuke `LazyImage` + piksel resize; liste/grid kaydırmasında `grid` veya `shelf` kullan.
+/// Nuke `LazyImage` + pixel resize; use `grid` or `shelf` when scrolling lists/grids.
 enum ImageLoadProfile: Equatable, Sendable {
-    /// Tekil / header: hafif animasyon, görünümden çıkınca istek iptal.
+    /// Single / header: light animation, request cancels on disappear.
     case standard
-    /// Yatay raf: küçük decode, kaybolunca iptal yok.
+    /// Horizontal shelf: small decode, no cancel on disappear (see body).
     case shelf
-    /// Uzun grid / liste: retina decode, iptal yok.
+    /// Long grid / list: retina decode, cancels on disappear (C10).
     case grid
-    /// Büyük görseller / backdrop: Downsampling yok veya çok yüksek.
+    /// Large images / backdrops: no (or very high) downsampling.
     case high
 }
 
@@ -54,30 +74,53 @@ struct CachedImage: View {
     let url: URL?
     let width: CGFloat
     let height: CGFloat
-    var cornerRadius: CGFloat = 8
+    /// Round 14 (B9): the default is the shared card radius token so
+    /// every poster matches without call sites passing a value.
+    var cornerRadius: CGFloat = AppTheme.cornerRadius
     var contentMode: SwiftUI.ContentMode = .fit
     var iconName: String = "photo"
     var loadProfile: ImageLoadProfile = .standard
+    /// Round 15 (C9): optional identity for the placeholder — when a
+    /// title is supplied, the fallback is a surface gradient + the
+    /// item's own title in the card font + the section symbol, instead
+    /// of an anonymous icon. Call sites that pass nothing keep the
+    /// icon-only placeholder.
+    var title: String? = nil
+    /// Round 19 (R19-2): optional failure hook — call sites that own
+    /// a fallback image (e.g. the detail hero's poster) use it to
+    /// swap invisibly when this load fails.
+    var onLoadFailed: (() -> Void)? = nil
 
     var body: some View {
         Group {
             if let url {
-                // Özel `transaction` aynı frame’de birden fazla LazyImageContext güncellemesi uyarısına yol açabiliyor; animasyon üst `Group` ile.
+                // A custom `transaction` can trigger multiple LazyImageContext updates in the same frame; animation is handled by the parent `Group` instead.
                 LazyImage(request: makeRequest(url: url)) { state in
                     if let image = state.image {
                         image
                             .resizable()
                             .aspectRatio(contentMode: contentMode)
+                    } else if state.error != nil {
+                        // Round 19 (R19-2): a failed image NEVER
+                        // renders as a warning glyph — it falls back
+                        // to the same invisible placeholder as the
+                        // loading state (gradient + section symbol),
+                        // and the call site is notified so it can
+                        // swap in its own fallback art.
+                        placeholder
+                            .onAppear { onLoadFailed?() }
                     } else {
                         placeholder
                     }
                 }
-                // Grid/raf profillerinde onDisappear davranışı YOK (bilinçli): .lowerPriority
-                // denendi ama geri kaydırılan hücrenin isteği .veryLow'da takılı kalıp
-                // posterlerin hiç yüklenmemesine yol açıyordu (öncelik görünürlükte geri
-                // yükselmiyor). Eski davranış: istek yaşamaya devam eder, hücre sökülünce
-                // FetchImage.deinit temizler.
-                .onDisappear(loadProfile == .standard ? .cancel : nil)
+                // Round 15 (C10): grid loads now cancel on disappear;
+                // when the cell reappears LazyImage re-issues the same
+                // request, which is the priority restore (Nuke resumes
+                // from its caches, it does not restart cold). The SHELF
+                // profile deliberately keeps the old no-cancel behavior:
+                // the documented round-5-era bug was shelf cells whose
+                // lowered-priority requests stuck and never loaded.
+                .onDisappear((loadProfile == .standard || loadProfile == .grid) ? .cancel : nil)
                 .frame(width: width, height: height)
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
             } else {
@@ -97,8 +140,9 @@ struct CachedImage: View {
         Self.request(url: url, width: width, height: height, contentMode: contentMode, loadProfile: loadProfile)
     }
 
-    /// Render ile birebir aynı ImageRequest. ListImagePrefetch de bunu kullanır —
-    /// prefetch/render anahtarları ancak böyle eşleşir (bkz. Resize size+contentMode).
+    /// The exact ImageRequest the render path uses. ListImagePrefetch
+    /// uses it too — prefetch/render keys only match this way (see the
+    /// Resize size+contentMode).
     static func request(
         url: URL,
         width: CGFloat,
@@ -123,26 +167,75 @@ struct CachedImage: View {
     }
 
     private static func downsamplePixelSize(width: CGFloat, height: CGFloat, loadProfile: ImageLoadProfile) -> CGSize {
+        // Round 5 (blur fix): the old code capped the decode at 2x for the
+        // shelf/standard/grid profiles on the theory that "2x is visually
+        // indistinguishable from 3x". On the owner's 3x phone it is NOT:
+        // every tile/poster/logo was decoded at 2x its point size and then
+        // upscaled 1.5x by the display — the blurry channel logos he
+        // reported. Requests use the FULL device scale for every profile,
+        // so a tile decodes at exactly its displayed pixel size.
+        //
+        // Round 7 (performance): the round-5 blanket caps (1024 for
+        // everything, 2048 for .high) sat far above every real surface and
+        // let oversized layouts (full-width iPad heroes, search cards)
+        // decode far beyond display need. Caps are now per profile, tied
+        // to the largest real surface each profile serves on a 3x phone:
+        //   standard — rows/collage slots/small icons:      ≤ 512 px
+        //   shelf    — shelf posters 100×150 pt → 300×450:  ≤ 640 px
+        //   grid     — grid posters (iPad 200×300 pt @2x):  ≤ 768 px
+        //   high     — hero/featured card ≤ 760 pt wide:    ≤ 1600 px
+        // On the owner's phone every visible tile already requests below
+        // its cap, so crispness is unchanged; the caps bind only where
+        // the old blanket values allowed pure waste. The pipeline's
+        // 150 MB / 1500-item memory cache remains the second bound.
+        let s = UIScreen.main.scale
+        let cap: CGFloat
         switch loadProfile {
-        case .shelf, .standard, .grid:
-            // 2x görsel olarak 3x'ten ayırt edilemez, %44 daha az bellek
-            let s = min(UIScreen.main.scale, 2)
-            return CGSize(width: ceil(width * s), height: ceil(height * s))
-        case .high:
-            // Hero / backdrop: büyük ekranda 3x kalite korunur
-            let s = min(UIScreen.main.scale, 3)
-            return CGSize(width: ceil(width * s), height: ceil(height * s))
+        case .standard: cap = 512
+        case .shelf: cap = 640
+        case .grid: cap = 768
+        case .high: cap = 1600
         }
+        return CGSize(
+            width: min(ceil(width * s), cap),
+            height: min(ceil(height * s), cap)
+        )
     }
 
+    /// Round 14 (B9) + Round 15 (C9): the dark elegant placeholder —
+    /// a surface→elevated gradient on the video-surface token (never
+    /// pure black, never the washed-out quaternary fill), the section
+    /// symbol in a soft accent tint, and — when the call site supplied
+    /// a title — the item's own title in the card font.
     private var placeholder: some View {
         ZStack {
             RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(Color(.systemGray6))
-            Image(systemName: iconName)
-                .font(.system(size: min(width, height) * 0.28, weight: .light))
-                .foregroundStyle(.quaternary)
+                .fill(
+                    LinearGradient(
+                        colors: [AppTheme.surface, AppTheme.elevated],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            VStack(spacing: 6) {
+                Image(systemName: iconName)
+                    .font(.system(size: min(width, height) * 0.24, weight: .light))
+                    .foregroundStyle(AppTheme.accent.opacity(0.45))
+                if let title, !title.isEmpty, width >= 80, height >= 100 {
+                    Text(title)
+                        .font(AppTheme.fontCardTitle)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                        .padding(.horizontal, 8)
+                }
+            }
         }
         .frame(width: width, height: height)
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+        )
     }
+
 }

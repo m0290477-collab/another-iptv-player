@@ -17,11 +17,22 @@
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSCameraUsageDescription</key>
+	<string>Used to scan your provider's sign-in QR code.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>To play via AirPlay, video is streamed to your Apple TV over the local network.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+		<key>UIImageName</key>
+		<string>LaunchMark</string>
+		<key>UIImageRespectsSafeAreaInsets</key>
 		<true/>
 	</dict>
 	<key>UIBackgroundModes</key>

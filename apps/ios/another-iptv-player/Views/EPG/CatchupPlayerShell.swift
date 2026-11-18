@@ -18,6 +18,12 @@ struct CatchupPlayerShell: View {
     let stream: DBLiveStream
     let programme: CatchupProgramme
     let url: URL
+    /// Round 14 (B1): forwarded to `PlayerView.onNavigateToDetail`
+    /// so tapping the player title navigates to the channel's
+    /// detail, like every other player shell. Optional: callers
+    /// that present catch-up from a surface with no detail route
+    /// leave it nil and the title tap stays inert.
+    var onNavigateToDetail: ((String, String) -> Void)? = nil
 
     var body: some View {
         PlayerView(
@@ -29,7 +35,8 @@ struct CatchupPlayerShell: View {
             playlistId: playlist.id,
             streamId: String(stream.streamId),
             type: "live",
-            suppressWatchHistory: true
+            suppressWatchHistory: true,
+            onNavigateToDetail: onNavigateToDetail
         )
     }
 }
@@ -46,7 +53,8 @@ final class CatchupPlaybackController: ObservableObject {
     private static var requestGeneration = 0
 
     func play(playlist: Playlist, stream: DBLiveStream, programme: CatchupProgramme,
-              overlay: PlayerOverlayController) async {
+              overlay: PlayerOverlayController,
+              onNavigateToDetail: ((String, String) -> Void)? = nil) async {
         guard !isResolving else { return }
         isResolving = true
         defer { isResolving = false }
@@ -64,7 +72,10 @@ final class CatchupPlaybackController: ObservableObject {
                 panelTimeZone: timeZone, allowedFormats: nil)
             guard generation == Self.requestGeneration else { return }
             overlay.present(playlistId: playlist.id) {
-                CatchupPlayerShell(playlist: playlist, stream: stream, programme: programme, url: resolved.url)
+                CatchupPlayerShell(
+                    playlist: playlist, stream: stream, programme: programme,
+                    url: resolved.url, onNavigateToDetail: onNavigateToDetail
+                )
             }
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? L("epg.catchup.error.unavailable")

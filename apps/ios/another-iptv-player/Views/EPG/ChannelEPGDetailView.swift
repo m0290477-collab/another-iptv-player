@@ -49,6 +49,7 @@ struct ChannelEPGDetailView: View {
                                     channelName: displayName, channelIcon: iconURL, liveStream: liveStream)
                 .presentationDetents([.medium, .large])
         }
+        .cinematicBackground()
     }
 
     private var scheduleList: some View {
@@ -66,6 +67,7 @@ struct ChannelEPGDetailView: View {
                 }
             }
             .listStyle(.plain)
+            .cinematicScrollBackground()
             .onAppear {
                 scrollToNowIfNeeded(proxy)
             }
@@ -110,7 +112,10 @@ struct ChannelEPGDetailView: View {
                     Text(desc).font(.caption).foregroundColor(.secondary).lineLimit(1)
                 }
                 if isCurrent, let fraction = programme.progress(at: now) {
-                    ProgressView(value: fraction).tint(.accentColor)
+                    // C12: the on-air progress bar animates on the
+                    // minute tick instead of snapping.
+                    ProgressView(value: fraction).tint(AppTheme.accent)
+                        .animation(Motion.animate(.linear(duration: 0.6)), value: fraction)
                 }
             }
             Spacer(minLength: 0)
@@ -155,25 +160,6 @@ struct ChannelEPGDetailView: View {
     }
 }
 
-/// NavigationStack-wrapped variant for sheet presentation (from cards / player).
-struct ChannelEPGSheet: View {
-    let playlist: Playlist
-    let channelKey: String
-    let displayName: String
-    let iconURL: URL?
-    let liveStream: DBLiveStream?
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ChannelEPGDetailView(playlist: playlist, channelKey: channelKey,
-                                 displayName: displayName, iconURL: iconURL, liveStream: liveStream)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(L("common.close")) { dismiss() }
-                    }
-                }
-        }
-    }
-}
+// Round 16 (R3): the orphaned ChannelEPGSheet wrapper is removed
+// (zero call sites — the guide presents ChannelEPGDetailView
+// directly).

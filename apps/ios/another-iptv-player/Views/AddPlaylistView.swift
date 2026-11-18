@@ -5,18 +5,24 @@ private enum PlaylistFormField: Hashable {
     case name, url, username, password
 }
 
+/// Edit-only Xtream playlist form (round 8, F-5). Creation lives on
+/// the playlist gate (round 4) — its forms run the same pipelines — so
+/// this screen's old new-playlist branch was unreachable and has been
+/// removed: `editingPlaylist` is now a required, non-optional value and
+/// every nil-branch went with it. The only call site is ContentView's
+/// gate edit sheet, which always passes the playlist being edited.
 struct AddPlaylistView: View {
     @Environment(\.dismiss) private var dismiss
-    
-    let editingPlaylist: Playlist?
-    
+
+    let editingPlaylist: Playlist
+
     @FocusState private var focusedField: PlaylistFormField?
-    
+
     @State private var name: String
     @State private var url: String
     @State private var username: String
     @State private var password: String
-    
+
     @State private var filterAdultContent: Bool
 
     @State private var isLoading = false
@@ -24,62 +30,89 @@ struct AddPlaylistView: View {
     @State private var errorMessage: String?
     @State private var showError = false
 
-    init(editingPlaylist: Playlist? = nil) {
+    init(editingPlaylist: Playlist) {
         self.editingPlaylist = editingPlaylist
-        _name = State(initialValue: editingPlaylist?.name ?? "")
-        _url = State(initialValue: editingPlaylist?.serverURL ?? "http://")
-        _username = State(initialValue: editingPlaylist?.username ?? "")
-        _password = State(initialValue: editingPlaylist?.password ?? "")
-        _filterAdultContent = State(initialValue: editingPlaylist?.filterAdultContent ?? false)
+        _name = State(initialValue: editingPlaylist.name)
+        _url = State(initialValue: editingPlaylist.serverURL)
+        _username = State(initialValue: editingPlaylist.username)
+        _password = State(initialValue: editingPlaylist.password)
+        _filterAdultContent = State(initialValue: editingPlaylist.filterAdultContent)
     }
     
     var body: some View {
         NavigationStack {
-            Form {
-                Section(header: Text(L("add_playlist.section.info"))) {
-                    TextField(L("add_playlist.name_placeholder"), text: $name)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.words)
-                        .focused($focusedField, equals: .name)
-                        .submitLabel(.next)
-                        .onSubmit { focusedField = .url }
+            // Round 14 (B11): rebuilt on the ELITE SettingsComponents
+            // / AppTheme system (cinematic background, styled cards,
+            // labels above fields) instead of the classic Form look.
+            // Save/validation logic below is unchanged.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    SettingsGroupHeader(title: L("add_playlist.section.info"))
+                    SettingsFormCard {
+                        VStack(alignment: .leading, spacing: 6) {
+                            SettingsFieldLabel(title: L("gate.field.name"))
+                            TextField(L("add_playlist.name_placeholder"), text: $name)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.words)
+                                .focused($focusedField, equals: .name)
+                                .submitLabel(.next)
+                                .onSubmit { focusedField = .url }
+                                .settingsFieldChrome()
+                        }
 
-                    TextField(L("add_playlist.server_url"), text: $url)
-                        .keyboardType(.URL)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .focused($focusedField, equals: .url)
-                        .submitLabel(.next)
-                        .onSubmit { focusedField = .username }
-                }
+                        VStack(alignment: .leading, spacing: 6) {
+                            SettingsFieldLabel(title: L("add_playlist.server_url"))
+                            TextField(L("add_playlist.server_url"), text: $url)
+                                .keyboardType(.URL)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .focused($focusedField, equals: .url)
+                                .submitLabel(.next)
+                                .onSubmit { focusedField = .username }
+                                .settingsFieldChrome()
+                        }
+                    }
 
-                Section(header: Text(L("add_playlist.section.credentials"))) {
-                    TextField(L("add_playlist.username"), text: $username)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .focused($focusedField, equals: .username)
-                        .submitLabel(.next)
-                        .onSubmit { focusedField = .password }
+                    SettingsGroupHeader(title: L("add_playlist.section.credentials"))
+                    SettingsFormCard {
+                        VStack(alignment: .leading, spacing: 6) {
+                            SettingsFieldLabel(title: L("add_playlist.username"))
+                            TextField(L("add_playlist.username"), text: $username)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .focused($focusedField, equals: .username)
+                                .submitLabel(.next)
+                                .onSubmit { focusedField = .password }
+                                .settingsFieldChrome()
+                        }
 
-                    SecureField(L("add_playlist.password"), text: $password)
-                        .autocorrectionDisabled()
-                        .focused($focusedField, equals: .password)
-                        .submitLabel(.done)
-                        .onSubmit { focusedField = nil }
-                }
+                        VStack(alignment: .leading, spacing: 6) {
+                            SettingsFieldLabel(title: L("add_playlist.password"))
+                            SecureField(L("add_playlist.password"), text: $password)
+                                .autocorrectionDisabled()
+                                .focused($focusedField, equals: .password)
+                                .submitLabel(.done)
+                                .onSubmit { focusedField = nil }
+                                .settingsFieldChrome()
+                        }
+                    }
 
-                Section(header: Text(L("add_playlist.section.content_settings"))) {
-                    Toggle(isOn: $filterAdultContent) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(L("add_playlist.filter_adult"))
-                            Text(L("add_playlist.filter_adult.desc"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    SettingsGroupHeader(title: L("add_playlist.section.content_settings"))
+                    SettingsFormCard {
+                        Toggle(isOn: $filterAdultContent) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(L("add_playlist.filter_adult"))
+                                Text(L("add_playlist.filter_adult.desc"))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
+                .padding(16)
             }
-            .navigationTitle(editingPlaylist == nil ? L("add_playlist.xtream.title_new") : L("add_playlist.xtream.title_edit"))
+            .cinematicBackground()
+            .navigationTitle(L("add_playlist.xtream.title_edit"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -104,8 +137,8 @@ struct AddPlaylistView: View {
                             .multilineTextAlignment(.center)
                     }
                     .padding(24)
-                    .background(Color(.systemBackground).opacity(0.9))
-                    .cornerRadius(12)
+                    .background(AppTheme.elevated.opacity(0.95))
+                    .cornerRadius(AppTheme.cornerRadius)
                     .shadow(radius: 20)
                 }
             }
@@ -115,7 +148,7 @@ struct AddPlaylistView: View {
                 Text(errorMessage ?? L("common.unknown_error"))
             })
         }
-        // Doğrulama/senkron sürerken sheet kaydırılarak kapatılamasın (bkz. AddM3UPlaylistView).
+        // The sheet must not be dismissible by scrolling while verification/sync is running (see AddM3UPlaylistView).
         .interactiveDismissDisabled(isLoading)
     }
 
@@ -127,23 +160,23 @@ struct AddPlaylistView: View {
         // Carry EPG/catch-up columns over on edit so a name-only save doesn't
         // reset them (the panel timezone is otherwise re-resolved lazily later).
         var newPlaylist = Playlist(
-            id: editingPlaylist?.id ?? UUID(),
+            id: editingPlaylist.id,
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
             serverURL: url.trimmingCharacters(in: .whitespacesAndNewlines),
             username: username.trimmingCharacters(in: .whitespacesAndNewlines),
             password: password.trimmingCharacters(in: .whitespacesAndNewlines),
             filterAdultContent: filterAdultContent,
-            epgEnabled: editingPlaylist?.epgEnabled ?? true,
-            serverTimezone: editingPlaylist?.serverTimezone,
-            timeshiftStyle: editingPlaylist?.timeshiftStyle
+            epgEnabled: editingPlaylist.epgEnabled,
+            serverTimezone: editingPlaylist.serverTimezone,
+            timeshiftStyle: editingPlaylist.timeshiftStyle
         )
 
         // Credentials or filter changed check
-        let detailsChanged = editingPlaylist == nil ||
-            newPlaylist.serverURL != editingPlaylist?.serverURL ||
-            newPlaylist.username != editingPlaylist?.username ||
-            newPlaylist.password != editingPlaylist?.password ||
-            newPlaylist.filterAdultContent != editingPlaylist?.filterAdultContent
+        let detailsChanged =
+            newPlaylist.serverURL != editingPlaylist.serverURL ||
+            newPlaylist.username != editingPlaylist.username ||
+            newPlaylist.password != editingPlaylist.password ||
+            newPlaylist.filterAdultContent != editingPlaylist.filterAdultContent
 
         if !detailsChanged {
             // Only name changed
@@ -160,15 +193,10 @@ struct AddPlaylistView: View {
             return
         }
         
-        let client = XtreamAPIClient(playlist: newPlaylist)
-        
         do {
-            let response = try await client.verify()
-
-            // Capture the panel timezone for timeshift start-time conversion.
-            if let tz = response.serverInfo?.timezone?.trimmingCharacters(in: .whitespacesAndNewlines), !tz.isEmpty {
-                newPlaylist.serverTimezone = tz
-            }
+            // Round 16 (F2): verify + timezone capture is the shared
+            // PlaylistSaveService pipeline (identical to the gate's).
+            let (response, client) = try await PlaylistSaveService.verifyXtream(playlist: &newPlaylist)
 
             if response.userInfo?.auth == 1 {
                 await syncAndSave(newPlaylist: newPlaylist, client: client)
@@ -192,7 +220,7 @@ struct AddPlaylistView: View {
     
     private func syncAndSave(newPlaylist: Playlist, client: XtreamAPIClient) async {
         do {
-            try await XtreamImporter.syncAndSave(playlist: newPlaylist, client: client) { message in
+            try await PlaylistSaveService.syncXtream(playlist: newPlaylist, client: client) { message in
                 self.progressMessage = message
             }
 
@@ -210,8 +238,4 @@ struct AddPlaylistView: View {
             }
         }
     }
-}
-
-#Preview {
-    AddPlaylistView()
 }

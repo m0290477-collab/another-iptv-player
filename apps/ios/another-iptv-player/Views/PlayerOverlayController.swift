@@ -1,7 +1,7 @@
 import Combine
 import SwiftUI
 
-/// Dashboard `ZStack` üzerinde tutulur; sürükleyerek kapatırken alttaki sekme içeriği görünür.
+/// It is kept on the Dashboard `ZStack`; while dismissing by dragging, the tab content underneath is visible.
 struct PlayerOverlayPresentation: Identifiable {
     let id = UUID()
     let root: AnyView
@@ -14,17 +14,31 @@ enum PlayerOverlayMode: Equatable {
     case mini
 }
 
+/// Round 12 (point 9): set when the expiry gate blocks a playback
+/// presentation; the dashboard hosts present the expired state.
+struct ExpiredPlaybackNotice: Identifiable {
+    let id = UUID()
+    let playlistId: UUID
+    let expiryDate: Date
+}
+
 final class PlayerOverlayController: ObservableObject {
     @Published var presentation: PlayerOverlayPresentation?
-    /// Aktif indirme varken gösterilen onay alert'i için tutulan bekleyen sunum.
+    /// The pending presentation held for the confirmation alert shown while there is an active download.
     @Published var pendingPresentation: PlayerOverlayPresentation?
     /// Fullscreen vs. floating mini player. Reset to `.fullscreen` on every new presentation.
     @Published var mode: PlayerOverlayMode = .fullscreen
+    /// Round 12 (point 9): the provider-expiry gate's blocked notice.
+    /// EVERY playback presentation in the app routes through
+    /// `present(...)` below, so this single check covers all entry
+    /// points (Home, Live, Movies, Series, EPG, favorites, history,
+    /// downloads). Browsing is never gated — only playback.
+    @Published var expiredNotice: ExpiredPlaybackNotice?
 
-    /// Aynı playlist'te aktif indirme varsa kullanıcıya onay sorar (sunucu connection limiti çakışmasın).
-    /// Başka playlist'in indirmesi etki etmez.
-    /// `skipDownloadCheck = true` → lokal dosya oynatımı için kontrolü atlar.
-    /// `playlistId` verilmezse uyarı gösterilmez (M3U / playlist-bağımsız oynatım için).
+    /// If there is an active download on the same playlist, it asks the user for confirmation (so the server connection limits don't collide).
+    /// Another playlist's download has no effect.
+    /// `skipDownloadCheck = true` → skips the check for local file playback.
+    /// If `playlistId` is not given, no warning is shown (for M3U / playlist-independent playback).
     @MainActor
     func present<Content: View>(
         onDismiss: (() -> Void)? = nil,
@@ -32,6 +46,20 @@ final class PlayerOverlayController: ObservableObject {
         playlistId: UUID? = nil,
         @ViewBuilder content: () -> Content
     ) {
+        // Round 12 (point 9): provider-expiry gate — checked FIRST,
+        // before the download warning, and independent of
+        // `skipDownloadCheck` (local downloads of an expired
+        // playlist's content are blocked too, per the owner's
+        // "ALL content playback stops" order). The expiry day
+        // itself still plays; blocking starts the next day
+        // (see ProviderExpiryStore). No recorded expiry = no block.
+        // M3U presentations carry no playlistId (or no expiry
+        // record) and are never blocked.
+        if let playlistId,
+           let expired = ProviderExpiryStore.blockedExpiry(playlistId: playlistId) {
+            expiredNotice = ExpiredPlaybackNotice(playlistId: playlistId, expiryDate: expired)
+            return
+        }
         let pkg = PlayerOverlayPresentation(root: AnyView(content()), onDismiss: onDismiss)
         let shouldWarn: Bool = {
             if skipDownloadCheck { return false }
@@ -105,7 +133,7 @@ private struct PlayerOverlayExpandKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    /// Overlay modunda `PlayerView` kapatma; yoksa `dismiss()` kullanılır.
+    /// In overlay mode, `PlayerView` closing; otherwise `dismiss()` is used.
     var playerOverlayDismiss: (() -> Void)? {
         get { self[PlayerOverlayDismissKey.self] }
         set { self[PlayerOverlayDismissKey.self] = newValue }
