@@ -63,6 +63,10 @@ enum EPGSourceType: String {
 nonisolated struct EPGProgramme: Identifiable, Equatable, Hashable, Sendable {
     let channelKey: String
     let title: String
+    /// Lowercased title, precomputed once at build time so programme
+    /// search never re-lowercases every title on every keystroke
+    /// (mirrors `EPGGuideRow.searchName` on the channel side).
+    let searchTitle: String
     let subtitle: String?
     let desc: String?
     let category: String?
@@ -91,6 +95,7 @@ nonisolated struct EPGProgramme: Identifiable, Equatable, Hashable, Sendable {
          start: Date, stop: Date) {
         self.channelKey = channelKey
         self.title = title
+        self.searchTitle = title.lowercased()
         self.subtitle = subtitle
         self.desc = desc
         self.category = category

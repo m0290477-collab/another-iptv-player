@@ -1,8 +1,10 @@
 import SwiftUI
 import Combine
 
-/// One channel row in the guide.
-struct EPGGuideRow: Identifiable, Equatable, Hashable {
+/// One channel row in the guide. Explicitly `Sendable`: every member
+/// is a value type (`DBLiveStream` is a struct of value types), and
+/// rows cross into the detached programme-search task.
+struct EPGGuideRow: Identifiable, Equatable, Hashable, Sendable {
     let id: String            // unique per channel
     let channelKey: String    // resolved stored key for programme lookup
     let displayName: String
@@ -64,7 +66,7 @@ struct EPGRowLayout: Equatable, Sendable {
 }
 
 /// F-37: one channel's programme-title matches in programme search.
-struct EPGProgrammeSearchGroup: Identifiable, Equatable {
+struct EPGProgrammeSearchGroup: Identifiable, Equatable, Sendable {
     let row: EPGGuideRow
     let programmes: [EPGProgramme]
 
@@ -95,7 +97,6 @@ final class EPGGuideViewModel: ObservableObject {
     /// Category ids the user has collapsed. Persisted per playlist so the guide
     /// reopens in the same shape.
     @Published private(set) var collapsedCategories: Set<String>
-    @Published private(set) var layouts: [String: EPGRowLayout] = [:]
     @Published var selectedDay: Date
     @Published private(set) var state: GuideState = .loading
     @Published var searchQuery: String = "" {
@@ -110,6 +111,23 @@ final class EPGGuideViewModel: ObservableObject {
     /// grouped by channel in guide order. Computed off the main actor
     /// from the loaded day's programmes (see `programmesByKey`).
     @Published private(set) var programmeSearchResults: [EPGProgrammeSearchGroup] = []
+
+    /// True while a programme-search pass for the current query is in
+    /// flight. The view gates its "no programmes match" label on a
+    /// COMPLETED search (`hasCompletedProgrammeSearch`), so it never
+    /// states a false empty result mid-computation.
+    @Published private(set) var isProgrammeSearchRunning = false
+    /// The search generation the published `programmeSearchResults`
+    /// belong to; compared against `programmeSearchGeneration` to
+    /// know whether the results on screen answer the current query.
+    @Published private(set) var programmeSearchResultsGeneration = 0
+
+    /// True when the published results are the finished answer to the
+    /// current query: no pass in flight and no newer pass pending.
+    var hasCompletedProgrammeSearch: Bool {
+        !isProgrammeSearchRunning
+            && programmeSearchResultsGeneration == programmeSearchGeneration
+    }
 
     /// Categories in display order with their channels. Built once per row set;
     /// `items` is derived from this plus the search query and collapse state.
@@ -268,6 +286,7 @@ final class EPGGuideViewModel: ObservableObject {
     func cancelLoading() {
         loadGeneration += 1
         programmeSearchGeneration += 1
+        isProgrammeSearchRunning = false
         programmeTask?.cancel()
         programmeSearchTask?.cancel()
         programmeTask = nil
@@ -311,9 +330,19 @@ final class EPGGuideViewModel: ObservableObject {
     }
 
     private func rebuildLayouts(generation: Int) async {
+        // Clear programme-search state FIRST: while the new day loads,
+        // the previous day's results must never stay visible or
+        // tappable, and no completed-search claim may survive into
+        // the new day. A fresh search is scheduled at the end.
+        programmeSearchTask?.cancel()
+        programmeSearchGeneration += 1
+        programmeSearchResults = []
+        programmeSearchResultsGeneration = programmeSearchGeneration
+        let queryAtStart = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        isProgrammeSearchRunning = !queryAtStart.isEmpty
+
         let start = dayStart
         guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return }
-        let wantedKeys = Set(rows.map(\.channelKey))
         let byKey: [String: [EPGProgramme]]
         do {
             // Fetch the whole playlist's day window and group locally — cheaper than a
@@ -326,6 +355,10 @@ final class EPGGuideViewModel: ObservableObject {
             byKey = try await query.value
         } catch {
             guard generation == loadGeneration, !Task.isCancelled else { return }
+            // The fetch failed, so no new search will be scheduled:
+            // settle the search state as completed-empty rather than
+            // leaving a search "running" forever.
+            isProgrammeSearchRunning = false
             state = rows.isEmpty ? .empty : .ready
             return
         }
@@ -348,15 +381,12 @@ final class EPGGuideViewModel: ObservableObject {
         layoutDayStart = start
         layoutDayEnd = end
         layoutCache = [:]
-        layouts = [:]
-        _ = wantedKeys
         state = .ready
         scheduleProgrammeSearch()
     }
 
     func layout(for channelKey: String) -> EPGRowLayout {
         if let cached = layoutCache[channelKey] { return cached }
-        if let published = layouts[channelKey] { return published }
         guard let programmes = programmesByKey[channelKey], !programmes.isEmpty else {
             return emptyLayout
         }
@@ -388,8 +418,11 @@ final class EPGGuideViewModel: ObservableObject {
         let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !q.isEmpty else {
             programmeSearchResults = []
+            programmeSearchResultsGeneration = generation
+            isProgrammeSearchRunning = false
             return
         }
+        isProgrammeSearchRunning = true
         let byKey = programmesByKey
         let guideRows = rows
         let task = Task.detached(priority: .userInitiated) { () -> [EPGProgrammeSearchGroup] in
@@ -397,8 +430,10 @@ final class EPGGuideViewModel: ObservableObject {
             for row in guideRows {
                 guard !Task.isCancelled else { return [] }
                 guard let programmes = byKey[row.channelKey] else { continue }
+                // `searchTitle` is precomputed when each programme is
+                // built — no per-keystroke lowercasing of every title.
                 let matches = programmes
-                    .filter { $0.title.lowercased().contains(q) }
+                    .filter { $0.searchTitle.contains(q) }
                     .sorted { $0.start < $1.start }
                 if !matches.isEmpty {
                     groups.append(EPGProgrammeSearchGroup(row: row, programmes: Array(matches.prefix(50))))
@@ -412,33 +447,9 @@ final class EPGGuideViewModel: ObservableObject {
             let results = await task.value
             guard !Task.isCancelled, generation == programmeSearchGeneration else { return }
             programmeSearchResults = results
+            programmeSearchResultsGeneration = generation
+            isProgrammeSearchRunning = false
         }
-    }
-
-    nonisolated static func makeLayouts(
-        byKey: [String: [EPGProgramme]],
-        wantedKeys: Set<String>,
-        dayStart: Date,
-        dayEnd: Date,
-        hourWidth: CGFloat,
-        version: Int
-    ) -> [String: EPGRowLayout] {
-        var result: [String: EPGRowLayout] = [:]
-        result.reserveCapacity(min(byKey.count, wantedKeys.count))
-        for (key, unsortedProgrammes) in byKey where wantedKeys.contains(key) {
-            guard !Task.isCancelled else { return [:] }
-            let programmes = unsortedProgrammes.sorted { $0.start < $1.start }
-            result[key] = EPGRowLayout(
-                cells: cells(
-                    for: programmes,
-                    dayStart: dayStart,
-                    dayEnd: dayEnd,
-                    hourWidth: hourWidth
-                ),
-                version: version
-            )
-        }
-        return result
     }
 
     /// Builds positioned cells for a row, clamped to the day bounds. A leading

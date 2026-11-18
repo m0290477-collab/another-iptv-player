@@ -122,18 +122,30 @@ struct EPGGuideView: View {
     @ViewBuilder
     private var programmeResults: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(L("epg.search.programmes"))
+            // Programme search covers the SELECTED day only (the only
+            // day whose programmes are loaded) — the header says so,
+            // using the guide's own day-chip label for the day.
+            Text("\(L("epg.search.programmes")) · \(dayChipLabel(model.selectedDay))")
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 4)
 
             if model.programmeSearchResults.isEmpty {
-                Text(L("epg.search.no_results"))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
+                if model.hasCompletedProgrammeSearch {
+                    Text(L("epg.search.no_results"))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 10)
+                } else {
+                    // A search for the current query is still running:
+                    // show the guide's neutral loading style, never a
+                    // premature "no match".
+                    ProgressView()
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 10)
+                }
             } else {
                 List {
                     ForEach(model.programmeSearchResults) { group in
