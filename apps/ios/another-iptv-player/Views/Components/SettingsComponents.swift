@@ -1597,6 +1597,17 @@ struct AppearanceSettingsSection: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(L("reducefx.title"))
                         Text(L("reducefx.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .onChange(of: reduceEffects) { _, isOn in
+                // Q21: turning it on trims the image memory cache
+                // immediately, not just at the next launch.
+                if isOn { IPTVRemoteImagePipeline.trimMemoryCache() }
+            }
+
             Toggle(isOn: $showEmptyCategories) {
                 HStack(spacing: 12) {
                     SettingsIconTile(systemImage: "folder", tint: .gray)
@@ -1608,10 +1619,7 @@ struct AppearanceSettingsSection: View {
                     }
                 }
             }
-            .onChange(of: reduceEffects) { _, isOn in
-                // Q21: turning it on trims the image memory cache
-                // immediately, not just at the next launch.
-                if isOn { IPTVRemoteImagePipeline.trimMemoryCache() }
+
             // F6: show/hide sections. Each toggle writes the
             // shared `sections.hidden.<section>` key through the
             // store; hidden sections leave the tab bar AND Home.
