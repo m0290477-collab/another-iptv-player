@@ -1467,6 +1467,11 @@ struct PlaybackSettingsSection: View {
 /// not duplicated here.
 struct AppearanceSettingsSection: View {
     @AppStorage("app.appearance") private var appearance = "dark"
+    /// Build 61 (B10, Q21): the single reduce-effects flag. B7's
+    /// D-pack effects and B13's onboarding/splash read this exact
+    /// key (`appearance.reduceEffects`); the image pipeline reads
+    /// it at install to trim its memory cache.
+    @AppStorage("appearance.reduceEffects") private var reduceEffects = false
 
     var body: some View {
         Section(header: ScopedSectionHeader(title: L("settings.appearance.title"), thisPlaylist: false)) {
@@ -1479,6 +1484,23 @@ struct AppearanceSettingsSection: View {
                 Text(L("settings.appearance.system")).tag("system")
                 Text(L("settings.appearance.light")).tag("light")
                 Text(L("settings.appearance.dark")).tag("dark")
+            }
+
+            Toggle(isOn: $reduceEffects) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "sparkles.slash", tint: .gray)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("reducefx.title"))
+                        Text(L("reducefx.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .onChange(of: reduceEffects) { _, isOn in
+                // Q21: turning it on trims the image memory cache
+                // immediately, not just at the next launch.
+                if isOn { IPTVRemoteImagePipeline.trimMemoryCache() }
             }
         }
     }
@@ -1636,6 +1658,10 @@ struct LockedCategoriesSection: View {
 /// when this section landed (see the report).
 struct StorageSettingsSection: View {
     @State private var cacheBytes: Int64 = 0
+    /// Build 61 (B10, F2): the two clear-history confirmations.
+    @State private var showClearWatchHistory = false
+    @State private var showClearSearchHistory = false
+    @State private var searchHistoryCount = SearchHistoryStore.queries.count
 
     var body: some View {
         Section(header: ScopedSectionHeader(title: L("storage.title"), thisPlaylist: false)) {
@@ -1654,8 +1680,62 @@ struct StorageSettingsSection: View {
                 .foregroundColor(AppTheme.accent)
                 .disabled(cacheBytes == 0)
             }
+
+            // F2: Clear watch history — empties the watchHistory
+            // table, which is the single store behind Continue
+            // Watching / Continue Series / Recent Channels.
+            Button {
+                showClearWatchHistory = true
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "clock.arrow.circlepath", tint: .gray)
+                    Text(L("storage.clear_watch_history"))
+                        .foregroundColor(.primary)
+                    Spacer()
+                }
+            }
+            .buttonStyle(.plain)
+
+            // F2: Clear search history — the SAME SearchHistoryStore
+            // the in-search clear calls (O6 single instance).
+            Button {
+                showClearSearchHistory = true
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "magnifyingglass", tint: .gray)
+                    Text(L("storage.clear_search_history"))
+                        .foregroundColor(.primary)
+                    Spacer()
+                    if searchHistoryCount > 0 {
+                        Text("\(searchHistoryCount)")
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(searchHistoryCount == 0)
         }
-        .task { refresh() }
+        .task {
+            refresh()
+            searchHistoryCount = SearchHistoryStore.queries.count
+        }
+        .alert(L("storage.clear_watch_history.confirm_title"), isPresented: $showClearWatchHistory) {
+            Button(L("common.cancel"), role: .cancel) {}
+            Button(L("storage.clear_watch_history"), role: .destructive) {
+                Task { await WatchHistoryClearing.clearAll() }
+            }
+        } message: {
+            Text(L("storage.clear_watch_history.confirm_message"))
+        }
+        .alert(L("storage.clear_search_history.confirm_title"), isPresented: $showClearSearchHistory) {
+            Button(L("common.cancel"), role: .cancel) {}
+            Button(L("storage.clear_search_history"), role: .destructive) {
+                SearchHistoryStore.clear()
+                searchHistoryCount = 0
+            }
+        } message: {
+            Text(L("storage.clear_search_history.confirm_message"))
+        }
     }
 
     private func refresh() {
@@ -1694,6 +1774,13 @@ struct SubscriptionSettingsSection: View {
 struct SubscriptionOverviewView: View {
     let playlists: [Playlist]
 
+    /// Build 61 (B10, Z2): the Xtream account's real connection
+    /// fields, fetched live per playlist (`user_info`:
+    /// `status` / `active_cons` / `max_connections`). A playlist
+    /// whose verify fails, or whose panel omits a field, simply
+    /// renders no row for it — nothing is invented.
+    @State private var userInfos: [UUID: XtreamUserInfo] = [:]
+
     var body: some View {
         List {
             ForEach(playlists) { playlist in
@@ -1715,6 +1802,7 @@ struct SubscriptionOverviewView: View {
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                     expiryLine(for: playlist)
+                    connectionLines(for: playlist)
                 }
                 .padding(.vertical, 2)
             }
@@ -1723,6 +1811,48 @@ struct SubscriptionOverviewView: View {
         .cinematicScrollBackground()
         .navigationTitle(L("subscription.title"))
         .navigationBarTitleDisplayMode(.inline)
+        .task { await loadUserInfos() }
+    }
+
+    /// Z2 fetch: one lightweight verify per Xtream playlist (the
+    /// same call the account card uses); the result also refreshes
+    /// the recorded expiry, exactly like the other verify sites.
+    private func loadUserInfos() async {
+        for playlist in playlists where playlist.kind == .xtream {
+            let client = XtreamAPIClient(playlist: playlist)
+            guard let response = try? await client.verify(),
+                  let info = response.userInfo else { continue }
+            ProviderExpiryStore.record(playlistId: playlist.id, expDate: info.expDate)
+            userInfos[playlist.id] = info
+        }
+    }
+
+    /// Z2 rows: status / active connections / max connections —
+    /// each rendered ONLY when the API actually returned it.
+    @ViewBuilder
+    private func connectionLines(for playlist: Playlist) -> some View {
+        if let info = userInfos[playlist.id] {
+            if let status = info.status, !status.isEmpty {
+                connectionRow(label: L("subscription.status"), value: status)
+            }
+            if let active = info.activeCons, !active.isEmpty {
+                connectionRow(label: L("subscription.connections_active"), value: active)
+            }
+            if let max = info.maxConnections, !max.isEmpty {
+                connectionRow(label: L("subscription.connections_max"), value: max)
+            }
+        }
+    }
+
+    private func connectionRow(label: String, value: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Text(value)
+                .font(.caption.weight(.semibold))
+        }
+        .accessibilityElement(children: .combine)
     }
 
     /// The provider/server label: the server's host only — never

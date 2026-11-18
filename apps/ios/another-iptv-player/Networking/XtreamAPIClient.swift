@@ -53,9 +53,11 @@ class XtreamAPIClient {
         return comps.string ?? "<invalid-url>"
     }
     
-    // Auto-formatting the base URL
-    private func getBaseURLComponents() -> URLComponents {
-        var baseString = playlist.serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    // Auto-formatting the base URL. Build 61 (B10, Q18): an
+    // explicit base override is the playlist's backup server, used
+    // by the one failover retry in `fetch`.
+    private func getBaseURLComponents(baseOverride: String? = nil) -> URLComponents {
+        var baseString = (baseOverride ?? playlist.serverURL).trimmingCharacters(in: .whitespacesAndNewlines)
         
         if !baseString.lowercased().hasPrefix("http://") && !baseString.lowercased().hasPrefix("https://") {
             baseString = "http://\(baseString)"
@@ -83,7 +85,24 @@ class XtreamAPIClient {
     }
     
     private func fetch<T: Decodable>(action: String? = nil, queryItems: [URLQueryItem] = []) async throws -> T {
-        var comps = getBaseURLComponents()
+        do {
+            return try await fetchOnce(action: action, queryItems: queryItems, baseOverride: nil)
+        } catch let error as XtreamError {
+            // Build 61 (B10, Q18): automatic failover — a
+            // CONNECTION failure against the primary retries the
+            // same request once against the playlist's backup
+            // server URL. Auth refusals and HTTP errors are NOT
+            // retried (the backup would answer identically).
+            // Silent-but-logged; surfaced in playlist settings via
+            // the backup-URL field's note.
+            guard case .networkError = error, let backup = playlist.trimmedBackupURL else { throw error }
+            Log.info("XtreamAPI", "Primary server unreachable — failing over to the playlist's backup URL")
+            return try await fetchOnce(action: action, queryItems: queryItems, baseOverride: backup)
+        }
+    }
+
+    private func fetchOnce<T: Decodable>(action: String? = nil, queryItems: [URLQueryItem] = [], baseOverride: String?) async throws -> T {
+        var comps = getBaseURLComponents(baseOverride: baseOverride)
         
         if let action = action {
             comps.queryItems?.append(URLQueryItem(name: "action", value: action))
@@ -106,7 +125,17 @@ class XtreamAPIClient {
 
 
         do {
-            let (data, response) = try await urlSession.data(from: url)
+            // Build 61 (B10, G2): the playlist's custom headers +
+            // User-Agent ride on every panel request when set.
+            let data: Data
+            let response: URLResponse
+            if !playlist.customHeaders.isEmpty || playlist.trimmedUserAgent != nil {
+                var request = URLRequest(url: url)
+                playlist.applyCustomHeaders(to: &request)
+                (data, response) = try await urlSession.data(for: request)
+            } else {
+                (data, response) = try await urlSession.data(from: url)
+            }
 
             // Round 16 (R7): the debug dump that printed the ENTIRE
             // get_series_info JSON response on every fetch is

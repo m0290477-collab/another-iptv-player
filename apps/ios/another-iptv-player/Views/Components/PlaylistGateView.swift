@@ -95,6 +95,23 @@ struct PlaylistGateView: View {
     @State private var localContent: String? = nil
     @State private var showFileImporter = false
 
+    // Build 61 (B10): connection-extras field state for both forms
+    // (Q18 backup URL, G4 custom EPG URL, G2 User-Agent + headers).
+    // @State only — an M3U backup URL can carry credentials, so
+    // none of this is persisted as a draft.
+    @State private var xtreamBackupURL = ""
+    @State private var xtreamEPGURL = ""
+    @State private var xtreamUserAgent = ""
+    @State private var xtreamHeadersText = ""
+    @State private var m3uBackupURL = ""
+    @State private var m3uEPGURL = ""
+    @State private var m3uUserAgent = ""
+    @State private var m3uHeadersText = ""
+
+    // Build 61 (B10, L1/L2/L3): staged add progress + summary.
+    @State private var addStages: [PlaylistValidationService.Stage: PlaylistValidationService.StageState] = [:]
+    @State private var addSummary: PlaylistValidationService.AddSummary?
+
     // Shared save state: one loading overlay + one error alert, exactly
     // the presentation the two Add screens use individually.
     @State private var isLoading = false
@@ -166,27 +183,55 @@ struct PlaylistGateView: View {
             .disabled(isLoading)
         }
         .overlay {
-            if isLoading {
-                VStack(spacing: 16) {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                    Text(progressMessage ?? L("common.loading"))
-                        .font(.headline)
-                        .multilineTextAlignment(.center)
-                    // Round 14 (B13): cancel during import.
-                    Button(L("common.cancel")) {
+            if let summary = addSummary {
+                // Build 61 (B10, L2/L3): the end-of-add summary.
+                AddPlaylistSummaryView(
+                    summary: summary,
+                    onRetryFailedStage: summary.failedStage == nil ? nil : {
+                        Task { await retryGuideStage() }
+                    },
+                    onStartWatching: {
+                        addSummary = nil
+                        addStages = [:]
+                        onSelect(summary.playlist)
+                    }
+                )
+                .padding(.horizontal, 24)
+            } else if isLoading {
+                if !addStages.isEmpty {
+                    // Build 61 (B10, L1): the staged checklist,
+                    // bound to the real importer stages; Cancel
+                    // leaves nothing half-saved.
+                    AddPlaylistProgressView(stages: addStages) {
                         importTask?.cancel()
                         importTask = nil
                         isLoading = false
                         progressMessage = nil
+                        addStages = [:]
                     }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(AppTheme.accent)
+                    .padding(.horizontal, 24)
+                } else {
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text(progressMessage ?? L("common.loading"))
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+                        // Round 14 (B13): cancel during import.
+                        Button(L("common.cancel")) {
+                            importTask?.cancel()
+                            importTask = nil
+                            isLoading = false
+                            progressMessage = nil
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(AppTheme.accent)
+                    }
+                    .padding(24)
+                    .background(AppTheme.elevated.opacity(0.95))
+                    .cornerRadius(AppTheme.cornerRadius)
+                    .shadow(radius: 20)
                 }
-                .padding(24)
-                .background(AppTheme.elevated.opacity(0.95))
-                .cornerRadius(AppTheme.cornerRadius)
-                .shadow(radius: 20)
             }
         }
         .overlay {
@@ -340,6 +385,107 @@ struct PlaylistGateView: View {
             .transition(.opacity)
         }
         .animation(.easeInOut(duration: 0.25), value: formKind)
+        // Build 61 (B10, K1): in-form paste parsing — pasting a
+        // full Xtream get.php-style ready link into ANY field
+        // fills Server / Username / Password. Parse failure leaves
+        // the text exactly as-is, no error. NO clipboard access.
+        .onChange(of: xtreamURL) { _, newValue in applyReadyLink(newValue) }
+        .onChange(of: xtreamUsername) { _, newValue in applyReadyLink(newValue) }
+        .onChange(of: xtreamPassword) { _, newValue in applyReadyLink(newValue) }
+        .onChange(of: m3uURL) { _, newValue in applyReadyLink(newValue) }
+    }
+
+    /// K1: fill the Xtream fields from a pasted ready link.
+    private func applyReadyLink(_ text: String) {
+        guard let credentials = XtreamReadyLink.parse(text) else { return }
+        formKind = .xtream
+        if xtreamURL != credentials.serverURL { xtreamURL = credentials.serverURL }
+        xtreamUsername = credentials.username
+        xtreamPassword = credentials.password
+    }
+
+    /// L1 stage bookkeeping (driven by the real save pipelines).
+    private func setStage(_ stage: PlaylistValidationService.Stage, _ state: PlaylistValidationService.StageState) {
+        addStages[stage] = state
+    }
+
+    private func resetStages() {
+        addStages = Dictionary(uniqueKeysWithValues: PlaylistValidationService.Stage.allCases.map { ($0, .pending) })
+    }
+
+    /// L3 retry: re-runs ONLY the guide stage for the summarized
+    /// playlist; success clears the summary's failed-stage mark.
+    private func retryGuideStage() async {
+        guard let summary = addSummary else { return }
+        let failed = await PlaylistValidationService.runGuideStage(playlist: summary.playlist) { stage, state in
+            if state == .done || state == .failed {
+                self.addSummary = PlaylistValidationService.AddSummary(
+                    playlist: summary.playlist,
+                    expiryDate: summary.expiryDate,
+                    liveCount: summary.liveCount,
+                    movieCount: summary.movieCount,
+                    seriesCount: summary.seriesCount,
+                    failedStage: state == .done ? nil : .loadingGuide,
+                    compatibility: summary.compatibility
+                )
+            }
+            _ = stage
+        }
+        _ = failed
+    }
+
+    /// Build 61 (B10): the optional connection-fields group shared
+    /// by both gate forms (Q18 backup URL, G4 custom EPG URL,
+    /// G2 User-Agent + custom headers).
+    private func connectionFields(
+        backup: Binding<String>,
+        epg: Binding<String>,
+        userAgent: Binding<String>,
+        headers: Binding<String>
+    ) -> some View {
+        VStack(spacing: 14) {
+            VStack(spacing: 6) {
+                fieldLabel(L("addplaylist.field.backup_url"))
+                TextField(L("addplaylist.field.backup_url.placeholder"), text: backup)
+                    .keyboardType(.URL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .gateFieldStyle()
+                Text(L("headers.backup.note"))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            VStack(spacing: 6) {
+                fieldLabel(L("addplaylist.field.epg_url"))
+                TextField(L("addplaylist.field.epg_url.placeholder"), text: epg)
+                    .keyboardType(.URL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .gateFieldStyle()
+            }
+            VStack(spacing: 6) {
+                fieldLabel(L("headers.user_agent"))
+                TextField(L("headers.user_agent.placeholder"), text: userAgent)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .gateFieldStyle()
+            }
+            VStack(spacing: 6) {
+                fieldLabel(L("headers.custom"))
+                TextField(L("headers.custom.placeholder"), text: headers, axis: .vertical)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .lineLimit(2...4)
+                    .gateFieldStyle()
+            }
+        }
+    }
+
+    /// Trims an optional field to nil-when-empty for the model.
+    private func optionalField(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// Build 61 (Design-4): the M3U | Xtream segmented pill switch.
@@ -496,6 +642,8 @@ struct PlaylistGateView: View {
                 }
             }
 
+            connectionFields(backup: $xtreamBackupURL, epg: $xtreamEPGURL, userAgent: $xtreamUserAgent, headers: $xtreamHeadersText)
+
             submitButton(title: L("gate.sign_in"), enabled: canSaveXtream) {
                 importTask = Task { await saveXtream() }
             }
@@ -590,6 +738,8 @@ struct PlaylistGateView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            connectionFields(backup: $m3uBackupURL, epg: $m3uEPGURL, userAgent: $m3uUserAgent, headers: $m3uHeadersText)
 
             // Design-4: the helper line under the M3U fields is
             // small accent text (the mockup's "Load your .m3u or
@@ -986,6 +1136,10 @@ struct PlaylistGateView: View {
         isLoading = true
         errorMessage = nil
         progressMessage = L("add_playlist.verifying")
+        // Build 61 (B10, L1): the staged checklist starts with the
+        // real verify below (connecting → verifying).
+        resetStages()
+        setStage(.connecting, .active)
 
         // A new playlist carries no EPG/timeshift state over — the same
         // values AddPlaylistView builds when `editingPlaylist == nil`.
@@ -994,7 +1148,11 @@ struct PlaylistGateView: View {
             serverURL: xtreamURL.trimmingCharacters(in: .whitespacesAndNewlines),
             username: xtreamUsername.trimmingCharacters(in: .whitespacesAndNewlines),
             password: xtreamPassword.trimmingCharacters(in: .whitespacesAndNewlines),
-            filterAdultContent: filterAdultContent
+            filterAdultContent: filterAdultContent,
+            epgURLOverride: optionalField(xtreamEPGURL),
+            backupURL: optionalField(xtreamBackupURL),
+            customUserAgent: optionalField(xtreamUserAgent),
+            customHeadersJSON: Playlist.encodeCustomHeaders(Playlist.parseHeaderLines(xtreamHeadersText))
         )
 
         do {
@@ -1005,6 +1163,8 @@ struct PlaylistGateView: View {
             let (response, client) = try await PlaylistSaveService.verifyXtream(playlist: &newPlaylist)
             guard !Task.isCancelled else { return }
 
+            setStage(.connecting, .done)
+            setStage(.verifying, .done)
             if response.userInfo?.auth == 1 {
                 // Round 11: re-signing into an already-saved account
                 // (same server + username) refreshes THAT record —
@@ -1020,6 +1180,10 @@ struct PlaylistGateView: View {
                     target.name = newPlaylist.name
                     target.password = newPlaylist.password
                     target.filterAdultContent = newPlaylist.filterAdultContent
+                    target.epgURLOverride = newPlaylist.epgURLOverride
+                    target.backupURL = newPlaylist.backupURL
+                    target.customUserAgent = newPlaylist.customUserAgent
+                    target.customHeadersJSON = newPlaylist.customHeadersJSON
                     target.serverTimezone = newPlaylist.serverTimezone ?? existing.serverTimezone
                     let targetClient = XtreamAPIClient(playlist: target)
                     if parkIfExpired(playlist: target, client: targetClient, response: response) { return }
@@ -1043,11 +1207,18 @@ struct PlaylistGateView: View {
                 showError = true
                 isLoading = false
                 progressMessage = nil
+                addStages = [:]
             }
         }
     }
 
     private func syncAndSaveXtream(newPlaylist: Playlist, client: XtreamAPIClient) async {
+        // Build 61 (B10, L1): the content stages run with the real
+        // importer; the guide stage and the Z1 probe follow, then
+        // the L2 summary (Start Watching enters the app — the
+        // round-11 direct-entry rule now lands via the summary).
+        if addStages.isEmpty { resetStages(); setStage(.connecting, .done); setStage(.verifying, .done) }
+        setStage(.loadingChannels, .active)
         do {
             try await PlaylistSaveService.syncXtream(playlist: newPlaylist, client: client) { message in
                 self.progressMessage = message
@@ -1056,24 +1227,38 @@ struct PlaylistGateView: View {
                 await MainActor.run {
                     self.isLoading = false
                     self.progressMessage = nil
+                    self.addStages = [:]
                 }
                 return
             }
+            setStage(.loadingChannels, .done)
+            setStage(.loadingMoviesSeries, .done)
+
+            let compatibility = await PlaylistValidationService.probeCompatibility(playlist: newPlaylist)
+            let guideFailed = await PlaylistValidationService.runGuideStage(playlist: newPlaylist) { stage, state in
+                self.setStage(stage, state)
+            }
+            let counts = await PlaylistValidationService.importedCounts(playlistId: newPlaylist.id, kind: .xtream)
+            let expiry = ProviderExpiryStore.expiryDate(playlistId: newPlaylist.id)
 
             await MainActor.run {
                 self.isLoading = false
                 self.progressMessage = nil
-                // Round 11: sign-in completes by ENTERING the app
-                // with the saved playlist — the gate no longer has a
-                // saved list to fall back to. The importer upserted
-                // this very struct, so its id is the saved record's.
-                self.onSelect(newPlaylist)
+                self.addStages = [:]
+                self.addSummary = PlaylistValidationService.AddSummary(
+                    playlist: newPlaylist,
+                    expiryDate: expiry,
+                    liveCount: counts.live, movieCount: counts.movies, seriesCount: counts.series,
+                    failedStage: guideFailed ? .loadingGuide : nil,
+                    compatibility: compatibility
+                )
             }
         } catch {
             guard !Task.isCancelled else {
                 await MainActor.run {
                     self.isLoading = false
                     self.progressMessage = nil
+                    self.addStages = [:]
                 }
                 return
             }
@@ -1082,6 +1267,7 @@ struct PlaylistGateView: View {
                 self.showError = true
                 self.isLoading = false
                 self.progressMessage = nil
+                self.addStages = [:]
             }
         }
     }
@@ -1117,7 +1303,11 @@ struct PlaylistGateView: View {
             password: "",
             filterAdultContent: m3uFilterAdultContent,
             type: .m3u,
-            m3uEpgURL: nil
+            m3uEpgURL: nil,
+            epgURLOverride: optionalField(m3uEPGURL),
+            backupURL: optionalField(m3uBackupURL),
+            customUserAgent: optionalField(m3uUserAgent),
+            customHeadersJSON: Playlist.encodeCustomHeaders(Playlist.parseHeaderLines(m3uHeadersText))
         )
 
         // Round 11: re-adding a URL that is already saved reuses the
@@ -1129,53 +1319,57 @@ struct PlaylistGateView: View {
             newPlaylist.createdAt = existing.createdAt
         }
 
+        // Build 61 (B10, Q17 + L1/L2/L3): the staged validation
+        // service — probe (fetch + parse) BEFORE anything is
+        // saved, the shared importer, the guide stage, the Z1
+        // probe, then the summary. A failed probe saves nothing.
+        resetStages()
         do {
-            // Round 16 (F2): fetch → parse → replace is the shared
-            // PlaylistSaveService pipeline (identical to the edit
-            // sheet's), with the gate's between-steps cancellation
-            // checks preserved inside it.
-            try await PlaylistSaveService.importM3U(
+            let summary = try await PlaylistValidationService.importM3U(
                 playlist: newPlaylist,
-                localContent: localContent,
-                remoteURLString: trimmedURL,
-                clearServerURL: hasLocalFile,
-                checkCancellation: true
-            ) { message in
-                self.progressMessage = message
+                localContent: localContent
+            ) { stage, state in
+                self.setStage(stage, state)
             }
             guard !Task.isCancelled else {
                 isLoading = false
                 progressMessage = nil
+                addStages = [:]
                 return
             }
 
             await MainActor.run {
                 self.isLoading = false
                 self.progressMessage = nil
+                self.addStages = [:]
                 // Round 15 (C13): a successful load is a health
                 // data point for My Playlists.
-                PlaylistHealthStore.record(.responds, for: newPlaylist.id)
-                // Round 11: enter the app with the saved playlist
-                // (same direct-entry rule as the Xtream flow).
-                self.onSelect(newPlaylist)
+                PlaylistHealthStore.record(.responds, for: summary.playlist.id)
+                // L2: the summary's Start Watching enters the app
+                // with the saved playlist.
+                self.addSummary = summary
             }
         } catch is CancellationError {
-            // The pipeline's between-steps cancellation check —
-            // the old inline copy reset silently here too.
             isLoading = false
             progressMessage = nil
+            addStages = [:]
             return
         } catch {
             guard !Task.isCancelled else {
                 isLoading = false
                 progressMessage = nil
+                addStages = [:]
                 return
             }
             await MainActor.run {
-                self.errorMessage = explainedError(for: error)
+                // Q17: distinct plain failures from the probe
+                // (bad URL / unreachable / empty) surface as-is.
+                self.errorMessage = (error as? PlaylistValidationService.ValidationFailure)?.errorDescription
+                    ?? explainedError(for: error)
                 self.showError = true
                 self.isLoading = false
                 self.progressMessage = nil
+                self.addStages = [:]
             }
         }
     }
@@ -1192,7 +1386,11 @@ struct PlaylistGateView: View {
             username: credentials.username,
             password: credentials.password,
             filterAdultContent: m3uFilterAdultContent,
-            type: .xtream
+            type: .xtream,
+            epgURLOverride: optionalField(m3uEPGURL),
+            backupURL: optionalField(m3uBackupURL),
+            customUserAgent: optionalField(m3uUserAgent),
+            customHeadersJSON: Playlist.encodeCustomHeaders(Playlist.parseHeaderLines(m3uHeadersText))
         )
         // Round 11: same no-duplicate rule as the Xtream form.
         if let existing = playlists.first(where: {
@@ -1224,32 +1422,12 @@ struct PlaylistGateView: View {
             return true
         }
 
-        do {
-            try await PlaylistSaveService.syncXtream(playlist: playlist, client: client) { message in
-                self.progressMessage = message
-            }
-            guard !Task.isCancelled else {
-                await MainActor.run {
-                    self.isLoading = false
-                    self.progressMessage = nil
-                }
-                return true
-            }
-            await MainActor.run {
-                self.isLoading = false
-                self.progressMessage = nil
-                self.onSelect(playlist)
-            }
-        } catch {
-            // Account verified but sync failed: surface the error instead of falling
-            // back, since get.php is likely blocked on such panels anyway.
-            await MainActor.run {
-                self.errorMessage = explainedError(for: error)
-                self.showError = true
-                self.isLoading = false
-                self.progressMessage = nil
-            }
-        }
+        // Build 61 (B10): the staged finisher (content stages →
+        // guide → Z1 → L2 summary) — the same end-of-add as the
+        // Xtream form. A sync failure surfaces the error instead
+        // of falling back, since get.php is likely blocked on
+        // such panels anyway (syncAndSaveXtream shows it).
+        await syncAndSaveXtream(newPlaylist: playlist, client: client)
         return true
     }
 

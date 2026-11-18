@@ -1187,6 +1187,10 @@ struct LivePlayerShell: View {
                     streamId: String(session.stream.streamId),
                     type: "live",
                     resumeTimeMs: session.resumeTimeMs,
+                    // Build 61 (B10, G2): the playlist's custom
+                    // User-Agent reaches the engine's existing
+                    // load path through the shell.
+                    userAgent: playlist.playbackUserAgent(channelUserAgent: nil),
                     epgChannelKey: EPGChannelKey.forXtream(session.stream),
                     canGoToPreviousChannel: (currentIndex ?? 0) > 0,
                     canGoToNextChannel: {

@@ -29,6 +29,8 @@ struct CatchupPlayerShell: View {
             playlistId: playlist.id,
             streamId: String(stream.streamId),
             type: "live",
+            // Build 61 (B10, G2): playlist User-Agent to the engine load path.
+            userAgent: playlist.playbackUserAgent(channelUserAgent: nil),
             suppressWatchHistory: true
         )
     }

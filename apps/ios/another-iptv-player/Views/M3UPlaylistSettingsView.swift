@@ -729,7 +729,7 @@ struct M3UPlaylistSettingsView: View {
             syncMessage = nil
         }
         do {
-            let content = try await M3UService().fetchRemote(urlString: currentPlaylist.serverURL)
+            let content = try await M3UService().fetchRemote(urlString: currentPlaylist.serverURL, playlist: currentPlaylist)
             syncMessage = L("settings.m3u.parsing")
             let parsed = try await M3UParser.parseAsync(content)
             syncMessage = L("settings.m3u.saving")

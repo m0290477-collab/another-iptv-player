@@ -26,7 +26,10 @@ struct M3UService {
         self.urlSession = urlSession
     }
 
-    func fetchRemote(urlString: String) async throws -> String {
+    /// Build 61 (B10, G2): when a playlist is supplied, its custom
+    /// headers + User-Agent ride on the fetch. Callers without a
+    /// playlist keep the previous behaviour exactly.
+    func fetchRemote(urlString: String, playlist: Playlist? = nil) async throws -> String {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https" else {
@@ -34,7 +37,15 @@ struct M3UService {
         }
 
         do {
-            let (data, response) = try await urlSession.data(from: url)
+            let data: Data
+            let response: URLResponse
+            if let playlist, (!playlist.customHeaders.isEmpty || playlist.trimmedUserAgent != nil) {
+                var request = URLRequest(url: url)
+                playlist.applyCustomHeaders(to: &request)
+                (data, response) = try await urlSession.data(for: request)
+            } else {
+                (data, response) = try await urlSession.data(from: url)
+            }
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 throw M3UServiceError.serverError(http.statusCode)
             }

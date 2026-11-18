@@ -278,6 +278,17 @@ final class KSPlayerEngine: NSObject, ObservableObject {
       // VOD (mkv/avi/ts): limit the worst-case analysis time without leaving multi-part headers closed.
       options.maxAnalyzeDuration = 3_000_000  // 3.0s tavan
     }
+    // Build 61 (B10, Q5): night/dialogue audio mode — when the
+    // user enabled it (key "player.nightAudioMode", toggled in
+    // the track-settings sheet), APPEND the dynamic-range
+    // compressor to KSOptions' FFmpeg audio-filter list. Append,
+    // never assign: B9's Q1 loudness filter shares this one list
+    // and the two compose in a single filter chain. Only the
+    // FFmpeg decode path consumes audioFilters; the native
+    // AVPlayer path is unaffected (documented in NightAudioMode).
+    if UserDefaults.standard.bool(forKey: NightAudioMode.defaultsKey) {
+      options.audioFilters.append(NightAudioMode.ffmpegFilter)
+    }
     // Let a single IO on a stalled socket fail in 10 sec; FFmpeg returns the real error code
     // before the watchdog (12s) kicks in. Only the FFmpeg path (AVPlayer ignores this).
     options.formatContextOptions["rw_timeout"] = 10_000_000  // mikrosaniye

@@ -2013,6 +2013,8 @@ private struct PlayerViewImpl: View {
                     openTrackSettings()
                 }
                 .accessibilityLabel(L("player.a11y.track_settings"))
+                // Build 61 (B10, Q24): accessibility MODIFIER ONLY — no layout/behaviour change.
+                .accessibilityHint(L("player.a11y.track_settings.hint"))
             }
         }
     }
@@ -2024,6 +2026,8 @@ private struct PlayerViewImpl: View {
                 toggle()
             }
             .accessibilityLabel(isFav ? L("favorites.remove") : L("favorites.add"))
+            // Build 61 (B10, Q24): accessibility MODIFIER ONLY — no layout/behaviour change.
+            .accessibilityHint(L("player.a11y.favorite.hint"))
         }
     }
 
@@ -2223,6 +2227,8 @@ private struct PlayerViewImpl: View {
                     player.togglePlayPause()
                 }
                 .accessibilityLabel(player.isPlaying ? L("player.a11y.pause") : L("player.a11y.play"))
+                // Build 61 (B10, Q24): accessibility MODIFIER ONLY — no layout/behaviour change.
+                .accessibilityHint(L("player.a11y.play_pause.hint"))
                 .disabled(hasPlaybackFailure)
                 .opacity(hasPlaybackFailure ? 0.4 : 1)
             }

@@ -44,6 +44,23 @@ struct AddPlaylistSheetView: View {
     @State private var localContent: String? = nil
     @State private var showFileImporter = false
 
+    // Build 61 (B10): connection-extras field state (Q18/G4/G2)
+    // for both forms + the L1 staged checklist state.
+    @State private var xtreamBackupURL = ""
+    @State private var xtreamEPGURL = ""
+    @State private var xtreamUserAgent = ""
+    @State private var xtreamHeadersText = ""
+    @State private var m3uBackupURL = ""
+    @State private var m3uEPGURL = ""
+    @State private var m3uUserAgent = ""
+    @State private var m3uHeadersText = ""
+    @State private var addStages: [PlaylistValidationService.Stage: PlaylistValidationService.StageState] = [:]
+
+    /// The running save, so the L1 checklist's Cancel really
+    /// cancels it (the service checks cancellation between
+    /// stages; the fetches cancel with the task).
+    @State private var saveTask: Task<Void, Never>?
+
     // Shared save state.
     @State private var isLoading = false
     @State private var progressMessage: String?
@@ -83,24 +100,36 @@ struct AddPlaylistSheetView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L("playlists.add_and_activate")) {
-                        Task { await save() }
+                        saveTask = Task { await save() }
                     }
                     .disabled(!canSave)
                 }
             }
             .overlay {
                 if isLoading {
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                        Text(progressMessage ?? L("common.loading"))
-                            .font(.headline)
-                            .multilineTextAlignment(.center)
+                    if !addStages.isEmpty {
+                        // Build 61 (B10, L1): staged checklist.
+                        AddPlaylistProgressView(stages: addStages) {
+                            saveTask?.cancel()
+                            saveTask = nil
+                            isLoading = false
+                            progressMessage = nil
+                            addStages = [:]
+                        }
+                        .padding(.horizontal, 24)
+                    } else {
+                        VStack(spacing: 16) {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                            Text(progressMessage ?? L("common.loading"))
+                                .font(.headline)
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(24)
+                        .background(AppTheme.elevated.opacity(0.95))
+                        .cornerRadius(AppTheme.cornerRadius)
+                        .shadow(radius: 20)
                     }
-                    .padding(24)
-                    .background(AppTheme.elevated.opacity(0.95))
-                    .cornerRadius(AppTheme.cornerRadius)
-                    .shadow(radius: 20)
                 }
             }
             .alert(L("common.error"), isPresented: $showError, actions: {
@@ -190,7 +219,13 @@ struct AddPlaylistSheetView: View {
                     }
                 }
             }
+
+            connectionSections(backup: $xtreamBackupURL, epg: $xtreamEPGURL, userAgent: $xtreamUserAgent, headers: $xtreamHeadersText)
         }
+        // Build 61 (B10, K1): in-form paste parsing.
+        .onChange(of: xtreamURL) { _, newValue in applyReadyLink(newValue) }
+        .onChange(of: xtreamUsername) { _, newValue in applyReadyLink(newValue) }
+        .onChange(of: xtreamPassword) { _, newValue in applyReadyLink(newValue) }
     }
 
     private var m3uSections: some View {
@@ -251,6 +286,83 @@ struct AddPlaylistSheetView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+
+            connectionSections(backup: $m3uBackupURL, epg: $m3uEPGURL, userAgent: $m3uUserAgent, headers: $m3uHeadersText)
+        }
+        .onChange(of: m3uURL) { _, newValue in applyReadyLink(newValue) }
+    }
+
+    // MARK: - Build 61 (B10): helpers
+
+    private func optionalField(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// K1: pasting a full Xtream ready link into any field fills
+    /// Server / Username / Password; failed parse = untouched.
+    private func applyReadyLink(_ text: String) {
+        guard let credentials = XtreamReadyLink.parse(text) else { return }
+        formKind = .xtream
+        xtreamURL = credentials.serverURL
+        xtreamUsername = credentials.username
+        xtreamPassword = credentials.password
+    }
+
+    private func setStage(_ stage: PlaylistValidationService.Stage, _ state: PlaylistValidationService.StageState) {
+        addStages[stage] = state
+    }
+
+    private func resetStages() {
+        addStages = Dictionary(uniqueKeysWithValues: PlaylistValidationService.Stage.allCases.map { ($0, .pending) })
+    }
+
+    /// The optional connection-fields group (Q18/G4/G2), same
+    /// fields as the gate's.
+    private func connectionSections(
+        backup: Binding<String>,
+        epg: Binding<String>,
+        userAgent: Binding<String>,
+        headers: Binding<String>
+    ) -> some View {
+        Group {
+            SettingsGroupHeader(title: L("addplaylist.section.connection"))
+            SettingsFormCard {
+                VStack(alignment: .leading, spacing: 6) {
+                    SettingsFieldLabel(title: L("addplaylist.field.backup_url"))
+                    TextField(L("addplaylist.field.backup_url.placeholder"), text: backup)
+                        .keyboardType(.URL)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .settingsFieldChrome()
+                    Text(L("headers.backup.note"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    SettingsFieldLabel(title: L("addplaylist.field.epg_url"))
+                    TextField(L("addplaylist.field.epg_url.placeholder"), text: epg)
+                        .keyboardType(.URL)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .settingsFieldChrome()
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    SettingsFieldLabel(title: L("headers.user_agent"))
+                    TextField(L("headers.user_agent.placeholder"), text: userAgent)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .settingsFieldChrome()
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    SettingsFieldLabel(title: L("headers.custom"))
+                    TextField(L("headers.custom.placeholder"), text: headers, axis: .vertical)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .lineLimit(2...4)
+                        .settingsFieldChrome()
+                }
+            }
         }
     }
 
@@ -294,48 +406,66 @@ struct AddPlaylistSheetView: View {
 
         let trimmedURL = xtreamURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedName = xtreamName.trimmingCharacters(in: .whitespacesAndNewlines)
-        var newPlaylist = Playlist(
+        let newPlaylist = Playlist(
             name: trimmedName.isEmpty ? fallbackName(for: trimmedURL) : trimmedName,
             serverURL: trimmedURL,
             username: xtreamUsername.trimmingCharacters(in: .whitespacesAndNewlines),
             password: xtreamPassword.trimmingCharacters(in: .whitespacesAndNewlines),
-            filterAdultContent: filterAdultContent
+            filterAdultContent: filterAdultContent,
+            epgURLOverride: optionalField(xtreamEPGURL),
+            backupURL: optionalField(xtreamBackupURL),
+            customUserAgent: optionalField(xtreamUserAgent),
+            customHeadersJSON: Playlist.encodeCustomHeaders(Playlist.parseHeaderLines(xtreamHeadersText))
         )
 
-        let client = XtreamAPIClient(playlist: newPlaylist)
-
+        // Build 61 (B10, Q17 + L1): probe BEFORE saving (distinct
+        // plain failures; nothing saved on failure), then the
+        // staged import. This sheet's contract is Add & Activate,
+        // so success hands the created playlist to the caller
+        // directly (the L2 summary lives on the gate).
+        resetStages()
+        setStage(.connecting, .active)
         do {
-            let response = try await client.verify()
-
-            if let tz = response.serverInfo?.timezone?.trimmingCharacters(in: .whitespacesAndNewlines), !tz.isEmpty {
-                newPlaylist.serverTimezone = tz
-            }
-
-            if response.userInfo?.auth == 1 {
-                do {
-                    try await XtreamImporter.syncAndSave(playlist: newPlaylist, client: client) { message in
-                        self.progressMessage = message
-                    }
-                    await MainActor.run {
-                        self.isLoading = false
-                        self.progressMessage = nil
-                        self.onCreated(newPlaylist)
-                    }
-                } catch {
-                    await MainActor.run {
-                        self.errorMessage = L("add_playlist.download_save_error", error.localizedDescription)
-                        self.showError = true
-                        self.isLoading = false
-                        self.progressMessage = nil
-                    }
+            let probed = try await PlaylistValidationService.probeXtream(playlist: newPlaylist)
+            setStage(.connecting, .done)
+            setStage(.verifying, .done)
+            setStage(.loadingChannels, .active)
+            do {
+                try await PlaylistSaveService.syncXtream(playlist: probed.playlist, client: probed.client) { message in
+                    self.progressMessage = message
                 }
-            } else {
+            } catch {
                 await MainActor.run {
-                    errorMessage = L("add_playlist.auth_failed")
-                    showError = true
-                    isLoading = false
-                    progressMessage = nil
+                    self.errorMessage = L("add_playlist.download_save_error", error.localizedDescription)
+                    self.showError = true
+                    self.isLoading = false
+                    self.progressMessage = nil
+                    self.addStages = [:]
                 }
+                return
+            }
+            setStage(.loadingChannels, .done)
+            setStage(.loadingMoviesSeries, .done)
+            ProviderExpiryStore.record(playlistId: probed.playlist.id, expDate: probed.response.userInfo?.expDate)
+            await MainActor.run {
+                self.isLoading = false
+                self.progressMessage = nil
+                self.addStages = [:]
+                self.onCreated(probed.playlist)
+            }
+        } catch let failure as PlaylistValidationService.ValidationFailure {
+            await MainActor.run {
+                self.errorMessage = failure.errorDescription
+                self.showError = true
+                self.isLoading = false
+                self.progressMessage = nil
+                self.addStages = [:]
+            }
+        } catch is CancellationError {
+            await MainActor.run {
+                self.isLoading = false
+                self.progressMessage = nil
+                self.addStages = [:]
             }
         } catch {
             await MainActor.run {
@@ -343,6 +473,7 @@ struct AddPlaylistSheetView: View {
                 showError = true
                 isLoading = false
                 progressMessage = nil
+                addStages = [:]
             }
         }
     }
@@ -379,33 +510,42 @@ struct AddPlaylistSheetView: View {
             password: "",
             filterAdultContent: false,
             type: .m3u,
-            m3uEpgURL: nil
+            m3uEpgURL: nil,
+            epgURLOverride: optionalField(m3uEPGURL),
+            backupURL: optionalField(m3uBackupURL),
+            customUserAgent: optionalField(m3uUserAgent),
+            customHeadersJSON: Playlist.encodeCustomHeaders(Playlist.parseHeaderLines(m3uHeadersText))
         )
 
+        // Build 61 (B10, Q17 + L1): the staged validation service
+        // (probe → import → guide), then Add & Activate as before.
+        resetStages()
         do {
-            let rawContent: String
-            if let local = localContent {
-                rawContent = local
-            } else {
-                progressMessage = L("add_m3u.downloading")
-                rawContent = try await M3UService().fetchRemote(urlString: trimmedURL)
-            }
-
-            progressMessage = L("add_m3u.parsing")
-            let parsed = try await M3UParser.parseAsync(rawContent)
-
-            progressMessage = L("add_m3u.saving_db")
-            try await M3UImporter.replace(
+            let summary = try await PlaylistValidationService.importM3U(
                 playlist: newPlaylist,
-                channels: parsed.channels,
-                epgURL: parsed.epgURL,
-                clearServerURL: hasLocalFile
-            )
-
+                localContent: localContent
+            ) { stage, state in
+                self.setStage(stage, state)
+            }
             await MainActor.run {
                 self.isLoading = false
                 self.progressMessage = nil
-                self.onCreated(newPlaylist)
+                self.addStages = [:]
+                self.onCreated(summary.playlist)
+            }
+        } catch let failure as PlaylistValidationService.ValidationFailure {
+            await MainActor.run {
+                self.errorMessage = failure.errorDescription
+                self.showError = true
+                self.isLoading = false
+                self.progressMessage = nil
+                self.addStages = [:]
+            }
+        } catch is CancellationError {
+            await MainActor.run {
+                self.isLoading = false
+                self.progressMessage = nil
+                self.addStages = [:]
             }
         } catch {
             await MainActor.run {
@@ -413,6 +553,7 @@ struct AddPlaylistSheetView: View {
                 self.showError = true
                 self.isLoading = false
                 self.progressMessage = nil
+                self.addStages = [:]
             }
         }
     }
@@ -427,7 +568,11 @@ struct AddPlaylistSheetView: View {
             serverURL: credentials.serverURL,
             username: credentials.username,
             password: credentials.password,
-            type: .xtream
+            type: .xtream,
+            epgURLOverride: optionalField(m3uEPGURL),
+            backupURL: optionalField(m3uBackupURL),
+            customUserAgent: optionalField(m3uUserAgent),
+            customHeadersJSON: Playlist.encodeCustomHeaders(Playlist.parseHeaderLines(m3uHeadersText))
         )
         let client = XtreamAPIClient(playlist: playlist)
 
