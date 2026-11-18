@@ -104,6 +104,13 @@ struct HomeView: View {
     // (see expiryBannerModel).
     @State private var expiryBannerDismissed = false
 
+    // Build 61 (B13): F6 section visibility (shelves + tiles read
+    // the ONE store), F7 new-version notice, G5 offline alert for
+    // this screen's refresh actions.
+    @ObservedObject private var sectionVisibility = SectionVisibilityStore.shared
+    @ObservedObject private var updateService = AppUpdateService.shared
+    @State private var showOfflineAlert = false
+
     private var liveHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "live") }
     private var vodHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod") }
     private var seriesHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "series") }
@@ -146,6 +153,14 @@ struct HomeView: View {
                         // playlist only.
                         if let expiryBanner = expiryBannerModel {
                             expiryBannerView(expiryBanner)
+                                .padding(.horizontal, 16)
+                        }
+
+                        // Build 61 (F7, B13): new-version banner —
+                        // only when the iTunes lookup found a newer
+                        // store version that was not dismissed.
+                        if let update = updateService.availableUpdate {
+                            updateBannerView(update)
                                 .padding(.horizontal, 16)
                         }
 
@@ -214,6 +229,13 @@ struct HomeView: View {
                     .padding(.bottom, 24)
                 }
                 .refreshable {
+                    // G5 (B13): playlist refresh is network-only —
+                    // offline it answers with the plain offline
+                    // message instead of a spinner.
+                    if OfflineState.shared.isOffline {
+                        showOfflineAlert = true
+                        return
+                    }
                     // Same cancellation-proof pattern as the Live tab: an
                     // independent Task so a ScrollView redraw can't cancel
                     // the network work mid-flight.
@@ -300,6 +322,16 @@ struct HomeView: View {
             Button(L("common.cancel"), role: .cancel) { }
         } message: {
             Text(L("home.refresh.message"))
+        }
+        // G5 (B13): the offline answer for this screen's refresh
+        // actions, with Retry.
+        .alert(L("offline.title"), isPresented: $showOfflineAlert) {
+            Button(L("common.try_again")) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { runHomeRefresh() }
+            }
+            Button(L("common.cancel"), role: .cancel) { }
+        } message: {
+            Text(L("offline.message"))
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("superx.downloadCompleted"))) { _ in
             AppSound.play(.downloadComplete)
@@ -473,13 +505,17 @@ struct HomeView: View {
 
             Spacer(minLength: 4)
 
-            NavigationLink {
-                FavoritesView(playlist: playlist, initialType: "live")
-            } label: {
-                topBarSquare(systemName: "star.fill", tint: AppTheme.accent)
+            // F6 (B13): the Library (Favorites) entry follows the
+            // ONE visibility store, like its Home shelf.
+            if sectionVisibility.isVisible(.library) {
+                NavigationLink {
+                    FavoritesView(playlist: playlist, initialType: "live")
+                } label: {
+                    topBarSquare(systemName: "star.fill", tint: AppTheme.accent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L("favorites.title"))
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(L("favorites.title"))
 
             Button {
                 showRefreshConfirm = true
@@ -542,6 +578,43 @@ struct HomeView: View {
     }
 
     // MARK: - S4 expiry banner (build 61)
+
+    // MARK: - F7 new-version banner (build 61, B13)
+
+    /// Shown only while `AppUpdateService` holds a newer,
+    /// undismissed store version. Tapping opens the App Store
+    /// page; the X dismisses for THIS store version only (the
+    /// service remembers it per version).
+    private func updateBannerView(_ update: (version: String, storeURL: URL)) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.up.circle.fill")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(AppTheme.accent)
+            Link(destination: update.storeURL) {
+                Text(L("update.banner_format", update.version))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 4)
+            Button {
+                updateService.dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L("update.dismiss"))
+        }
+        .padding(12)
+        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .strokeBorder(AppTheme.accent.opacity(0.45), lineWidth: 1)
+        )
+    }
 
     /// The banner's data: the ACTIVE playlist's recorded provider
     /// expiry (ProviderExpiryStore — Xtream playlists only; M3U
@@ -620,6 +693,11 @@ struct HomeView: View {
     /// exactly its duration.
     private func runHomeRefresh() {
         guard !isRefreshingHome else { return }
+        // G5 (B13): offline → the plain message, no spinner.
+        if OfflineState.shared.isOffline {
+            showOfflineAlert = true
+            return
+        }
         isRefreshingHome = true
         Task {
             await contentStore.refreshFromNetwork(playlist: playlist)
@@ -773,25 +851,31 @@ struct HomeView: View {
                 iconName: "tv",
                 action: onOpenLive
             )
-            HomeCategoryTile(
-                title: L("dashboard.movies"),
-                countText: L("home.count_movies", CatalogCountFormatter.string(contentStore.vodStreams.count)),
-                tint: AppTheme.accent,
-                iconName: "film",
-                action: onOpenMovies
-            )
-            HomeCategoryTile(
-                title: L("dashboard.series"),
-                countText: L("home.count_series", CatalogCountFormatter.string(contentStore.seriesItems.count)),
-                // Build 61: the Series tile follows the shared
-                // SectionTheme (a hue-shifted sibling of the CURRENT
-                // accent) instead of a hard-coded violet preset, so
-                // the tile family stays inside the Design-4 system
-                // for every accent choice.
-                tint: SectionTheme.series,
-                iconName: "play.tv",
-                action: onOpenSeries
-            )
+            // F6 (B13): the Movies/Series tiles follow the ONE
+            // section-visibility store, same as their tabs.
+            if sectionVisibility.isVisible(.movies) {
+                HomeCategoryTile(
+                    title: L("dashboard.movies"),
+                    countText: L("home.count_movies", CatalogCountFormatter.string(contentStore.vodStreams.count)),
+                    tint: AppTheme.accent,
+                    iconName: "film",
+                    action: onOpenMovies
+                )
+            }
+            if sectionVisibility.isVisible(.series) {
+                HomeCategoryTile(
+                    title: L("dashboard.series"),
+                    countText: L("home.count_series", CatalogCountFormatter.string(contentStore.seriesItems.count)),
+                    // Build 61: the Series tile follows the shared
+                    // SectionTheme (a hue-shifted sibling of the CURRENT
+                    // accent) instead of a hard-coded violet preset, so
+                    // the tile family stays inside the Design-4 system
+                    // for every accent choice.
+                    tint: SectionTheme.series,
+                    iconName: "play.tv",
+                    action: onOpenSeries
+                )
+            }
         }
         .padding(.horizontal, 16)
         // Round 8 (audit E3): cap the row at 560 pt like the Live hero —
@@ -1080,18 +1164,20 @@ struct HomeView: View {
     @ViewBuilder
     private func shelfView(_ kind: HomeShelfKind) -> some View {
         switch kind {
+        // F6 (B13): the Movies/Series shelves and the Library
+        // (favorites) shelf follow the ONE visibility store.
         case .topMovies:
-            if topRatedMovies.count >= 3 { topRatedMoviesShelf }
+            if sectionVisibility.isVisible(.movies), topRatedMovies.count >= 3 { topRatedMoviesShelf }
         case .topSeries:
-            if topRatedSeries.count >= 3 { topRatedSeriesShelf }
+            if sectionVisibility.isVisible(.series), topRatedSeries.count >= 3 { topRatedSeriesShelf }
         case .newMovies:
-            if !newMovies.isEmpty { newMoviesShelf }
+            if sectionVisibility.isVisible(.movies), !newMovies.isEmpty { newMoviesShelf }
         case .newSeries:
-            if !newSeries.isEmpty { newSeriesShelf }
+            if sectionVisibility.isVisible(.series), !newSeries.isEmpty { newSeriesShelf }
         case .because:
             if !becauseYouWatched.isEmpty { becauseShelf }
         case .favorites:
-            if !favoriteLive.isEmpty || !favoriteVODs.isEmpty || !favoriteSeries.isEmpty { favoritesShelf }
+            if sectionVisibility.isVisible(.library), !favoriteLive.isEmpty || !favoriteVODs.isEmpty || !favoriteSeries.isEmpty { favoritesShelf }
         case .newEpisodes:
             if !newEpisodeSeries.isEmpty { newEpisodesShelf }
         case .tonight:
@@ -1116,7 +1202,9 @@ struct HomeView: View {
         for item in contentStore.liveStreams where !liveHiddenIds.contains(item.stream.categoryId ?? "") {
             let stream = item.stream
             guard let nn = snapshot[EPGChannelKey.forXtream(stream)], let now = nn.now else { continue }
-            out.append(OnNowEntry(stream: stream, nowTitle: now.title, progress: now.progress(at: epgStore.nowDate)))
+            // F1 (B13): progress against the offset-shifted "now",
+            // matching the snapshot's own offset-aware current pick.
+            out.append(OnNowEntry(stream: stream, nowTitle: now.title, progress: now.progress(at: EPGOffsetStore.lookupNow(epgStore.nowDate))))
             if out.count == 15 { break }
         }
         return out
@@ -1169,8 +1257,12 @@ struct HomeView: View {
         let streams = seen.compactMap { sid in homeLiveQueue.first(where: { $0.streamId == sid }) }
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
-        guard let windowStart = cal.date(bySettingHour: 19, minute: 0, second: 0, of: today),
-              let windowEnd = cal.date(bySettingHour: 23, minute: 0, second: 0, of: today) else { return }
+        // F1 (B13): "tonight" is a DISPLAY window (19:00–23:00 as
+        // shown), so the raw programme window shifts by −offset.
+        guard let displayWindowStart = cal.date(bySettingHour: 19, minute: 0, second: 0, of: today),
+              let displayWindowEnd = cal.date(bySettingHour: 23, minute: 0, second: 0, of: today) else { return }
+        let windowStart = displayWindowStart.addingTimeInterval(-EPGOffsetStore.offsetSeconds)
+        let windowEnd = displayWindowEnd.addingTimeInterval(-EPGOffsetStore.offsetSeconds)
         var entries: [TonightEntry] = []
         for stream in streams {
             guard let key = epgStore.storedKey(idKey: stream.epgChannelId, nameKey: stream.name) else { continue }

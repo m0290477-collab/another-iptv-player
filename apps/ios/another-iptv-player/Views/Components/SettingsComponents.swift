@@ -1352,6 +1352,9 @@ struct BackupSettingsSection: View {
             }
             guard !exists else { return false }
             try await AppDatabase.shared.write { db in try playlist.save(db) }
+            // N1 (B13): an imported playlist joins the keychain
+            // restore mirror like any other save path.
+            CredentialStore.mirror(playlist)
             return true
         } catch {
             return false
@@ -1442,6 +1445,9 @@ struct PlaybackSettingsSection: View {
     @AppStorage(DataSaverService.toggleKey) private var dataSaverOnCellular = false
     @AppStorage(ChannelHealthStore.hideDeadKey) private var hideDeadChannels = false
     @ObservedObject private var channelHealth = ChannelHealthStore.shared
+    /// F1 (B13): the ONE EPG time offset store — guide display,
+    /// programme details and reminder fire dates all read it.
+    @ObservedObject private var epgOffset = EPGOffsetStore.shared
 
     var body: some View {
         Section(header: ScopedSectionHeader(title: L("settings.playback.title"), thisPlaylist: false)) {
@@ -1454,6 +1460,25 @@ struct PlaybackSettingsSection: View {
                 Text(L("settings.buffer.low")).tag("low")
                 Text(L("settings.buffer.default")).tag("default")
                 Text(L("settings.buffer.high")).tag("high")
+            }
+
+            // F1: EPG time offset, −12…+12 h in 0.5 h steps,
+            // per-APP (the store is a singleton over one key).
+            HStack(spacing: 12) {
+                SettingsIconTile(systemImage: "clock.arrow.2.circlepath", tint: .orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("epgoffset.title"))
+                    Text(L("epgoffset.desc"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(epgOffsetValueText)
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                Stepper("", value: $epgOffset.offsetHours, in: -12...12, step: 0.5)
+                    .labelsHidden()
             }
 
             Toggle(isOn: $playLastChannel) {
@@ -1524,6 +1549,13 @@ struct PlaybackSettingsSection: View {
             }
         }
     }
+
+    /// "+1.5 h" / "-0.5 h" / "0 h" — the stepper's current value.
+    private var epgOffsetValueText: String {
+        let value = epgOffset.offsetHours
+        let number = value == 0 ? "0" : String(format: "%+.1f", value)
+        return L("epgoffset.value_format", number)
+    }
 }
 
 /// APPEARANCE group (item 7a): the appearance choice
@@ -1538,6 +1570,10 @@ struct AppearanceSettingsSection: View {
     /// key (`appearance.reduceEffects`); the image pipeline reads
     /// it at install to trim its memory cache.
     @AppStorage("appearance.reduceEffects") private var reduceEffects = false
+    /// F6 (B13): the ONE section-visibility store, consumed by
+    /// the tab bar and Home. Home and Live have NO toggles here —
+    /// they can never be hidden.
+    @ObservedObject private var sectionVisibility = SectionVisibilityStore.shared
 
     var body: some View {
         Section(header: ScopedSectionHeader(title: L("settings.appearance.title"), thisPlaylist: false)) {
@@ -1567,6 +1603,26 @@ struct AppearanceSettingsSection: View {
                 // Q21: turning it on trims the image memory cache
                 // immediately, not just at the next launch.
                 if isOn { IPTVRemoteImagePipeline.trimMemoryCache() }
+            // F6: show/hide sections. Each toggle writes the
+            // shared `sections.hidden.<section>` key through the
+            // store; hidden sections leave the tab bar AND Home.
+            sectionToggle(.movies, titleKey: "sections.movies", systemImage: "film.fill", tint: AppTheme.accent)
+            sectionToggle(.series, titleKey: "sections.series", systemImage: "play.tv.fill", tint: .purple)
+            sectionToggle(.matches, titleKey: "sections.matches", systemImage: "sportscourt.fill", tint: .green)
+            sectionToggle(.library, titleKey: "sections.library", systemImage: "star.fill", tint: .yellow)
+        }
+    }
+
+    /// One "Show <section>" toggle — ON means visible (the store
+    /// persists the inverse, the shared hidden key).
+    private func sectionToggle(_ section: SectionVisibilityStore.Section, titleKey: String, systemImage: String, tint: Color) -> some View {
+        Toggle(isOn: Binding(
+            get: { sectionVisibility.isVisible(section) },
+            set: { sectionVisibility.setHidden(!$0, section) }
+        )) {
+            HStack(spacing: 12) {
+                SettingsIconTile(systemImage: systemImage, tint: tint)
+                Text(L(titleKey))
             }
         }
     }
@@ -1991,6 +2047,21 @@ struct SupportSettingsSection: View {
 
     @State private var diagnosticsCopied = false
     @State private var copyResetTask: Task<Void, Never>?
+    /// F3 (B13): connection & speed test state.
+    @State private var speedTestRunning = false
+    @State private var speedOutcome: ConnectionSpeedTestService.Outcome?
+    @State private var speedTestServerName: String?
+
+    /// The playlist the speed test measures: the ACTIVE one (the
+    /// content stores' active id), falling back to the first
+    /// saved playlist. Nil when there is nothing to test.
+    private var speedTestPlaylist: Playlist? {
+        let activeId = PlaylistContentStore.shared.activePlaylistId ?? M3UContentStore.shared.activePlaylistId
+        if let activeId, let active = playlists.first(where: { $0.id == activeId }) {
+            return active
+        }
+        return playlists.first
+    }
 
     var body: some View {
         Section(header: ScopedSectionHeader(title: L("support.title"), thisPlaylist: false)) {
@@ -2001,6 +2072,26 @@ struct SupportSettingsSection: View {
                     SettingsIconTile(systemImage: "questionmark.circle.fill", tint: AppTheme.accent)
                     Text(L("support.faq.title"))
                 }
+            }
+
+            // F3: connection & speed test against the ACTIVE
+            // provider's server only (see ConnectionSpeedTestService).
+            Button {
+                runSpeedTest()
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "speedometer", tint: .teal)
+                    Text(L("speedtest.run"))
+                        .foregroundColor(.primary)
+                    Spacer()
+                    if speedTestRunning { ProgressView() }
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(speedTestRunning || speedTestPlaylist == nil)
+
+            if let outcome = speedOutcome {
+                speedTestResultRows(outcome)
             }
 
             Button {
@@ -2023,17 +2114,88 @@ struct SupportSettingsSection: View {
         .onDisappear { copyResetTask?.cancel() }
     }
 
+    // MARK: - F3: connection & speed test
+
+    private func runSpeedTest() {
+        guard let playlist = speedTestPlaylist else { return }
+        // G5: with no network path the verdict is known without
+        // a 20-second timeout — report it immediately.
+        if OfflineState.shared.isOffline {
+            speedTestServerName = playlist.name
+            speedOutcome = ConnectionSpeedTestService.Outcome(
+                verdict: .unreachable, responseTimeMs: nil, throughputMbps: nil, sampledBytes: 0)
+            return
+        }
+        speedTestRunning = true
+        speedOutcome = nil
+        speedTestServerName = playlist.name
+        Task {
+            let outcome = await ConnectionSpeedTestService.run(playlist: playlist)
+            speedOutcome = outcome
+            speedTestRunning = false
+        }
+    }
+
+    @ViewBuilder
+    private func speedTestResultRows(_ outcome: ConnectionSpeedTestService.Outcome) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: outcome.verdict == .unreachable ? "xmark.circle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(outcome.verdict == .good ? Color.green : (outcome.verdict == .weak ? Color.orange : Color.red))
+                Text(L(verdictKey(outcome.verdict)))
+                    .font(.subheadline.weight(.semibold))
+                if let name = speedTestServerName {
+                    Text(name)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            if let ms = outcome.responseTimeMs {
+                Text(L("speedtest.response_format", ms))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let mbps = outcome.throughputMbps {
+                Text(L("speedtest.throughput_format", String(format: "%.1f", mbps)))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            // The method, labeled in small text: the sample came
+            // from the provider's own server, capped — approximate
+            // by construction, never a general internet speed.
+            Text(L("speedtest.method_format", String(format: "%.1f", Double(outcome.sampledBytes) / 1_000_000)))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.leading, 52)
+    }
+
+    private func verdictKey(_ verdict: ConnectionSpeedTestService.Verdict) -> String {
+        switch verdict {
+        case .good: return "speedtest.verdict.good"
+        case .weak: return "speedtest.verdict.weak"
+        case .unreachable: return "speedtest.verdict.unreachable"
+        }
+    }
+
     private func copyDiagnostics() {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"
         let xtreamCount = playlists.filter { $0.kind == .xtream }.count
         let m3uCount = playlists.count - xtreamCount
-        let text = """
+        var text = """
         Super X \(version) (\(build))
         iOS \(UIDevice.current.systemVersion) · \(UIDevice.current.model)
         \(L("support.diagnostics.playlists_format", playlists.count, xtreamCount, m3uCount))
         \(L("support.diagnostics.language_format", LocalizationManager.shared.effectiveLanguageCode))
         """
+        // G6 (B13): MetricKit's plain-language summary joins the
+        // diagnostics ONLY when iOS has actually delivered
+        // diagnostic payloads — nil keeps the text unchanged.
+        if let metricKitSummary = MetricKitService.summaryForDiagnostics() {
+            text += "\n" + metricKitSummary
+        }
         UIPasteboard.general.string = text
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         diagnosticsCopied = true

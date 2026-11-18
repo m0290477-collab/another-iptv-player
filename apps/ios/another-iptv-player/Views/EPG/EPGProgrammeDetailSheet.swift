@@ -44,13 +44,21 @@ struct EPGProgrammeDetailSheet: View {
     }
     /// A reminder only makes sense for a programme that has not
     /// started yet, with the lead time still in the future.
+    /// F1 (B13): judged against the DISPLAYED start (raw + the one
+    /// EPG offset), matching the fire date the scheduler computes.
     private var canRemind: Bool {
         remindersEnabled
-            && programme.start.addingTimeInterval(-Double(reminderLeadMinutes) * 60) > Date()
+            && EPGOffsetStore.displayDate(programme.start).addingTimeInterval(-Double(reminderLeadMinutes) * 60) > Date()
     }
 
     private var now: Date { Date() }
     private var isCurrent: Bool { programme.isCurrent(at: now) }
+    /// F1 (B13): on-air state as the user SEES it (offset-shifted
+    /// "now") — drives the LIVE badge and progress bar only.
+    /// Catch-up availability below keeps the REAL `now`/`isCurrent`:
+    /// playback resolves against raw provider times.
+    private var displayNow: Date { EPGOffsetStore.lookupNow(now) }
+    private var isDisplayCurrent: Bool { programme.isCurrent(at: displayNow) }
 
     private var catchupPlayable: Bool {
         guard let s = liveStream, s.tvArchive == 1 else { return false }
@@ -76,14 +84,14 @@ struct EPGProgrammeDetailSheet: View {
                         Text(programme.title).font(.title3.bold())
                         HStack(spacing: 8) {
                             Text(timeLine).font(.subheadline).foregroundColor(.secondary)
-                            if isCurrent {
+                            if isDisplayCurrent {
                                 Text(L("epg.detail.live_badge"))
                                     .font(.caption2.bold())
                                     .padding(.horizontal, 6).padding(.vertical, 2)
                                     .background(Color.accentColor.opacity(0.2), in: Capsule())
                             }
                         }
-                        if isCurrent, let fraction = programme.progress(at: now) {
+                        if isDisplayCurrent, let fraction = programme.progress(at: displayNow) {
                             ProgressView(value: fraction).tint(.accentColor)
                         }
                     }

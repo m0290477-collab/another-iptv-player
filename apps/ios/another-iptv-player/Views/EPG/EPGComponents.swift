@@ -70,7 +70,9 @@ struct EPGNowNextLine: View {
 
     @ViewBuilder
     private func progressCapsule(for programme: EPGProgramme) -> some View {
-        let fraction = programme.progress(at: Date()) ?? 0
+        // F1 (B13): progress is measured against the offset-shifted
+        // "now" so the bar matches the displayed times.
+        let fraction = programme.progress(at: EPGOffsetStore.lookupNow()) ?? 0
         ZStack(alignment: .leading) {
             Capsule().fill(Color.primary.opacity(0.18)).frame(width: width, height: 3)
             Capsule().fill(tint).frame(width: max(0, width * fraction), height: 3)
@@ -91,7 +93,8 @@ struct PlayerProgrammeStrip: View {
     private let barWidth: CGFloat = 188
 
     var body: some View {
-        let fraction = programme.progress(at: Date()) ?? 0
+        // F1 (B13): offset-shifted "now", matching the displayed range.
+        let fraction = programme.progress(at: EPGOffsetStore.lookupNow()) ?? 0
 
         VStack(alignment: .leading, spacing: 5) {
             Text(programme.title)
@@ -121,12 +124,19 @@ enum EPGTimeFormat {
     /// "20:30" in the APP's chosen language (C9 one-locale law,
     /// finisher wiring): the formatter binds to `AppTheme.appLocale`,
     /// never the device locale (24h or 12h per that locale).
+    ///
+    /// F1 (B13): the F1 EPG time offset is applied HERE, at the
+    /// single formatting choke point, so every displayed programme
+    /// time in the app (guide axis + cells, programme details,
+    /// channel schedules, search results, Home shelves, the player
+    /// programme strip) shifts by the same amount. Callers always
+    /// pass RAW provider times.
     static func time(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = AppTheme.appLocale
         // "j" = the locale's own hour cycle (12h with AM/PM or 24h).
         formatter.setLocalizedDateFormatFromTemplate("j:mm")
-        return formatter.string(from: date)
+        return formatter.string(from: EPGOffsetStore.displayDate(date))
     }
 
     /// "20:30 – 21:00"

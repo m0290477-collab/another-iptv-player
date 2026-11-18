@@ -31,6 +31,8 @@ struct EPGGuideView: View {
     @State private var selected: SelectedProgramme?
     @State private var selectionTask: Task<Void, Never>?
     @State private var detailChannel: EPGGuideRow?
+    /// G5 (B13): the offline alert for this screen's EPG refresh.
+    @State private var showOfflineAlert = false
 
     private static let axisID = "axis"
     private static let bodyID = "body"
@@ -47,8 +49,27 @@ struct EPGGuideView: View {
         let row: EPGGuideRow
     }
 
+    /// G5 (B13): EPG refresh is network-only — offline it shows
+    /// the plain offline message with Retry instead of spinning
+    /// against a dead path.
+    private func refreshGuide() {
+        if OfflineState.shared.isOffline {
+            showOfflineAlert = true
+            return
+        }
+        Task { await epgStore.forceRefresh(playlist: model.playlist); await model.load() }
+    }
+
     var body: some View {
         content
+            .alert(L("offline.title"), isPresented: $showOfflineAlert) {
+                Button(L("common.try_again")) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { refreshGuide() }
+                }
+                Button(L("common.cancel"), role: .cancel) {}
+            } message: {
+                Text(L("offline.message"))
+            }
             .navigationTitle(L("epg.guide.title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .tabBar)
@@ -117,7 +138,7 @@ struct EPGGuideView: View {
             } description: {
                 Text(L("epg.empty.message"))
             } actions: {
-                Button(L("epg.refresh")) { Task { await epgStore.forceRefresh(playlist: model.playlist); await model.load() } }
+                Button(L("epg.refresh")) { refreshGuide() }
             }
         case .ready:
             VStack(spacing: 0) {
@@ -386,7 +407,7 @@ struct EPGGuideView: View {
         ToolbarItem(placement: .topBarTrailing) {
             let refreshing = epgStore.refreshState[model.playlist.id]?.isRefreshing ?? false
             Button {
-                Task { await epgStore.forceRefresh(playlist: model.playlist); await model.load() }
+                refreshGuide()
             } label: {
                 if refreshing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
             }
@@ -400,7 +421,10 @@ struct EPGGuideView: View {
 
     private var nowLineX: CGFloat? {
         guard isToday else { return nil }
-        return metrics.x(for: Date(), dayStart: model.dayStart)
+        // F1 (B13): the now-line sits at the position whose
+        // DISPLAYED time is now — the raw instant shifted by the
+        // one EPG offset (`EPGOffsetStore.lookupNow`).
+        return metrics.x(for: EPGOffsetStore.lookupNow(), dayStart: model.dayStart)
     }
 
     private func hBinding(_ id: String) -> Binding<ScrollPosition> {
@@ -463,7 +487,8 @@ struct EPGGuideView: View {
 
     private var defaultTimeOffset: CGFloat {
         if isToday {
-            return max(0, metrics.x(for: Date(), dayStart: model.dayStart) - metrics.hourWidth / 2)
+            // F1 (B13): same offset-shifted "now" as the now-line.
+            return max(0, metrics.x(for: EPGOffsetStore.lookupNow(), dayStart: model.dayStart) - metrics.hourWidth / 2)
         }
         return 8 * metrics.hourWidth // 08:00
     }

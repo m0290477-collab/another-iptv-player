@@ -177,7 +177,12 @@ final class EPGStore: ObservableObject {
     func tick() async {
         nowDate = Date()
         guard let pid = activePlaylistId else { snapshot = nil; return }
-        let now = Int64(Date().timeIntervalSince1970)
+        // F1 (B13): the now/next index is built against the
+        // offset-shifted "now" (`EPGOffsetStore.lookupNow`), so the
+        // snapshot's current programme is the one the user SEES as
+        // current under the F1 EPG time offset — the same offset
+        // `EPGTimeFormat` applies to every displayed time.
+        let now = Int64(EPGOffsetStore.lookupNow().timeIntervalSince1970)
 
         // C10 (Round 15): the tick query is narrowed to NOW/NEXT per
         // channel only. The old query fetched EVERY programme starting
@@ -213,7 +218,7 @@ final class EPGStore: ObservableObject {
         for row in rows {
             let prog = EPGProgramme(from: row)
             var entry = byStored[row.channelKey] ?? EPGNowNext()
-            if prog.isCurrent(at: Date()) {
+            if prog.isCurrent(at: EPGOffsetStore.lookupNow()) {
                 if entry.now == nil { entry.now = prog }
             } else if prog.start.timeIntervalSince1970 > Double(now) {
                 if entry.next == nil { entry.next = prog }

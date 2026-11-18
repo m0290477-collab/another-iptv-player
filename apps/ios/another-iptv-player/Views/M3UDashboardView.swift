@@ -97,6 +97,11 @@ struct M3UDashboardView: View {
         }
         .environmentObject(playerOverlay)
         .environment(\.epgSnapshot, epgStore.snapshot)
+        // G5 (B13): the shared offline indicator, same as the
+        // Xtream dashboard.
+        .overlay(alignment: .top) {
+            OfflineBannerView()
+        }
         .task(id: playlist.id) {
             favorites.track(playlistId: playlist.id)
             await store.loadPlaylist(playlist)

@@ -30,7 +30,10 @@ struct ChannelEPGDetailView: View {
 
     private var days: [(day: Date, items: [EPGProgramme])] {
         let cal = Calendar.current
-        let grouped = Dictionary(grouping: programmes) { cal.startOfDay(for: $0.start) }
+        // F1 (B13): group by the DISPLAYED day (raw start + the one
+        // EPG offset) so a programme shown as "01:30" sits under the
+        // day its displayed time belongs to.
+        let grouped = Dictionary(grouping: programmes) { cal.startOfDay(for: EPGOffsetStore.displayDate($0.start)) }
         return grouped.keys.sorted().map { ($0, grouped[$0]!.sorted { $0.start < $1.start }) }
     }
 
@@ -77,7 +80,7 @@ struct ChannelEPGDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        if let current = programmes.first(where: { $0.isCurrent(at: Date()) }) {
+                        if let current = programmes.first(where: { $0.isCurrent(at: EPGOffsetStore.lookupNow()) }) {
                             withAnimation { proxy.scrollTo(rowID(current), anchor: .center) }
                         }
                     } label: {
@@ -92,8 +95,12 @@ struct ChannelEPGDetailView: View {
     @ViewBuilder
     private func row(_ programme: EPGProgramme) -> some View {
         let now = Date()
-        let isCurrent = programme.isCurrent(at: now)
-        let isPast = programme.isPast(at: now)
+        // F1 (B13): on-air/past state as DISPLAYED (offset-shifted
+        // "now"); catch-up availability below keeps the real `now`
+        // because playback resolves against raw provider times.
+        let displayNow = EPGOffsetStore.lookupNow(now)
+        let isCurrent = programme.isCurrent(at: displayNow)
+        let isPast = programme.isPast(at: displayNow)
         HStack(alignment: .top, spacing: 12) {
             Text(EPGTimeFormat.time(programme.start))
                 .font(.subheadline.monospacedDigit())
@@ -111,7 +118,7 @@ struct ChannelEPGDetailView: View {
                 if let desc = programme.desc, !desc.isEmpty {
                     Text(desc).font(.caption).foregroundColor(.secondary).lineLimit(1)
                 }
-                if isCurrent, let fraction = programme.progress(at: now) {
+                if isCurrent, let fraction = programme.progress(at: displayNow) {
                     // C12: the on-air progress bar animates on the
                     // minute tick instead of snapping.
                     ProgressView(value: fraction).tint(AppTheme.accent)
@@ -144,7 +151,7 @@ struct ChannelEPGDetailView: View {
 
     /// Deferred a tick so the target row (often ~2 days into the list) has been laid out before scrolling.
     private func scrollToNowIfNeeded(_ proxy: ScrollViewProxy) {
-        guard !hasScrolledToNow, let current = programmes.first(where: { $0.isCurrent(at: Date()) }) else { return }
+        guard !hasScrolledToNow, let current = programmes.first(where: { $0.isCurrent(at: EPGOffsetStore.lookupNow()) }) else { return }
         hasScrolledToNow = true
         DispatchQueue.main.async {
             proxy.scrollTo(rowID(current), anchor: .center)

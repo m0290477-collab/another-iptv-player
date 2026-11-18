@@ -8,6 +8,9 @@ struct DashboardView: View {
     let onSwitchPlaylist: (Playlist) -> Void
     @ObservedObject private var contentStore = PlaylistContentStore.shared
     @ObservedObject private var epgStore = EPGStore.shared
+    /// F6 (B13): section visibility — hidden Movies/Series leave
+    /// the tab bar (Home and Live are never hidable).
+    @ObservedObject private var sectionVisibility = SectionVisibilityStore.shared
     /// Round 15 (C3): foreground returns consume pending Siri /
     /// App Intent requests and refresh the widget snapshot.
     @Environment(\.scenePhase) private var scenePhase
@@ -105,19 +108,25 @@ struct DashboardView: View {
                     }
                 } label: { tabLabel(L("dashboard.live"), symbol: "tv.fill", tab: DashboardTab.live) }
 
-                Tab(value: DashboardTab.movies) {
-                    NavigationStack {
-                        VODView(playlist: playlist)
-                            .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.movies"), type: "vod")
-                    }
-                } label: { tabLabel(L("dashboard.movies"), symbol: "film.fill", tab: DashboardTab.movies) }
+                // F6 (B13): Movies/Series tabs exist only while
+                // their section is visible in the ONE store.
+                if sectionVisibility.isVisible(.movies) {
+                    Tab(value: DashboardTab.movies) {
+                        NavigationStack {
+                            VODView(playlist: playlist)
+                                .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.movies"), type: "vod")
+                        }
+                    } label: { tabLabel(L("dashboard.movies"), symbol: "film.fill", tab: DashboardTab.movies) }
+                }
 
-                Tab(value: DashboardTab.series) {
-                    NavigationStack {
-                        SeriesView(playlist: playlist)
-                            .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.series"), type: "series")
-                    }
-                } label: { tabLabel(L("dashboard.series"), symbol: "play.tv.fill", tab: DashboardTab.series) }
+                if sectionVisibility.isVisible(.series) {
+                    Tab(value: DashboardTab.series) {
+                        NavigationStack {
+                            SeriesView(playlist: playlist)
+                                .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.series"), type: "series")
+                        }
+                    } label: { tabLabel(L("dashboard.series"), symbol: "play.tv.fill", tab: DashboardTab.series) }
+                }
 
                 Tab(value: DashboardTab.settings) {
                     NavigationStack {
@@ -171,6 +180,20 @@ struct DashboardView: View {
         }
         .environmentObject(playerOverlay)
         .environment(\.epgSnapshot, epgStore.snapshot)
+        // G5 (B13): the shared offline indicator — local content
+        // (cached catalog, downloads) stays usable beneath it.
+        .overlay(alignment: .top) {
+            OfflineBannerView()
+        }
+        // F6 (B13): if the section the user is standing in gets
+        // hidden from Settings, land on Home instead of a vanished
+        // tab.
+        .onChange(of: sectionVisibility.hiddenSections) { _, hidden in
+            if (selectedTab == .movies && hidden.contains(.movies))
+                || (selectedTab == .series && hidden.contains(.series)) {
+                selectedTab = .home
+            }
+        }
         .task(id: playlist.id) {
             await contentStore.loadPlaylist(playlist)
             // Round 12 (point 9): keep the provider-expiry record

@@ -59,6 +59,11 @@ enum M3UImporter {
                 try row.save(db)
             }
         }
+        // N1 (B13): mirror the credentials into the synchronizable
+        // keychain at the store layer — every M3U add/edit/refresh
+        // path funnels through this gateway. Mirrors `updated`
+        // (post-EPG-URL state), exactly what was saved.
+        CredentialStore.mirror(updated)
     }
 
     /// Deterministic channel ID generation: after a reimport the same URL gets the same ID.

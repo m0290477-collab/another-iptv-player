@@ -83,6 +83,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // happen before launch finishes; the service schedules its
         // first run itself.
         BackgroundRefreshService.register()
+        // Build 61 (B13, G6): MetricKit subscriber registration —
+        // same launch-callback pattern; payloads (if any) land in
+        // MetricKitService and surface only in Support diagnostics.
+        MetricKitService.register()
         // C2 (Round 15): memory-warning response — trim the IMAGE
         // memory cache only; the catalog and all DB state stay. (The
         // pipeline itself lives in CachedImage.swift, which is not the
@@ -174,6 +178,14 @@ private struct AppRootView: View {
             .task {
                 _ = AppDatabase.shared
                 MockFixture.seedIfNeeded()
+                // Build 61 (B13, N2): after a reinstall, an EMPTY
+                // playlist table + keychain mirror records =
+                // restore the playlists automatically (the service
+                // no-ops in every other state).
+                await PlaylistRestoreService.shared.restoreIfNeeded()
+                // Build 61 (B13, F7): one iTunes lookup per launch;
+                // silence on any failure (see AppUpdateService).
+                await AppUpdateService.shared.checkIfNeeded()
                 await AppDatabase.shared.pruneWatchHistory()
                 // === B5 (build 61) Item 3: iCloud sync start (one line;
                 // the service degrades silently when iCloud is off) ===
