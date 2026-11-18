@@ -19,6 +19,8 @@
 	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Used to scan your provider's sign-in QR code.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Used to unlock Super X when the app lock is on.</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>vlc</string>

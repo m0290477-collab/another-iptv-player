@@ -29,7 +29,35 @@ import UIKit
 ///    device is stored in the DB (harmless, invisible) and becomes
 ///    visible if the same playlist (same UUID) is added there.
 ///
-/// 2. Settings — `NSUbiquitousKeyValueStore`, whitelist ONLY:
+/// 2. Watch history — CloudKit private database (B15, W2a):
+///    - `SXWatchHistory` for `DBWatchHistory`, one record per
+///    history row, keyed by the row's stable id. Fields carry the
+///    resume position (`lastTimeMs` / `durationMs`), the per-record
+///    timestamp `lastWatchedAt`, and the quick-listing metadata —
+///    NO server URL, username or password ever syncs (history rows
+///    don't hold any).
+///    Merge rule is last-writer-wins on a per-record `modifiedAt`
+///    stamp (equal to `lastWatchedAt` for live rows; the deletion
+///    time for tombstones). Deletions (clear-history, pruning)
+///    propagate via tombstone records exactly like favorites.
+///    This one sync covers THREE features, because all three read
+///    the same table:
+///      (a) watch progress / Continue rows (resume positions),
+///      (b) C5 watched-episode marks — the AUTO mark derives from
+///          history position (≥90%), and the MANUAL overrides are
+///          UserDefaults string arrays whose prefixes
+///          (`episodes.manually_watched.` /
+///          `episodes.manually_unwatched.`) B8 already added to the
+///          KVS whitelist below,
+///      (c) Recent Channels — `RecentChannelsRow` is a query over
+///          this same table (type "live"), so there is deliberately
+///          NO second sync path for it.
+///    Triggers mirror favorites: launch, foregrounding, and a GRDB
+///    ValueObservation (count + max(lastWatchedAt) fingerprint, so
+///    pure position updates — which change neither the row count
+///    nor the row set — still schedule a sync).
+///
+/// 3. Settings — `NSUbiquitousKeyValueStore`, whitelist ONLY:
 ///    Fixed keys (verified against their `@AppStorage` / store
 ///    definitions in this codebase):
 ///      appearance:  app.accent_preset, app.selected_language,
@@ -54,6 +82,8 @@ import UIKit
 ///      watchlist.vod.*      (WatchlistStore — §5 sync scope: watch later)
 ///    NEVER synced: gate.draft.* (playlist server URL + username),
 ///    pin.* (parental-PIN behaviour; the PIN itself is Keychain-only),
+///    applock.* (B15 W1: the app-lock enable flag; its PIN hash is a
+///    device-only Keychain item and never leaves the device),
 ///    playlist credentials (they live in the GRDB `playlist` table and
 ///    are not UserDefaults values at all), and any key not listed here.
 final class ICloudSyncService: NSObject {
@@ -73,7 +103,14 @@ final class ICloudSyncService: NSObject {
     private var favoritesDebounceItem: DispatchWorkItem?
     private var settingsDebounceItem: DispatchWorkItem?
 
+    // B15 (W2a): watch-history sync state, mirroring favorites.
+    private var historySyncInFlight = false
+    private var historySyncPending = false
+    private var historyObservation: AnyDatabaseCancellable?
+    private var historyDebounceItem: DispatchWorkItem?
+
     private static let lastSyncKey = "icloud.favoritesLastSyncAt"
+    private static let historyLastSyncKey = "icloud.historyLastSyncAt"
 
     private override init() { super.init() }
 
@@ -107,6 +144,9 @@ final class ICloudSyncService: NSObject {
         startSettingsSync()
         startFavoriteObservations()
         await syncFavorites()
+        // B15 (W2a): watch-history sync rides the same bootstrap.
+        startHistoryObservation()
+        await syncWatchHistory()
 
         NotificationCenter.default.addObserver(
             self,
@@ -117,7 +157,10 @@ final class ICloudSyncService: NSObject {
     }
 
     @objc private func appWillEnterForeground() {
-        Task { await syncFavorites() }
+        Task {
+            await syncFavorites()
+            await syncWatchHistory()
+        }
     }
 
     private var syncEnabled: Bool {
@@ -410,6 +453,250 @@ final class ICloudSyncService: NSObject {
             all.append(contentsOf: matches.compactMap { _, result in try? result.get() })
         }
         return all
+    }
+
+    // MARK: - Watch history (CloudKit) — B15, W2a
+
+    private static let historyRecordType = "SXWatchHistory"
+
+    /// One watch-history row, flattened for sync.
+    struct HistorySnapshot {
+        var recordName: String
+        /// The row's stable id ("\(playlistId)_\(type)_\(streamId)").
+        var id: String
+        var playlistId: UUID
+        var streamId: String
+        var type: String
+        var lastTimeMs: Int
+        var durationMs: Int
+        /// The row's own timestamp (data — drives Continue-row
+        /// ordering on the receiving device).
+        var lastWatchedAt: Date
+        var seriesId: String?
+        var title: String
+        var secondaryTitle: String?
+        var imageURL: String?
+        var containerExtension: String?
+        /// The last-writer-wins clock: `lastWatchedAt` for a live
+        /// row, the deletion time for a tombstone.
+        var modifiedAt: Date
+        var isDeleted: Bool
+    }
+
+    private static func snapshot(for row: DBWatchHistory) -> HistorySnapshot {
+        HistorySnapshot(
+            recordName: "hist|\(sanitized(row.id))",
+            id: row.id,
+            playlistId: row.playlistId,
+            streamId: row.streamId,
+            type: row.type,
+            lastTimeMs: row.lastTimeMs,
+            durationMs: row.durationMs,
+            lastWatchedAt: row.lastWatchedAt,
+            seriesId: row.seriesId,
+            title: row.title,
+            secondaryTitle: row.secondaryTitle,
+            imageURL: row.imageURL,
+            containerExtension: row.containerExtension,
+            modifiedAt: row.lastWatchedAt,
+            isDeleted: false
+        )
+    }
+
+    private static func snapshotFromHistoryRecord(_ record: CKRecord) -> HistorySnapshot? {
+        guard let id = record["id"] as? String,
+              let playlistRaw = record["playlistId"] as? String,
+              let playlistId = UUID(uuidString: playlistRaw),
+              let streamId = record["streamId"] as? String,
+              let type = record["type"] as? String,
+              let lastWatchedAt = record["lastWatchedAt"] as? Date,
+              let modifiedAt = record["modifiedAt"] as? Date
+        else { return nil }
+        return HistorySnapshot(
+            recordName: record.recordID.recordName,
+            id: id,
+            playlistId: playlistId,
+            streamId: streamId,
+            type: type,
+            lastTimeMs: (record["lastTimeMs"] as? NSNumber)?.intValue ?? 0,
+            durationMs: (record["durationMs"] as? NSNumber)?.intValue ?? 0,
+            lastWatchedAt: lastWatchedAt,
+            seriesId: record["seriesId"] as? String,
+            title: (record["title"] as? String) ?? "",
+            secondaryTitle: record["secondaryTitle"] as? String,
+            imageURL: record["imageURL"] as? String,
+            containerExtension: record["containerExtension"] as? String,
+            modifiedAt: modifiedAt,
+            isDeleted: ((record["deleted"] as? NSNumber)?.int64Value ?? 0) != 0
+        )
+    }
+
+    private static func write(_ snapshot: HistorySnapshot, into record: CKRecord) {
+        record["id"] = snapshot.id as NSString
+        record["playlistId"] = snapshot.playlistId.uuidString as NSString
+        record["streamId"] = snapshot.streamId as NSString
+        record["type"] = snapshot.type as NSString
+        record["lastTimeMs"] = Int64(snapshot.lastTimeMs) as NSNumber
+        record["durationMs"] = Int64(snapshot.durationMs) as NSNumber
+        record["lastWatchedAt"] = snapshot.lastWatchedAt as NSDate
+        if let seriesId = snapshot.seriesId { record["seriesId"] = seriesId as NSString }
+        record["title"] = snapshot.title as NSString
+        if let secondaryTitle = snapshot.secondaryTitle { record["secondaryTitle"] = secondaryTitle as NSString }
+        if let imageURL = snapshot.imageURL { record["imageURL"] = imageURL as NSString }
+        if let containerExtension = snapshot.containerExtension { record["containerExtension"] = containerExtension as NSString }
+        record["modifiedAt"] = snapshot.modifiedAt as NSDate
+        record["deleted"] = NSNumber(value: snapshot.isDeleted ? 1 : 0)
+    }
+
+    private func startHistoryObservation() {
+        // Fingerprint = row count + newest lastWatchedAt. A pure
+        // resume-position update rewrites its row with
+        // lastWatchedAt = now, which moves the max; inserts and
+        // deletions move the count. Either change schedules a sync.
+        let observation = ValueObservation.tracking { db -> String in
+            try String.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) || '|' || COALESCE(MAX(lastWatchedAt), '') FROM watchHistory"
+            ) ?? ""
+        }
+        self.historyObservation = observation.start(
+            in: AppDatabase.shared.reader,
+            onError: { _ in },
+            onChange: { [weak self] _ in self?.scheduleHistorySync() }
+        )
+    }
+
+    private func scheduleHistorySync() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.historyDebounceItem?.cancel()
+            let item = DispatchWorkItem { [weak self] in
+                Task { await self?.syncWatchHistory() }
+            }
+            self.historyDebounceItem = item
+            self.queue.asyncAfter(deadline: .now() + 2, execute: item)
+        }
+    }
+
+    /// Full bidirectional merge of the watch-history table against
+    /// the private database. Last-writer-wins per record on
+    /// `modifiedAt`; deletions propagate as tombstones — the same
+    /// discipline as the favorites merge above.
+    func syncWatchHistory() async {
+        guard syncEnabled else { return }
+        let shouldRun: Bool = queue.sync {
+            if historySyncInFlight {
+                historySyncPending = true
+                return false
+            }
+            historySyncInFlight = true
+            return true
+        }
+        guard shouldRun else { return }
+        defer {
+            let rerun: Bool = queue.sync {
+                historySyncInFlight = false
+                let pending = historySyncPending
+                historySyncPending = false
+                return pending
+            }
+            if rerun { Task { await syncWatchHistory() } }
+        }
+
+        do {
+            let local = try await AppDatabase.shared.read { db in
+                try DBWatchHistory.fetchAll(db).map { Self.snapshot(for: $0) }
+            }
+            let remoteRecords = try await fetchAllRecords(recordType: Self.historyRecordType)
+            let remoteSnapshots = remoteRecords.compactMap(Self.snapshotFromHistoryRecord(_:))
+            let remoteByName = Dictionary(uniqueKeysWithValues: remoteSnapshots.map { ($0.recordName, $0) })
+            let localByName = Dictionary(uniqueKeysWithValues: local.map { ($0.recordName, $0) })
+            let lastSync = UserDefaults.standard.object(forKey: Self.historyLastSyncKey) as? Date
+
+            // 1) Remote wins → apply locally.
+            var toApply: [HistorySnapshot] = []
+            for remote in remoteSnapshots {
+                if let localRow = localByName[remote.recordName] {
+                    if remote.modifiedAt > localRow.modifiedAt { toApply.append(remote) }
+                } else if !remote.isDeleted {
+                    if let lastSync {
+                        if remote.modifiedAt > lastSync { toApply.append(remote) }
+                    } else {
+                        toApply.append(remote)
+                    }
+                }
+            }
+            if !toApply.isEmpty {
+                try await AppDatabase.shared.write { db in
+                    for snapshot in toApply {
+                        if snapshot.isDeleted {
+                            _ = try DBWatchHistory
+                                .filter(Column("id") == snapshot.id)
+                                .deleteAll(db)
+                        } else {
+                            try DBWatchHistory(
+                                id: snapshot.id,
+                                playlistId: snapshot.playlistId,
+                                streamId: snapshot.streamId,
+                                type: snapshot.type,
+                                lastTimeMs: snapshot.lastTimeMs,
+                                durationMs: snapshot.durationMs,
+                                lastWatchedAt: snapshot.lastWatchedAt,
+                                seriesId: snapshot.seriesId,
+                                title: snapshot.title,
+                                secondaryTitle: snapshot.secondaryTitle,
+                                imageURL: snapshot.imageURL,
+                                containerExtension: snapshot.containerExtension
+                            ).save(db)
+                        }
+                    }
+                }
+            }
+
+            // 2) Local wins → push.
+            var recordsToSave: [CKRecord] = []
+            for localRow in local {
+                if let remote = remoteByName[localRow.recordName] {
+                    if localRow.modifiedAt > remote.modifiedAt {
+                        let record = remoteRecords.first { $0.recordID.recordName == localRow.recordName }
+                            ?? CKRecord(recordType: Self.historyRecordType, recordID: CKRecord.ID(recordName: localRow.recordName))
+                        Self.write(localRow, into: record)
+                        recordsToSave.append(record)
+                    }
+                } else {
+                    let record = CKRecord(
+                        recordType: Self.historyRecordType,
+                        recordID: CKRecord.ID(recordName: localRow.recordName)
+                    )
+                    Self.write(localRow, into: record)
+                    recordsToSave.append(record)
+                }
+            }
+            // Local deletions: a live remote record whose row is
+            // gone locally and which has not changed since our last
+            // sync was deleted here (clear-history / prune) → push
+            // a tombstone stamped now.
+            if let lastSync {
+                for remote in remoteSnapshots where !remote.isDeleted {
+                    guard localByName[remote.recordName] == nil,
+                          remote.modifiedAt <= lastSync,
+                          let record = remoteRecords.first(where: { $0.recordID.recordName == remote.recordName })
+                    else { continue }
+                    record["deleted"] = NSNumber(value: 1)
+                    record["modifiedAt"] = Date() as NSDate
+                    recordsToSave.append(record)
+                }
+            }
+            if !recordsToSave.isEmpty {
+                _ = try await database.modifyRecords(saving: recordsToSave, deleting: [])
+            }
+            UserDefaults.standard.set(Date(), forKey: Self.historyLastSyncKey)
+        } catch {
+            // Same contract as favorites: any CloudKit failure
+            // leaves local data untouched and sync retries on the
+            // next trigger.
+            Log.error("ICloudSync", "watch-history sync failed — local data untouched: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Settings (NSUbiquitousKeyValueStore)

@@ -372,6 +372,11 @@ struct M3UPlaylistSettingsView: View {
             if settingsSearchMatches(settingsSearch, "pin parental lock settings") {
                 ParentalPINSection()
             }
+            // Build 61 (B15, W1): the app-open lock group, directly
+            // under the parental PIN group (distinct lock, labeled).
+            if settingsSearchMatches(settingsSearch, "app lock face id touch id passcode open pin") {
+                AppLockSection()
+            }
             // — Build 61 (B3, O5): the Parental group continues
             // with the locked categories (item 5), then the
             // Storage group (T1 cache). —

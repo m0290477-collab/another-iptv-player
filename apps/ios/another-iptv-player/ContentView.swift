@@ -35,10 +35,26 @@ struct ContentView: View {
     /// Build 61 (N2, B13): observes the reinstall-restore pass so
     /// its ONE small notice can be shown (and acknowledged) here.
     @ObservedObject private var restoreService = PlaylistRestoreService.shared
+    /// Build 61 (B15, W1): the app-open lock. While locked, the
+    /// body renders ONLY the lock screen — the gate, onboarding
+    /// and dashboards below are not in the hierarchy at all.
+    @ObservedObject private var appLock = AppLockService.shared
 
     private let lastPlaylistKey = "lastPlaylistId"
 
     var body: some View {
+        // === B15 (build 61) W1: app-open lock gate ===
+        Group {
+            if appLock.isLocked {
+                AppLockView()
+            } else {
+                mainBody
+            }
+        }
+        // === End B15 W1 ===
+    }
+
+    private var mainBody: some View {
         storageAwareBody
             .overlay {
                 if showSplash {
