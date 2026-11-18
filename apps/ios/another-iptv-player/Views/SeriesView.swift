@@ -1000,20 +1000,34 @@ struct SeriesCategoryContent: View, Equatable {
         return hasher.finalize()
     }
 
+    // Build 61 (B8, C1): year + rating facets (genre already lives
+    // in `genreFilter` above; countries don't exist on series
+    // records, so no country facet is offered — honestly absent).
+    @State private var facetSelection = CatalogFacetSelection()
+    @State private var facetYears: [Int] = []
+    @State private var facetHasRatings = false
+
     private var isFilterActive: Bool {
-        sortOption != .defaultOrder || !genreFilter.isEmpty
+        sortOption != .defaultOrder || !genreFilter.isEmpty || !facetSelection.isEmpty
     }
 
     private func recompute() async {
         let source = items
         let sort = sortOption
         let filter = genreFilter
-        let (result, allGenres) = await Task.detached(priority: .userInitiated) { () -> ([SeriesWithCategory], [String]) in
-            let sorted = sort.apply(to: SeriesGenre.filter(source, selection: filter))
-            return (sorted, SeriesGenre.available(in: source))
+        let facets = facetSelection
+        let (result, allGenres, years) = await Task.detached(priority: .userInitiated) { () -> ([SeriesWithCategory], [String], [Int]) in
+            let genreFiltered = SeriesGenre.filter(source, selection: filter)
+            let sorted = sort.apply(to: facets.apply(to: genreFiltered))
+            return (sorted, SeriesGenre.available(in: source),
+                    CatalogFacets.seriesFacets(in: source.map(\.series)).years)
         }.value
         displayItems = result
         genres = allGenres
+        facetYears = years
+        facetHasRatings = items.contains {
+            ContentRating.normalizedRating10(rating: $0.series.rating, rating5Based: $0.series.rating5Based) != nil
+        }
         visibleCount = min(Self.pageSize, result.count)
         prefetch(result)
     }
@@ -1077,6 +1091,7 @@ struct SeriesCategoryContent: View, Equatable {
         .task(id: itemsToken) { await recompute() }
         .task(id: sortOption) { await recompute() }
         .task(id: genreFilter) { await recompute() }
+        .task(id: facetSelection) { await recompute() }
         .task(id: initialGenre) {
             if let initialGenre, genreFilter.isEmpty {
                 genreFilter = [initialGenre]
@@ -1106,22 +1121,46 @@ struct SeriesCategoryContent: View, Equatable {
                         isSelected: sortOption == option
                     ) { sortOption = option }
                 },
-                filterTitle: genres.isEmpty ? nil : L("filter.genre"),
+                filterTitle: L("filter.title"),
                 filterRows: genres.map { genre in
                     SortFilterSheet.Row(
                         id: "genre-\(genre)",
                         title: genre,
                         isSelected: genreFilter.contains(genre)
                     ) { toggleGenre(genre) }
-                },
+                } + facetRows,
                 // Round 14 (B1): Clear resets the SORT as well as the
-                // genre filter.
-                onClearFilters: (sortOption == .defaultOrder && genreFilter.isEmpty) ? nil : {
+                // genre filter. B8: facets clear with them.
+                onClearFilters: (sortOption == .defaultOrder && genreFilter.isEmpty && facetSelection.isEmpty) ? nil : {
                     sortOption = .defaultOrder
                     genreFilter.removeAll()
+                    facetSelection.clear()
                 }
             )
         }
+    }
+
+    /// Build 61 (B8, C1): year + rating-floor rows, built only from
+    /// values present in this list.
+    private var facetRows: [SortFilterSheet.Row] {
+        var rows: [SortFilterSheet.Row] = []
+        for year in facetYears.prefix(12) {
+            rows.append(SortFilterSheet.Row(
+                id: "year-\(year)", title: String(year),
+                isSelected: facetSelection.years.contains(year)
+            ) {
+                if facetSelection.years.contains(year) { facetSelection.years.remove(year) } else { facetSelection.years.insert(year) }
+            })
+        }
+        if facetHasRatings {
+            for floor in [7.0, 8.0, 9.0] {
+                rows.append(SortFilterSheet.Row(
+                    id: "rating-\(floor)", title: L("filter.rating_min_format", Int(floor)),
+                    isSelected: facetSelection.minRating == floor
+                ) { facetSelection.minRating = facetSelection.minRating == floor ? nil : floor })
+            }
+        }
+        return rows
     }
 
     private func toggleGenre(_ genre: String) {

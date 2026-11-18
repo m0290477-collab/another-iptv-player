@@ -1010,6 +1010,13 @@ struct VODCategoryContent: View, Equatable {
     /// Screen-local: file types are specific to the currently shown list, so this
     /// intentionally does not persist across screens.
     @State private var fileTypeFilter: Set<String> = []
+    // Build 61 (B8, C1): advanced facet selection + the facet values
+    // actually present in this list (built in recompute, off-main).
+    @State private var facetSelection = CatalogFacetSelection()
+    @State private var facetGenres: [String] = []
+    @State private var facetYears: [Int] = []
+    @State private var facetCountries: [String] = []
+    @State private var facetHasRatings = false
     /// Sort/filter output, recomputed off the main thread on input changes so large
     /// lists (e.g. "All Movies") don't re-sort on every body pass (watch-progress ticks).
     @State private var displayItems: [VODWithCategory] = []
@@ -1046,22 +1053,31 @@ struct VODCategoryContent: View, Equatable {
     }
 
     private var isFilterActive: Bool {
-        sortOption != .defaultOrder || !fileTypeFilter.isEmpty
+        sortOption != .defaultOrder || !fileTypeFilter.isEmpty || !facetSelection.isEmpty
     }
 
     private func recompute() async {
         let source = items
         let sort = sortOption
         let filter = fileTypeFilter
-        let (result, queue, types) = await Task.detached(priority: .userInitiated) { () -> ([VODWithCategory], [DBVODStream], [String]) in
-            let sorted = sort.apply(to: VODFileType.filter(source, selection: filter))
+        let facets = facetSelection
+        let (result, queue, types, facetValues) = await Task.detached(priority: .userInitiated) { () -> ([VODWithCategory], [DBVODStream], [String], (genres: [String], years: [Int], countries: [String])) in
+            let facetFiltered = facets.apply(to: VODFileType.filter(source, selection: filter))
+            let sorted = sort.apply(to: facetFiltered)
             // Options come from the full list so toggling one doesn't hide the others.
-            return (sorted, sorted.map(\.stream), VODFileType.available(in: source))
+            return (sorted, sorted.map(\.stream), VODFileType.available(in: source),
+                    CatalogFacets.vodFacets(in: source.map(\.stream)))
         }.value
         guard !Task.isCancelled else { return }
         displayItems = result
         streamQueue = queue
         fileTypes = types
+        facetGenres = facetValues.genres
+        facetYears = facetValues.years
+        facetCountries = facetValues.countries
+        facetHasRatings = items.contains {
+            ContentRating.normalizedRating10(rating: $0.stream.rating, rating5Based: $0.stream.rating5Based) != nil
+        }
         visibleCount = min(Self.pageSize, result.count)
         prefetch(result)
     }
@@ -1142,7 +1158,54 @@ struct VODCategoryContent: View, Equatable {
         .task(id: itemsToken) { await recompute() }
         .task(id: sortOption) { await recompute() }
         .task(id: fileTypeFilter) { await recompute() }
+        .task(id: facetSelection) { await recompute() }
         .cinematicBackground()
+    }
+
+    /// Build 61 (B8, C1): facet rows for the sort/filter sheet —
+    /// genres, years, countries and rating floors, built ONLY from
+    /// values present in this list (empty facet = no rows).
+    private var facetRows: [SortFilterSheet.Row] {
+        var rows: [SortFilterSheet.Row] = []
+        for genre in facetGenres.prefix(12) {
+            rows.append(SortFilterSheet.Row(
+                id: "genre-\(genre)", title: genre,
+                isSelected: facetSelection.genres.contains(genre)
+            ) { toggleFacetGenre(genre) })
+        }
+        for year in facetYears.prefix(12) {
+            rows.append(SortFilterSheet.Row(
+                id: "year-\(year)", title: String(year),
+                isSelected: facetSelection.years.contains(year)
+            ) { toggleFacetYear(year) })
+        }
+        for country in facetCountries.prefix(12) {
+            rows.append(SortFilterSheet.Row(
+                id: "country-\(country)", title: country,
+                isSelected: facetSelection.countries.contains(country)
+            ) { toggleFacetCountry(country) })
+        }
+        if facetHasRatings {
+            for floor in [7.0, 8.0, 9.0] {
+                rows.append(SortFilterSheet.Row(
+                    id: "rating-\(floor)", title: L("filter.rating_min_format", Int(floor)),
+                    isSelected: facetSelection.minRating == floor
+                ) { facetSelection.minRating = facetSelection.minRating == floor ? nil : floor })
+            }
+        }
+        return rows
+    }
+
+    private func toggleFacetGenre(_ genre: String) {
+        if facetSelection.genres.contains(genre) { facetSelection.genres.remove(genre) } else { facetSelection.genres.insert(genre) }
+    }
+
+    private func toggleFacetYear(_ year: Int) {
+        if facetSelection.years.contains(year) { facetSelection.years.remove(year) } else { facetSelection.years.insert(year) }
+    }
+
+    private func toggleFacetCountry(_ country: String) {
+        if facetSelection.countries.contains(country) { facetSelection.countries.remove(country) } else { facetSelection.countries.insert(country) }
     }
 
     /// Round 10 (point 13): the raw popover `Menu` is now the
@@ -1166,19 +1229,20 @@ struct VODCategoryContent: View, Equatable {
                         isSelected: sortOption == option
                     ) { sortOption = option }
                 },
-                filterTitle: fileTypes.count > 1 ? L("filter.file_type") : nil,
-                filterRows: fileTypes.count > 1 ? fileTypes.map { ext in
+                filterTitle: L("filter.title"),
+                filterRows: (fileTypes.count > 1 ? fileTypes.map { ext in
                     SortFilterSheet.Row(
                         id: "type-\(ext)",
                         title: ext.uppercased(),
                         isSelected: fileTypeFilter.contains(ext)
                     ) { toggleFileType(ext) }
-                } : [],
+                } : []) + facetRows,
                 // Round 14 (B1): Clear resets the SORT as well as the
-                // file-type filter.
-                onClearFilters: (sortOption == .defaultOrder && fileTypeFilter.isEmpty) ? nil : {
+                // file-type filter. B8: facets clear with them.
+                onClearFilters: (sortOption == .defaultOrder && fileTypeFilter.isEmpty && facetSelection.isEmpty) ? nil : {
                     sortOption = .defaultOrder
                     fileTypeFilter.removeAll()
+                    facetSelection.clear()
                 }
             )
         }
