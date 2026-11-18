@@ -213,8 +213,13 @@ struct HomeView: View {
                         // entry — the LAST Home section per O1; Matches
                         // hangs off Home, it is NOT a tab (O2). B7: keep
                         // this row when restyling Home surfaces.
-                        matchesEntryRow
-                            .padding(.horizontal, 16)
+                        // Coordinator integration: F6 gate — hidden when
+                        // the user hid the Matches section (B13's
+                        // SectionVisibility key `sections.hidden.matches`).
+                        if !UserDefaults.standard.bool(forKey: "sections.hidden.matches") {
+                            matchesEntryRow
+                                .padding(.horizontal, 16)
+                        }
                         // ── B12 (build 61, M1) END ──
 
                         // B6 per-type loading: a type that has not

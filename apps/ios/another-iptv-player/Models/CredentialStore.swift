@@ -45,6 +45,13 @@ enum CredentialStore {
         var m3uEpgURL: String?
         var epgURLOverride: String?
         var epgEnabled: Bool
+        // Coordinator integration (build 61): B10's connection
+        // fields (G2 headers/UA, Q18 backup URL) ride the mirror
+        // too — N1 names them explicitly. Optional + defaulted so
+        // records written before this extension still decode.
+        var backupURL: String? = nil
+        var customUserAgent: String? = nil
+        var customHeadersJSON: String? = nil
         var createdAt: Date
 
         init(playlist: Playlist) {
@@ -58,6 +65,9 @@ enum CredentialStore {
             m3uEpgURL = playlist.m3uEpgURL
             epgURLOverride = playlist.epgURLOverride
             epgEnabled = playlist.epgEnabled
+            backupURL = playlist.backupURL
+            customUserAgent = playlist.customUserAgent
+            customHeadersJSON = playlist.customHeadersJSON
             createdAt = playlist.createdAt
         }
 
@@ -77,7 +87,10 @@ enum CredentialStore {
                 type: PlaylistKind(rawValue: type) ?? .xtream,
                 m3uEpgURL: m3uEpgURL,
                 epgURLOverride: epgURLOverride,
-                epgEnabled: epgEnabled
+                epgEnabled: epgEnabled,
+                backupURL: backupURL,
+                customUserAgent: customUserAgent,
+                customHeadersJSON: customHeadersJSON
             )
         }
     }
