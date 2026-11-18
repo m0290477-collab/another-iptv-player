@@ -185,7 +185,7 @@
 "settings.filter_adult.m3u_desc" = "XXX, 18+, adult वाले चैनल/समूह छिपाए जाएँगे";
 
 "settings.about.title" = "इसके बारे में";
-"settings.about.version" = "संस्करण";
+"settings.about.version" = "Super X Pro Max · संस्करण";
 
 // MARK: - M3U settings
 "settings.m3u.type_label" = "M3U / M3U8";
@@ -844,7 +844,7 @@
 "storage.title" = "स्टोरेज";
 "storage.cache" = "कैश";
 "storage.clear_cache" = "साफ़ करें";
-"subscription.title" = "सदस्यताएँ";
+"subscription.title" = "प्रदाता सदस्यताएँ";
 "subscription.m3u_source" = "M3U प्लेलिस्ट — कोई प्रदाता खाता नहीं";
 "subscription.provider_format" = "प्रदाता: %@";
 "subscription.provider_unknown" = "Xtream प्रदाता";
@@ -910,7 +910,7 @@
 "home.expiry.expiring" = "आपकी सदस्यता %d दिनों में समाप्त हो रही है (%@)";
 "home.expiry.expired" = "आपकी सदस्यता %@ को समाप्त हो गई";
 "home.expiry.dismiss" = "बंद करें";
-"splash.accessibility_label" = "Super X";
+"splash.accessibility_label" = "Super X Pro Max";
 
 /* MARK: Build 61 (b2) */
 "download.error.corrupt_removed" = "डाउनलोड की गई फ़ाइल क्षतिग्रस्त थी और हटा दी गई है। आप इसे फिर से डाउनलोड कर सकते हैं।";

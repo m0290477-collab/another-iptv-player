@@ -96,8 +96,16 @@ struct ShelfEntranceModifier: ViewModifier {
     @State private var shown = false
     @State private var rise: CGFloat = 28
     @State private var lastToken: Int?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var animates: Bool { index < 12 && Motion.animate(Motion.shelfSpring) != nil }
+    // Build 61 fixer (X3→Q21): the staggered entrance now reads the
+    // SAME EffectsGate as every other B7 effect — Reduce Motion +
+    // `appearance.reduceEffects` (Q21) + motion intensity. Before,
+    // this modifier read Motion/Reduce-Motion only, so entrances
+    // still animated under Q21 (critic F-5).
+    private var animates: Bool {
+        index < 12 && EffectsGate.allowsHeavyEffects(reduceMotion: reduceMotion)
+    }
 
     func body(content: Content) -> some View {
         content

@@ -77,6 +77,11 @@ enum RecentlyAddedResolver {
 
 struct RecentlyAddedRow: View {
     let playlist: Playlist
+    /// Build 61 fixer (F-3, O1 dedupe): resolver keys ("vod:<id>" /
+    /// "series:<id>" / "live:<id>") the earlier Home rows already
+    /// show — this row (O1 position 6) drops them. Default empty:
+    /// every other call site keeps the full set.
+    var excludingKeys: Set<String> = []
     /// Tapping a card hands the resolved entry's catalog identity to
     /// the parent, which routes it through its existing detail/play
     /// paths (Home assembly is B7's job).
@@ -88,6 +93,7 @@ struct RecentlyAddedRow: View {
 
     private var entries: [RecentlyAddedEntry] {
         RecentlyAddedResolver.entries(playlist: playlist, contentStore: contentStore)
+            .filter { !excludingKeys.contains($0.key) }
     }
 
     var body: some View {

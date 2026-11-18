@@ -185,7 +185,7 @@
 "settings.filter_adult.m3u_desc" = "隐藏名称含 XXX、18+、adult 的频道/分组";
 
 "settings.about.title" = "关于";
-"settings.about.version" = "版本";
+"settings.about.version" = "Super X Pro Max · 版本";
 
 // MARK: - M3U settings
 "settings.m3u.type_label" = "M3U / M3U8";
@@ -844,7 +844,7 @@
 "storage.title" = "存储空间";
 "storage.cache" = "缓存";
 "storage.clear_cache" = "清除";
-"subscription.title" = "订阅";
+"subscription.title" = "服务商订阅";
 "subscription.m3u_source" = "M3U 播放列表——无提供商账户";
 "subscription.provider_format" = "提供商：%@";
 "subscription.provider_unknown" = "Xtream 提供商";
@@ -910,7 +910,7 @@
 "home.expiry.expiring" = "您的订阅将在 %d 天后到期（%@）";
 "home.expiry.expired" = "您的订阅已于 %@ 到期";
 "home.expiry.dismiss" = "关闭";
-"splash.accessibility_label" = "Super X";
+"splash.accessibility_label" = "Super X Pro Max";
 
 /* MARK: Build 61 (b2) */
 "download.error.corrupt_removed" = "下载的文件已损坏并已被移除。您可以重新下载。";

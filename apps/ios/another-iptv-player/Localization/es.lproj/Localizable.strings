@@ -185,7 +185,7 @@
 "settings.filter_adult.m3u_desc" = "Oculta canales/grupos con XXX, 18+, adult en el nombre";
 
 "settings.about.title" = "Acerca de";
-"settings.about.version" = "Versión";
+"settings.about.version" = "Super X Pro Max · Versión";
 
 // MARK: - M3U settings
 "settings.m3u.type_label" = "M3U / M3U8";
@@ -844,7 +844,7 @@
 "storage.title" = "Almacenamiento";
 "storage.cache" = "Caché";
 "storage.clear_cache" = "Borrar";
-"subscription.title" = "Suscripciones";
+"subscription.title" = "Suscripciones del proveedor";
 "subscription.m3u_source" = "Lista M3U: sin cuenta de proveedor";
 "subscription.provider_format" = "Proveedor: %@";
 "subscription.provider_unknown" = "Proveedor Xtream";
@@ -910,7 +910,7 @@
 "home.expiry.expiring" = "Tu suscripción vence en %d días (%@)";
 "home.expiry.expired" = "Tu suscripción venció el %@";
 "home.expiry.dismiss" = "Descartar";
-"splash.accessibility_label" = "Super X";
+"splash.accessibility_label" = "Super X Pro Max";
 
 /* MARK: Build 61 (b2) */
 "download.error.corrupt_removed" = "El archivo descargado estaba dañado y se eliminó. Puedes descargarlo de nuevo.";

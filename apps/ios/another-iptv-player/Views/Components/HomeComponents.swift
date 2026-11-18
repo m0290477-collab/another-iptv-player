@@ -68,7 +68,10 @@ struct CinematicSectionHeader<Destination: View>: View {
             // ("• LIVE CHANNELS •" style, SPEC §2) via the shared
             // tokens — no per-screen header styling anywhere.
             Text("• \(title.uppercased()) •")
-                .font(.subheadline.weight(.bold))
+                // ST5 (fixer): chrome font via AppFont — IBM Plex
+                // Sans Arabic when Arabic, identical system
+                // subheadline/bold otherwise.
+                .font(AppFont.font(.subheadline, weight: .bold))
                 .foregroundStyle(AppTheme.accent)
                 .lineLimit(1)
             Spacer()
@@ -86,7 +89,7 @@ struct CinematicSectionHeader<Destination: View>: View {
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.bold))
                 }
-                .font(.subheadline.weight(.semibold))
+                .font(AppFont.font(.subheadline, weight: .semibold))
                 .foregroundStyle(AppTheme.accent)
             }
             .buttonStyle(PressScaleButtonStyle())

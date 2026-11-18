@@ -209,7 +209,7 @@
 "settings.filter_adult.m3u_desc" = "Kanal adı veya grupta XXX, 18+, adult gibi kelimeler içerenler gizlenir";
 
 "settings.about.title" = "Hakkında";
-"settings.about.version" = "Sürüm";
+"settings.about.version" = "Super X Pro Max · Sürüm";
 
 // MARK: - M3U settings
 "settings.m3u.type_label" = "M3U / M3U8";
@@ -862,7 +862,7 @@
 "storage.title" = "Depolama";
 "storage.cache" = "Önbellek";
 "storage.clear_cache" = "Temizle";
-"subscription.title" = "Abonelikler";
+"subscription.title" = "Sağlayıcı Abonelikleri";
 "subscription.m3u_source" = "M3U listesi — sağlayıcı hesabı yok";
 "subscription.provider_format" = "Sağlayıcı: %@";
 "subscription.provider_unknown" = "Xtream sağlayıcısı";
@@ -928,7 +928,7 @@
 "home.expiry.expiring" = "Aboneliğiniz %d gün içinde sona eriyor (%@)";
 "home.expiry.expired" = "Aboneliğiniz %@ tarihinde sona erdi";
 "home.expiry.dismiss" = "Kapat";
-"splash.accessibility_label" = "Super X";
+"splash.accessibility_label" = "Super X Pro Max";
 
 /* MARK: Build 61 (b2) */
 "download.error.corrupt_removed" = "İndirilen dosya bozuktu ve kaldırıldı. Tekrar indirebilirsiniz.";
