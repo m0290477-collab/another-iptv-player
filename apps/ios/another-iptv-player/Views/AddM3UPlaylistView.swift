@@ -227,6 +227,9 @@ struct AddM3UPlaylistView: View {
                 try await AppDatabase.shared.write { db in
                     try updated.save(db)
                 }
+                // N1 (B13): keep the keychain restore mirror in
+                // step on this direct save path too.
+                CredentialStore.mirror(updated)
                 await MainActor.run {
                     self.isLoading = false
                     self.progressMessage = nil

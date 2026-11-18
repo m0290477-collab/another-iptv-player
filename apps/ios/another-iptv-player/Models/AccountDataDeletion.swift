@@ -126,6 +126,11 @@ enum AccountDataDeletion {
         // account setup; a fresh start must not inherit it.
         PINStore.clearPIN()
 
+        // N4 (B13): the erase also deletes the synchronizable
+        // playlist-credential mirror items — otherwise a reinstall
+        // restore would resurrect playlists the user just erased.
+        CredentialStore.deleteAll()
+
         // Files / caches: poster image caches (memory + disk) and
         // the shared URL cache. The disk cache is the Nuke
         // DataCache directory named in CachedImage's pipeline
@@ -213,6 +218,10 @@ enum AccountDataDeletion {
         }
 
         await clearPerPlaylistStores(playlistId: id)
+
+        // N1 (B13): removing one playlist also removes its
+        // keychain restore mirror item.
+        CredentialStore.remove(playlistId: id)
 
         // Gate/session pointers that named this playlist.
         let defaults = UserDefaults.standard

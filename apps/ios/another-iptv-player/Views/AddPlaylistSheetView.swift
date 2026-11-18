@@ -49,6 +49,8 @@ struct AddPlaylistSheetView: View {
     @State private var progressMessage: String?
     @State private var errorMessage: String?
     @State private var showError = false
+    /// G5 (B13): the offline alert for the network save paths.
+    @State private var showOfflineAlert = false
 
     private var hasLocalFile: Bool { localContent != nil }
 
@@ -108,6 +110,16 @@ struct AddPlaylistSheetView: View {
             }, message: {
                 Text(errorMessage ?? L("common.unknown_error"))
             })
+            .alert(L("offline.title"), isPresented: $showOfflineAlert) {
+                Button(L("common.try_again")) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        Task { await save() }
+                    }
+                }
+                Button(L("common.cancel"), role: .cancel) { }
+            } message: {
+                Text(L("offline.message"))
+            }
             .fileImporter(
                 isPresented: $showFileImporter,
                 allowedContentTypes: Self.allowedFileTypes,
@@ -269,6 +281,15 @@ struct AddPlaylistSheetView: View {
     }
 
     private func save() async {
+        // G5 (B13): adding a playlist is network-only — EXCEPT an
+        // M3U picked from a local file, which imports fine
+        // offline. Offline, show the plain message with Retry
+        // instead of a spinner against a dead path.
+        let needsNetwork = formKind == .xtream || !hasLocalFile
+        if needsNetwork, OfflineState.shared.isOffline {
+            showOfflineAlert = true
+            return
+        }
         switch formKind {
         case .xtream: await saveXtream()
         case .m3u: await saveM3U()

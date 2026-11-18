@@ -184,6 +184,9 @@ struct AddPlaylistView: View {
                 try await AppDatabase.shared.write { db in
                     try newPlaylist.save(db)
                 }
+                // N1 (B13): keep the keychain restore mirror in
+                // step on this direct save path too.
+                CredentialStore.mirror(newPlaylist)
                 dismiss()
             } catch {
                 errorMessage = error.localizedDescription

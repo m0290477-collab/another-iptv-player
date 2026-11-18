@@ -21,6 +21,15 @@ struct ContentView: View {
     /// or the auto-loaded dashboard underneath is ready. No timer,
     /// no artificial delay.
     @State private var showSplash = true
+    /// Build 61 (F4, B13): first-run onboarding completion flag.
+    /// First launch only; the T6 erase wipes the whole
+    /// UserDefaults domain, which resets it (verified in B13's
+    /// report — the erase uses `removePersistentDomain`, not a
+    /// key list).
+    @AppStorage("onboarding.completed.v1") private var onboardingCompleted = false
+    /// Build 61 (N2, B13): observes the reinstall-restore pass so
+    /// its ONE small notice can be shown (and acknowledged) here.
+    @ObservedObject private var restoreService = PlaylistRestoreService.shared
 
     private let lastPlaylistKey = "lastPlaylistId"
 
@@ -32,6 +41,35 @@ struct ContentView: View {
                         .transition(.opacity)
                         .zIndex(100)
                 }
+            }
+            // F4: onboarding sits UNDER the splash and ABOVE the
+            // gate/dashboard — on a first launch it is revealed as
+            // the splash fades and must be finished or skipped
+            // before the gate is reachable. On later launches the
+            // flag is already set and this never renders.
+            .overlay {
+                if !showSplash && !onboardingCompleted {
+                    OnboardingView {
+                        withAnimation(Motion.animate(.easeInOut(duration: 0.3))) {
+                            onboardingCompleted = true
+                        }
+                    }
+                    .transition(.opacity)
+                    .zIndex(90)
+                }
+            }
+            // N2: the ONE restored-playlists notice for this launch.
+            .alert(L("restored.title"), isPresented: Binding(
+                get: { restoreService.restoredCount > 0 },
+                set: { if !$0 { restoreService.acknowledgeNotice() } }
+            )) {
+                Button(L("common.ok"), role: .cancel) {
+                    restoreService.acknowledgeNotice()
+                }
+            } message: {
+                Text(restoreService.restoredCount == 1
+                     ? L("restored.notice_one")
+                     : L("restored.notice_many_format", restoreService.restoredCount))
             }
             .onChange(of: playlists != nil) { _, ready in
                 if ready { dismissSplash() }

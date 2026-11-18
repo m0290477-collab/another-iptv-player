@@ -200,7 +200,12 @@ enum NotificationScheduler {
     @discardableResult
     static func scheduleProgrammeReminder(title: String, channelName: String, startDate: Date, id: String) async -> Bool {
         guard remindersEnabled else { return false }
-        let fireDate = startDate.addingTimeInterval(-Double(reminderLeadMinutes) * 60)
+        // F1 (B13): the reminder fires relative to the DISPLAYED
+        // programme start — the raw start shifted by the one EPG
+        // time offset (`EPGOffsetStore`), the same shift the guide
+        // and details show. `startDate` arrives raw.
+        let displayStart = EPGOffsetStore.displayDate(startDate)
+        let fireDate = displayStart.addingTimeInterval(-Double(reminderLeadMinutes) * 60)
         guard fireDate > Date() else { return false }
         guard await requestAuthorization() else { return false }
         await add(identifier: programmeReminderIdentifier(id: id),

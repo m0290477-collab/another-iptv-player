@@ -34,6 +34,10 @@ enum XtreamImporter {
         try await AppDatabase.shared.write { db in
             try playlist.save(db)
         }
+        // N1 (B13): mirror the credentials into the synchronizable
+        // keychain at the store layer — every Xtream add/edit path
+        // funnels through this gateway.
+        CredentialStore.mirror(playlist)
 
         progress(L("add_playlist.saving_db"))
 
