@@ -1,7 +1,7 @@
 import GRDB
 import SwiftUI
 
-/// “Kaldığın yerden” / geçmişten açılan dizi oynatıcısı; aynı dizi içinde önceki–sonraki bölüme geçer.
+/// The series player opened from "Where you left off" / history; moves to the prev/next episode within the same series.
 struct HistorySeriesPlayerShell: View {
     let playlist: Playlist
     private let initialHistory: DBWatchHistory
@@ -10,6 +10,10 @@ struct HistorySeriesPlayerShell: View {
     @State private var session: SeriesPlaybackSession
     @State private var neighborPrev: DBEpisode?
     @State private var neighborNext: DBEpisode?
+    /// F-58: the next episode's numbers for the T-50 card line,
+    /// resolved with the neighbors in `refreshNeighbors`.
+    @State private var nextSeasonNumber: Int?
+    @State private var nextEpisodeNumber: Int?
     @Environment(\.playerOverlayPresentationID) private var overlayPresentationID
     
     var onNavigateToDetail: ((String, String) -> Void)? = nil
@@ -39,6 +43,8 @@ struct HistorySeriesPlayerShell: View {
             canGoToNextEpisode: neighborNext != nil,
             onPreviousEpisode: { jumpTo(neighborPrev) },
             onNextEpisode: { jumpTo(neighborNext) },
+            nextEpisodeSeason: nextSeasonNumber,
+            nextEpisodeEpisode: nextEpisodeNumber,
             onNavigateToDetail: onNavigateToDetail
         )
         .task(id: session.streamId) {
@@ -54,16 +60,21 @@ struct HistorySeriesPlayerShell: View {
         guard session != target else { return }
         neighborPrev = nil
         neighborNext = nil
+        nextSeasonNumber = nil
+        nextEpisodeNumber = nil
         session = target
     }
 
     private func refreshNeighbors() async {
         guard let seriesIdStr = session.seriesId, let seriesId = Int(seriesIdStr) else {
-            await MainActor.run { neighborPrev = nil; neighborNext = nil }
+            await MainActor.run {
+                neighborPrev = nil; neighborNext = nil
+                nextSeasonNumber = nil; nextEpisodeNumber = nil
+            }
             return
         }
 
-        // Sync sonrası cascade silinmiş olabilir; seasonsLoaded = false ise API'dan çek
+        // It may have been cascade-deleted after sync; if seasonsLoaded = false, fetch it from the API
         let episodesMissing = (try? await AppDatabase.shared.read { db in
             try DBSeries
                 .filter(Column("seriesId") == seriesId && Column("playlistId") == playlist.id)
@@ -86,6 +97,8 @@ struct HistorySeriesPlayerShell: View {
         await MainActor.run {
             neighborPrev = ctx?.previous
             neighborNext = ctx?.next
+            nextSeasonNumber = ctx?.nextSeasonNumber
+            nextEpisodeNumber = ctx?.nextEpisodeNumber
         }
     }
 
@@ -96,6 +109,10 @@ struct HistorySeriesPlayerShell: View {
         let episodesBySeason = info.episodesBySeasonNumber
 
         try? await AppDatabase.shared.write { db in
+            // Round 15 (C8): ghost-episode cleanup, same rule as the
+            // detail screen's fetch — fetched set first, then delete
+            // this series' stored episodes absent from it.
+            var fetchedEpisodeIds = Set<String>()
             for (seasonNum, apiSeason) in info.resolvedSeasons {
                 let seasonId = DBSeason.scopedId(playlistId: playlist.id, seriesId: seriesId, seasonNumber: seasonNum)
                 let eps = episodesBySeason[seasonNum] ?? []
@@ -127,11 +144,25 @@ struct HistorySeriesPlayerShell: View {
                         rating: ep.info?.rating,
                         seasonId: seasonId
                     )
+                    fetchedEpisodeIds.insert(dbEp.id)
                     try dbEp.save(db)
                 }
             }
 
-            // Bir dahaki açılışta tekrar çekilmesin
+            let storedSeasonIds = try DBSeason
+                .filter(Column("seriesId") == seriesId && Column("playlistId") == playlist.id)
+                .fetchAll(db)
+                .map(\.id)
+            if !storedSeasonIds.isEmpty {
+                let stored = try DBEpisode
+                    .filter(storedSeasonIds.contains(Column("seasonId")))
+                    .fetchAll(db)
+                for stale in stored where !fetchedEpisodeIds.contains(stale.id) {
+                    try stale.delete(db)
+                }
+            }
+
+            // So it isn't fetched again on the next open
             if var s = try DBSeries
                 .filter(Column("seriesId") == seriesId && Column("playlistId") == playlist.id)
                 .fetchOne(db) {
@@ -144,15 +175,17 @@ struct HistorySeriesPlayerShell: View {
     private func jumpTo(_ episode: DBEpisode?) {
         guard let ep = episode else { return }
         let targetSid = ep.episodeId ?? ep.id
-        // Aynı bölüme (hızlı çift tap / bayat buton) atlamayı yut ve komşuları hemen
-        // sıfırla: refreshNeighbors ağ turu bitene dek eski bölümün komşuları
-        // butonlarda/Control Center'da geçerli kalıyordu.
+        // Swallow a jump to the same episode (fast double tap / stale button) and immediately reset the neighbors:
+        // until the refreshNeighbors network round finished, the old episode's neighbors
+        // stayed valid on the buttons/in Control Center.
         guard targetSid != session.streamId else { return }
         neighborPrev = nil
         neighborNext = nil
+        nextSeasonNumber = nil
+        nextEpisodeNumber = nil
         Task {
             let sid = targetSid
-            // Bölüm indirilmişse local dosyadan oynat; yoksa remote URL kullan.
+            // If the episode is downloaded, play it from the local file; otherwise use the remote URL.
             let localURL = await DownloadManager.shared.localURL(
                 forId: DownloadManager.idFor(episode: playlist.id, episodeId: sid)
             )
