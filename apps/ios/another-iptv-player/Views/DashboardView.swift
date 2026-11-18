@@ -245,19 +245,6 @@ struct DashboardView: View {
             }
             .environmentObject(playerOverlay)
         }
-        // Round 12 (point 9): the expired state for a blocked
-        // playback attempt. "Open Settings" routes to the Settings
-        // tab (switch playlist / renew with the provider).
-        .sheet(item: $playerOverlay.expiredNotice) { notice in
-            SubscriptionExpiredView(
-                expiryDate: notice.expiryDate,
-                onOpenSettings: {
-                    playerOverlay.expiredNotice = nil
-                    tabBinding.wrappedValue = .settings
-                },
-                onClose: { playerOverlay.expiredNotice = nil }
-            )
-        }
     }
 
     // MARK: - Round 15 (C3): pending Siri / App Intent playback
