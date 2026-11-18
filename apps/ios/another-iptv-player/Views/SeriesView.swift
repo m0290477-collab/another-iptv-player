@@ -85,6 +85,8 @@ struct SeriesView: View {
     @State private var topRatedSeries: [DBSeries] = []
     /// B8: seriesId (string key) → in-progress state for shelf cards.
     @State private var progressBySeriesId: [String: SeriesProgressInfo] = [:]
+    /// Build 61 (B8, C5): per-series watched % over loaded episodes.
+    @State private var watchedPercentBySeriesId: [String: Int] = [:]
     /// Full `lastModified`-desc ordering for the paginated Newest
     /// grid (the shared ranking is capped at 60).
     @State private var newestAll: [DBSeries] = []
@@ -162,11 +164,11 @@ struct SeriesView: View {
                             )
 
                             if topRatedSeries.count >= 3 {
-                                PopularSeriesShelf(playlist: playlist, items: topRatedSeries, progressBySeriesId: progressBySeriesId, replayToken: shelfReplayToken)
+                                PopularSeriesShelf(playlist: playlist, items: topRatedSeries, progressBySeriesId: progressBySeriesId, watchedPercentBySeriesId: watchedPercentBySeriesId, replayToken: shelfReplayToken)
                             }
 
                             if !recentlyAddedSeries.isEmpty {
-                                RecentlyAddedSeriesShelf(playlist: playlist, items: recentlyAddedSeries, progressBySeriesId: progressBySeriesId)
+                                RecentlyAddedSeriesShelf(playlist: playlist, items: recentlyAddedSeries, progressBySeriesId: progressBySeriesId, watchedPercentBySeriesId: watchedPercentBySeriesId)
                             }
 
                             LazyVStack(spacing: 0) {
@@ -176,7 +178,8 @@ struct SeriesView: View {
                                         category: category,
                                         items: displayItemsByCategory[category.id] ?? [],
                                         isStreamsLoading: !contentStore.streamsLoaded,
-                                        progressBySeriesId: progressBySeriesId
+                                        progressBySeriesId: progressBySeriesId,
+                                        watchedPercentBySeriesId: watchedPercentBySeriesId
                                     )
                                     .equatable()
                                     .id(category.id)
@@ -310,7 +313,8 @@ struct SeriesView: View {
                                 imageLoadProfile: .grid,
                                 watchProgress: progressBySeriesId[String(series.seriesId)]?.progress,
                                 seasonEpisodeCounts: contentStore.seriesSeasonEpisodeCounts[series.seriesId],
-                                positionText: progressBySeriesId[String(series.seriesId)]?.positionText
+                                positionText: progressBySeriesId[String(series.seriesId)]?.positionText,
+                                watchedPercent: watchedPercentBySeriesId[String(series.seriesId)]
                             )
                         }
                         .buttonStyle(PressScaleButtonStyle())
@@ -471,6 +475,47 @@ struct SeriesView: View {
         }
         guard !Task.isCancelled else { return }
         progressBySeriesId = result ?? [:]
+        await loadWatchedPercents()
+    }
+
+    /// Build 61 (B8, C5): watched % per series over its LOADED
+    /// episodes (episodes land in the DB when a series is opened or
+    /// refreshed). Series with no loaded episodes get no entry —
+    /// their cards show no percentage rather than a fabricated 0%.
+    private func loadWatchedPercents() async {
+        let pid = playlist.id
+        let result = try? await AppDatabase.shared.read { db -> [String: Int] in
+            let seasons = try DBSeason.filter(Column("playlistId") == pid).fetchAll(db)
+            guard !seasons.isEmpty else { return [:] }
+            let seasonSeries = Dictionary(seasons.map { ($0.id, $0.seriesId) }, uniquingKeysWith: { first, _ in first })
+            let episodes = try DBEpisode.filter(seasonSeries.keys.contains(Column("seasonId"))).fetchAll(db)
+            let history = try DBWatchHistory
+                .filter(Column("playlistId") == pid && Column("type") == "series")
+                .fetchAll(db)
+            let historyByKey = Dictionary(history.map { ($0.streamId, $0) }, uniquingKeysWith: { first, _ in first })
+            var totals: [Int: Int] = [:]
+            var watchedCounts: [Int: Int] = [:]
+            for episode in episodes {
+                guard let seriesId = seasonSeries[episode.seasonId] else { continue }
+                totals[seriesId, default: 0] += 1
+                let key = episode.episodeId ?? episode.id
+                let row = historyByKey[key]
+                let manual = EpisodeWatchStore.manualVerdict(playlistId: pid, episodeKey: key)
+                if EpisodeWatched.isWatched(manual: manual, lastTimeMs: row?.lastTimeMs ?? 0, durationMs: row?.durationMs ?? 0) {
+                    watchedCounts[seriesId, default: 0] += 1
+                }
+            }
+            var out: [String: Int] = [:]
+            for (seriesId, total) in totals where total > 0 {
+                let watched = watchedCounts[seriesId] ?? 0
+                if watched > 0 {
+                    out[String(seriesId)] = Int((Double(watched) / Double(total) * 100).rounded())
+                }
+            }
+            return out
+        }
+        guard !Task.isCancelled else { return }
+        watchedPercentBySeriesId = result ?? [:]
     }
 
     private func buildURL(for item: DBWatchHistory) -> URL? {
@@ -494,6 +539,7 @@ struct PopularSeriesShelf: View, Equatable {
     let playlist: Playlist
     let items: [DBSeries]
     var progressBySeriesId: [String: SeriesProgressInfo] = [:]
+    var watchedPercentBySeriesId: [String: Int] = [:]
     var replayToken: Int = 0
 
     static func == (lhs: PopularSeriesShelf, rhs: PopularSeriesShelf) -> Bool {
@@ -558,6 +604,7 @@ struct RecentlyAddedSeriesShelf: View, Equatable {
     let playlist: Playlist
     let items: [DBSeries]
     var progressBySeriesId: [String: SeriesProgressInfo] = [:]
+    var watchedPercentBySeriesId: [String: Int] = [:]
 
     static func == (lhs: RecentlyAddedSeriesShelf, rhs: RecentlyAddedSeriesShelf) -> Bool {
         lhs.playlist.id == rhs.playlist.id && lhs.items == rhs.items
@@ -594,7 +641,8 @@ struct RecentlyAddedSeriesShelf: View, Equatable {
                                 imageLoadProfile: .shelf,
                                 watchProgress: progressBySeriesId[String(series.seriesId)]?.progress,
                                 seasonEpisodeCounts: contentStore.seriesSeasonEpisodeCounts[series.seriesId],
-                                positionText: progressBySeriesId[String(series.seriesId)]?.positionText
+                                positionText: progressBySeriesId[String(series.seriesId)]?.positionText,
+                                watchedPercent: watchedPercentBySeriesId[String(series.seriesId)]
                             )
                         }
                         .buttonStyle(.plain)
@@ -658,6 +706,7 @@ struct SeriesCategoryShelfRow: View, Equatable {
     let items: [SeriesWithCategory]
     var isStreamsLoading: Bool = false
     var progressBySeriesId: [String: SeriesProgressInfo] = [:]
+    var watchedPercentBySeriesId: [String: Int] = [:]
 
     static func == (lhs: SeriesCategoryShelfRow, rhs: SeriesCategoryShelfRow) -> Bool {
         lhs.playlist.id == rhs.playlist.id &&
@@ -708,7 +757,8 @@ struct SeriesCategoryShelfRow: View, Equatable {
                                     imageLoadProfile: .shelf,
                                     watchProgress: progressBySeriesId[String(item.series.seriesId)]?.progress,
                                     seasonEpisodeCounts: contentStore.seriesSeasonEpisodeCounts[item.series.seriesId],
-                                    positionText: progressBySeriesId[String(item.series.seriesId)]?.positionText
+                                    positionText: progressBySeriesId[String(item.series.seriesId)]?.positionText,
+                                    watchedPercent: watchedPercentBySeriesId[String(item.series.seriesId)]
                                 )
                             }
                             .buttonStyle(.plain)
@@ -808,6 +858,9 @@ struct SeriesCard: View {
     /// B8: "S# • E#" of the latest in-progress episode, from real
     /// watch history; nil when the series isn't in progress.
     var positionText: String? = nil
+    /// Build 61 (B8, C5): watched-episode percentage over the
+    /// series' loaded episodes; nil when unknown or nothing watched.
+    var watchedPercent: Int? = nil
 
     /// "2024 • Fantasy" — built only from fields the record actually
     /// carries (release year, first genre); nil when neither exists.
@@ -887,6 +940,15 @@ struct SeriesCard: View {
                 Text(extraLine)
                     .font(AppTheme.fontMetadata)
                     .foregroundColor(positionText != nil ? AppTheme.accent : .secondary)
+                    .lineLimit(1)
+                    .frame(width: posterWidth, alignment: .leading)
+            }
+
+            // Build 61 (B8, C5): per-series watched percentage.
+            if let watchedPercent, watchedPercent > 0 {
+                Text(L("series.progress.percent_format", watchedPercent))
+                    .font(AppTheme.fontMetadata)
+                    .foregroundColor(.secondary)
                     .lineLimit(1)
                     .frame(width: posterWidth, alignment: .leading)
             }
@@ -1271,6 +1333,16 @@ struct SeriesDetailView: View {
     /// known-ID set from the previous detail open (first open only
     /// records the baseline).
     @State private var newEpisodeCount = 0
+    // Build 61 (B8): C5 watched progress, J2 More Like This, C2
+    // watch-later store, parental guard state.
+    @State private var seriesWatchedProgress: (watched: Int, total: Int)?
+    @State private var moreLikeThisSeries: [DBSeries] = []
+    @State private var pendingSeriesDetail: DBSeries?
+    @State private var parentalBlocked = false
+    @State private var showParentalPIN = false
+    @ObservedObject private var watchlistStore = WatchlistStore.shared
+    @ObservedObject private var episodeWatchStore = EpisodeWatchStore.shared
+    @ObservedObject private var contentStore = PlaylistContentStore.shared
     /// One navigation route for genre + people browsing (single
     /// destination registration per type, as SwiftUI requires).
     @State private var pendingRoute: MovieDetailRoute?
@@ -1392,9 +1464,51 @@ struct SeriesDetailView: View {
                 PersonTitlesView(playlist: playlist, person: person)
             }
         }
+        // Build 61 (B8, J2): More Like This target.
+        .navigationDestination(item: $pendingSeriesDetail) { next in
+            SeriesDetailView(playlist: playlist, series: next)
+        }
         .task {
+            // Build 61 (B8): parental guard for the series
+            // detail-open path + NEW-badge clearing (R2/R5).
+            if ParentalControlStore.shared.isBlocked(
+                playlistId: playlist.id, type: "series", categoryId: currentSeries.categoryId
+            ) {
+                parentalBlocked = true
+                showParentalPIN = true
+            }
+            FirstSeenStore.shared.markOpened(playlistId: playlist.id, itemKey: "series:\(currentSeries.seriesId)")
             if !currentSeries.seasonsLoaded {
                 await fetchSeriesInfo()
+            }
+        }
+        .task(id: currentSeries.seasonsLoaded) { await loadSeriesWatchedProgress() }
+        .task(id: episodeWatchStore.version) { await loadSeriesWatchedProgress() }
+        .task(id: currentSeries.seriesId) { await computeMoreLikeThis() }
+        .sheet(isPresented: $showParentalPIN) {
+            PINEntrySheet(message: L("parental.locked.enter_pin")) {
+                if let categoryId = currentSeries.categoryId {
+                    ParentalControlStore.shared.unlockForSession(
+                        playlistId: playlist.id, type: "series", categoryId: categoryId
+                    )
+                }
+                parentalBlocked = false
+            }
+        }
+        .overlay {
+            if parentalBlocked {
+                VStack(spacing: 12) {
+                    Image(systemName: "lock.fill")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text(L("parental.locked.title"))
+                        .font(.headline)
+                    Button(L("parental.locked.enter_pin")) { showParentalPIN = true }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.accent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.ultraThinMaterial)
             }
         }
         .task(id: watchHistory?.streamId) { await loadResumeEpisode() }
@@ -1717,6 +1831,47 @@ struct SeriesDetailView: View {
                 }
                 .padding(.top, -10)
 
+                // Build 61 (B8, C2): series Watch Later — the SAME
+                // WatchlistStore as movies (separate from Favorites),
+                // with its own surface on the Series tab.
+                seriesWatchLaterRow
+                    .padding(.top, -10)
+
+                // Build 61 (B8, J1): add to a custom favorite group.
+                FavoriteGroupMenuItems(
+                    playlist: playlist,
+                    item: FavoriteGroupStore.Item(
+                        type: "series",
+                        itemId: String(currentSeries.seriesId),
+                        title: currentSeries.name,
+                        imageURL: currentSeries.cover
+                    )
+                )
+                .font(.footnote.weight(.semibold))
+                .padding(.horizontal, 16)
+                .padding(.top, -6)
+
+                // Build 61 (B8, C5): watched-episode progress for
+                // this series (auto ≥90% + manual toggles), shown
+                // only when the series has episodes and at least one
+                // is watched — otherwise nothing is claimed.
+                if let progress = seriesWatchedProgress, progress.watched > 0 {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(L("series.progress.title"))
+                                .font(.footnote.weight(.semibold))
+                            Spacer()
+                            Text(L("series.progress.format", progress.watched, progress.total))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        ProgressView(value: Double(progress.watched) / Double(max(progress.total, 1)))
+                            .tint(AppTheme.accent)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, -4)
+                }
+
                 // Round 10: Episodes / About segmented tabs — the
                 // episode list is the default surface; Story,
                 // Director and Cast live under About.
@@ -1731,6 +1886,13 @@ struct SeriesDetailView: View {
                     seasonsSection
                 } else {
                     aboutSection
+                }
+
+                // Build 61 (B8, J2): More Like This — same-genre
+                // series from the loaded catalog, excluding this
+                // one; hidden below 3 matches.
+                if moreLikeThisSeries.count >= 3 {
+                    moreLikeThisSection
                 }
             }
             .padding(.bottom, 48)
@@ -1769,6 +1931,135 @@ struct SeriesDetailView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Build 61 (B8): watch-later row, watched progress, More Like This
+
+    /// C2: series Watch Later toggle — same store as movies, its own
+    /// surface on the Series tab (WatchlistSeriesView).
+    private var seriesWatchLaterRow: some View {
+        let inList = watchlistStore.containsSeries(playlistId: playlist.id, seriesId: currentSeries.seriesId)
+        return Button {
+            watchlistStore.toggleSeries(
+                playlistId: playlist.id, seriesId: currentSeries.seriesId,
+                title: currentSeries.name, imageURL: currentSeries.cover
+            )
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: inList ? "bookmark.fill" : "bookmark")
+                    .font(.footnote.weight(.semibold))
+                Text(inList ? L("watchlist.in_list") : L("watchlist.add"))
+                    .font(.footnote.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+            }
+            .foregroundStyle(inList ? AppTheme.accent : Color.primary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .fill(AppTheme.elevated)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .strokeBorder(AppTheme.cardBorderColor, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .accessibilityLabel(L("watchlist.title"))
+    }
+
+    private var moreLikeThisSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            DetailSectionHeader(title: L("detail.more_like_this"))
+                .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(moreLikeThisSeries) { item in
+                        Button {
+                            pendingSeriesDetail = item
+                        } label: {
+                            SeriesCard(
+                                playlistId: playlist.id,
+                                stream: item,
+                                posterWidth: posterMetrics.searchCardWidth,
+                                posterHeight: posterMetrics.searchCardHeight,
+                                imageLoadProfile: .shelf
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .scrollClipDisabled()
+            .shelfEdgeFade()
+        }
+    }
+
+    /// J2: same-genre series from the loaded catalog (genre overlap
+    /// scored like the movie side), excluding this series.
+    private func computeMoreLikeThis() async {
+        let snapshot = contentStore.seriesItems.map(\.series)
+        let source = currentSeries
+        let result = await Task.detached(priority: .utility) { () -> [DBSeries] in
+            let myGenres = Set(DetailFormatting.genreList(source.genre).map { $0.lowercased() })
+            guard !myGenres.isEmpty else { return [] }
+            var scored: [(series: DBSeries, score: Int, rating: Double)] = []
+            for candidate in snapshot where candidate.seriesId != source.seriesId {
+                let genres = Set(DetailFormatting.genreList(candidate.genre).map { $0.lowercased() })
+                let overlap = genres.intersection(myGenres).count
+                guard overlap > 0 else { continue }
+                scored.append((
+                    candidate, overlap,
+                    ContentRating.normalizedRating10(rating: candidate.rating, rating5Based: candidate.rating5Based) ?? -1
+                ))
+            }
+            scored.sort { a, b in
+                if a.score != b.score { return a.score > b.score }
+                return a.rating > b.rating
+            }
+            return Array(scored.prefix(15).map(\.series))
+        }.value
+        guard !Task.isCancelled else { return }
+        moreLikeThisSeries = result
+    }
+
+    /// C5 (+R5): watched/total over the series' CURRENT episode set
+    /// (the post-refresh DB rows — episodes added by a refresh count
+    /// in the denominator as soon as they land). Watched = history
+    /// ≥90% or a manual EpisodeWatchStore verdict.
+    private func loadSeriesWatchedProgress() async {
+        let pid = playlist.id
+        let sid = currentSeries.seriesId
+        let data = try? await AppDatabase.shared.read { db -> (episodes: [DBEpisode], history: [DBWatchHistory]) in
+            let seasonIds = try DBSeason
+                .filter(Column("seriesId") == sid && Column("playlistId") == pid)
+                .fetchAll(db)
+                .map(\.id)
+            let episodes = seasonIds.isEmpty ? [] : try DBEpisode
+                .filter(seasonIds.contains(Column("seasonId")))
+                .fetchAll(db)
+            let history = try DBWatchHistory
+                .filter(Column("playlistId") == pid && Column("type") == "series" && Column("seriesId") == String(sid))
+                .fetchAll(db)
+            return (episodes, history)
+        }
+        guard let data else { return }
+        let historyByKey = Dictionary(data.history.map { ($0.streamId, $0) }, uniquingKeysWith: { first, _ in first })
+        var watched = 0
+        for episode in data.episodes {
+            let key = episode.episodeId ?? episode.id
+            let manual = EpisodeWatchStore.shared.manualVerdict(playlistId: pid, episodeKey: key)
+            let row = historyByKey[key]
+            if EpisodeWatched.isWatched(manual: manual, lastTimeMs: row?.lastTimeMs ?? 0, durationMs: row?.durationMs ?? 0) {
+                watched += 1
+            }
+        }
+        guard !Task.isCancelled else { return }
+        seriesWatchedProgress = data.episodes.isEmpty ? nil : (watched, data.episodes.count)
     }
 
     @ViewBuilder
@@ -2059,6 +2350,14 @@ struct SeriesDetailView: View {
             // B8: the store's season/episode counts now include this
             // series — refresh them for the tab shelves.
             await PlaylistContentStore.shared.refreshSeriesSeasonEpisodeCounts()
+            // Build 61 (B8, R1/R5): record episode first-seen from
+            // this fetched set — new episodes badge the series.
+            let episodeKeys = (info.episodes ?? [:]).values.flatMap { eps in
+                eps.compactMap { ep in ep.id.map { "episode:\(series.seriesId):\($0)" } }
+            }
+            if !episodeKeys.isEmpty {
+                await FirstSeenStore.shared.record(playlistId: playlist.id, itemKeys: episodeKeys)
+            }
             await MainActor.run { self.isLoading = false }
         } catch {
             await MainActor.run {
@@ -2208,6 +2507,24 @@ private struct EpisodeDetailRow: View {
         )
     }
 
+    // Build 61 (B8, C5): watched verdict + manual toggle.
+    @ObservedObject private var episodeWatchStore = EpisodeWatchStore.shared
+
+    private var episodeKey: String { episode.episodeId ?? episode.id }
+
+    private var historyWatched: Bool {
+        guard let history = watchHistory else { return false }
+        return EpisodeWatched.historyWatched(lastTimeMs: history.lastTimeMs, durationMs: history.durationMs)
+    }
+
+    private var isWatched: Bool {
+        EpisodeWatched.isWatched(
+            manual: episodeWatchStore.manualVerdict(playlistId: playlist.id, episodeKey: episodeKey),
+            lastTimeMs: watchHistory?.lastTimeMs ?? 0,
+            durationMs: watchHistory?.durationMs ?? 0
+        )
+    }
+
     /// Round 10 (point 4): the thumbnail is the episode's OWN still
     /// when the panel provided one; when it didn't, the row falls
     /// back to the series' cover art instead of rendering an empty
@@ -2272,16 +2589,19 @@ private struct EpisodeDetailRow: View {
 
                     FlowMetaRow(episode: episode)
 
-                    if let history = watchHistory, history.durationMs > 0 {
+                    // Build 61 (B8, C5): the WATCHED mark uses the
+                    // C5 rule — history at ≥90% or a manual toggle in
+                    // EpisodeWatchStore (context menu below). This is
+                    // deliberately separate from the ≥98% resume/
+                    // finished threshold used by the player shells.
+                    if isWatched {
+                        Label(L("detail.watched"), systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                            .labelStyle(.titleAndIcon)
+                    } else if let history = watchHistory, history.durationMs > 0 {
                         let progress = Double(history.lastTimeMs) / Double(history.durationMs)
-                        // Round 14 (B8): the unified finished
-                        // threshold is ≥98% everywhere.
-                        if progress >= 0.98 {
-                            Label(L("detail.watched"), systemImage: "checkmark.circle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.green)
-                                .labelStyle(.titleAndIcon)
-                        } else {
+                        if progress > 0.02 {
                             let remainingMs = history.durationMs - history.lastTimeMs
                             Label(L("detail.remaining_format", formatWatchMs(remainingMs)), systemImage: "play.circle")
                                 .font(.caption)
@@ -2327,6 +2647,20 @@ private struct EpisodeDetailRow: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+        // Build 61 (B8, C5): manual watched toggle on the episode row.
+        .contextMenu {
+            Button {
+                episodeWatchStore.setWatched(
+                    !isWatched, playlistId: playlist.id,
+                    episodeKey: episodeKey, historyWatched: historyWatched
+                )
+            } label: {
+                Label(
+                    isWatched ? L("series.mark_unwatched") : L("series.mark_watched"),
+                    systemImage: isWatched ? "eye.slash" : "checkmark.circle"
+                )
+            }
+        }
     }
 
     private var episodeTitle: String {

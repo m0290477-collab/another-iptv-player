@@ -43,8 +43,16 @@ final class EpisodeWatchStore: ObservableObject {
     /// The manual verdict for one episode: true = forced watched,
     /// false = forced unwatched, nil = no override (history decides).
     func manualVerdict(playlistId: UUID, episodeKey: String) -> Bool? {
-        if stringSet(Self.watchedKey(playlistId: playlistId)).contains(episodeKey) { return true }
-        if stringSet(Self.unwatchedKey(playlistId: playlistId)).contains(episodeKey) { return false }
+        Self.manualVerdict(playlistId: playlistId, episodeKey: episodeKey)
+    }
+
+    /// Non-isolated read (UserDefaults only) so catalog computations
+    /// running inside GRDB read closures can consult overrides.
+    nonisolated static func manualVerdict(playlistId: UUID, episodeKey: String) -> Bool? {
+        let watched = Set(UserDefaults.standard.stringArray(forKey: watchedKey(playlistId: playlistId)) ?? [])
+        if watched.contains(episodeKey) { return true }
+        let unwatched = Set(UserDefaults.standard.stringArray(forKey: unwatchedKey(playlistId: playlistId)) ?? [])
+        if unwatched.contains(episodeKey) { return false }
         return nil
     }
 
