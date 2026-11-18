@@ -29,6 +29,10 @@ struct LiveCardContextMenu: ViewModifier {
     @State private var isFavorite = false
     @State private var historyRowId: String?
 
+    // MARK: - B2 (build 61) state: recording service + reorder sheet
+    @ObservedObject private var recorder = LiveRecordingService.shared
+    @State private var showReorderChannels = false
+
     func body(content: Content) -> some View {
         content
             .task(id: "\(playlist.id.uuidString)-\(stream.streamId)") {
@@ -39,6 +43,17 @@ struct LiveCardContextMenu: ViewModifier {
                 // stayed mounted while the favorite/history facts
                 // changed elsewhere (e.g. inside the player).
                 Task { await resolveState() }
+            }
+            // B2 (build 61, item 12): the channel reorder sheet for
+            // this card's category.
+            .sheet(isPresented: $showReorderChannels) {
+                if let categoryId {
+                    ReorderChannelsView(
+                        playlist: playlist,
+                        categoryId: categoryId,
+                        categoryName: categoryName
+                    )
+                }
             }
             .contextMenu {
                 Button {
@@ -65,6 +80,44 @@ struct LiveCardContextMenu: ViewModifier {
                         Label(L("continue_watching.remove"), systemImage: "xmark.circle")
                     }
                 }
+
+                // ────────────────────────────────────────────────
+                // B2 (build 61) — recording / external player /
+                // channel reorder. Delimited section: B8's menu
+                // items live above; keep these additive.
+                //
+                // NOTE on the header comment: the "no Download
+                // item" rule stands for file downloads — what
+                // follows is RECORDING (item 2's DVR), a real-time
+                // capture into Downloads, not a file download.
+                Divider()
+
+                if let activeId = recorder.activeRecordingId(playlistId: playlist.id, streamId: stream.streamId) {
+                    Button {
+                        recorder.stop(id: activeId)
+                    } label: {
+                        Label(L("record.stop"), systemImage: "stop.circle")
+                    }
+                } else {
+                    Button {
+                        Task { await recorder.start(playlist: playlist, stream: stream) }
+                    } label: {
+                        Label(L("record.start"), systemImage: "record.circle")
+                    }
+                }
+
+                if let liveURL = PlaybackURLBuilder(playlist: playlist).liveURL(streamId: stream.streamId) {
+                    ExternalPlayerMenuItems(streamURL: liveURL)
+                }
+
+                if let categoryId, categoryId != "all", !categoryId.isEmpty {
+                    Button {
+                        showReorderChannels = true
+                    } label: {
+                        Label(L("reorder.title"), systemImage: "arrow.up.arrow.down")
+                    }
+                }
+                // ────────────────────────────────────────────────
             }
     }
 
