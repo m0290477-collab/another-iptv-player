@@ -795,6 +795,12 @@ struct MovieDetailView: View {
                         try fav.insert(db)
                     }
                 }
+                // Build 61 (B8, R6): snapshot for the unavailable state.
+                if isFavorite {
+                    FavoriteSnapshotStore.shared.remove(playlistId: playlist.id, type: "vod", streamId: movie.streamId)
+                } else {
+                    FavoriteSnapshotStore.shared.record(playlistId: playlist.id, type: "vod", streamId: movie.streamId, title: movie.name, imageURL: movie.streamIcon)
+                }
             } catch {
                 Log.error("MovieDetail", "Failed to toggle favorite: \(error.localizedDescription)")
             }

@@ -48,7 +48,12 @@ final class HiddenChannelStore: ObservableObject {
     // MARK: - M3U
 
     func hiddenM3UIds(playlistId: UUID) -> Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: Self.m3uKey(playlistId: playlistId)) ?? [])
+        Self.hiddenM3UIds(playlistId: playlistId)
+    }
+
+    /// Non-isolated read for off-main list computations.
+    nonisolated static func hiddenM3UIds(playlistId: UUID) -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: m3uKey(playlistId: playlistId)) ?? [])
     }
 
     func isHiddenM3U(playlistId: UUID, channelId: String) -> Bool {

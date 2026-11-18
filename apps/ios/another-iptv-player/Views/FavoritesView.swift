@@ -49,6 +49,27 @@ struct FavoritesView: View {
             VStack(spacing: 12) {
                 CatalogSearchField(text: $searchText, placeholder: L("favorites.search_placeholder"))
 
+                // Build 61 (B8, J1): custom favorite groups live in
+                // the Library alongside Favorites + Watch Later.
+                NavigationLink {
+                    FavoriteGroupsView(playlist: playlist)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "folder")
+                            .font(.subheadline.weight(.semibold))
+                        Text(L("groups.title"))
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(AppTheme.elevated, in: RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius))
+                }
+                .buttonStyle(.plain)
+
                 HStack(spacing: 8) {
                     PillChipButton(title: L("dashboard.live"), isSelected: selectedType == "live") {
                         selectedType = "live"
@@ -75,10 +96,78 @@ struct FavoritesView: View {
                     seriesGrid
                 }
             }
+
+            // Build 61 (B8, R6): favorites whose catalog entry has
+            // vanished stay listed here, marked unavailable — user
+            // data is never silently deleted.
+            if !unavailableFavorites.isEmpty {
+                unavailableSection
+            }
         }
         .navigationTitle(L("favorites.title"))
         .navigationBarTitleDisplayMode(.large)
         .cinematicBackground()
+        .task { await loadRawFavorites() }
+        .onChange(of: favoriteLive.count) { _, _ in Task { await loadRawFavorites() } }
+        .onChange(of: favoriteVODs.count) { _, _ in Task { await loadRawFavorites() } }
+        .onChange(of: favoriteSeries.count) { _, _ in Task { await loadRawFavorites() } }
+    }
+
+    // MARK: - Build 61 (B8, R6): unavailable favorites
+
+    @State private var rawFavorites: [DBFavorite] = []
+    @ObservedObject private var snapshotStore = FavoriteSnapshotStore.shared
+
+    private func loadRawFavorites() async {
+        let pid = playlist.id
+        let rows = try? await AppDatabase.shared.read { db in
+            try DBFavorite.filter(Column("playlistId") == pid).fetchAll(db)
+        }
+        rawFavorites = rows ?? []
+    }
+
+    private var unavailableFavorites: [DBFavorite] {
+        let availableIds: Set<Int>
+        switch selectedType {
+        case "live": availableIds = Set(favoriteLive.map(\.stream.streamId))
+        case "vod": availableIds = Set(favoriteVODs.map(\.stream.streamId))
+        default: availableIds = Set(favoriteSeries.map(\.series.seriesId))
+        }
+        return rawFavorites.filter { $0.type == selectedType && !availableIds.contains($0.streamId) }
+    }
+
+    private var unavailableSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L("groups.unavailable"))
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.secondary)
+            ForEach(unavailableFavorites, id: \.streamId) { favorite in
+                let snap = snapshotStore.snapshot(playlistId: playlist.id, type: favorite.type, streamId: favorite.streamId)
+                HStack(spacing: 12) {
+                    CachedImage(
+                        url: snap?.imageURL.flatMap { URL(string: $0) },
+                        width: 44, height: 44,
+                        cornerRadius: AppTheme.smallCornerRadius,
+                        iconName: "exclamationmark.triangle"
+                    )
+                    Text(snap?.title ?? L("groups.unavailable"))
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(2)
+                    Spacer(minLength: 8)
+                    Button(role: .destructive) {
+                        removeFavorite(streamId: favorite.streamId, type: favorite.type)
+                        FavoriteSnapshotStore.shared.remove(playlistId: playlist.id, type: favorite.type, streamId: favorite.streamId)
+                        rawFavorites.removeAll { $0.streamId == favorite.streamId && $0.type == favorite.type }
+                    } label: {
+                        Image(systemName: "minus.circle")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     // MARK: - Search filtering (because the favorites lists are small, filtering per render is enough)

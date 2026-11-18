@@ -160,6 +160,12 @@ struct LiveCardContextMenu: ViewModifier {
             let currentValue = fresh ?? isFavorite
             let nextValue = !currentValue
             isFavorite = nextValue
+            // Build 61 (B8, R6): snapshot for the unavailable state.
+            if nextValue {
+                FavoriteSnapshotStore.shared.record(playlistId: playlistId, type: "live", streamId: streamId, title: stream.name, imageURL: stream.streamIcon)
+            } else {
+                FavoriteSnapshotStore.shared.remove(playlistId: playlistId, type: "live", streamId: streamId)
+            }
             do {
                 try await AppDatabase.shared.write { db in
                     if nextValue {

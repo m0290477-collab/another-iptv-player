@@ -87,6 +87,20 @@ struct SeriesView: View {
     @State private var progressBySeriesId: [String: SeriesProgressInfo] = [:]
     /// Build 61 (B8, C5): per-series watched % over loaded episodes.
     @State private var watchedPercentBySeriesId: [String: Int] = [:]
+    /// Build 61 (B8, C2): the series Watch Later list, resolved
+    /// against the loaded catalog in watchlist order.
+    @ObservedObject private var watchlistStore = WatchlistStore.shared
+
+    private var watchlistSeries: [DBSeries] {
+        let ids = watchlistStore.seriesIds(playlistId: playlist.id)
+        guard !ids.isEmpty else { return [] }
+        let wanted = Set(ids)
+        var found: [Int: DBSeries] = [:]
+        for item in contentStore.seriesItems where wanted.contains(item.series.seriesId) {
+            found[item.series.seriesId] = item.series
+        }
+        return ids.compactMap { found[$0] }
+    }
     /// Full `lastModified`-desc ordering for the paginated Newest
     /// grid (the shared ranking is capped at 60).
     @State private var newestAll: [DBSeries] = []
@@ -169,6 +183,11 @@ struct SeriesView: View {
 
                             if !recentlyAddedSeries.isEmpty {
                                 RecentlyAddedSeriesShelf(playlist: playlist, items: recentlyAddedSeries, progressBySeriesId: progressBySeriesId, watchedPercentBySeriesId: watchedPercentBySeriesId)
+                            }
+
+                            // Build 61 (B8, C2): series Watch Later shelf.
+                            if !watchlistSeries.isEmpty {
+                                WatchlistSeriesShelf(playlist: playlist, items: watchlistSeries)
                             }
 
                             LazyVStack(spacing: 0) {
@@ -2379,6 +2398,12 @@ struct SeriesDetailView: View {
                     try fav.insert(db)
                 }
             }
+            // Build 61 (B8, R6): snapshot for the unavailable state.
+            if isFavorite {
+                FavoriteSnapshotStore.shared.remove(playlistId: playlist.id, type: "series", streamId: series.seriesId)
+            } else {
+                FavoriteSnapshotStore.shared.record(playlistId: playlist.id, type: "series", streamId: series.seriesId, title: series.name, imageURL: series.cover)
+            }
         } catch {
             Log.error("Series", "Failed to toggle favorite: \(error.localizedDescription)")
         }
@@ -2743,5 +2768,153 @@ struct SeriesGenreGridView: View {
         guard playlist.id == contentStore.activePlaylistId else { displayItems = []; return }
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")
         displayItems = contentStore.seriesItems.filter { !hidden.contains($0.series.categoryId ?? "") }
+    }
+}
+
+// MARK: - Build 61 (B8, C2): Series Watch Later shelf + surface
+
+/// The Series tab's Watch Later shelf — the mirror of the Movies
+/// tab's `WatchlistShelf`, fed by the SAME `WatchlistStore`.
+struct WatchlistSeriesShelf: View {
+    let playlist: Playlist
+    let items: [DBSeries]
+
+    @Environment(\.posterMetrics) private var posterMetrics
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            CinematicSectionHeader(title: L("watchlist.title")) {
+                WatchlistSeriesView(playlist: playlist)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 14) {
+                    ForEach(items) { series in
+                        NavigationLink {
+                            SeriesDetailView(playlist: playlist, series: series)
+                        } label: {
+                            SeriesCard(
+                                playlistId: playlist.id,
+                                stream: series,
+                                posterWidth: posterMetrics.shelfPosterWidth,
+                                posterHeight: posterMetrics.shelfPosterHeight,
+                                imageLoadProfile: .shelf
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .frame(height: posterMetrics.shelfRowTotalHeight)
+            .shelfEdgeFade()
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+/// Every watch-later series for this playlist, resolved against the
+/// loaded catalog — plus the R6 unavailable entries (vanished from
+/// the catalog, kept from their snapshots, marked, removable).
+struct WatchlistSeriesView: View {
+    let playlist: Playlist
+
+    @ObservedObject private var contentStore = PlaylistContentStore.shared
+    @ObservedObject private var watchlistStore = WatchlistStore.shared
+    @Environment(\.posterMetrics) private var posterMetrics
+
+    private var seriesList: [DBSeries] {
+        let ids = watchlistStore.seriesIds(playlistId: playlist.id)
+        guard !ids.isEmpty else { return [] }
+        let wanted = Set(ids)
+        var found: [Int: DBSeries] = [:]
+        for item in contentStore.seriesItems where wanted.contains(item.series.seriesId) {
+            found[item.series.seriesId] = item.series
+        }
+        return ids.compactMap { found[$0] }
+    }
+
+    private var unavailableEntries: [(id: Int, title: String, imageURL: String?)] {
+        let ids = watchlistStore.seriesIds(playlistId: playlist.id)
+        let available = Set(seriesList.map(\.seriesId))
+        let snapshots = watchlistStore.snapshots(playlistId: playlist.id)
+        return ids.filter { !available.contains($0) }.map { id in
+            let snap = snapshots["series:\(id)"]
+            return (id, snap?.first ?? L("groups.unavailable"), snap?.last.flatMap { $0.isEmpty ? nil : $0 })
+        }
+    }
+
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: posterMetrics.categoryGridPosterWidth), spacing: posterMetrics.gridSpacing)]
+    }
+
+    var body: some View {
+        Group {
+            if seriesList.isEmpty && unavailableEntries.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "bookmark")
+                        .font(.largeTitle)
+                        .foregroundColor(.secondary)
+                    Text(L("watchlist.empty"))
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: posterMetrics.gridRowSpacing) {
+                        ForEach(seriesList) { series in
+                            NavigationLink {
+                                SeriesDetailView(playlist: playlist, series: series)
+                            } label: {
+                                SeriesCard(
+                                    playlistId: playlist.id,
+                                    stream: series,
+                                    posterWidth: posterMetrics.categoryGridPosterWidth,
+                                    posterHeight: posterMetrics.categoryGridPosterHeight,
+                                    imageLoadProfile: .grid
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding()
+
+                    if !unavailableEntries.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(L("groups.unavailable"))
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.secondary)
+                            ForEach(unavailableEntries, id: \.id) { entry in
+                                HStack(spacing: 12) {
+                                    CachedImage(
+                                        url: entry.imageURL.flatMap { URL(string: $0) },
+                                        width: 44, height: 44,
+                                        cornerRadius: AppTheme.smallCornerRadius,
+                                        iconName: "play.tv"
+                                    )
+                                    Text(entry.title)
+                                        .font(.subheadline.weight(.medium))
+                                        .lineLimit(2)
+                                    Spacer(minLength: 8)
+                                    Button(role: .destructive) {
+                                        watchlistStore.toggleSeries(playlistId: playlist.id, seriesId: entry.id)
+                                    } label: {
+                                        Image(systemName: "minus.circle")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom, 24)
+                    }
+                }
+            }
+        }
+        .navigationTitle(L("watchlist.title"))
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar(.hidden, for: .tabBar)
+        .cinematicBackground()
     }
 }

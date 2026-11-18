@@ -1593,13 +1593,26 @@ struct WatchlistView: View {
         return ids.compactMap { found[$0] }
     }
 
+    /// Build 61 (B8, R6): watch-later entries whose catalog record
+    /// has vanished — kept, rendered from their add-time snapshot,
+    /// marked unavailable, removable. Never silently dropped.
+    private var unavailableEntries: [(id: Int, title: String, imageURL: String?)] {
+        let ids = watchlistStore.movieIds(playlistId: playlist.id)
+        let available = Set(movies.map(\.streamId))
+        let snapshots = watchlistStore.snapshots(playlistId: playlist.id)
+        return ids.filter { !available.contains($0) }.map { id in
+            let snap = snapshots["vod:\(id)"]
+            return (id, snap?.first ?? L("groups.unavailable"), snap?.last.flatMap { $0.isEmpty ? nil : $0 })
+        }
+    }
+
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: posterMetrics.categoryGridPosterWidth), spacing: posterMetrics.gridSpacing)]
     }
 
     var body: some View {
         Group {
-            if movies.isEmpty {
+            if movies.isEmpty && unavailableEntries.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "bookmark")
                         .font(.largeTitle)
@@ -1627,6 +1640,38 @@ struct WatchlistView: View {
                         }
                     }
                     .padding()
+
+                    // Build 61 (B8, R6): unavailable entries stay.
+                    if !unavailableEntries.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(L("groups.unavailable"))
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.secondary)
+                            ForEach(unavailableEntries, id: \.id) { entry in
+                                HStack(spacing: 12) {
+                                    CachedImage(
+                                        url: entry.imageURL.flatMap { URL(string: $0) },
+                                        width: 44, height: 44,
+                                        cornerRadius: AppTheme.smallCornerRadius,
+                                        iconName: "film"
+                                    )
+                                    Text(entry.title)
+                                        .font(.subheadline.weight(.medium))
+                                        .lineLimit(2)
+                                    Spacer(minLength: 8)
+                                    Button(role: .destructive) {
+                                        watchlistStore.toggle(playlistId: playlist.id, streamId: entry.id)
+                                    } label: {
+                                        Image(systemName: "minus.circle")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom, 24)
+                    }
                 }
             }
         }

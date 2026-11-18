@@ -347,6 +347,18 @@ final class PlaylistContentStore: ObservableObject {
             seriesItems = si.items
             seriesItemsByCategoryId = si.byCategory
             streamsLoaded = true
+            // Build 61 (B8, R1): first-seen recording — ONLY on the
+            // network-bootstrap path; plain DB loads never stamp.
+            // The store's baseline rule keeps the first-ever batch
+            // silent.
+            if needsSync {
+                FirstSeenStore.shared.recordCatalog(
+                    playlistId: playlist.id,
+                    liveIds: liveStreams.map(\.stream.streamId),
+                    vodIds: vodStreams.map(\.stream.streamId),
+                    seriesIds: seriesItems.map(\.series.seriesId)
+                )
+            }
             // Round 14 (B10/B8): the catalog is complete — derive the
             // shared rankings once and aggregate series counts.
             scheduleSharedRankingsRecompute()
@@ -357,6 +369,20 @@ final class PlaylistContentStore: ObservableObject {
             loadingMessage = nil
             isLoading = false
         }
+    }
+
+    /// Build 61 (B8, R1): record first-seen for the in-memory
+    /// catalog after a network refresh reloaded it. No-op when this
+    /// playlist is not the active one (the arrays would be another
+    /// playlist's).
+    private func recordFirstSeenIfActive(playlistId: UUID) {
+        guard activePlaylistId == playlistId, streamsLoaded else { return }
+        FirstSeenStore.shared.recordCatalog(
+            playlistId: playlistId,
+            liveIds: liveStreams.map(\.stream.streamId),
+            vodIds: vodStreams.map(\.stream.streamId),
+            seriesIds: seriesItems.map(\.series.seriesId)
+        )
     }
 
     /// After a movie detail fetch is written to the DB, also update the copy in the memory catalog —
@@ -428,6 +454,10 @@ final class PlaylistContentStore: ObservableObject {
         guard activePlaylistId == playlistId else { return }
         do {
             try await reloadFromDatabase(playlistId: playlistId)
+            // Build 61 (B8, R1): every caller of this funnel is a
+            // post-sync reload — stamp first-seen for the refreshed
+            // catalog here so no sync path can skip it.
+            recordFirstSeenIfActive(playlistId: playlistId)
         } catch {
             loadError = error.localizedDescription
         }
@@ -478,6 +508,8 @@ final class PlaylistContentStore: ObservableObject {
             }
             // Round 14 (B10): one of the catalog arrays changed.
             scheduleSharedRankingsRecompute()
+            // Build 61 (B8, R1): scoped post-sync reload — stamp too.
+            recordFirstSeenIfActive(playlistId: playlistId)
         } catch {
             loadError = error.localizedDescription
         }

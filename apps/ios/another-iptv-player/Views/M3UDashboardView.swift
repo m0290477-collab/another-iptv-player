@@ -1,3 +1,4 @@
+import GRDB
 import SwiftUI
 
 /// TabView for M3U playlists. No Live/Movies/Series split — a single "Channels" list.
@@ -11,6 +12,7 @@ struct M3UDashboardView: View {
     @ObservedObject private var favorites = M3UFavoriteStore.shared
     @ObservedObject private var epgStore = EPGStore.shared
     @StateObject private var playerOverlay = PlayerOverlayController()
+    @Environment(\.scenePhase) private var scenePhase
 
     /// The last selected tab is not persisted — the dashboard always opens on "Channels".
     @State private var selectedTab: Int = 0
@@ -102,6 +104,13 @@ struct M3UDashboardView: View {
             await store.loadPlaylist(playlist)
             epgStore.setActivePlaylist(playlist)
             await epgStore.refreshIfStale(playlist: playlist)
+            // Build 61 (B8, B3 flag c): consume pending playback
+            // (T2 play-last-channel / Siri & Shortcuts intents) —
+            // mirrors DashboardView so M3U playlists honor it too.
+            consumePendingPlayback()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { consumePendingPlayback() }
         }
         .alert(L("loading.error.title"), isPresented: Binding(
             get: {
@@ -126,5 +135,58 @@ struct M3UDashboardView: View {
         // dashboard (expiry records exist only for Xtream playlists;
         // ProviderExpiryStore refuses non-Xtream kinds). The live
         // host on DashboardView is unchanged.
+    }
+
+    // MARK: - Build 61 (B8, B3 flag c): pending playback (T2)
+
+    /// Consumes a `PendingPlayback` queued by the T2 launch-resume
+    /// service or a Siri/Shortcuts intent and presents it through
+    /// the SAME `M3UPlayerShell` path channel taps use. Mirrors
+    /// `DashboardView.consumePendingPlayback` (same dictionary
+    /// payload, same consume-once semantics).
+    private func consumePendingPlayback() {
+        guard playerOverlay.presentation == nil,
+              store.activePlaylistId == playlist.id,
+              !store.channels.isEmpty,
+              let pending = PendingPlayback.consume(),
+              pending["playlistId"] == nil || pending["playlistId"] == playlist.id.uuidString
+        else { return }
+
+        switch pending["kind"] {
+        case "live":
+            guard let streamId = pending["streamId"],
+                  let channel = store.channels.first(where: { $0.id == streamId })
+            else { return }
+            presentM3UChannel(channel, resumeTimeMs: nil)
+        case "resume":
+            Task {
+                let history = (try? await AppDatabase.shared.read { db in
+                    try DBWatchHistory
+                        .filter(Column("playlistId") == playlist.id)
+                        .order(Column("lastWatchedAt").desc)
+                        .fetchOne(db)
+                }) ?? nil
+                guard let history, playerOverlay.presentation == nil,
+                      let channel = store.channels.first(where: { $0.id == history.streamId })
+                else { return }
+                presentM3UChannel(channel, resumeTimeMs: history.type == "live" ? nil : history.lastTimeMs)
+            }
+        default:
+            return
+        }
+    }
+
+    private func presentM3UChannel(_ channel: DBM3UChannel, resumeTimeMs: Int?) {
+        guard M3UParser.sanitizedURL(from: channel.url) != nil else { return }
+        let groupKey = channel.groupTitle?.trimmingCharacters(in: .whitespaces)
+        let queue = store.channels.filter { ($0.groupTitle?.trimmingCharacters(in: .whitespaces) ?? "") == (groupKey ?? "") }
+        playerOverlay.present {
+            M3UPlayerShell(
+                playlist: playlist,
+                channel: channel,
+                queue: queue.isEmpty ? [channel] : queue,
+                resumeTimeMs: resumeTimeMs
+            )
+        }
     }
 }

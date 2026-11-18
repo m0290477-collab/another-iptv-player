@@ -55,7 +55,12 @@ final class PinnedChannelStore: ObservableObject {
     // MARK: - M3U
 
     func pinnedM3UIds(playlistId: UUID) -> Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: Self.m3uKey(playlistId: playlistId)) ?? [])
+        Self.pinnedM3UIds(playlistId: playlistId)
+    }
+
+    /// Non-isolated read for off-main list computations.
+    nonisolated static func pinnedM3UIds(playlistId: UUID) -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: m3uKey(playlistId: playlistId)) ?? [])
     }
 
     func isPinnedM3U(playlistId: UUID, channelId: String) -> Bool {
@@ -111,6 +116,22 @@ nonisolated enum ChannelOrdering {
             .sorted { a, b in
                 let ta = tier(a.element), tb = tier(b.element)
                 if ta != tb { return ta < tb }
+                return a.offset < b.offset
+            }
+            .map(\.element)
+    }
+
+    /// M3U variant: String channel ids, pins only (M3U favorites
+    /// live in their own store/surface).
+    static func pinnedFirstM3U(
+        _ items: [DBM3UChannel],
+        pinned: Set<String>
+    ) -> [DBM3UChannel] {
+        items.enumerated()
+            .sorted { a, b in
+                let pa = pinned.contains(a.element.id) ? 0 : 1
+                let pb = pinned.contains(b.element.id) ? 0 : 1
+                if pa != pb { return pa < pb }
                 return a.offset < b.offset
             }
             .map(\.element)
