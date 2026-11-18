@@ -1,5 +1,4 @@
 import SwiftUI
-import UserNotifications
 
 /// Programme detail popover: title, time, description, and context-appropriate
 /// play actions (play the live channel, watch-from-start, or catch-up playback).
@@ -36,8 +35,12 @@ struct EPGProgrammeDetailSheet: View {
     /// C12 (Round 15): staggered sheet entrance (transform/opacity only).
     @State private var entranceShown = false
 
-    private var reminderIdentifier: String {
-        "epg.reminder.\(programme.channelKey)|\(Int(programme.start.timeIntervalSince1970))"
+    /// Build 61 (B1): the programme identity handed to
+    /// `NotificationScheduler` (§5 contract), which prefixes it into
+    /// the request identifier — the resulting identifier string is
+    /// unchanged from what earlier builds scheduled directly.
+    private var reminderID: String {
+        "\(programme.channelKey)|\(Int(programme.start.timeIntervalSince1970))"
     }
     /// A reminder only makes sense for a programme that has not
     /// started yet, with the lead time still in the future.
@@ -100,8 +103,7 @@ struct EPGProgrammeDetailSheet: View {
                 .padding()
             }
             .task {
-                let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
-                reminderSet = pending.contains { $0.identifier == reminderIdentifier }
+                reminderSet = await NotificationScheduler.isProgrammeReminderSet(id: reminderID)
                 // C12: staggered entrance — header, then body, then actions.
                 withAnimation(.easeOut(duration: 0.3).delay(0.05)) { entranceShown = true }
             }
@@ -188,43 +190,24 @@ struct EPGProgrammeDetailSheet: View {
     }
 }
 
-// MARK: - B3 programme reminder scheduling
+// MARK: - Programme reminder scheduling (via NotificationScheduler, build 61 B1)
 
 private extension EPGProgrammeDetailSheet {
     func toggleReminder() async {
-        let center = UNUserNotificationCenter.current()
         if reminderSet {
-            center.removePendingNotificationRequests(withIdentifiers: [reminderIdentifier])
+            NotificationScheduler.cancelProgrammeReminder(id: reminderID)
             reminderSet = false
             return
         }
-        // First use: ask. A denial leaves the button a no-op rather
-        // than scheduling into the void.
-        let settings = await center.notificationSettings()
-        if settings.authorizationStatus == .notDetermined {
-            _ = try? await center.requestAuthorization(options: [.alert, .sound])
-        }
-        let refreshed = await center.notificationSettings()
-        guard refreshed.authorizationStatus == .authorized
-                || refreshed.authorizationStatus == .provisional else { return }
-
-        let fireDate = programme.start.addingTimeInterval(-Double(reminderLeadMinutes) * 60)
-        let interval = fireDate.timeIntervalSinceNow
-        guard interval > 0 else { return }
-        let content = UNMutableNotificationContent()
-        content.title = programme.title
-        content.body = channelName
-        content.sound = .default
-        let request = UNNotificationRequest(
-            identifier: reminderIdentifier,
-            content: content,
-            trigger: UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+        // The scheduler requests authorization at first use (never
+        // at launch), honours the reminders toggle + lead time, and
+        // reports whether the request actually landed — a denial
+        // leaves the button unset rather than pretending.
+        reminderSet = await NotificationScheduler.scheduleProgrammeReminder(
+            title: programme.title,
+            channelName: channelName,
+            startDate: programme.start,
+            id: reminderID
         )
-        do {
-            try await center.add(request)
-            reminderSet = true
-        } catch {
-            reminderSet = false
-        }
     }
 }

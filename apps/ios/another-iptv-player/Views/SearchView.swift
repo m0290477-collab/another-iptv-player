@@ -22,16 +22,18 @@ struct SearchView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
 
-    /// The section pills exactly as specified: Movie / Series /
-    /// Live. (The old build's extra "All" grouping is gone.)
+    /// The section pills: Movie / Series / Live, plus Programmes
+    /// (build 61, B1 item 4 — EPG programme-title search through
+    /// the same core as the guide's programme search).
     enum SearchFilter: String, CaseIterable {
-        case movies, series, live
+        case movies, series, live, programmes
 
         var displayName: String {
             switch self {
             case .movies: return L("dashboard.movies")
             case .series: return L("dashboard.series")
             case .live:   return L("dashboard.live")
+            case .programmes: return L("epgsearch.programmes")
             }
         }
     }
@@ -124,6 +126,17 @@ struct SearchView: View {
 
 // MARK: - Results
 
+/// Build 61 (B1, item 4): one EPG programme match in global search.
+/// Carries everything `EPGProgrammeDetailSheet` needs, resolved
+/// with the same channel-key logic the guide uses.
+private struct EPGProgrammeSearchResult: Identifiable {
+    let programme: EPGProgramme
+    let channelName: String
+    let channelIcon: URL?
+    let liveStream: DBLiveStream?
+    var id: String { programme.id }
+}
+
 private struct SearchResultsView: View {
     let playlist: Playlist
     let query: String
@@ -137,6 +150,9 @@ private struct SearchResultsView: View {
     @State private var liveResults: [LiveStreamWithCategory] = []
     @State private var movieResults: [VODWithCategory] = []
     @State private var seriesResults: [SeriesWithCategory] = []
+    @State private var epgResults: [EPGProgrammeSearchResult] = []
+    @State private var epgSearchRunning = false
+    @State private var selectedProgramme: EPGProgrammeSearchResult?
 
     /// The play queue handed to the player shell: every live result.
     private var liveQueue: [DBLiveStream] { liveResults.map(\.stream) }
@@ -168,12 +184,15 @@ private struct SearchResultsView: View {
         case .movies: return movieResults.isEmpty
         case .series: return seriesResults.isEmpty
         case .live:   return liveResults.isEmpty
+        case .programmes: return epgResults.isEmpty
         }
     }
 
     var body: some View {
         Group {
-            if selectedIsEmpty {
+            if filter == .programmes {
+                epgContent
+            } else if selectedIsEmpty {
                 if !contentStore.streamsLoaded {
                     // The catalog is still loading: showing a false "no results" makes it look to the user
                     // as if the content has disappeared. When streamsLoaded [becomes true], the [real state] below
@@ -193,6 +212,7 @@ private struct SearchResultsView: View {
                 case .movies: movieGrid
                 case .series: seriesGrid
                 case .live:   liveList
+                case .programmes: epgContent
                 }
             }
         }
@@ -200,6 +220,93 @@ private struct SearchResultsView: View {
         .task(id: filter) { await runSearch() }
         .task(id: hiddenStore.version) { await runSearch() }
         .task(id: contentStore.streamsLoaded) { await runSearch() }
+        .sheet(item: $selectedProgramme) { result in
+            EPGProgrammeDetailSheet(
+                playlist: playlist,
+                programme: result.programme,
+                channelName: result.channelName,
+                channelIcon: result.channelIcon,
+                liveStream: result.liveStream
+            )
+            .presentationDetents([.medium, .large])
+        }
+    }
+
+    // MARK: EPG programmes section (build 61, B1 item 4)
+
+    /// Programme-title results over the guide data loaded for
+    /// TODAY and TOMORROW — the header discloses that scope, the
+    /// same honesty pattern as the guide's own programme search
+    /// (which discloses its selected-day scope).
+    @ViewBuilder
+    private var epgContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(L("epgsearch.scope"))
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+            if epgResults.isEmpty {
+                if epgSearchRunning {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ContentUnavailableView.search(text: query)
+                }
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(epgResults) { result in
+                            epgRow(result)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                }
+            }
+        }
+    }
+
+    /// A programme row: title, channel + time range; tap opens the
+    /// programme detail sheet (reminders / play / catch-up live
+    /// there, exactly as from the guide).
+    private func epgRow(_ result: EPGProgrammeSearchResult) -> some View {
+        Button {
+            selectedProgramme = result
+        } label: {
+            HStack(spacing: 12) {
+                CachedImage(
+                    url: result.channelIcon,
+                    width: 64,
+                    height: 44,
+                    cornerRadius: AppTheme.smallCornerRadius,
+                    contentMode: .fit,
+                    iconName: "tv",
+                    loadProfile: .grid
+                )
+                .background {
+                    RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius, style: .continuous)
+                        .fill(AppTheme.surface)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(result.programme.title)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text("\(result.channelName) · \(EPGTimeFormat.range(result.programme.start, result.programme.stop))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Single-type sections
@@ -394,6 +501,76 @@ private struct SearchResultsView: View {
             liveResults = result
             movieResults = []
             seriesResults = []
+        case .programmes:
+            // Build 61 (B1, item 4): programme-TITLE search over
+            // the guide programmes stored for today + tomorrow —
+            // the same matching core as the guide's programme
+            // search (precomputed `searchTitle`, case-insensitive
+            // contains), with channel identity resolved through
+            // the same key logic `EPGGuideViewModel.buildRows`
+            // uses. Programmes on channels the catalog doesn't
+            // know are skipped, as in the guide.
+            epgSearchRunning = true
+            let calendar = Calendar.current
+            let windowStart = calendar.startOfDay(for: Date())
+            let windowEnd = calendar.date(byAdding: .day, value: 2, to: windowStart) ?? windowStart
+            let byKey = (try? await EPGStore.shared.programmes(
+                playlistId: playlist.id, from: windowStart, to: windowEnd)) ?? [:]
+            // Channel directory in catalog order: key → display
+            // info. Kept on the main actor (DBLiveStream is not
+            // Sendable); only keys + programmes cross into the
+            // detached matching pass.
+            var infoByKey: [String: (name: String, icon: URL?, stream: DBLiveStream?)] = [:]
+            var orderedKeys: [String] = []
+            let epg = EPGStore.shared
+            if playlist.kind == .m3u {
+                for channel in M3UContentStore.shared.channels {
+                    let idKey = EPGConstants.normalizeChannelKey(channel.tvgId)
+                    let nameKey = EPGConstants.normalizeChannelKey(channel.tvgName ?? channel.name)
+                    let key = epg.storedKey(idKey: idKey, nameKey: nameKey) ?? idKey ?? nameKey ?? channel.id
+                    if infoByKey[key] == nil { orderedKeys.append(key) }
+                    infoByKey[key] = (name: channel.name,
+                                      icon: channel.tvgLogo.flatMap { URL(string: $0) },
+                                      stream: nil)
+                }
+            } else {
+                for entry in contentStore.liveStreams {
+                    let stream = entry.stream
+                    let idKey = EPGConstants.normalizeChannelKey(stream.epgChannelId)
+                    let nameKey = EPGConstants.normalizeChannelKey(stream.name)
+                    let key = epg.storedKey(idKey: idKey, nameKey: nameKey) ?? idKey ?? nameKey ?? "#stream:\(stream.streamId)"
+                    if infoByKey[key] == nil { orderedKeys.append(key) }
+                    infoByKey[key] = (name: stream.name,
+                                      icon: stream.streamIcon.flatMap { URL(string: $0) },
+                                      stream: stream)
+                }
+            }
+            let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let matches = await Task.detached(priority: .userInitiated) { () -> [EPGProgramme] in
+                var found: [EPGProgramme] = []
+                for key in orderedKeys {
+                    guard let programmes = byKey[key] else { continue }
+                    for programme in programmes where programme.searchTitle.contains(q) {
+                        found.append(programme)
+                    }
+                }
+                found.sort { $0.start < $1.start }
+                return Array(found.prefix(Self.resultCap))
+            }.value
+            guard !Task.isCancelled else { epgSearchRunning = false; return }
+            epgResults = matches.map { programme in
+                let info = infoByKey[programme.channelKey]
+                return EPGProgrammeSearchResult(
+                    programme: programme,
+                    channelName: info?.name ?? programme.channelKey,
+                    channelIcon: info?.icon,
+                    liveStream: info?.stream
+                )
+            }
+            liveResults = []
+            movieResults = []
+            seriesResults = []
+            epgSearchRunning = false
         }
     }
 }
