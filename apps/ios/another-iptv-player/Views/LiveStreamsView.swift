@@ -26,6 +26,9 @@ struct LiveStreamsView: View {
 
     @State private var showSearchSheet = false
     @State private var homeSearchText = ""
+    // === B5 (build 61) Item 11: Multiview entry state — wave-2 (B8) preserve ===
+    @State private var showMultiview = false
+    // === End B5 Item 11 state ===
     // B3 (Round 14): Live tab Favorites filter chip — when on, the
     // shelves/queue below contain favorite channels only (real
     // DBFavorite rows via FavoriteLiveRequest).
@@ -204,6 +207,18 @@ struct LiveStreamsView: View {
                 }
                 .accessibilityLabel(L("epg.guide.title"))
             }
+            // === B5 (build 61) Item 11: Multiview entry — wave-2 (B8) preserve this item ===
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showMultiview = true
+                } label: {
+                    Image(systemName: "rectangle.split.2x1")
+                        .font(.body.weight(.semibold))
+                }
+                .disabled(contentStore.liveCategories.isEmpty)
+                .accessibilityLabel(L("multiview.title"))
+            }
+            // === End B5 Item 11 entry ===
             // Round 8 (D-2): NO toolbar grid icon — AllLiveView was
             // reachable twice from this tab (here + the Trending
             // shelf's "See all"). The shelf entry stays as the ONE
@@ -237,6 +252,11 @@ struct LiveStreamsView: View {
                 SearchView(playlist: playlist, searchText: $homeSearchText)
             }
         }
+        // === B5 (build 61) Item 11: Multiview sheet — wave-2 (B8) preserve ===
+        .fullScreenCover(isPresented: $showMultiview) {
+            MultiviewView(playlist: playlist)
+        }
+        // === End B5 Item 11 sheet ===
         .cinematicBackground()
     }
 

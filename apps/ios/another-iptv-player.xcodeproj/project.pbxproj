@@ -17,6 +17,7 @@
 		D76253C22F85052600E30229 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = E8A1F0022F85000100AAA003 /* Nuke */; };
 		D76253C32F85052600E30229 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = E8A1F0022F85000100AAA004 /* NukeUI */; };
 		D76253C42F85052600E30229 /* KSPlayer in Frameworks */ = {isa = PBXBuildFile; productRef = E8A1F0022F85000100AAA005 /* KSPlayer */; };
+		B561CA5700000000000000A3 /* GoogleCastDynamic in Frameworks */ = {isa = PBXBuildFile; productRef = B561CA5700000000000000A2 /* GoogleCastDynamic */; };
 		D76253C52F85052600E30229 /* Libavformat in Frameworks */ = {isa = PBXBuildFile; productRef = E8A1F0022F85000100AAA006 /* Libavformat */; };
 		D76253C62F85052600E30229 /* Libavutil in Frameworks */ = {isa = PBXBuildFile; productRef = E8A1F0022F85000100AAA007 /* Libavutil */; };
 		D76253C72F85052600E30229 /* Libavcodec in Frameworks */ = {isa = PBXBuildFile; productRef = E8A1F0022F85000100AAA008 /* Libavcodec */; };
@@ -119,6 +120,7 @@
 			files = (
 				D76253C32F85052600E30229 /* NukeUI in Frameworks */,
 				D76253C42F85052600E30229 /* KSPlayer in Frameworks */,
+				B561CA5700000000000000A3 /* GoogleCastDynamic in Frameworks */,
 				D76253C52F85052600E30229 /* Libavformat in Frameworks */,
 				D76253C62F85052600E30229 /* Libavutil in Frameworks */,
 				D76253C72F85052600E30229 /* Libavcodec in Frameworks */,
@@ -262,6 +264,7 @@
 				E8A1F0022F85000100AAA002 /* GRDBQuery */,
 				E8A1F0022F85000100AAA003 /* Nuke */,
 				E8A1F0022F85000100AAA004 /* NukeUI */,
+				B561CA5700000000000000A2 /* GoogleCastDynamic */,
 			);
 			productName = "another-iptv-player";
 			productReference = D713CDA92F82DC8A00C6BEFF /* another-iptv-player.app */;
@@ -333,6 +336,7 @@
 				D7262AD82F840A6C0093E87D /* XCRemoteSwiftPackageReference "Nuke" */,
 				D7262AD92F840A6C0093E87D /* XCRemoteSwiftPackageReference "KSPlayer" */,
 				D7262ADA2F840A6C0093E87D /* XCRemoteSwiftPackageReference "FFmpegKit" */,
+				B561CA5700000000000000A1 /* XCRemoteSwiftPackageReference "google-cast-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D713CDAA2F82DC8A00C6BEFF /* Products */;
@@ -862,6 +866,14 @@
 				minimumVersion = 0.11.0;
 			};
 		};
+		B561CA5700000000000000A1 /* XCRemoteSwiftPackageReference "google-cast-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googlecast/google-cast-ios-sdk";
+			requirement = {
+				kind = exactVersion;
+				version = 4.8.6;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -889,6 +901,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = D7262AD92F840A6C0093E87D /* XCRemoteSwiftPackageReference "KSPlayer" */;
 			productName = KSPlayer;
+		};
+		B561CA5700000000000000A2 /* GoogleCastDynamic */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B561CA5700000000000000A1 /* XCRemoteSwiftPackageReference "google-cast-ios-sdk" */;
+			productName = GoogleCastDynamic;
 		};
 		E8A1F0022F85000100AAA006 /* Libavformat */ = {
 			isa = XCSwiftPackageProductDependency;
