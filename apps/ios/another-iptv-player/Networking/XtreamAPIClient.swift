@@ -18,9 +18,9 @@ enum XtreamError: LocalizedError {
     }
 }
 
-/// IPTV panel/playlist istekleri için sınırlı zaman aşımlı oturum. `URLSession.shared`
-/// 60 sn idle + 7 GÜN resource zaman aşımıyla geliyor — yanıt vermeyen bir panel,
-/// ekleme/yenileme akışını dakikalarca iptal edilemez şekilde asılı bırakıyordu.
+/// A session with bounded timeouts for IPTV panel/playlist requests. `URLSession.shared`
+/// comes with a 60s idle + 7-DAY resource timeout — an unresponsive panel
+/// used to leave the add/refresh flow hanging for minutes, uncancellable.
 /// `nonisolated`: URLSession is Sendable; used from background contexts (EPG download).
 nonisolated enum PanelURLSession {
     static let shared: URLSession = {
@@ -40,8 +40,8 @@ class XtreamAPIClient {
         self.urlSession = urlSession
     }
 
-    /// Log ve hata metinlerine gidecek URL'lerde kimlik bilgisini maskeler — panel URL'leri
-    /// username/password taşır ve bunlar alert ekran görüntüleriyle/loglarla sızabilir.
+    /// Masks credentials in URLs that will end up in logs and error texts — panel URLs
+    /// carry username/password and those can leak via alert screenshots/logs.
     private static func redacted(_ urlString: String) -> String {
         guard var comps = URLComponents(string: urlString) else { return "<invalid-url>" }
         comps.queryItems = comps.queryItems?.map { item in
@@ -93,14 +93,14 @@ class XtreamAPIClient {
             comps.queryItems?.append(contentsOf: queryItems)
         }
         
-        // '+' RFC 3986'da query'de geçerli olduğundan URLComponents kodlamaz, ama PHP
-        // tabanlı Xtream panelleri $_GET'te '+'yı boşluğa çevirir — 'ab+12' şifresi
-        // 'ab 12' olarak ulaşır ve giriş sessizce reddedilirdi.
+        // '+' is valid in a query per RFC 3986 so URLComponents does not encode it, but PHP-
+        // based Xtream panels turn '+' into a space in $_GET — an 'ab+12' password
+        // would arrive as 'ab 12' and sign-in would be silently rejected.
         comps.percentEncodedQuery = comps.percentEncodedQuery?
             .replacingOccurrences(of: "+", with: "%2B")
 
         guard let url = comps.url else {
-            // Kullanıcıya gösterilen hata metnine ham (kimlik bilgili) URL koyma.
+            // Do not put a raw (credential-bearing) URL in error text shown to the user.
             throw XtreamError.invalidURL(Self.redacted(comps.string ?? ""))
         }
 
@@ -108,17 +108,10 @@ class XtreamAPIClient {
         do {
             let (data, response) = try await urlSession.data(from: url)
 
-            #if DEBUG
-            // Debug: Log series info for structure comparison
-            if url.absoluteString.contains("action=get_series_info") {
-                if let jsonString = String(data: data, encoding: .utf8) {
-                    print("--- [DEBUG] SERIES INFO RAW RESPONSE START ---")
-                    print("URL: \(Self.redacted(url.absoluteString))")
-                    print("JSON: \(jsonString)")
-                    print("--- [DEBUG] SERIES INFO RAW RESPONSE END ---")
-                }
-            }
-            #endif
+            // Round 16 (R7): the debug dump that printed the ENTIRE
+            // get_series_info JSON response on every fetch is
+            // removed — production logging must never carry full
+            // panel payloads.
 
             // Check HTTP status code
             if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
@@ -130,15 +123,8 @@ class XtreamAPIClient {
                 let decoder = JSONDecoder()
                 return try decoder.decode(T.self, from: data)
             } catch(let error) {
-                #if DEBUG
-                print("--- DECODING ERROR ---")
-                print("URL: \(Self.redacted(url.absoluteString))")
-                if let jsonString = String(data: data, encoding: .utf8) {
-                    print("RAW DATA: \(jsonString)")
-                }
-                print("ERROR: \(error)")
-                print("--- END ERROR ---")
-                #endif
+                // Round 16 (R7): the raw-payload decoding-error
+                // prints are removed with the series-info dump.
                 throw XtreamError.decodingError(error)
             }
         } catch let error as XtreamError {

@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Premium, özel yapım video timeline (scrubber).
-/// SwiftUI Slider yerine kullanılarak v2 projesindeki o zarif görünümü sağlar.
+/// Premium, custom-built video timeline (scrubber).
+/// Used instead of the SwiftUI Slider to provide that elegant look from the v2 project.
 struct PlayerTimeline: View {
     @Binding var value: Double
     var isSeekable: Bool = true
@@ -19,12 +19,12 @@ struct PlayerTimeline: View {
             let thumbSize: CGFloat = isDragging ? 20 : 13
 
             ZStack(alignment: .leading) {
-                // 1. Arka plan hattı — iOS native ince + açık ton.
+                // 1. Background track — iOS-native thin + light tone.
                 Capsule()
                     .fill(Color.white.opacity(0.28))
                     .frame(height: barHeight)
 
-                // 2. İlerleme fill.
+                // 2. Progress fill.
                 Capsule()
                     .fill(Color.white.opacity(0.96))
                     .frame(width: max(0, width * CGFloat(currentDisplayValue)), height: barHeight)
@@ -61,7 +61,7 @@ struct PlayerTimeline: View {
                     }
             )
         }
-        .frame(height: 44) // HIG minimum dokunma hedefi; görsel bar ince kalır.
+        .frame(height: 44) // HIG minimum touch target; the visual bar stays thin.
         // Light tick when the scrub grab begins/releases, like the native scrubber.
         .sensoryFeedback(.selection, trigger: isDragging)
     }

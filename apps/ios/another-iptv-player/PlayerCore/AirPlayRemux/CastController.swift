@@ -256,8 +256,8 @@ final class CastController: ObservableObject {
       return
     }
     stopDirectPlayback?()
-    // Telefon oynatıcısının panel bağlantısı asenkron kapanır; yeni bağlantıyı
-    // 1 sn geciktir (bağlantı-limitli panelde ilk açılış çakışması).
+    // The phone player's panel connection closes asynchronously; delay the new connection
+    // by 1s (first-open collision on a connection-limited panel).
     beginRemuxSession(
       content: content, replacing: nil, retryUsed: false,
       openDelaySeconds: 1.0, completion: completion

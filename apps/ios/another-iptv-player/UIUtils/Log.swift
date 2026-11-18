@@ -1,12 +1,12 @@
 import Foundation
 
-/// Tüm NSLog çağrıları bu helper üzerinden gitmeli.
+/// All NSLog calls must go through this helper.
 ///
-/// **Neden:** `NSLog("foo \(bar)")` çağrısında interpolate edilmiş tüm string format string
-/// olarak yorumlanır. `bar` içinde `%` geçerse (URL'lerdeki `%20`, `%2F` vb.) NSLog
-/// va_list'ten çöp pointer okuyup `EXC_BAD_ACCESS` ile crash eder.
+/// **Why:** in an `NSLog("foo \(bar)")` call, the whole interpolated string is interpreted as a format string.
+/// If `bar` contains `%` (such as `%20`, `%2F` in URLs), NSLog
+/// reads a garbage pointer from va_list and crashes with `EXC_BAD_ACCESS`.
 ///
-/// `Log.info/error` her zaman mesajı `"%@"` ile geçirir → format string injection imkânsız.
+/// `Log.info/error` always passes the message with `"%@"` → format-string injection is impossible.
 nonisolated enum Log {
   static func info(_ tag: String, _ message: @autoclosure () -> String) {
     NSLog("%@", "[\(tag)] \(message())")

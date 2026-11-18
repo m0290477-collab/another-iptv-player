@@ -2,8 +2,8 @@ import Foundation
 import GRDB
 import Combine
 
-/// M3U favorilerini hem yazar hem de aktif playlist için reactive bir set sunar.
-/// `@Published favoriteIds` değiştiğinde UI otomatik güncellenir.
+/// Both writes M3U favorites and exposes a reactive set for the active playlist.
+/// When `@Published favoriteIds` changes, the UI updates automatically.
 @MainActor
 final class M3UFavoriteStore: ObservableObject {
     static let shared = M3UFavoriteStore()
@@ -14,7 +14,7 @@ final class M3UFavoriteStore: ObservableObject {
 
     private init() {}
 
-    /// Aktif playlist değiştiğinde çağrılır; GRDB ValueObservation ile canlı abonelik kurar.
+    /// Called when the active playlist changes; sets up a live subscription with GRDB ValueObservation.
     func track(playlistId: UUID) {
         guard trackedPlaylistId != playlistId else { return }
         trackedPlaylistId = playlistId
@@ -38,7 +38,7 @@ final class M3UFavoriteStore: ObservableObject {
         favoriteIds.contains(channelId)
     }
 
-    /// Kanalı toggle'la. Callback'siz — ValueObservation yeniden yayacak.
+    /// Toggles the channel. No callback — ValueObservation will re-publish.
     func toggle(channel: DBM3UChannel) async {
         do {
             try await AppDatabase.shared.write { db in
@@ -62,7 +62,8 @@ final class M3UFavoriteStore: ObservableObject {
                 }
             }
         } catch {
-            print("M3UFavoriteStore toggle error: \(error)")
+            // Round 16 (R7): print removed (production logging);
+            // the store's optimistic state handling is unchanged.
         }
     }
 }

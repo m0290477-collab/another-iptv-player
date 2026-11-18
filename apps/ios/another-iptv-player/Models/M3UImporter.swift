@@ -2,20 +2,20 @@ import Foundation
 import GRDB
 import CryptoKit
 
-/// M3U kanallarını veritabanına yazan tek kapı. Hem ekleme hem yenileme akışı aynı yolu kullanır.
+/// The single gateway that writes M3U channels to the database. Both the add and refresh flows use the same path.
 ///
-/// Tüm işlem GRDB'nin write kuyruğunda tek transaction'da yapılır:
-/// - Playlist (opsiyonel güncelleme ile) kaydedilir.
-/// - Eski `m3uChannel` kayıtları silinir.
-/// - Yeni kanallar `sortIndex`'e göre batch yazılır.
+/// The whole operation runs in a single transaction on GRDB's write queue:
+/// - The playlist is saved (with an optional update).
+/// - The old `m3uChannel` records are deleted.
+/// - The new channels are batch-written by `sortIndex`.
 ///
-/// Kanal ID'si **deterministik** (SHA256 of `playlistId:url`). Reimport sonrası aynı URL aynı ID'yi
-/// alır, böylece favoriler ve izleme geçmişi korunur.
+/// The channel ID is **deterministic** (SHA256 of `playlistId:url`). After a reimport the same URL gets the same ID,
+/// so favorites and watch history are preserved.
 enum M3UImporter {
 
-    /// Playlist + kanallar için tam yenileme. Eski kayıtları siler, yenilerini yazar.
+    /// Full refresh for playlist + channels. Deletes the old records, writes the new ones.
     ///
-    /// - Parameter clearServerURL: Yerel dosya import'unda playlist URL'i boşaltılır (refresh tekrar dosya ister).
+    /// - Parameter clearServerURL: In a local-file import the playlist URL is cleared (a refresh asks for the file again).
     static func replace(
         playlist: Playlist,
         channels: [ParsedM3UChannel],
@@ -30,11 +30,11 @@ enum M3UImporter {
         try await AppDatabase.shared.write { db in
             try updated.save(db)
             try db.execute(sql: "DELETE FROM m3uChannel WHERE playlistId = ?", arguments: [pid])
-            // Aynı URL birden çok grupta geçebilir ("ALL" + ülke grubu gibi) — eskiden
-            // INSERT OR REPLACE hepsini tek satıra indiriyordu ve kanallar gruplardan
-            // sessizce kayboluyordu. İlk geçiş URL bazlı eski kimliğini korur (favoriler
-            // ve izleme geçmişi reimport'ta yaşasın diye), sonraki tekrarlar deterministik
-            // `#n` son ekiyle ayrı satır olur.
+            // The same URL can appear in multiple groups (like "ALL" + a country group) — previously
+            // INSERT OR REPLACE collapsed them all into a single row and channels silently
+            // disappeared from groups. The first occurrence keeps its old URL-based identity (so favorites
+            // and watch history survive a reimport); later duplicates become separate rows with a deterministic
+            // `#n` suffix.
             var urlOccurrences: [String: Int] = [:]
             for (index, ch) in channels.enumerated() {
                 let trimmedURL = ch.url.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -61,11 +61,11 @@ enum M3UImporter {
         }
     }
 
-    /// Deterministik kanal ID üretimi: reimport sonrası aynı URL aynı ID'yi alır.
-    /// URL boşsa fallback olarak sortIndex kullanılır (nadir durum, ama güvence).
-    /// `occurrence`: aynı URL'nin kaçıncı tekrarı (0 = ilk). İlk geçiş eski formatla
-    /// aynı kimliği üretir; tekrarlar `#n` son ekiyle ayrışır ve playlist sırası
-    /// değişmedikçe reimport'ta da aynı kimliği alır.
+    /// Deterministic channel ID generation: after a reimport the same URL gets the same ID.
+    /// If the URL is empty, sortIndex is used as a fallback (rare, but a safeguard).
+    /// `occurrence`: which repetition of the same URL this is (0 = first). The first occurrence produces the same identity
+    /// as the old format; duplicates are distinguished with the `#n` suffix and, as long as the playlist order
+    /// does not change, get the same identity on reimport too.
     static func stableChannelID(playlistId: UUID, url: String, fallbackIndex: Int = 0, occurrence: Int = 0) -> String {
         var key: String
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)

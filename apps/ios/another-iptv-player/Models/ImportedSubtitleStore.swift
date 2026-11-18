@@ -57,8 +57,8 @@ enum ImportedSubtitleStore {
         UserDefaults.standard.set(map, forKey: selectionKey)
     }
 
-    /// Playlist silinince: o playlist'e ait tüm altyazı klasörlerini ve seçim
-    /// kayıtlarını temizler. contentKey her zaman "<playlistUUID>_..." ile başlar.
+    /// When a playlist is deleted: clears all of that playlist's subtitle folders and selection
+    /// records. contentKey always starts with "<playlistUUID>_...".
     static func removeAll(playlistId: UUID) {
         let prefix = sanitize(playlistId.uuidString) + "_"
         let fm = FileManager.default

@@ -18,7 +18,7 @@ enum M3UServiceError: LocalizedError {
     }
 }
 
-/// M3U/M3U8 içeriğini uzak URL'den indirmek veya yerel dosyadan okumak.
+/// Downloads M3U/M3U8 content from a remote URL or reads it from a local file.
 struct M3UService {
     let urlSession: URLSession
 
@@ -48,7 +48,7 @@ struct M3UService {
 
     // nonisolated: runs inside the detached task in `readLocalAsync`.
     nonisolated func readLocal(url: URL) throws -> String {
-        // Security-scoped resource (fileImporter URL'leri için şart).
+        // Security-scoped resource (required for fileImporter URLs).
         let didStart = url.startAccessingSecurityScopedResource()
         defer { if didStart { url.stopAccessingSecurityScopedResource() } }
         do {
@@ -74,9 +74,9 @@ struct M3UService {
     // MARK: - Decoding
 
     nonisolated private func decode(data: Data) throws -> String {
-        // BOM önce: UTF-16 dosyalar isoLatin1'den "başarıyla" ama NUL'larla dolu çözülür
-        // ve #EXTM3U hiç eşleşmezdi. isoLatin1 HER bayt dizisi için başarılı olduğundan
-        // en sona konmalı (son çare, mojibake riskiyle).
+        // BOM first: UTF-16 files decode "successfully" from isoLatin1 but full of NULs
+        // and #EXTM3U would never match. Because isoLatin1 succeeds for EVERY byte sequence,
+        // it must come last (last resort, with mojibake risk).
         if data.count >= 2 {
             let b0 = data[data.startIndex], b1 = data[data.index(after: data.startIndex)]
             if b0 == 0xFF, b1 == 0xFE, let s = String(data: data, encoding: .utf16LittleEndian) {
@@ -88,7 +88,7 @@ struct M3UService {
         }
         if let s = String(data: data, encoding: .utf8) { return s }
         if let s = String(data: data, encoding: .utf16) { return s }
-        // Türkçe listeler çoğunlukla Windows-1254 gelir; Latin1'den önce dene.
+        // Turkish lists usually arrive as Windows-1254; try it before Latin1.
         if let s = String(data: data, encoding: .windowsCP1254) { return s }
         if let s = String(data: data, encoding: .isoLatin1) { return s }
         throw M3UServiceError.encodingUnsupported

@@ -6,8 +6,8 @@ nonisolated enum AdultContentFilter {
 
     // MARK: - Keywords
 
-    /// Kategori adında ayrı bir kelime olarak geçiyorsa yetişkin içerik sayılır.
-    /// (Büyük/küçük harf duyarsız, noktalama/boşlukla çevrelenmiş token olarak eşleşir.)
+    /// Counts as adult content if it appears as a separate word in the category name.
+    /// (Case-insensitive; matches as a token surrounded by punctuation/whitespace.)
     private static let adultTokens: Set<String> = [
         "XXX",
         "ADULT", "ADULTS",
@@ -15,7 +15,7 @@ nonisolated enum AdultContentFilter {
         "EROTIC", "EROTICA",
         "HENTAI",
         "NUDE", "NUDITY",
-        "SEX",           // "Essex" gibi yanlış pozitifleri önlemek için token kontrolü yeterli
+        "SEX",           // the token check is enough to avoid false positives like "Essex"
         "NSFW",
         "EXPLICIT",
         "X-RATED",
@@ -24,7 +24,7 @@ nonisolated enum AdultContentFilter {
         "PLAYBOY",
     ]
 
-    /// Kategori adında herhangi bir yerde geçiyorsa yetişkin içerik sayılır.
+    /// Counts as adult content if it appears anywhere in the category name.
     private static let adultSubstrings: [String] = [
         "18+",
         "18 +",
@@ -35,32 +35,32 @@ nonisolated enum AdultContentFilter {
 
     // MARK: - Category Check
 
-    /// Verilen kategori adının yetişkin içerik içerip içermediğini döner.
+    /// Returns whether the given category name contains adult content.
     static func isAdultCategoryName(_ name: String) -> Bool {
         let upper = name.uppercased()
 
-        // Alfanümerik olmayan karakterlere göre böl, boş tokenları çıkar
+        // Split on non-alphanumeric characters, drop empty tokens
         let tokens = upper.components(separatedBy: CharacterSet.alphanumerics.inverted)
                           .filter { !$0.isEmpty }
         if tokens.contains(where: { adultTokens.contains($0) }) {
             return true
         }
 
-        // Özel karakterler içeren kalıplar (18+ gibi) substring olarak kontrol
+        // Patterns containing special characters (like 18+) are checked as substrings
         return adultSubstrings.contains(where: { upper.contains($0) })
     }
 
     // MARK: - Stream Checks
 
-    /// Bir canlı yayının yetişkin içerik olup olmadığını döner.
-    /// - `is_adult: 1` bayrağı varsa veya bulunduğu kategori yetişkin kategoriyse filtrele.
+    /// Returns whether a live stream is adult content.
+    /// - Filter if the `is_adult: 1` flag is set or its category is an adult category.
     static func isAdultLiveStream(_ stream: XtreamLiveStream, adultCategoryIds: Set<String>) -> Bool {
         if (stream.isAdult ?? 0) == 1 { return true }
         if let cid = stream.categoryId, adultCategoryIds.contains(cid) { return true }
         return false
     }
 
-    /// Bir film (VOD) yayınının yetişkin içerik olup olmadığını döner.
+    /// Returns whether a movie (VOD) stream is adult content.
     static func isAdultVODStream(_ stream: XtreamVODStream, adultCategoryIds: Set<String>) -> Bool {
         if (stream.isAdult ?? 0) == 1 { return true }
         if let cid = stream.categoryId, adultCategoryIds.contains(cid) { return true }
@@ -69,7 +69,7 @@ nonisolated enum AdultContentFilter {
 
     // MARK: - Helpers
 
-    /// Kategori listesinden yetişkin kategorilerin ID'lerini çıkarır.
+    /// Extracts the IDs of the adult categories from the category list.
     static func adultCategoryIds(from categories: [XtreamCategory]) -> Set<String> {
         Set(categories.compactMap { cat in
             guard let name = cat.categoryName, isAdultCategoryName(name) else { return nil }

@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Public Types
 
-/// Parse sonucu tek bir kanal.
+/// A single channel as a parse result.
 struct ParsedM3UChannel: Equatable, Sendable {
     var name: String
     var url: String
@@ -21,7 +21,7 @@ struct ParsedM3UChannel: Equatable, Sendable {
 
 struct ParsedM3UPlaylist: Equatable, Sendable {
     var channels: [ParsedM3UChannel]
-    /// `#EXTM3U` satırındaki `x-tvg-url` (varsa). v1'de sadece saklanır, EPG için kullanılmaz.
+    /// The `x-tvg-url` on the `#EXTM3U` line (if any). In v1 it is only stored, not used for EPG.
     var epgURL: String?
 }
 
@@ -39,10 +39,10 @@ enum M3UParserError: LocalizedError {
 
 // MARK: - Parser
 
-/// IPTV-odaklı M3U / M3U8 parser.
+/// IPTV-focused M3U / M3U8 parser.
 ///
-/// Mimari videojs/m3u8-parser'dan ilham aldı: `classify` satırı tipli bir `M3ULine`'a çevirir,
-/// ana döngü state-machine olarak kanal ekler. HLS (variant stream) değil, kanal-listesi M3U'su hedeflenir.
+/// Architecture inspired by videojs/m3u8-parser: `classify` turns a line into a typed `M3ULine`,
+/// and the main loop adds channels as a state machine. Targets channel-list M3Us, not HLS (variant streams).
 ///
 /// Desteklenen tag'ler:
 /// - `#EXTM3U [x-tvg-url="..."]`
@@ -51,12 +51,12 @@ enum M3UParserError: LocalizedError {
 /// - `#KODIPROP:inputstream.adaptive.stream_headers="User-Agent=..."`
 /// - `#EXTGRP:GroupName`
 ///
-/// Dayanıklılık:
-/// - UTF-8 BOM, `\r\n`/`\r`/U+2028/U+2029 newline'ları normalize eder.
-/// - Attr değeri içindeki virgüllere (tvg-logo URL'leri) dayanıklıdır (quote-aware split).
-/// - Attr değeri içine sızmış newline'ları birleştirir (`joinEXTINFContinuations`).
-/// - EXTINF ve URL aynı satıra yapışık gelmişse (`...,Namehttp://...`) ayırır.
-/// - URL percent-encoding fallback'i ile oynatılabilirliği arttırır.
+/// Robustness:
+/// - Normalizes the UTF-8 BOM and `\r\n`/`\r`/U+2028/U+2029 newlines.
+/// - Resistant to commas inside attribute values (tvg-logo URLs) (quote-aware split).
+/// - Joins newlines that leaked into an attribute value (`joinEXTINFContinuations`).
+/// - Splits EXTINF and URL when they arrive stuck on the same line (`...,Namehttp://...`).
+/// - Improves playability with a URL percent-encoding fallback.
 /// Pure stateless namespace — parse runs in detached tasks, so it must not be MainActor.
 nonisolated enum M3UParser {
 
@@ -93,7 +93,7 @@ nonisolated enum M3UParser {
         var channelCount: Int = 0
         var noGroupCount: Int = 0
         var noNameFallbackCount: Int = 0
-        /// İlk 20 "Diğer"e düşen kanalın ham EXTINF satırı + parsed özeti (debug için).
+        /// The raw EXTINF line + parsed summary of the first 20 channels that fall into "Diğer" (for debugging).
         var sampleNoGroup: [NoGroupSample] = []
 
         var debugSummary: String {
@@ -120,7 +120,7 @@ nonisolated enum M3UParser {
 
     // MARK: Public API
 
-    /// Senkron parse. Büyük dosyalar için `parseAsync`'i tercih et — bu UI thread'i bloklar.
+    /// Synchronous parse. Prefer `parseAsync` for large files — this blocks the UI thread.
     static func parse(_ rawText: String) throws -> ParsedM3UPlaylist {
         try parseInternal(rawText, collectDiagnostics: false).playlist
     }
@@ -130,7 +130,7 @@ nonisolated enum M3UParser {
         try parseInternal(rawText, collectDiagnostics: true)
     }
 
-    /// Arka plan thread'inde parse — UI akışını korur. 310K kanal için ~3-5 saniye sürebilir; çağıran tarafta progress göster.
+    /// Parses on a background thread — keeps the UI flowing. Can take ~3-5 seconds for 310K channels; show progress on the calling side.
     static func parseAsync(_ rawText: String) async throws -> ParsedM3UPlaylist {
         try await Task.detached(priority: .userInitiated) {
             try parse(rawText)
@@ -144,8 +144,8 @@ nonisolated enum M3UParser {
         }.value
     }
 
-    /// URL string'ini `URL`'e çevirir. Doğrudan başarısız olursa boşluk/UTF-8 gibi encode edilmemiş
-    /// karakterler için percent-encoding fallback'i dener.
+    /// Converts a URL string to a `URL`. If the direct conversion fails, tries a percent-encoding fallback
+    /// for unencoded characters such as spaces/UTF-8.
     static func sanitizedURL(from raw: String) -> URL? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -165,10 +165,10 @@ nonisolated enum M3UParser {
         _ rawText: String,
         collectDiagnostics: Bool
     ) throws -> (playlist: ParsedM3UPlaylist, diagnostics: ParseDiagnostics) {
-        // 100k+ satırlık listelerde tam metin kopyalarından kaçın: BOM Substring ile
-        // kopyasız atılır, boşluk kontrolü lazy taramadır ve satır bölme tek geçişte
-        // yapılır. `Character.isNewline` \n, \r, CRLF (tek grapheme), U+2028 ve U+2029'u
-        // kapsar — eski 4×replacingOccurrences normalizasyon zinciriyle aynı davranış.
+        // Avoid full-text copies on 100k+ line lists: the BOM is skipped with a Substring,
+        // the whitespace check is a lazy scan, and line splitting is done in a single pass.
+        // `Character.isNewline` covers \n, \r, CRLF (a single grapheme), U+2028 and U+2029 —
+        // the same behavior as the old 4×replacingOccurrences normalization chain.
         var text = Substring(rawText)
         if text.hasPrefix("\u{FEFF}") { text = text.dropFirst() }
 
@@ -176,7 +176,7 @@ nonisolated enum M3UParser {
             throw M3UParserError.empty
         }
 
-        // Attr değeri içine sızmış newline'ları birleştir.
+        // Join newlines that leaked into an attribute value.
         let logicalLines = joinEXTINFContinuations(
             text.split(omittingEmptySubsequences: false, whereSeparator: { $0.isNewline })
         )
@@ -207,7 +207,7 @@ nonisolated enum M3UParser {
         )
     }
 
-    /// Ana döngüden çıkarıldı; tek satırı işler ve state'i günceller.
+    /// Extracted from the main loop; processes a single line and updates the state.
     private static func processLine(
         _ line: String,
         state: inout ParserState,
@@ -235,7 +235,7 @@ nonisolated enum M3UParser {
             }
 
             if let embedded = embeddedURL, !embedded.isEmpty {
-                // Yapışık EXTINF+URL — kanalı hemen ekle.
+                // Stuck EXTINF+URL — add the channel immediately.
                 ch.url = embedded
                 let wasEmpty = ch.name.trimmingCharacters(in: .whitespaces).isEmpty
                 applyNameFallback(&ch, urlString: embedded, channelsCount: state.channels.count)
@@ -305,7 +305,7 @@ nonisolated enum M3UParser {
             pendingRawExtinf = nil
         }
 
-        /// EXTINF'ten SONRA gelen EXTVLCOPT/KODIPROP için: önce pendingChannel üstüne yaz, yoksa bekletme kovasına al.
+        /// For EXTVLCOPT/KODIPROP arriving AFTER the EXTINF: write onto the pendingChannel first, else put it in the holding bucket.
         mutating func assignUserAgent(_ ua: String) {
             if var p = pendingChannel {
                 if p.userAgent == nil { p.userAgent = ua }
@@ -338,7 +338,7 @@ nonisolated enum M3UParser {
     }
 
     private static func classify(_ line: String) -> M3ULine {
-        // URL satırı: `#` ile başlamayan her şey (http, https, rtmp, rtsp, udp, relative path, vb.)
+        // URL line: anything not starting with `#` (http, https, rtmp, rtsp, udp, relative path, etc.)
         guard line.hasPrefix("#") else { return .uri(line) }
 
         if line.hasPrefix(Tag.extm3u) {
@@ -368,7 +368,7 @@ nonisolated enum M3UParser {
 
     private static func parseExtinf(_ line: String) -> M3ULine {
         // `#EXTINF:<duration>[ attrs],<Display Name>`
-        // Virgül attr değerinde (tvg-logo URL'leri) de geçebilir — tırnak farkında böl.
+        // A comma can also appear inside an attribute value (tvg-logo URLs) — split quote-aware.
         let body = String(line.dropFirst(Tag.extinf.count))
         let (header, rawTitle) = splitHeaderAndName(body)
 
@@ -379,9 +379,9 @@ nonisolated enum M3UParser {
 
         let attrs = parseAttributes(in: header)
 
-        // Bozuk M3U'da title ve URL aynı satıra yapışmış olabilir.
-        // Ucuz "://" ön kontrolü: iyi biçimli satırların (%99+) regex'e hiç girmemesini
-        // sağlar — satır başına regex derlemesi 100k+ kanal importunda saniyeler yiyordu.
+        // In a broken M3U the title and URL may be stuck on the same line.
+        // Cheap "://" pre-check: keeps well-formed lines (99%+) from ever entering the regex —
+        // compiling a regex per line was costing seconds on a 100k+ channel import.
         var title = rawTitle
         var embedded: String? = nil
         if rawTitle.contains("://"),
@@ -395,17 +395,17 @@ nonisolated enum M3UParser {
 
     // MARK: Continuation Join
 
-    /// EXTINF satırında açık kalmış tırnak varsa (attr değeri içine gerçek newline sızmışsa),
-    /// tırnak dengelenene kadar sonraki fiziksel satırları birleştirir.
+    /// If the EXTINF line has an unclosed quote (a real newline leaked into an attribute value),
+    /// joins the following physical lines until the quotes balance.
     ///
     ///     #EXTINF:-1 tvg-name="NL - Venom - 2018
     ///     " tvg-logo="..." group-title="...",NL - Venom - 2018
     ///     http://server/movie.mp4
     ///
-    /// İlk iki satır mantıksal olarak tek EXTINF'tir. Yeni `#EXTINF:` görüldüğünde birleştirme durdurulur.
+    /// The first two lines are logically a single EXTINF. Joining stops when a new `#EXTINF:` is seen.
     private static func joinEXTINFContinuations(_ lines: [Substring]) -> [Substring] {
-        // Substring döner: normal satırlar için kopya yok; yalnızca (nadir) birleştirilen
-        // EXTINF'ler kendi String buffer'ını taşır.
+        // Returns a Substring: no copy for normal lines; only the (rare) joined
+        // EXTINFs carry their own String buffer.
         var result: [Substring] = []
         result.reserveCapacity(lines.count)
         var i = 0
@@ -420,10 +420,10 @@ nonisolated enum M3UParser {
             }
             var buffer = String(raw)
             var j = i + 1
-            let limit = min(n, i + 10) // güvenlik üst limiti — tek EXTINF için 10 fiziksel satır
+            let limit = min(n, i + 10) // safety upper limit — 10 physical lines for a single EXTINF
             while j < limit {
                 let nextTrimmed = lines[j].trimmingCharacters(in: .whitespaces)
-                if nextTrimmed.hasPrefix(Tag.extinf) { break } // yeni entry — birleştirme
+                if nextTrimmed.hasPrefix(Tag.extinf) { break } // new entry — stop joining
                 buffer += String(lines[j])
                 j += 1
                 if !hasOddQuoteCount(buffer) { break }
@@ -442,8 +442,8 @@ nonisolated enum M3UParser {
 
     // MARK: Attribute Parsing
 
-    /// `key="value"` (tırnaklı) VEYA `key=value` (tırnaksız, whitespace/virgüle kadar).
-    /// videojs'un attribute pattern'inden genişletildi: hem HLS (comma-separated) hem IPTV (space-separated) destekler.
+    /// `key="value"` (quoted) OR `key=value` (unquoted, up to whitespace/comma).
+    /// Extended from videojs's attribute pattern: supports both HLS (comma-separated) and IPTV (space-separated).
     private static let attributeRegex: NSRegularExpression = {
         try! NSRegularExpression(
             pattern: "([^=\\s,\"]+)=(?:\"([^\"]*)\"|([^\\s,\"]+))",
@@ -475,7 +475,7 @@ nonisolated enum M3UParser {
         return out
     }
 
-    /// `body`'yi, tırnak dışındaki ilk virgülden böler. Header (attr'lar) + Name (display).
+    /// Splits `body` at the first comma outside quotes. Header (attributes) + Name (display).
     private static func splitHeaderAndName(_ body: String) -> (header: String, name: String) {
         var inQuotes = false
         var splitIndex: String.Index? = nil
@@ -498,7 +498,7 @@ nonisolated enum M3UParser {
         return (header, name)
     }
 
-    /// `foo=bar` → ("foo", "bar"). `=` yoksa key = trim'lenmiş metin, value boş. Değer tırnaklıysa tırnakları soyar.
+    /// `foo=bar` → ("foo", "bar"). With no `=`, key = the trimmed text and value is empty. If the value is quoted, the quotes are stripped.
     private static func splitKeyValue(_ s: String) -> (key: String, value: String) {
         guard let eq = s.firstIndex(of: "=") else {
             return (s.trimmingCharacters(in: .whitespaces), "")
@@ -511,8 +511,8 @@ nonisolated enum M3UParser {
         return (k, v)
     }
 
-    /// KODIPROP stream_headers formatları: `User-Agent=Foo&Referer=Bar` veya `User-Agent: Foo\nReferer: Bar`.
-    /// Verilen key'i arar, URL-encoded ise çözüp döner.
+    /// KODIPROP stream_headers formats: `User-Agent=Foo&Referer=Bar` or `User-Agent: Foo\nReferer: Bar`.
+    /// Looks up the given key; if URL-encoded, decodes and returns it.
     private static func parseHeaderString(_ raw: String, keyed: String) -> String? {
         let lowerKey = keyed.lowercased()
         let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
@@ -572,7 +572,7 @@ nonisolated enum M3UParser {
                 return
             }
         }
-        // Import anında aktif dile göre yazılır; sabit Türkçe "Kanal N" tüm dillerde görünüyordu.
+        // Written in the active language at import time; the fixed Turkish "Kanal N" used to appear in every language.
         channel.name = L("misc.channel_fallback_name", channelsCount + 1)
     }
 

@@ -14,12 +14,12 @@ enum XtreamImporter {
         client: XtreamAPIClient,
         progress: @escaping @MainActor (String) -> Void
     ) async throws {
-        print("--- XTREAM IMPORT: SYNC STARTED (SQLITE) ---")
-        let totalStartTime = Date()
+        // Round 16 (R7): the sync progress prints are removed
+        // (production logging on every sync); the timing locals
+        // that only fed those prints went with them.
 
-        // Altı endpoint bağımsız — sıralı beklemek toplam süreyi altı gidiş-dönüşün
-        // TOPLAMI yapıyordu; paralel çekim yavaş panellerde süreyi yarıdan fazla kısaltır.
-        let fetchStart = Date()
+        // The six endpoints are independent — waiting sequentially made the total time the SUM
+        // of six round trips; fetching in parallel cuts the time by more than half on slow panels.
         progress(L("add_playlist.fetching_categories"))
         async let liveCatsTask = client.getLiveCategories()
         async let vodCatsTask = client.getVODCategories()
@@ -30,16 +30,12 @@ enum XtreamImporter {
         let (liveCats, vodCats, seriesCats, liveStreams, vods, series) = try await (
             liveCatsTask, vodCatsTask, seriesCatsTask, liveStreamsTask, vodsTask, seriesTask
         )
-        print("NETWORK: All 6 endpoints fetched in \(Date().timeIntervalSince(fetchStart)) seconds | live=\(liveStreams.count) vod=\(vods.count) series=\(series.count)")
-
         // 1. Save the playlist first so it shows up in the list even if content insertion fails.
         try await AppDatabase.shared.write { db in
             try playlist.save(db)
         }
-        print("DATABASE: Playlist saved successfully")
 
         progress(L("add_playlist.saving_db"))
-        let insertStart = Date()
 
         // Adult content filter
         let filterAdult = playlist.filterAdultContent
@@ -90,7 +86,5 @@ enum XtreamImporter {
             }
         }
 
-        print("DATABASE: Total Insertion completed in \(Date().timeIntervalSince(insertStart)) seconds")
-        print("--- TOTAL SYNC TIME: \(Date().timeIntervalSince(totalStartTime)) seconds ---")
     }
 }

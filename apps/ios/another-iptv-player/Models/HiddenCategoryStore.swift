@@ -1,8 +1,8 @@
 import Foundation
 import Combine
 
-/// Playlist + içerik tipi başına gizlenmiş kategori ID'lerini UserDefaults'ta saklar.
-/// Yazımda `@Published` versiyon artar; `@ObservedObject` kullanan view'lar otomatik yenilenir.
+/// Stores the hidden category IDs per playlist + content type in UserDefaults.
+/// On write the `@Published` version increments; views using `@ObservedObject` refresh automatically.
 @MainActor
 final class HiddenCategoryStore: ObservableObject {
     static let shared = HiddenCategoryStore()
@@ -42,7 +42,7 @@ final class HiddenCategoryStore: ObservableObject {
         setHidden(!isCurrentlyHidden, playlistId: playlistId, type: type, categoryId: categoryId)
     }
 
-    /// Playlist silindiğinde çağrılır — bu playlist'e ait tüm gizli kategori kayıtlarını siler.
+    /// Called when a playlist is deleted — removes all hidden-category records for this playlist.
     func removeAll(playlistId: UUID) {
         var changed = false
         for type in ["live", "vod", "series", "m3u"] {

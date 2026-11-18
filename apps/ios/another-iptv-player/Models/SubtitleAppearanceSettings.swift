@@ -29,7 +29,7 @@ enum SubtitleFontWeight: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    /// libass / CoreText için iOS sistem yazı tipi postscript adı. Cihazda aranır; bulunamazsa fallback olur.
+    /// The iOS system font's PostScript name for libass / CoreText. Looked up on the device; falls back if not found.
     var iosPostscriptName: String {
         switch self {
         case .thin: return "SFProDisplay-Thin"

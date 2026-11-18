@@ -7,17 +7,15 @@ struct PlaylistRequest: Queryable, Equatable {
     static var defaultValue: [Playlist]? { nil }
     
     func publisher(in appDatabase: AppDatabase) -> AnyPublisher<[Playlist]?, Never> {
-        print("DATABASE: PlaylistRequest publisher called")
+        // Round 16 (R7): per-query prints removed (production
+        // logging fired on every playlist observation).
         return ValueObservation
             .tracking { db in
-                let playlists = try Playlist.fetchAll(db)
-                print("DATABASE: FetchAll(playlist) returns \(playlists.count) items")
-                return playlists
+                try Playlist.fetchAll(db)
             }
             .publisher(in: appDatabase.reader)
             .map { $0 as [Playlist]? }
-            .catch { error in
-                print("DATABASE: PlaylistRequest error: \(error)")
+            .catch { _ in
                 return Just([] as [Playlist]?)
             }
             .eraseToAnyPublisher()
@@ -54,8 +52,13 @@ struct LiveStreamsRequest: Queryable, Equatable {
     func publisher(in appDatabase: AppDatabase) -> AnyPublisher<[LiveStreamWithCategory], Never> {
         ValueObservation
             .tracking { db in
+                // Round 14 (B10): explicit card columns instead of
+                // `liveStream.*` (the live table has no heavy columns).
                 var sql = """
-                SELECT liveStream.*, COALESCE(category.name, ?) AS categoryName
+                SELECT liveStream.streamId, liveStream.name, liveStream.streamIcon,
+                       liveStream.epgChannelId, liveStream.categoryId, liveStream.sortIndex,
+                       liveStream.playlistId, liveStream.tvArchive, liveStream.tvArchiveDuration,
+                       COALESCE(category.name, ?) AS categoryName
                 FROM liveStream
                 LEFT JOIN category ON liveStream.categoryId = category.id
                              AND liveStream.playlistId = category.playlistId
@@ -102,8 +105,19 @@ struct VODStreamsRequest: Queryable, Equatable {
     func publisher(in appDatabase: AppDatabase) -> AnyPublisher<[VODWithCategory], Never> {
         ValueObservation
             .tracking { db in
+                // Round 14 (B10): narrowed to card columns; heavy text
+                // (plot/cast/director) and detail-only fields return as
+                // NULL / false — the full record is fetched on demand
+                // by `VODByIDRequest` for the detail screen.
                 var sql = """
-                SELECT vodStream.*, COALESCE(category.name, ?) AS categoryName
+                SELECT vodStream.streamId, vodStream.name, vodStream.streamIcon,
+                       vodStream.categoryId, vodStream.rating, vodStream.containerExtension,
+                       NULL AS director, NULL AS cast, NULL AS plot,
+                       vodStream.genre, vodStream.releaseDate, vodStream.rating5Based,
+                       vodStream.backdropPath, NULL AS youtubeTrailer, vodStream.duration,
+                       NULL AS tmdbId, NULL AS kinopoiskURL, 0 AS metadataLoaded,
+                       vodStream.added, vodStream.sortIndex, vodStream.playlistId,
+                       COALESCE(category.name, ?) AS categoryName
                 FROM vodStream
                 LEFT JOIN category ON vodStream.categoryId = category.id
                              AND vodStream.playlistId = category.playlistId
@@ -150,8 +164,18 @@ struct SeriesRequest: Queryable, Equatable {
     func publisher(in appDatabase: AppDatabase) -> AnyPublisher<[SeriesWithCategory], Never> {
         ValueObservation
             .tracking { db in
+                // Round 14 (B10): narrowed to card columns; heavy text
+                // (plot/cast/director) and the trailer id return as
+                // NULL — the full record is fetched on demand by
+                // `SeriesByIDRequest` for the detail screen.
                 var sql = """
-                SELECT series.*, COALESCE(category.name, ?) AS categoryName
+                SELECT series.seriesId, series.name, series.cover,
+                       NULL AS plot, NULL AS cast, NULL AS director,
+                       series.genre, series.releaseDate, series.rating, series.lastModified,
+                       series.rating5Based, series.backdropPath, NULL AS youtubeTrailer,
+                       series.episodeRunTime, series.categoryId, series.sortIndex,
+                       series.seasonsLoaded, series.playlistId,
+                       COALESCE(category.name, ?) AS categoryName
                 FROM series
                 LEFT JOIN category ON series.categoryId = category.id
                              AND series.playlistId = category.playlistId
@@ -297,8 +321,17 @@ struct FavoriteVODRequest: Queryable, Equatable {
     func publisher(in appDatabase: AppDatabase) -> AnyPublisher<[VODWithCategory], Never> {
         ValueObservation
             .tracking { db in
+                // Round 14 (B10): same card-column narrowing as
+                // `VODStreamsRequest`.
                 let sql = """
-                SELECT vodStream.*, COALESCE(category.name, ?) AS categoryName
+                SELECT vodStream.streamId, vodStream.name, vodStream.streamIcon,
+                       vodStream.categoryId, vodStream.rating, vodStream.containerExtension,
+                       NULL AS director, NULL AS cast, NULL AS plot,
+                       vodStream.genre, vodStream.releaseDate, vodStream.rating5Based,
+                       vodStream.backdropPath, NULL AS youtubeTrailer, vodStream.duration,
+                       NULL AS tmdbId, NULL AS kinopoiskURL, 0 AS metadataLoaded,
+                       vodStream.added, vodStream.sortIndex, vodStream.playlistId,
+                       COALESCE(category.name, ?) AS categoryName
                 FROM favorite
                 JOIN vodStream ON favorite.streamId = vodStream.streamId
                                AND favorite.playlistId = vodStream.playlistId
@@ -324,8 +357,16 @@ struct FavoriteSeriesRequest: Queryable, Equatable {
     func publisher(in appDatabase: AppDatabase) -> AnyPublisher<[SeriesWithCategory], Never> {
         ValueObservation
             .tracking { db in
+                // Round 14 (B10): same card-column narrowing as
+                // `SeriesRequest`.
                 let sql = """
-                SELECT series.*, COALESCE(category.name, ?) AS categoryName
+                SELECT series.seriesId, series.name, series.cover,
+                       NULL AS plot, NULL AS cast, NULL AS director,
+                       series.genre, series.releaseDate, series.rating, series.lastModified,
+                       series.rating5Based, series.backdropPath, NULL AS youtubeTrailer,
+                       series.episodeRunTime, series.categoryId, series.sortIndex,
+                       series.seasonsLoaded, series.playlistId,
+                       COALESCE(category.name, ?) AS categoryName
                 FROM favorite
                 JOIN series ON favorite.streamId = series.seriesId
                            AND favorite.playlistId = series.playlistId
@@ -351,8 +392,13 @@ struct FavoriteLiveRequest: Queryable, Equatable {
     func publisher(in appDatabase: AppDatabase) -> AnyPublisher<[LiveStreamWithCategory], Never> {
         ValueObservation
             .tracking { db in
+                // Round 14 (B10): explicit card columns, as in
+                // `LiveStreamsRequest`.
                 let sql = """
-                SELECT liveStream.*, COALESCE(category.name, ?) AS categoryName
+                SELECT liveStream.streamId, liveStream.name, liveStream.streamIcon,
+                       liveStream.epgChannelId, liveStream.categoryId, liveStream.sortIndex,
+                       liveStream.playlistId, liveStream.tvArchive, liveStream.tvArchiveDuration,
+                       COALESCE(category.name, ?) AS categoryName
                 FROM favorite
                 JOIN liveStream ON favorite.streamId = liveStream.streamId
                                AND favorite.playlistId = liveStream.playlistId
@@ -419,8 +465,8 @@ struct RecentWatchHistoryRequest: Queryable, Equatable {
     }
 }
 
-/// Bir playlist'teki tüm izleme ilerlemelerini tek sorguda döner.
-/// Kart başına ayrı @Query açmak yerine bu kullanılır: streamId → ilerleme (0…1)
+/// Returns all watch progress for a playlist in a single query.
+/// This is used instead of opening a separate @Query per card: streamId → progress (0…1)
 struct WatchProgressMapRequest: Queryable, Equatable {
     static var defaultValue: [String: Double] { [:] }
     let playlistId: UUID

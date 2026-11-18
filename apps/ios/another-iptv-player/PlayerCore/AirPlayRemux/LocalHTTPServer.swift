@@ -1,19 +1,19 @@
 import Foundation
 import Network
 
-/// Minimal statik dosya sunucusu: Apple TV, AirPlay sırasında HLS playlist/segmentleri
-/// buradan çeker. Yalnız GET, kök dizin altı (bir seviye oturum alt dizini dahil),
-/// range'siz — HLS istemcileri için yeterli.
+/// Minimal static file server: during AirPlay, the Apple TV fetches the HLS playlists/segments
+/// from here. GET only, under the root directory (including one level of session subdirectory),
+/// no ranges — sufficient for HLS clients.
 final class LocalHTTPServer {
-  /// Zapping'de oturum başına listener kurup yıkmamak için süreç boyu paylaşılan örnek;
-  /// oturumlar kök altında kendi alt dizinlerini kullanır. Port ve yerel-ağ doğrulaması
-  /// böylece bir kez yapılır.
+  /// A process-wide shared instance so zapping does not set up and tear down a listener per session;
+  /// sessions use their own subdirectories under the root. Port and local-network validation
+  /// is therefore done once.
   static let shared: LocalHTTPServer = {
     let root = FileManager.default.temporaryDirectory
       .appendingPathComponent("airplay-remux", isDirectory: true)
     try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-    // App kill ile yarım kalan önceki oturum dizinleri (segment yığınları) süpürülür;
-    // ilk cast anında süreçte hiçbir oturum yok, kökün tamamı güvenle temizlenir.
+    // Previous session directories left half-finished by an app kill (segment piles) are swept;
+    // at the first cast moment there is no session in the process, so the whole root is safely cleaned.
     if let leftovers = try? FileManager.default.contentsOfDirectory(
       at: root, includingPropertiesForKeys: nil
     ) {
@@ -32,7 +32,7 @@ final class LocalHTTPServer {
   private let connectionQueue = DispatchQueue(
     label: "AirPlayRemux.http.connections", attributes: .concurrent
   )
-  /// listener/port farklı thread'lerden okunur (main'den start, queue'dan state
+  /// listener/port are read from different threads (start from main, state from the queue
   /// callback'leri) — kilitle korunur.
   private let stateLock = NSLock()
   private var listener: NWListener?
@@ -48,9 +48,9 @@ final class LocalHTTPServer {
     self.directory = directory
   }
 
-  /// Idempotent: listener zaten ayaktaysa hızla döner. Ölmüş (failed/cancelled)
-  /// listener state callback'inde kendini temizler — bir sonraki start() yeniden
-  /// kurar; süreç ömrü boyu "ölü sunucu" durumu kalıcı olamaz.
+  /// Idempotent: returns quickly if the listener is already up. A dead (failed/cancelled)
+  /// listener cleans itself up in its state callback — the next start() sets it up
+  /// again; a "dead server" state cannot persist for the process lifetime.
   func start() throws {
     stateLock.lock()
     let alreadyRunning = listener != nil && listenerPort > 0
@@ -91,7 +91,7 @@ final class LocalHTTPServer {
     listenerPort = 0
     stateLock.unlock()
     newListener.start(queue: listenerQueue)
-    // Çağıran port'u senkron bekler (en fazla 1 sn); polling yerine state sinyali.
+    // The caller waits for the port synchronously (at most 1s); a state signal instead of polling.
     _ = ready.wait(timeout: .now() + 1)
   }
 
@@ -113,9 +113,9 @@ final class LocalHTTPServer {
     current?.cancel()
   }
 
-  /// Telefonun, Apple TV'nin erişebileceği IPv4 adresi. Tercih sırası: en0 (Wi-Fi) →
-  /// bridge* (hotspot: TV telefonun hotspot'undaysa) → diğer en* arayüzleri.
-  /// lo/utun(VPN)/pdp_ip(hücresel)/awdl-llw adresleri TV'den erişilemez, atlanır;
+  /// The phone's IPv4 address reachable by the Apple TV. Preference order: en0 (Wi-Fi) →
+  /// bridge* (hotspot: when the TV is on the phone's hotspot) → other en* interfaces.
+  /// lo/utun (VPN)/pdp_ip (cellular)/awdl-llw addresses are unreachable from the TV and are skipped;
   /// 169.254.* link-local adresler de (DHCP yokken) elenir.
   static func lanIPv4Address() -> String? {
     var addrList: UnsafeMutablePointer<ifaddrs>?
@@ -189,12 +189,12 @@ final class LocalHTTPServer {
     let rawPath = requestLine.split(separator: " ").dropFirst().first.map(String.init) ?? "/"
     let cleanPath = rawPath.split(separator: "?").first.map(String.init) ?? "/"
     if cleanPath == "/ping" {
-      // Erişilebilirlik/izin ön-doğrulaması: playlist hazır olmadan da 200 verir.
+      // Reachability/permission pre-check: returns 200 even before the playlist is ready.
       send(connection, status: "200 OK", body: Data("ok".utf8), contentType: "text/plain")
       return
     }
-    // Yol atlatmaya kapalı: kök altında en fazla iki bileşen (oturum-dizini/dosya),
-    // ".." ve boş bileşen reddedilir.
+    // Closed to path traversal: at most two components under the root (session-directory/file),
+    // ".." and empty components are rejected.
     let components = cleanPath.split(separator: "/").map(String.init)
     guard !components.isEmpty, components.count <= 2,
           components.allSatisfy({ !$0.isEmpty && $0 != ".." && !$0.hasPrefix(".") })

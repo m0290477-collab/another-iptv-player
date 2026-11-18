@@ -13,8 +13,8 @@ struct TrackMenuOption: Identifiable, Hashable {
   let langCode: String?
   /// mpv `track-list/N/external`: external file track added via `sub-add`.
   let isExternal: Bool
-  /// Başlık gerçek metadata değil, index'ten türetilmiş ("Parça 2" gibi). Tercih olarak
-  /// SAKLANMAMALI — bir sonraki videoda pozisyonu aynı olan alakasız parçayı seçtirir.
+  /// The title is not real metadata; it is derived from the index (like "Part 2"). It should NOT be SAVED
+  /// as a preference — it would select an unrelated segment at the same position in the next video.
   let isSyntheticTitle: Bool
 
   init(id: Int, title: String, detail: String? = nil, langCode: String? = nil, isExternal: Bool = false, isSyntheticTitle: Bool = false) {
@@ -150,13 +150,16 @@ final class VideoPlayerController: ObservableObject {
   }
 
   private let log = Logger(
-    subsystem: Bundle.main.bundleIdentifier ?? "another-iptv-player",
+    // Round 16 (R9): fallback names this app's own bundle id
+    // (was the upstream project's name; never executes in the
+    // shipped app, where the bundle identifier is always present).
+    subsystem: Bundle.main.bundleIdentifier ?? "com.irqus.superx",
     category: "VideoPlayer"
   )
 
   let engine: KSPlayerEngine
-  /// AirPlay cast orkestratörü. Cast oturumu aktifken motor tamamen durdurulur;
-  /// sunum ve transport bu nesne üzerinden akar.
+  /// AirPlay cast orchestrator. While a cast session is active the engine is fully stopped;
+  /// presentation and transport flow through this object.
   let castController: CastController?
   private let castOwnerToken = UUID()
 
@@ -183,7 +186,7 @@ final class VideoPlayerController: ObservableObject {
   @Published var hwdecCurrent: String = ""
   @Published var videoCodecName: String = ""
   @Published var seekLatencyMs: Int = -1
-  /// Ağ / yükleme hatası (`KSPlayerEngine.playbackFailureMessage` yansıması).
+  /// Network / loading error (a reflection of `KSPlayerEngine.playbackFailureMessage`).
   @Published var playbackFailureMessage: String?
 
   @Published var videoTracks: [TrackMenuOption] = []
@@ -194,23 +197,23 @@ final class VideoPlayerController: ObservableObject {
   @Published var currentSubtitleTrackId: Int = -1
 
   @Published var isPiPActive: Bool = false
-  /// Yalnız KSPlayer/AVPlayer yolunda true: gerçek AirPlay external playback mümkün.
+  /// True only on the KSPlayer/AVPlayer path: real AirPlay external playback is possible.
   @Published private(set) var isAirPlayVideoCapable: Bool = false
-  /// Debug overlay için: aktif ses codec'i (AirPlay adaylığı teşhisi).
+  /// For the debug overlay: the active audio codec (AirPlay candidacy diagnosis).
   @Published private(set) var audioCodecName: String = ""
-  /// FFmpeg yolunda: AirPlay butonu önce remux hazırlar, sonra sistem seçiciyi açar.
+  /// On the FFmpeg path: the AirPlay button first prepares the remux, then opens the system picker.
   @Published private(set) var needsAirPlayPreparation: Bool = false
   /// Cast oturumu sunumda: transport/scrubber cast'e akar, track menüsü pasif.
   @Published private(set) var isCastPresenting: Bool = false
-  /// Video şu anda AirPlay hedefinde oynuyor (native external ya da remux cast);
-  /// yerel yüzeyde "AirPlay'de oynatılıyor" placeholder'ı gösterilir.
+  /// The video is currently playing on the AirPlay target (native external or remux cast);
+  /// the "Playing on AirPlay" placeholder is shown on the local surface.
   @Published private(set) var isAirPlayPlaybackActive: Bool = false
   @Published var aspectMode: VideoAspectMode = .fit
-  /// Canlı yayın bayrağı: `setPlaybackPresentation` üzerinden güncellenir. PiP sample buffer
-  /// delegesi skip kontrollerini gizlemek için bu değeri okur (mpv duration canlıda 0 dönmeyebilir).
+  /// Live broadcast flag: updated via `setPlaybackPresentation`. The PiP sample buffer
+  /// delegate reads this value to hide the skip controls (mpv duration may return 0 for live).
   @Published var isLiveStream: Bool = false
 
-  /// Sistem ekran parlaklığı (0…1). Kontrol Merkezi vb. dış değişimler `brightnessDidChange` ile güncellenir.
+  /// System screen brightness (0…1). External changes such as Control Center are updated via `brightnessDidChange`.
   @Published private(set) var screenBrightness: CGFloat
 
   var hdrAvailable: Bool = false
@@ -223,7 +226,7 @@ final class VideoPlayerController: ObservableObject {
   }
 
   private var pendingLoadRequest: PendingLoadRequest?
-  /// Son `play(url:)` isteği — AirPlay hazırlığı ve cast devri buradan içerik kurar.
+  /// The last `play(url:)` request — AirPlay preparation and cast handover build content from here.
   private var currentLoadRequest: PendingLoadRequest?
   private var isTornDown = false
   private var audioSessionActivated = false
@@ -235,22 +238,28 @@ final class VideoPlayerController: ObservableObject {
   private var remoteCommandTargets: [(MPRemoteCommand, Any)] = []
   private var seriesEpisodeOnPrevious: (() -> Void)?
   private var seriesEpisodeOnNext: (() -> Void)?
-  /// Remote-command'lar yeniden kurulduğunda enable durumunu geri uygulamak için.
+  /// To re-apply the enabled state when the remote commands are rebuilt.
   private var episodeNavCanPrevious = false
   private var episodeNavCanNext = false
   private var episodeNavSwapSkip = true
   private var cancellables = Set<AnyCancellable>()
 
   private var nowPlayingArtwork: UIImage?
-  private var artworkFetchTask: URLSessionDataTask?
+  /// Round 15 (C11): the artwork fetch is an async task, not a
+  /// completion-handler data task.
+  private var artworkFetchTask: Task<Void, Never>?
   private var artworkFetchURL: URL?
   private var seekRequestStartedAt: Date?
   private var seekSourceTimeMs: Int64?
-  /// `play` sonrası ilk `isPlaybackEstablished` olayında kayıtlı parça tercihleri uygulanır.
+  /// When the first `isPlaybackEstablished` event arrives after `play`, the saved track preferences are applied.
   private var pendingPreferredTrackSelection = false
   /// Recoverable open failures (timeout / host unreachable) trigger one silent reload
   /// before the error is surfaced. Reset on every explicit `play(url:)`.
   private var didAutoRetryCurrentLoad = false
+  // Round 20 (R20-4): the round-17 alternate-engine attempt and
+  // the round-14/18 total startup cap are REMOVED — build 33 has
+  // exactly one silent retry for a recoverable failure and no
+  // startup cap; build 33 wins.
 
   /// Imported external subtitles (`ImportedSubtitleStore`): the content key comes from
   /// PlayerView; once playback is established the stored files are re-added to mpv.
@@ -272,13 +281,13 @@ final class VideoPlayerController: ObservableObject {
     teardown()
   }
 
-  /// Kenar tespiti için son görülen motor durumları (`changePublisher` toplu yayınlar).
+  /// The last seen engine states for edge detection (`changePublisher` publishes in batches).
   private var lastEngineIsReady = false
   private var lastEngineEstablished = false
 
   private func wireEngine() {
-    // DispatchQueue scheduler'ı her zaman async planlar; objectWillChange değişimden
-    // ÖNCE ateşlense de sink koşarken değerler güncellenmiş olur.
+    // The DispatchQueue scheduler always schedules async; even if objectWillChange fires BEFORE
+    // the change, the values are already updated by the time the sink runs.
     engine.changePublisher
       .receive(on: DispatchQueue.main)
       .sink { [weak self] in
@@ -290,8 +299,8 @@ final class VideoPlayerController: ObservableObject {
       .receive(on: DispatchQueue.main)
       .sink { [weak self] _ in
         guard let self else { return }
-        // Dosyanın zorunlu kıldığı `if current != new` koruması: @Published aynı
-        // değerde bile objectWillChange yakar, sürükleme boyunca PlayerView'ı boşa
+        // The file-mandated `if current != new` guard: @Published fires objectWillChange even for the same
+        // value, needlessly invalidating PlayerView throughout a drag.
         // invalidate ediyordu.
         let b = UIScreen.main.brightness
         if self.screenBrightness != b { self.screenBrightness = b }
@@ -307,10 +316,10 @@ final class VideoPlayerController: ObservableObject {
       }
       .store(in: &cancellables)
 
-    // Kulaklık çıkarma / Bluetooth kopması: platform geleneği (AVPlayer davranışı)
-    // oynatmayı duraklatmaktır — aksi halde ses aniden hoparlörden devam eder.
-    // Cast aktifken bu kural İŞLEMEZ: oynatma TV'de, AirPlay rota kararları
-    // CastController'ındır (iki gözlemcinin çelişmesi saha bulgusuydu).
+    // Headphone removal / Bluetooth disconnect: platform convention (AVPlayer behavior)
+    // is to pause playback — otherwise the audio suddenly continues from the speaker.
+    // This rule does NOT apply while cast is active: playback is on the TV, AirPlay route decisions belong
+    // to CastController (two observers contradicting each other was a field finding).
     NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)
       .receive(on: DispatchQueue.main)
       .sink { [weak self] note in
@@ -338,8 +347,8 @@ final class VideoPlayerController: ObservableObject {
       stopDirectPlayback: { [weak self] in
       guard let self else { return }
       self.engine.stopPlayback()
-      // KSPlayerLayer.deinit removeTarget(nil) ile TÜM remote-command hedeflerini
-      // siler; kilit ekranı kontrolleri her layer yıkımından sonra yeniden kurulur.
+      // KSPlayerLayer.deinit deletes ALL remote-command targets with removeTarget(nil);
+      // deletes; the lock screen controls are rebuilt after every layer teardown.
       self.reinstallRemoteCommands()
       },
       resumeDirectPlayback: { [weak self] content, at in
@@ -364,6 +373,9 @@ final class VideoPlayerController: ObservableObject {
     let established = engine.isPlaybackEstablished
     if established != lastEngineEstablished {
       lastEngineEstablished = established
+      // Round 20 (R20-4): build 33 does nothing extra on
+      // establishment here — the round-14 startup-cap disarm and
+      // the round-18 retry re-arm are removed with their machinery.
       if established, pendingPreferredTrackSelection {
         pendingPreferredTrackSelection = false
         // If an imported subtitle is selected, the global subtitle preference must not override it.
@@ -390,6 +402,8 @@ final class VideoPlayerController: ObservableObject {
       log.info("Auto-retrying playback after recoverable failure")
       // Resume from the current position, not the original startSeconds — otherwise a
       // mid-stream retry silently rewinds to wherever the user started this load from.
+      // (Build-33 form, restored in round 20: no live carve-out,
+      // no startup-cap gate, no alternate-engine second attempt.)
       let resumeAt: TimeInterval? = engine.isPlaybackEstablished && engine.position > 0.5
         ? engine.position
         : request.startSeconds
@@ -407,7 +421,7 @@ final class VideoPlayerController: ObservableObject {
     let ks = engine
     if isPiPActive != ks.isPiPActive { isPiPActive = ks.isPiPActive }
     if audioCodecName != ks.audioCodecName { audioCodecName = ks.audioCodecName }
-    // Remux adaylığı: FFmpeg yolu + uyumlu codec'ler.
+    // Remux candidacy: the FFmpeg path + compatible codecs.
     let remuxCandidate = ks.isFFmpegBackendActive
       && !ks.videoCodecName.isEmpty
       && RemuxHLSWriter.isCompatible(
@@ -470,7 +484,7 @@ final class VideoPlayerController: ObservableObject {
     }
   }
 
-  /// Mutlak (kaynak-zamanı) seek; uzaktan kumanda ve scrubber buradan geçer.
+  /// Absolute (source-time) seek; the remote control and the scrubber pass through here.
   func seekAbsolute(to seconds: TimeInterval) {
     markSeekRequestStart()
     if let cast = castController, cast.isPresenting {
@@ -480,8 +494,8 @@ final class VideoPlayerController: ObservableObject {
     }
   }
 
-  /// Sunum kaynağı: cast oturumu aktifken cast, değilse motor. Tek anahtar noktası —
-  /// aşağıdaki tüm @Published eşlemeleri bu anlık görüntüden beslenir.
+  /// Presentation source: cast while a cast session is active, otherwise the engine. The single key point —
+  /// all @Published mappings below are fed from this snapshot.
   private struct PresentationSnapshot {
     var position: TimeInterval
     var duration: TimeInterval
@@ -524,8 +538,8 @@ final class VideoPlayerController: ObservableObject {
     )
   }
 
-  /// Her @Published atama `objectWillChange` fire eder — Swift @Published eşitlik kontrolü yapmaz.
-  /// Tüm atamaları `if current != new` ile koru; aksi halde saniyede 8×22 = ~176 gereksiz SwiftUI invalidation olur.
+  /// Every @Published assignment fires `objectWillChange` — Swift's @Published does no equality check.
+  /// Guard all assignments with `if current != new`; otherwise there are 8×22 = ~176 needless SwiftUI invalidations per second.
   private func syncFromEngine() {
     let snapshot = presentationSnapshot()
     let pos = snapshot.position
@@ -604,7 +618,7 @@ final class VideoPlayerController: ObservableObject {
     updateNowPlayingInfo()
   }
 
-  /// Oynatma sırasında ekranın otomatik kapanmasını engeller; duraklatınca veya ekrandan çıkınca normale döner.
+  /// Prevents the screen from auto-locking during playback; returns to normal when paused or when leaving the screen.
   private func applyIdleTimerPolicy() {
     let disableIdleTimer = isPlaying
     if Thread.isMainThread {
@@ -627,8 +641,8 @@ final class VideoPlayerController: ObservableObject {
       liveLowLatency: request.isLiveStream,
       userAgent: request.userAgent
     )
-    // Yeni KSPlayerLayer kurulurken eskisinin deinit'i tüm remote-command
-    // hedeflerini sildi; kilit ekranı kontrollerini geri kur.
+    // While a new KSPlayerLayer is being set up, the old one's deinit
+    // deleted their targets; rebuild the lock screen controls.
     reinstallRemoteCommands()
     let saved = SubtitleAppearancePersistence.load()
     engine.applySubtitleAppearanceFromSettings(saved)
@@ -665,12 +679,12 @@ final class VideoPlayerController: ObservableObject {
       isLiveStream: isLiveStream,
       userAgent: userAgent
     )
-    // Cast oturumu aktifken (zap / auto-next) içerik cast hattından akar; motor
-    // AÇILMAZ — panele ikinci bağlantı açmak bağlantı-limitli panellerde devir
-    // hatalarının kök nedeniydi. Native-external oynatma sırasında FFmpeg'lik
-    // içeriğe zap da doğrudan remux devriyle sürer. Üçüncü yol: önceki oynatıcı
-    // ekranı cast ortasında kapandıysa (film kapat → canlı aç) CastController'ın
-    // kendisi yeni ekrana devredilir; `cast.isEngaged` bu yolu doğrudan seçer.
+    // While a cast session is active (zap / auto-next), content flows through the cast pipeline; the engine
+    // does NOT OPEN — opening a second connection to the panel was the root cause of handover errors on
+    // connection-limited panels. During native-external playback, a zap to FFmpeg content also
+    // proceeds directly via the remux handover. Third path: if the previous player screen closed mid-cast
+    // (close movie → open live), CastController itself is handed over
+    // to the new screen; `cast.isEngaged` selects this path directly.
     if let cast = castController {
       let nativeNext = !KSPlayerEngine.prefersFFmpegFirst(for: url)
       let overlapsNativeExternalPlayback =
@@ -687,9 +701,9 @@ final class VideoPlayerController: ObservableObject {
       if cast.isEngaged || crossoverToRemux || continueNativeExternalPlayback {
         pendingPreferredTrackSelection = false
         setupAudioSession()
-        // Motor durdurulmuş; altyazı modeli önceki içeriğin seçimini taşıyor.
-        // Cast tikleri cue araması yapmaya devam ettiğinden yanlış içerik altyazısı
-        // basılmasın diye seçim temizlenir.
+        // The engine is stopped; the subtitle model carries the previous content's selection.
+        // Because cast ticks kept doing cue searches, the selection is cleared so the wrong content's subtitles are not printed.
+        // the selection is cleared so it is not printed.
         engine.selectSubtitleTrack(id: -1)
         let content = CastController.Content(
           url: url,
@@ -747,9 +761,13 @@ final class VideoPlayerController: ObservableObject {
   }
 
   func seek(to pos: Float) {
+    // Round 14 (B2): resume/seek math is undefined when the
+    // duration is unknown — guard BOTH paths (the cast path
+    // already did; the engine path relied on the engine's own
+    // guard, which a cast-shaped duration of 0 could bypass).
+    guard durationMs > 0 else { return }
     if castPresentingNow {
       let dur = Double(durationMs) / 1000.0
-      guard dur > 0 else { return }
       seekAbsolute(to: dur * Double(min(max(pos, 0), 1)))
       return
     }
@@ -775,7 +793,7 @@ final class VideoPlayerController: ObservableObject {
     }
   }
 
-  /// `UIScreen` parlaklığı; ana iş parçacığında uygulanır.
+  /// `UIScreen` brightness; applied on the main thread.
   func setScreenBrightness(_ value: CGFloat) {
     let clamped = min(max(value, 0), 1)
     let apply = { [weak self] in
@@ -811,6 +829,11 @@ final class VideoPlayerController: ObservableObject {
       if self.currentSubtitleTrackId != sid { self.currentSubtitleTrackId = sid }
       guard applyPreferences else { return }
       let prefs = PlaybackTrackPreferences.load()
+      // Round 20 (R20-4): build-33 preference application restored
+      // — the remembered video pick applies to live exactly as to
+      // VOD (the round-12 live ABR carve-out is removed), and the
+      // GLOBAL preferences are the only ones applied (the round-15
+      // per-series override layer is removed).
       if let pick = PlaybackTrackPreferences.pickVideo(from: video, prefs: prefs) {
         self.engine.selectVideoTrack(id: pick)
         if self.currentVideoTrackId != pick { self.currentVideoTrackId = pick }
@@ -856,6 +879,10 @@ final class VideoPlayerController: ObservableObject {
       }
     }
   }
+
+  // Round 20 (R20-4): the round-15 per-series track-preference
+  // layer (MARK block that stood here) is REMOVED — build 33
+  // applies only the global `PlaybackTrackPreferences`.
 
   // MARK: - Imported subtitles (issue #98)
 
@@ -921,7 +948,7 @@ final class VideoPlayerController: ObservableObject {
     engine.setSubDelay(seconds: seconds)
   }
 
-  /// UHF akışı: remux'u kur, hazır olunca completion(true) — UI sistem seçiciyi o anda açar.
+  /// UHF flow: set up the remux, when ready completion(true) — the UI opens the system picker at that moment.
   func prepareAirPlay(completion: @escaping (Bool) -> Void) {
     guard let cast = castController else {
       completion(false)
@@ -929,15 +956,15 @@ final class VideoPlayerController: ObservableObject {
     }
     let ks = engine
     guard needsAirPlayPreparation else {
-      completion(true)  // native yol ya da cast zaten sunumda — seçici direkt açılabilir
+      completion(true)  // the native path or cast is already presenting — the picker can open directly
       return
     }
     guard let request = currentLoadRequest else {
       completion(false)
       return
     }
-    // Resume edilmiş içerikte ilk zaman tiki henüz gelmediyse motor 0 raporlar;
-    // istekteki başlangıç saniyesine düş (cast 0:00'dan başlamasın).
+    // If the first time tick has not yet arrived for resumed content, the engine reports 0;
+    // fall back to the requested start second (so cast doesn't start from 0:00).
     let at: TimeInterval
     if ks.isPlaybackEstablished, ks.position > 0.5 {
       at = ks.position
@@ -1009,9 +1036,9 @@ final class VideoPlayerController: ObservableObject {
     audioSessionActivated = false
     audioSessionLease = nil
     if wasActivated, let leaseToRelease {
-      // Non-mixable .playback oturumu açık bırakılırsa, oynatıcı kapandıktan sonra
-      // kestiğimiz uygulama (Music/Spotify) hiçbir zaman devam sinyali alamaz.
-      // mpv'nin audio unit'i async dispose olduğundan kısa bir gecikmeyle kapat.
+      // If a non-mixable .playback session is left open, the app we interrupted (Music/Spotify) never
+      // receives a resume signal after the player closes.
+      // Because mpv's audio unit is disposed async, close it with a short delay.
       // A newer controller may claim the process-wide session during this delay;
       // the lease guard then turns this teardown into a no-op.
       DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5) {
@@ -1077,7 +1104,7 @@ final class VideoPlayerController: ObservableObject {
       displayArtist = p.title
     } else {
       displayTitle = p.title
-      displayArtist = p.subtitle ?? "Another IPTV Player"
+      displayArtist = p.subtitle ?? "Super X"
     }
 
     var info: [String: Any] = [
@@ -1095,7 +1122,7 @@ final class VideoPlayerController: ObservableObject {
       info[MPMediaItemPropertyPlaybackDuration] = 0
     }
     if let img = nowPlayingArtwork {
-      // Sistem istenen boyutta tekrar çağırır; tek `UIImage` yeterli.
+      // The system calls again at the requested size; a single `UIImage` is enough.
       let b = img.size
       let bounds = CGSize(width: max(b.width, 1), height: max(b.height, 1))
       info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: bounds) { _ in img }
@@ -1110,7 +1137,9 @@ final class VideoPlayerController: ObservableObject {
     if clearImage { nowPlayingArtwork = nil }
   }
 
-  /// Now Playing yalnızca bitmap kabul eder (`MPMediaItemArtwork`); URL’yi biz indiriyoruz.
+  /// Now Playing only accepts a bitmap (`MPMediaItemArtwork`); we download the URL ourselves.
+  /// Round 15 (C11): async/await fetch (was a completion-handler
+  /// data task); cancellation and the stale-URL guard are unchanged.
   private func scheduleNowPlayingArtworkFetch(for presentation: PlaybackPresentation) {
     guard let url = presentation.artworkURL else {
       cancelNowPlayingArtworkFetch(clearImage: true)
@@ -1123,29 +1152,23 @@ final class VideoPlayerController: ObservableObject {
     artworkFetchURL = url
 
     let capturedURL = url
-    let task = URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-      guard let data, let image = UIImage(data: data) else {
-        DispatchQueue.main.async { [weak self] in
-          guard let self else { return }
-          if self.artworkFetchURL == capturedURL {
-            self.nowPlayingArtwork = nil
-            self.artworkFetchTask = nil
-            self.artworkFetchURL = nil
-            self.updateNowPlayingInfo(force: true)
-          }
-        }
-        return
+    artworkFetchTask = Task { [weak self] in
+      let image: UIImage?
+      do {
+        let (data, _) = try await URLSession.shared.data(from: capturedURL)
+        image = UIImage(data: data)
+      } catch {
+        image = nil
       }
-      DispatchQueue.main.async { [weak self] in
-        guard let self else { return }
-        guard self.artworkFetchURL == capturedURL else { return }
+      guard !Task.isCancelled else { return }
+      await MainActor.run { [weak self] in
+        guard let self, self.artworkFetchURL == capturedURL else { return }
         self.nowPlayingArtwork = image
         self.artworkFetchTask = nil
+        if image == nil { self.artworkFetchURL = nil }
         self.updateNowPlayingInfo(force: true)
       }
     }
-    artworkFetchTask = task
-    task.resume()
   }
 
   private func setupRemoteCommands() {
@@ -1185,17 +1208,20 @@ final class VideoPlayerController: ObservableObject {
     remoteCommandTargets.append((center.changePlaybackPositionCommand, tSeek))
 
     center.skipForwardCommand.isEnabled = true
-    center.skipForwardCommand.preferredIntervals = [15]
+    // Round 15 (C1): the lock-screen / remote skip interval matches
+    // the in-player ±10 s transport (was 15 s — two different skip
+    // lengths for the same gesture family confused users).
+    center.skipForwardCommand.preferredIntervals = [10]
     let t4 = center.skipForwardCommand.addTarget { [weak self] _ in
-      self?.jump(seconds: 15)
+      self?.jump(seconds: 10)
       return .success
     }
     remoteCommandTargets.append((center.skipForwardCommand, t4))
 
     center.skipBackwardCommand.isEnabled = true
-    center.skipBackwardCommand.preferredIntervals = [15]
+    center.skipBackwardCommand.preferredIntervals = [10]
     let t5 = center.skipBackwardCommand.addTarget { [weak self] _ in
-      self?.jump(seconds: -15)
+      self?.jump(seconds: -10)
       return .success
     }
     remoteCommandTargets.append((center.skipBackwardCommand, t5))
@@ -1217,9 +1243,9 @@ final class VideoPlayerController: ObservableObject {
     remoteCommandTargets.append((center.nextTrackCommand, t7))
   }
 
-  /// Kontrol Merkezi / kilit ekranından önceki–sonraki bölüm (yalnızca dizi oynatırken).
-  /// - swapSkipForNav: true → skip komutları kapatılır, prev/next gösterilir (dizi & canlı TV).
-  ///                   false → skip aktif kalır; filmler için her zaman false.
+  /// Previous–next episode from Control Center / lock screen (only while playing a series).
+  /// - swapSkipForNav: true → skip commands are turned off, prev/next are shown (series & live TV).
+  /// false → skip stays active; always false for movies.
   func configureSeriesEpisodeSkipping(
     canPrevious: Bool,
     canNext: Bool,
@@ -1247,9 +1273,9 @@ final class VideoPlayerController: ObservableObject {
     center.nextTrackCommand.isEnabled = episodeNavSwapSkip && episodeNavCanNext
   }
 
-  /// `KSPlayerLayer.deinit` koşulsuz `removeTarget(nil)` çağırır ve Now Playing'i
-  /// siler — her layer yıkımından (yeni load, cast devri) sonra kendi komutlarımız
-  /// ve Now Playing yeniden kurulmalı; aksi halde kilit ekranı ilk zap'tan sonra ölür.
+  /// `KSPlayerLayer.deinit` unconditionally calls `removeTarget(nil)` and deletes Now Playing
+  /// — after every layer teardown (new load, cast handover) our own commands
+  /// and Now Playing must be rebuilt; otherwise the lock screen dies after the first zap.
   private func reinstallRemoteCommands() {
     guard !remoteCommandTargets.isEmpty else { return }
     removeRemoteCommands()

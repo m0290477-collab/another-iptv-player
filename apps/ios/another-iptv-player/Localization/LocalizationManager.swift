@@ -2,13 +2,13 @@ import Foundation
 import Combine
 import SwiftUI
 
-/// Runtime dil değiştirme destekli localization yöneticisi.
-/// Default = cihaz dili (ayar yoksa). Kullanıcı seçimi UserDefaults'ta saklanır.
+/// Localization manager with runtime language switching.
+/// Default = device language (when no setting exists). The user's choice is stored in UserDefaults.
 @MainActor
 final class LocalizationManager: ObservableObject {
     static let shared = LocalizationManager()
 
-    /// Desteklenen diller — Flutter projesindeki l10n ARB dosyalarıyla aynı.
+    /// Supported languages — the same as the l10n ARB files in the Flutter project.
     nonisolated static let supportedLanguages: [AppLanguage] = [
         .init(code: "system", nativeName: "Sistem Dili", englishName: "System"),
         .init(code: "en", nativeName: "English", englishName: "English"),
@@ -26,7 +26,7 @@ final class LocalizationManager: ObservableObject {
     /// UserDefaults key — "system" veya iki harfli ISO 639-1 kod.
     private let storageKey = "app.selected_language"
 
-    /// Kullanıcı seçimi. Değişince tüm view'lar re-render olsun diye @Published.
+    /// The user's choice. @Published so all views re-render when it changes.
     @Published var selectedLanguage: String {
         didSet {
             UserDefaults.standard.set(selectedLanguage, forKey: storageKey)
@@ -37,7 +37,7 @@ final class LocalizationManager: ObservableObject {
         self.selectedLanguage = UserDefaults.standard.string(forKey: storageKey) ?? "system"
     }
 
-    /// Aktif kullanılan dil kodu — "system" ise cihaz diline çevrilir.
+    /// The actively used language code — "system" resolves to the device language.
     var effectiveLanguageCode: String {
         if selectedLanguage == "system" {
             return Self.systemLanguageCode()
@@ -45,7 +45,7 @@ final class LocalizationManager: ObservableObject {
         return selectedLanguage
     }
 
-    /// Seçili dile göre .lproj bundle'ı; bulamazsa fallback olarak English, sonra main.
+    /// The .lproj bundle for the selected language; falls back to English, then main.
     var bundle: Bundle {
         if let b = loadBundle(for: effectiveLanguageCode) {
             return b
@@ -64,14 +64,14 @@ final class LocalizationManager: ObservableObject {
         return bundle
     }
 
-    /// Verilen key için mevcut dilde string dön. Seçili dilde yoksa İngilizce'ye, o da yoksa
-    /// Main bundle'a, son çare olarak key'in kendisine düşer (debug için).
+    /// Returns the string for the given key in the current language. If it is missing in the selected language, falls back to English, and if that is missing too,
+    /// to the main bundle, and as a last resort to the key itself (for debugging).
     func string(for key: String) -> String {
         Self.resolveLocalizedString(for: key)
     }
 
-    /// Actor-bağımsız lookup — LocalizedError gibi nonisolated contexlerden de güvenle çağrılabilir.
-    /// Seçili dil UserDefaults'tan okunur (`selectedLanguage` @Published değeri zaten UserDefaults'a yazılıyor).
+    /// Actor-independent lookup — safe to call from nonisolated contexts such as LocalizedError.
+    /// The selected language is read from UserDefaults (the `selectedLanguage` @Published value is already written to UserDefaults).
     nonisolated static func resolveLocalizedString(for key: String) -> String {
         let sentinel = "\u{1e}__missing__\u{1e}"
         let stored = UserDefaults.standard.string(forKey: "app.selected_language") ?? "system"
@@ -82,7 +82,7 @@ final class LocalizationManager: ObservableObject {
             if primary != sentinel { return primary }
         }
 
-        // Seçili dilde key yoksa İngilizce fallback.
+        // If the key is missing in the selected language, fall back to English.
         if effective != "en", let en = nonisolatedBundle(for: "en") {
             let enValue = en.localizedString(forKey: key, value: sentinel, table: nil)
             if enValue != sentinel { return enValue }
@@ -102,7 +102,7 @@ final class LocalizationManager: ObservableObject {
     // MARK: - System detection
 
     nonisolated private static func systemLanguageCode() -> String {
-        // Tercih edilen diller sırasıyla; desteklenen ilk eşleşmeyi bul.
+        // Preferred languages in order; find the first supported match.
         let supportedCodes = Set(supportedLanguages.map { $0.code }).subtracting(["system"])
         for lang in Locale.preferredLanguages {
             let base = Locale(identifier: lang).language.languageCode?.identifier ?? lang
@@ -121,17 +121,17 @@ struct AppLanguage: Identifiable, Equatable {
     let englishName: String
 }
 
-/// Global helper — tüm view'larda kullanılır: `L("settings.title")` gibi.
-/// Dil değiştiğinde LocalizationManager @Published yayar, view re-render olur, L() yeni değeri çeker.
-/// `nonisolated` — LocalizedError gibi actor-bağımsız contextlerden de çağrılabilir.
+/// Global helper — used in all views: e.g. `L("settings.title")`.
+/// When the language changes, LocalizationManager publishes, the view re-renders, and L() picks up the new value.
+/// `nonisolated` — can also be called from actor-independent contexts such as LocalizedError.
 nonisolated func L(_ key: String) -> String {
     LocalizationManager.resolveLocalizedString(for: key)
 }
 
 /// Parametreli format helper: `L("episode_count", 10)` → `"10 episodes"`.
-/// `String.localizedStringWithFormat` kullanılır ki Localizable.stringsdict'teki çoğul
-/// kuralları (one/few/many/other) uygulanabilsin — düz `String(format:)` bunları yok
-/// sayar ve "1 Days" gibi hatalı metin üretir.
+/// Uses `String.localizedStringWithFormat` so the plural rules in Localizable.stringsdict
+/// (one/few/many/other) are applied — plain `String(format:)` ignores them
+/// and produces wrong text such as "1 Days".
 nonisolated func L(_ key: String, _ args: CVarArg...) -> String {
     let format = LocalizationManager.resolveLocalizedString(for: key)
     return withVaList(args) { NSString(format: format, locale: nil, arguments: $0) as String }

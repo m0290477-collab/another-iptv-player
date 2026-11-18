@@ -1,12 +1,12 @@
 import StoreKit
 import UIKit
 
-/// Uygulama içi App Store puanlama isteğini yönetir.
+/// Manages the in-app App Store rating request.
 ///
-/// Strateji: kullanıcı belirli sayıda *başarılı oturum* (bir playlist dashboard'una
-/// sorunsuz ulaşma) yaşadıktan sonra sistem puanlama diyaloğu istenir. Apple bu
-/// diyaloğu yılda en fazla 3 kez gerçekten gösterir; bu yüzden istek kendi
-/// tarafımızda da sürüm + tarih bazlı kapıda tutulur.
+/// Strategy: after the user has had a certain number of *successful sessions* (reaching a playlist dashboard
+/// without problems), the system rating dialog is requested. Apple actually shows this
+/// dialog at most 3 times a year; therefore the request is also kept behind a
+/// version + date based gate on our side.
 @MainActor
 final class RatingManager {
     static let shared = RatingManager()
@@ -20,20 +20,20 @@ final class RatingManager {
         static let lastPromptDate = "rating.lastPromptDate"
     }
 
-    /// İlk isteğin gösterileceği başarılı oturum eşiği.
+    /// The successful-session threshold at which the first request is shown.
     private let promptThreshold = 4
-    /// İki istek arasındaki minimum gün.
+    /// The minimum days between two requests.
     private let minDaysBetweenPrompts = 90
 
-    /// Bu uygulama açılışında oturum zaten sayıldı mı? (açılış başına tek sayım)
+    /// Was a session already counted for this app launch? (one count per launch)
     private var didCountThisLaunch = false
 
     private var currentVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
     }
 
-    /// Kullanıcı içeriğe ulaştığında (dashboard açıldığında) çağrılır.
-    /// Uygulama açılışı başına yalnızca bir kez sayar.
+    /// Called when the user reaches content (when the dashboard opens).
+    /// Counts only once per app launch.
     func registerSuccessfulSession() {
         if MockFixture.isActive { return }
         guard !didCountThisLaunch else { return }
@@ -42,19 +42,19 @@ final class RatingManager {
         defaults.set(count, forKey: Key.sessionCount)
     }
 
-    /// Tüm koşullar uygunsa sistem puanlama diyaloğunu ister.
-    /// Bir başarılı oturum tetiklendikten birkaç saniye sonra çağrılması önerilir.
+    /// If all conditions are met, requests the system rating dialog.
+    /// Best called a few seconds after a successful session is triggered.
     func requestReviewIfAppropriate() {
         if MockFixture.isActive { return }
-        // Yalnızca bu açılışta gerçek bir oturum sayıldıysa devam et.
+        // Continue only if a real session was counted for this launch.
         guard didCountThisLaunch else { return }
 
         guard defaults.integer(forKey: Key.sessionCount) >= promptThreshold else { return }
 
-        // Bu sürümde daha önce sorduysak tekrar sorma.
+        // If we already asked on this version, do not ask again.
         guard defaults.string(forKey: Key.lastPromptVersion) != currentVersion else { return }
 
-        // Son istekten bu yana yeterli süre geçmiş mi?
+        // Has enough time passed since the last request?
         if let last = defaults.object(forKey: Key.lastPromptDate) as? Date {
             let days = Calendar.current.dateComponents([.day], from: last, to: Date()).day ?? 0
             guard days >= minDaysBetweenPrompts else { return }

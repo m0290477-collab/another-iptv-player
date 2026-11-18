@@ -18,11 +18,28 @@ final class KSPlayerEngine: NSObject, ObservableObject {
   @Published private(set) var isBuffering = false
   @Published private(set) var isCompleted = false
   @Published private(set) var isPlaybackEstablished = false
+  /// Round 18 (R18-1): true once the player's clock has actually
+  /// ticked for this load — i.e. frames are rendering on screen.
+  /// `isSecondOpen` releases the first frames BEFORE `readyToPlay`
+  /// flips `isPlaybackEstablished`, so a loading surface keyed on
+  /// establishment alone lingers over already-playing video (the
+  /// owner's 0:05–0:23 "Connecting…" recording). Loading UI keys
+  /// its pre-establishment state on THIS flag instead.
+  @Published private(set) var hasRenderedFirstFrame = false
   @Published private(set) var playbackFailureMessage: String?
   /// True when the last failure was a transient open failure (timeout / host
   /// unreachable) worth one silent retry, false for terminal ones. Read by
   /// `VideoPlayerController` to decide auto-retry.
   @Published private(set) var playbackFailureIsRecoverable = false
+  /// Round 17 (R17-4), kept in round 20 as failure-card
+  /// attribution only: true when the last failure carries an HTTP
+  /// 4xx — the PROVIDER answered and refused (expired account,
+  /// wrong credentials, dead title, 451). Open failures with no
+  /// HTTP status (FFmpeg could not open the input at all) leave
+  /// this false. (Round 20 removed the alternate-engine attempt
+  /// this flag used to gate; it now only attributes the failure
+  /// shown on the kept failure card.)
+  @Published private(set) var playbackFailureIsProviderRefusal = false
   @Published private(set) var position: TimeInterval = 0
   @Published private(set) var duration: TimeInterval = 0
   @Published private(set) var playbackRate: Double = 1
@@ -45,12 +62,12 @@ final class KSPlayerEngine: NSObject, ObservableObject {
   /// Bumped whenever `videoView` may point to a new UIView (engine fallback swaps the
   /// player instance); the SwiftUI surface remounts on change.
   @Published private(set) var surfaceRevision = 0
-  /// Gerçek AirPlay (external playback) yalnız AVPlayer motorunda mümkün; FFmpeg
-  /// yolundaki remux adaylığını `VideoPlayerController` hesaplar.
+  /// Real AirPlay (external playback) is only possible on the AVPlayer engine; the remux candidacy
+  /// on the FFmpeg path is computed by `VideoPlayerController`.
   @Published private(set) var isAirPlayVideoCapable = false
-  /// Aktif oynatıcı KSMEPlayer (FFmpeg yolu) mu? Remux adaylığının bir bileşeni.
+  /// Is the active player KSMEPlayer (the FFmpeg path)? A component of remux candidacy.
   @Published private(set) var isFFmpegBackendActive = false
-  /// Debug overlay teşhisi + remux adaylığı için aktif ses codec'i.
+  /// The active audio codec for debug overlay diagnosis + remux candidacy.
   @Published private(set) var audioCodecName: String = ""
   /// Current subtitle cue for the overlay (nil = hide).
   @Published private(set) var subtitleText: NSAttributedString?
@@ -97,9 +114,13 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     guard !isDisposed else { return }
     resetForNewLoad()
     subtitleModel.url = url
-    // Motor sırası içerik türünden seçilir. AVPlayer'ın oynatamayacağı kaplarda
-    // (mkv/avi/ts/uzantısız canlı TS) önce AVPlayer'ı deneyip başarısızlığını beklemek
-    // açılışı saniyelerce uzatıyordu; doğrudan FFmpeg ile başla.
+    // Round 20 (R20-4): build-33 engine selection restored — the
+    // engine order is chosen by content type only. In containers
+    // AVPlayer cannot play (mkv/avi/ts/extensionless live TS),
+    // waiting for AVPlayer to be tried and fail first was extending
+    // the opening by seconds; start directly with FFmpeg. (The
+    // round-11 `player.enginePreference` override and the round-17
+    // alternate-engine flip are removed; build 33 wins.)
     if Self.prefersFFmpegFirst(for: url) {
       KSOptions.firstPlayerType = KSMEPlayer.self
       KSOptions.secondPlayerType = KSAVPlayer.self
@@ -112,11 +133,11 @@ final class KSPlayerEngine: NSObject, ObservableObject {
       startSeconds: startSeconds,
       userAgent: userAgent
     )
-    // Layer her yüklemede sıfırdan kurulur. `layer.set(url:)` yolu KULLANILMAZ:
-    // KSPlayerLayer.url.didSet, herhangi bir kablosuz rota aktifken bizim motor
-    // seçimimizi ezip KSAVPlayer'ı zorluyor (mkv/ts'te uzun başarısızlık + fallback
-    // beklemesi — "içerik açılmıyor" şikayetinin ikinci kök nedeni). init yolu
-    // statiklere sadık kalır.
+    // The layer is built from scratch on every load. The `layer.set(url:)` path is NOT USED:
+    // KSPlayerLayer.url.didSet, while any wireless route is active,
+    // it overrides our choice and forces KSAVPlayer (a long failure + fallback wait on mkv/ts
+    // — the second root cause of the "content won't open" complaint). The init path
+    // stays faithful to the statics.
     if let oldLayer = layer {
       oldLayer.delegate = nil
       oldLayer.stop()
@@ -144,7 +165,9 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     cancelLoadTimeoutWatchdog()
     playbackFailureMessage = nil
     playbackFailureIsRecoverable = false
+    playbackFailureIsProviderRefusal = false
     isPlaybackEstablished = false
+    hasRenderedFirstFrame = false
     isCompleted = false
     isBuffering = true
     isPaused = true
@@ -167,9 +190,9 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     isAirPlayVideoCapable = false
   }
 
-  /// AVPlayer'ın native oynatabildiği uzantılar; geri kalan her şey (mkv, avi, ts,
-  /// uzantısız Xtream canlı) FFmpeg'e gider. mpv dönemindeki davranışla birebir —
-  /// yalnızca HLS/mp4 ailesi AVPlayer'a (ve gerçek AirPlay'e) çıkar.
+  /// The extensions AVPlayer can play natively; everything else (mkv, avi, ts,
+  /// extensionless Xtream live) goes to FFmpeg. Exactly the behavior of the mpv era —
+  /// only the HLS/mp4 family goes up to AVPlayer (and real AirPlay).
   private static let avPlayerExtensions: Set<String> = [
     "m3u8", "mp4", "m4v", "mov", "mp3", "m4a", "aac",
   ]
@@ -202,29 +225,36 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     if let startSeconds, startSeconds > 0 {
       options.startPlayTime = startSeconds
     }
-    // isSecondOpen: ilk kare her parça 2 kare decode edince salınır — açılış süresini
-    // kısaltır. NOT: bu yüzden preferredForwardBufferDuration/maxBufferDuration İLK
-    // kareyi geciktirmez; yalnız yeniden-buffer yastığını ve seek/second-open'ı yönetir.
+    // isSecondOpen: the first frame is released once each part decodes 2 frames — it shortens the opening
+    // time. NOTE: therefore preferredForwardBufferDuration/maxBufferDuration does NOT
+    // delay the FIRST frame; it only manages the re-buffer cushion and seek/second-open.
     options.isSecondOpen = true
     if liveLowLatency {
+      // Round 20 (R20-4): build-33 buffer cushion restored
+      // (2 s forward / 16 s max); the round-18 deepening is removed.
       options.preferredForwardBufferDuration = 2
       options.maxBufferDuration = 16
-      // FFmpeg yolunda ilk kare, avformat_find_stream_info'nun varsayılan 5 MB probe'u
-      // yavaş IPTV soketinden çekmesine takılıyordu. Bu iki değer, uygulamanın kendi
-      // remux giriş yolunda (RemuxHLSWriter) sahada kanıtlanmış değerlerdir; AVPlayer/HLS
-      // yolunda bu alanlar okunmaz (inert). `nobuffer` bilerek KAPALI — find_stream_info'nun
-      // ikincil ses parçasını kaçırmasına yol açabiliyor.
+      // On the FFmpeg path, the first frame was stuck on avformat_find_stream_info's default 5 MB probe
+      // being pulled over a slow IPTV socket. These two values are the values proven in the field
+      // on the app's own remux input path (RemuxHLSWriter); on the AVPlayer/HLS [path]
+      // path these fields are not read (inert). `nobuffer` is deliberately OFF — find_stream_info
+      // it can cause the secondary audio track to be missed.
+      // (These are build 33's own values — 1.5 MB / 2 s.)
       options.probesize = 1_500_000
       options.maxAnalyzeDuration = 2_000_000  // AV_TIME_BASE birimi = 2.0s
     } else {
+      // Round 20 (R20-4): build-33 VOD cushion restored
+      // (3 s forward / 60 s max); the round-18 raising is removed.
       options.preferredForwardBufferDuration = 3
       options.maxBufferDuration = 60
-      // VOD (mkv/avi/ts): çok parçalı başlıkları aç bırakmadan en kötü analiz süresini sınırla.
+      // VOD (mkv/avi/ts): limit the worst-case analysis time without leaving multi-part headers closed.
       options.maxAnalyzeDuration = 3_000_000  // 3.0s tavan
     }
-    // Duran sokette tek IO 10 sn'de başarısız olsun; watchdog (12s) devreye girmeden
-    // FFmpeg gerçek hata kodunu döndürür. Yalnız FFmpeg yolu (AVPlayer bunu yok sayar).
+    // Let a single IO on a stalled socket fail in 10 sec; FFmpeg returns the real error code
+    // before the watchdog (12s) kicks in. Only the FFmpeg path (AVPlayer ignores this).
     options.formatContextOptions["rw_timeout"] = 10_000_000  // mikrosaniye
+    // Round 20 (R20-4): the round-18 FFmpeg HTTP reconnect options
+    // are removed — build 33 set only `rw_timeout` here.
     // Remote commands are ours (VideoPlayerController). KSPlayerLayer's own
     // registration would double-handle events; its deinit still wipes all
     // targets regardless of this flag, which the controller compensates for.
@@ -234,7 +264,7 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     let backgroundEnabled =
       defaults.object(forKey: "player.continuePlayingInBackground") as? Bool ?? true
     options.canStartPictureInPictureAutomaticallyFromInline = pipEnabled && backgroundEnabled
-    // KSPlayerLayer arka plan geçişini kendisi yönetir (PiP aktifse dokunmaz):
+    // KSPlayerLayer manages the background transition itself (it doesn't touch it if PiP is active):
     // true → video decode durur ses sürer; false → pause.
     KSOptions.canBackgroundPlay = backgroundEnabled
     return options
@@ -328,8 +358,8 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     let videoTracks = player.tracks(mediaType: .video)
     let audioTracks = player.tracks(mediaType: .audio)
 
-    let video = videoTracks.map { Self.menuOption(for: $0) }
-    let audio = audioTracks.map { Self.menuOption(for: $0) }
+    let video = Self.disambiguated(videoTracks.map { Self.menuOption(for: $0) })
+    let audio = Self.disambiguated(audioTracks.map { Self.menuOption(for: $0) })
 
     var subs: [TrackMenuOption] = [TrackMenuOption(id: -1, title: L("player.subtitle_off"))]
     subtitleInfosById = [:]
@@ -340,17 +370,40 @@ final class KSPlayerEngine: NSObject, ObservableObject {
       let id = nextId
       nextId += 1
       subtitleInfosById[id] = info
+      let isExternal = externalSubtitleIDs.contains(info.subtitleID)
+      // Round 20 (R20-1): embedded subtitle infos carry no separate
+      // language field at this construction site — KSPlayer names
+      // them with the stream's raw language code ("dan", "hin", …),
+      // which is exactly what the owner's photo shows in the menu.
+      // When the whole name IS a bare language code, show the
+      // localized language name instead and record the code on the
+      // option, so PlaybackTrackPreferences matches by language
+      // rather than by the fragile title token. External
+      // (imported-file) entries are NEVER renamed:
+      // VideoPlayerController matches them by exact title against
+      // the imported file names.
+      var subTitle = info.name
+      var subLangCode: String? = nil
+      if !isExternal,
+         let code = Self.languageCode(fromWholeTrackName: info.name),
+         let languageName = Self.displayLanguageName(forCode: code)
+      {
+        subTitle = languageName
+        subLangCode = code
+      }
       subs.append(
         TrackMenuOption(
           id: id,
-          title: info.name,
-          isExternal: externalSubtitleIDs.contains(info.subtitleID)
+          title: subTitle,
+          langCode: subLangCode,
+          isExternal: isExternal
         )
       )
       if subtitleModel.selectedSubtitleInfo?.subtitleID == info.subtitleID {
         currentSubId = id
       }
     }
+    subs = Self.disambiguated(subs)
 
     let currentVideo = videoTracks.first { $0.isEnabled }.map { Int($0.trackID) } ?? -1
     let currentAudio = audioTracks.first { $0.isEnabled }.map { Int($0.trackID) } ?? -1
@@ -358,10 +411,56 @@ final class KSPlayerEngine: NSObject, ObservableObject {
   }
 
   private static func menuOption(for track: MediaPlayerTrack) -> TrackMenuOption {
-    let name = track.name.trimmingCharacters(in: .whitespaces)
+    let rawName = track.name.trimmingCharacters(in: .whitespaces)
+    // Round 20 (R20-1): the menu showed `track.name` verbatim, and
+    // for audio/subtitle streams that name IS the raw ISO code
+    // ("dan", "cze", "hin", …) — the owner's photo. Build the
+    // display title from the track's real language code instead:
+    // the full language name in the app's current UI language
+    // (Foundation's localized name, never a hand-written table).
+    var langCode = track.languageCode
+    if (langCode ?? "").trimmingCharacters(in: .whitespaces).isEmpty,
+       let parsed = languageCode(fromWholeTrackName: rawName)
+    {
+      // No reported language code, but the name itself is a bare
+      // code — that code IS the track's language; recording it on
+      // the option also lets preferences match by language.
+      langCode = parsed
+    }
+    let languageName = displayLanguageName(forCode: langCode)
+    // A stream-provided title that says MORE than the language
+    // (e.g. "Hindi [SDH]", a commentary label) is kept as a suffix
+    // so same-language tracks stay distinguishable by their real
+    // metadata. A name that merely restates the language — as the
+    // raw code, or as the language's name in the UI language or in
+    // English — is not a distinct title and is dropped.
+    var streamTitle: String? = nil
+    if !rawName.isEmpty {
+      let rawIsOwnCode =
+        normalizedLanguageCode(rawName) != nil
+        && normalizedLanguageCode(rawName) == normalizedLanguageCode(langCode)
+      let rawIsOtherCode = languageCode(fromWholeTrackName: rawName) != nil
+      let rawIsLanguageName =
+        (languageName != nil && rawName.caseInsensitiveCompare(languageName!) == .orderedSame)
+        || englishLanguageName(forCode: langCode).map {
+          rawName.caseInsensitiveCompare($0) == .orderedSame
+        } ?? false
+      if !rawIsOwnCode && !rawIsOtherCode && !rawIsLanguageName {
+        streamTitle = rawName
+      }
+    }
     // FFmpeg often reports no title; "Track N" style fallbacks must not be stored
-    // as a preference (see TrackMenuOption.isSyntheticTitle).
-    let synthetic = name.isEmpty
+    // as a preference (see TrackMenuOption.isSyntheticTitle). A title
+    // resolved from the language code is real metadata, not synthetic.
+    let synthetic = rawName.isEmpty && languageName == nil
+    let title: String
+    if let languageName {
+      title = streamTitle.map { "\(languageName) — \($0)" } ?? languageName
+    } else if let streamTitle {
+      title = streamTitle
+    } else {
+      title = L("player.tracks.fallback_title", Int(track.trackID))
+    }
     var detailParts: [String] = []
     if track.mediaType == .video {
       let size = track.formatDescription.map { CMVideoFormatDescriptionGetDimensions($0) }
@@ -374,11 +473,102 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     }
     return TrackMenuOption(
       id: Int(track.trackID),
-      title: synthetic ? L("player.tracks.fallback_title", Int(track.trackID)) : name,
+      title: title,
       detail: detailParts.isEmpty ? nil : detailParts.joined(separator: " · "),
-      langCode: track.languageCode,
+      langCode: langCode,
       isSyntheticTitle: synthetic
     )
+  }
+
+  // MARK: - Track title localization (R20-1)
+
+  /// Primary subtag of a language code ("en-US" / "en_US" → "en"),
+  /// lowercased; nil for nil/empty input.
+  private static func normalizedLanguageCode(_ raw: String?) -> String? {
+    guard let raw else { return nil }
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !trimmed.isEmpty else { return nil }
+    let primary =
+      trimmed.replacingOccurrences(of: "_", with: "-")
+        .split(separator: "-").first.map(String.init) ?? trimmed
+    return primary.isEmpty ? nil : primary
+  }
+
+  /// ISO 639-2/B bibliographic codes whose terminological/639-1
+  /// form differs (ger ≠ deu, cze ≠ ces, …). This maps CODES only —
+  /// every display NAME still comes from Foundation. Used when
+  /// `localizedString(forLanguageCode:)` does not resolve the
+  /// bibliographic form directly.
+  private static let bibliographicCodeAliases: [String: String] = [
+    "ger": "de", "fre": "fr", "cze": "cs", "chi": "zh", "per": "fa",
+    "rum": "ro", "slo": "sk", "alb": "sq", "mac": "mk", "may": "ms",
+    "dut": "nl", "gre": "el", "arm": "hy", "baq": "eu", "bur": "my",
+    "geo": "ka", "ice": "is", "mao": "mi", "tib": "bo", "wel": "cy",
+  ]
+
+  /// The full language name for a code, in the given locale;
+  /// nil when the code is missing or Foundation has no name for
+  /// it (an echoed-back code counts as "no name" — never invent).
+  private static func languageName(forCode rawCode: String?, in locale: Locale) -> String? {
+    guard let code = normalizedLanguageCode(rawCode) else { return nil }
+    let candidates = [bibliographicCodeAliases[code], code].compactMap { $0 }
+    for candidate in candidates {
+      if let name = locale.localizedString(forLanguageCode: candidate),
+         !name.isEmpty,
+         name.lowercased() != candidate
+      {
+        return name
+      }
+    }
+    return nil
+  }
+
+  /// The language name in the app's current UI language — the
+  /// same locale the rest of the app binds to (`AppTheme.appLocale`,
+  /// the C9 one-locale law), NOT the device locale.
+  private static func displayLanguageName(forCode rawCode: String?) -> String? {
+    languageName(forCode: rawCode, in: AppTheme.appLocale)
+  }
+
+  private static func englishLanguageName(forCode rawCode: String?) -> String? {
+    languageName(forCode: rawCode, in: Locale(identifier: "en"))
+  }
+
+  /// The code when a whole track name IS a bare language code
+  /// ("hin", "eng", "cze" — 2–3 ASCII letters that Foundation can
+  /// name); nil for real titles, file names, or unknown strings.
+  private static func languageCode(fromWholeTrackName name: String) -> String? {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard (2...3).contains(trimmed.count),
+          trimmed.allSatisfy({ $0.isASCII && $0.isLetter })
+    else { return nil }
+    let code = trimmed.lowercased()
+    return displayLanguageName(forCode: code) != nil ? code : nil
+  }
+
+  /// Numbers entries whose display titles are still identical
+  /// after language naming and stream-title suffixes ("Hindi",
+  /// "Hindi 2", "Hindi 3" — first occurrence unnumbered, numbering
+  /// follows list order, so it is stable for a given track list).
+  /// The subtitle "Off" entry (id -1) and external entries (matched
+  /// by exact title elsewhere) are never renamed. The suffix is a
+  /// bare number — no new localized string is introduced.
+  private static func disambiguated(_ options: [TrackMenuOption]) -> [TrackMenuOption] {
+    var seen: [String: Int] = [:]
+    return options.map { option in
+      guard option.id >= 0, !option.isExternal else { return option }
+      let occurrence = (seen[option.title] ?? 0) + 1
+      seen[option.title] = occurrence
+      guard occurrence > 1 else { return option }
+      return TrackMenuOption(
+        id: option.id,
+        title: "\(option.title) \(occurrence)",
+        detail: option.detail,
+        langCode: option.langCode,
+        isExternal: option.isExternal,
+        isSyntheticTitle: option.isSyntheticTitle
+      )
+    }
   }
 
   func selectVideoTrack(id: Int) {
@@ -481,6 +671,10 @@ final class KSPlayerEngine: NSObject, ObservableObject {
 
   // MARK: - Watchdog
 
+  // Round 20 (R20-4): build-33 watchdog restored verbatim in
+  // behavior — it fires ONLY for a stream that never establishes.
+  // The round-14/18 mid-stream stall re-arm (6 s stall window) is
+  // removed; build 33 wins.
   private func scheduleLoadTimeoutWatchdog() {
     cancelLoadTimeoutWatchdog()
     let item = DispatchWorkItem { [weak self] in
@@ -507,6 +701,10 @@ final class KSPlayerEngine: NSObject, ObservableObject {
 
   private func refreshDiagnostics() {
     guard let player = layer?.player else { return }
+    // Round 19: the round-14 video-gravity re-assertion is REMOVED —
+    // nothing in the engine touches the render layer's content mode
+    // or video gravity any more; the layer keeps KSPlayer's own
+    // default (aspect-fit), exactly as in the reference player.
     var size = player.naturalSize
     // AVPlayer's naturalSize is the encoded (unrotated) frame — it never consults the
     // track's preferredTransform, unlike the FFmpeg path's display-matrix handling.
@@ -546,7 +744,7 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     let engineName = isAVPlayer ? "avplayer" : "ffmpeg"
     if hwdecCurrent != engineName { hwdecCurrent = engineName }
     // AVPlayer yolunda native external playback mümkün; FFmpeg yolundaki remux
-    // adaylığını controller hesaplar.
+    // the controller computes its candidacy.
     if isAirPlayVideoCapable != isAVPlayer { isAirPlayVideoCapable = isAVPlayer }
   }
 
@@ -577,9 +775,9 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     return abs(degrees - 90) <= 1 || abs(degrees - 270) <= 1
   }
 
-  /// FFmpeg track'lerinde `codecName` her zaman dolu ama profil ekli gelir ("h264 (High)");
-  /// formatDescription canlı TS'te extradata gelene kadar nil kalabilir — tespit codecName'in
-  /// normalize edilmiş ilk kelimesine dayanır.
+  /// In FFmpeg tracks `codecName` is always populated but arrives with the profile attached ("h264 (High)");
+  /// formatDescription can stay nil on live TS until the extradata arrives — detection is based on codecName's
+  /// normalized first word.
   private static func codecName(of track: MediaPlayerTrack) -> String {
     if let ffTrack = track as? FFmpegAssetTrack, !ffTrack.codecName.isEmpty {
       return RemuxHLSWriter.normalizeCodec(ffTrack.codecName)
@@ -644,8 +842,12 @@ extension KSPlayerEngine: KSPlayerLayerDelegate {
   func player(layer: KSPlayerLayer, currentTime: TimeInterval, totalTime: TimeInterval) {
     DispatchQueue.main.async { [weak self] in
       guard let self, !self.isDisposed, layer === self.layer else { return }
+      // Round 18 (R18-1): the position callback only runs while
+      // the playback clock advances — frames are on screen. This
+      // is the first-frame signal the loading UI keys on.
+      if !self.hasRenderedFirstFrame { self.hasRenderedFirstFrame = true }
       let now = CFAbsoluteTimeGetCurrent()
-      // mpv motorundaki 0.12s pozisyon throttle'ının karşılığı.
+      // The counterpart of the 0.12s position throttle in the mpv engine.
       if now - self.lastPositionPublish >= 0.12 {
         self.lastPositionPublish = now
         if self.position != currentTime { self.position = currentTime }
@@ -672,29 +874,143 @@ extension KSPlayerEngine: KSPlayerLayerDelegate {
       guard let self, !self.isDisposed, layer === self.layer else { return }
       self.cancelLoadTimeoutWatchdog()
       if let error {
-        let ns = error as NSError
-        if ns.domain == NSURLErrorDomain {
-          switch ns.code {
-          case NSURLErrorTimedOut:
-            self.playbackFailureIsRecoverable = true
-            self.playbackFailureMessage = L("playback.error.timeout")
-          case NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost,
-               NSURLErrorNotConnectedToInternet:
-            self.playbackFailureIsRecoverable = true
-            self.playbackFailureMessage = L("playback.error.cannot_reach")
-          default:
-            self.playbackFailureIsRecoverable = false
-            self.playbackFailureMessage = L("playback.error.failed_check_network")
-          }
-        } else {
-          self.playbackFailureIsRecoverable = false
-          self.playbackFailureMessage = L("playback.error.failed_check_network")
-        }
+        // Round 14 (A2): surface the REAL cause (HTTP status /
+        // server refusal / unsupported codec) instead of only the
+        // generic "check your network" text.
+        let failure = Self.playbackFailure(for: error)
+        self.playbackFailureIsRecoverable = failure.recoverable
+        self.playbackFailureIsProviderRefusal = failure.providerRefusal
+        self.playbackFailureMessage = failure.message
       } else {
         self.isCompleted = true
         self.isPaused = true
       }
     }
+  }
+
+  // MARK: - Failure mapping (round 14, A2)
+
+  private struct PlaybackFailure {
+    let message: String
+    /// True only for transient failures worth the controller's one
+    /// silent retry (timeout / host unreachable / HTTP 5xx). A
+    /// server REFUSAL (401/403/404/451…) is terminal: retrying the
+    /// same dead stream silently would just delay the real message.
+    let recoverable: Bool
+    /// Round 17 (R17-4): true when an HTTP 4xx was found in the
+    /// error chain — the provider answered and refused. Distinct
+    /// from `recoverable`: a NON-refusal open failure (e.g.
+    /// `.formatOpenInput` with no HTTP status) is not recoverable
+    /// in the same-form sense, but it IS eligible for the
+    /// controller's one alternate-engine attempt.
+    let providerRefusal: Bool
+  }
+
+  private static func playbackFailure(for error: Error) -> PlaybackFailure {
+    // 1) An HTTP status anywhere in the error chain is the real
+    //    cause — name it (the owner's provider answered 451/403
+    //    while the app said "check your network").
+    if let status = httpStatusCode(in: error) {
+      switch status {
+      case 401:
+        return PlaybackFailure(message: L("playback.error.unauthorized"), recoverable: false, providerRefusal: true)
+      case 403:
+        return PlaybackFailure(message: L("playback.error.forbidden"), recoverable: false, providerRefusal: true)
+      case 404:
+        return PlaybackFailure(message: L("playback.error.not_found"), recoverable: false, providerRefusal: true)
+      case 400...499:
+        return PlaybackFailure(message: L("playback.error.http_status", status), recoverable: false, providerRefusal: true)
+      default:
+        return PlaybackFailure(message: L("playback.error.http_status", status), recoverable: true, providerRefusal: false)
+      }
+    }
+    let ns = error as NSError
+    // 2) URL loading failures keep their established mapping.
+    if ns.domain == NSURLErrorDomain {
+      switch ns.code {
+      case NSURLErrorTimedOut:
+        return PlaybackFailure(message: L("playback.error.timeout"), recoverable: true, providerRefusal: false)
+      case NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost,
+           NSURLErrorNotConnectedToInternet:
+        return PlaybackFailure(message: L("playback.error.cannot_reach"), recoverable: true, providerRefusal: false)
+      default:
+        return PlaybackFailure(message: L("playback.error.failed_check_network"), recoverable: false, providerRefusal: false)
+      }
+    }
+    // 3) KSPlayer's own error codes distinguish "no playable
+    //    stream" and codec failures from a generic open failure.
+    if ns.domain == KSPlayerErrorDomain,
+       let code = KSPlayerErrorCode(rawValue: ns.code) {
+      switch code {
+      case .videoTracksUnplayable:
+        return PlaybackFailure(message: L("playback.error.no_playable_stream"), recoverable: false, providerRefusal: false)
+      case .codecContextCreate, .codecContextSetParam, .codecContextFindDecoder,
+           .codesContextOpen, .codecVideoSendPacket, .codecAudioSendPacket,
+           .codecVideoReceiveFrame, .codecAudioReceiveFrame:
+        return PlaybackFailure(message: L("playback.error.unsupported"), recoverable: false, providerRefusal: false)
+      case .formatOpenInput, .formatFindStreamInfo:
+        return PlaybackFailure(message: L("playback.error.failed_to_start"), recoverable: false, providerRefusal: false)
+      default:
+        break
+      }
+    }
+    return PlaybackFailure(message: L("playback.error.failed_check_network"), recoverable: false, providerRefusal: false)
+  }
+
+  /// Extracts an HTTP status code from an error chain: FFmpeg
+  /// errors carry it in the underlying `AVError` (both as its
+  /// FourCC-style code and inside its message, e.g. "Server
+  /// returned 403 Forbidden"), AVPlayer errors describe it in
+  /// their localized text / underlying errors.
+  private static func httpStatusCode(in error: Error) -> Int? {
+    var texts: [String] = []
+    var avErrorCodes: [Int32] = []
+    func collect(_ err: Error, depth: Int) {
+      guard depth < 5 else { return }
+      if let avError = err as? KSPlayer.AVError {
+        texts.append(avError.message)
+        avErrorCodes.append(avError.code)
+      }
+      let ns = err as NSError
+      texts.append(ns.localizedDescription)
+      if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? Error {
+        collect(underlying, depth: depth + 1)
+      }
+    }
+    collect(error, depth: 0)
+    for code in avErrorCodes {
+      for status in 400...599 where ffmpegHTTPErrorCode(forStatus: status) == code {
+        return status
+      }
+    }
+    let text = texts.joined(separator: " ")
+    if let match = firstCapture(
+      pattern: #"(?i)(?:http|status|returned)\D{0,24}([1-5][0-9]{2})"#, in: text
+    ), let status = Int(match) {
+      return status
+    }
+    if let match = firstCapture(
+      pattern: #"\b(401|403|404|408|451|500|502|503|504)\b"#, in: text
+    ), let status = Int(match) {
+      return status
+    }
+    return nil
+  }
+
+  private static func firstCapture(pattern: String, in text: String) -> String? {
+    guard let regex = try? NSRegularExpression(pattern: pattern),
+          let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+          let range = Range(match.range(at: 1), in: text)
+    else { return nil }
+    return String(text[range])
+  }
+
+  /// FFmpeg's `AVERROR_HTTP_*` codes are `FFERRTAG(0xF8, '4','0','3')`
+  /// style FourCC tags of the status digits, negated.
+  private static func ffmpegHTTPErrorCode(forStatus status: Int) -> Int32 {
+    let digits = String(status).utf8.map { Int32($0) }
+    guard digits.count == 3 else { return 0 }
+    return -(0xF8 | (digits[0] << 8) | (digits[1] << 16) | (digits[2] << 24))
   }
 
   func player(layer _: KSPlayerLayer, bufferedCount _: Int, consumeTime _: TimeInterval) {}

@@ -52,7 +52,7 @@ struct DBVODStream: Identifiable, Codable, FetchableRecord, PersistableRecord, E
     var tmdbId: String? = nil
     var kinopoiskURL: String? = nil
     var metadataLoaded: Bool = false
-    /// Xtream `get_vod_streams` `added` alanı — unix timestamp string. Son eklenenler sıralaması için.
+    /// The Xtream `get_vod_streams` `added` field — a unix timestamp string. Used for the recently-added ordering.
     var added: String? = nil
 
     var sortIndex: Int = 0
@@ -102,9 +102,9 @@ struct DBSeason: Identifiable, Codable, FetchableRecord, PersistableRecord, Equa
 
     static let databaseTableName = "season"
 
-    /// Playlist kapsamlı sezon PK'sı. Panel `seriesId`'leri paneller arası çakışır;
-    /// çıplak "\(seriesId)_\(seasonNum)" anahtarı iki playlist'in sezonlarını aynı
-    /// satıra REPLACE edip prev/next bölüm gezinmesini bozuyordu.
+    /// Playlist-scoped season PK. Panel `seriesId`s collide across panels;
+    /// the bare "\(seriesId)_\(seasonNum)" key used to REPLACE two playlists' seasons into the same
+    /// row, breaking prev/next episode navigation.
     static func scopedId(playlistId: UUID, seriesId: Int, seasonNumber: Int) -> String {
         "\(playlistId.uuidString)_\(seriesId)_\(seasonNumber)"
     }
@@ -125,8 +125,8 @@ struct DBEpisode: Identifiable, Codable, FetchableRecord, PersistableRecord, Equ
 
     static let databaseTableName = "episode"
 
-    /// Playlist kapsamlı bölüm PK'sı. `episodeId` (panel ham id'si) izleme geçmişi ve
-    /// indirme eşleştirmesi için AYNEN korunur; yalnız satır kimliği kapsamlanır.
+    /// Playlist-scoped episode PK. `episodeId` (the panel's raw id) is kept EXACTLY for watch-history and
+    /// download matching; only the row identity is scoped.
     static func scopedId(playlistId: UUID, panelEpisodeId: String?) -> String {
         "\(playlistId.uuidString)_\(panelEpisodeId ?? UUID().uuidString)"
     }
@@ -206,7 +206,7 @@ struct DBDownloadedItem: Identifiable, Codable, FetchableRecord, PersistableReco
     var secondaryTitle: String?
     var imageURL: String?
     var remoteURL: String
-    /// Application Support/Downloads altında relative path — cihaz sandbox path'i değişirse bozulmaz.
+    /// A relative path under Application Support/Downloads — does not break if the device sandbox path changes.
     var localPath: String
     var containerExtension: String?
     var totalBytes: Int = 0

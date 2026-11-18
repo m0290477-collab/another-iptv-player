@@ -27,7 +27,7 @@ struct PlaybackURLBuilder {
         return baseString.replacingOccurrences(of: " ", with: "")
     }
     
-    /// Path segmenti için izinli karakterler: `urlPathAllowed` eksi segment ayırıcı `/`.
+    /// Allowed characters for a path segment: `urlPathAllowed` minus the segment separator `/`.
     private static let pathSegmentAllowed: CharacterSet = {
         var set = CharacterSet.urlPathAllowed
         set.remove(charactersIn: "/")
@@ -35,8 +35,8 @@ struct PlaybackURLBuilder {
     }()
 
     private var authPath: String {
-        // Ham birleştirme, '#'/'?'/'/'/'%' içeren hesaplarda URL'yi sessizce bozuyordu
-        // (login query-item kodlamasından geçtiği için çalışıyor, oynatma çalışmıyordu).
+        // Raw concatenation silently broke the URL for accounts containing '#'/'?'/'/'/'%'
+        // (login worked because it went through query-item encoding; playback did not).
         let u = playlist.username.trimmingCharacters(in: .whitespacesAndNewlines)
         let p = playlist.password.trimmingCharacters(in: .whitespacesAndNewlines)
         let eu = u.addingPercentEncoding(withAllowedCharacters: Self.pathSegmentAllowed) ?? u
@@ -53,10 +53,34 @@ struct PlaybackURLBuilder {
         return URL(string: urlString)
     }
     
+    /// Round 17 (R17-4): the ONE container-extension rule for
+    /// playback/download URL construction. Panels routinely send
+    /// `container_extension` as an EMPTY string (present, not
+    /// null), padded with spaces, uppercased, or with a leading
+    /// dot — the old `containerExtension ?? "mp4"` only handled
+    /// nil, so an empty value produced `…/movie/u/p/12345.` (a
+    /// trailing dot), which panels refuse and FFmpeg cannot open
+    /// (`.formatOpenInput` → "Playback failed to start") on every
+    /// affected title, while titles with a well-formed extension
+    /// played fine. Anything unusable falls back to "mp4", the
+    /// Xtream default container.
+    static func normalizedContainerExtension(_ raw: String?) -> String {
+        var ext = (raw ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        while ext.hasPrefix(".") { ext.removeFirst() }
+        ext = ext.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ext.isEmpty,
+              ext.count <= 5,
+              ext.allSatisfy({ $0.isLetter || $0.isNumber })
+        else { return "mp4" }
+        return ext
+    }
+
     /// Builds URL for a VOD (Movie).
     func movieURL(streamId: Int, containerExtension: String?) -> URL? {
         if let mock = MockFixture.demoPlaybackURL(playlistId: playlist.id) { return mock }
-        let ext = containerExtension ?? "mp4"
+        let ext = Self.normalizedContainerExtension(containerExtension)
         let urlString = "\(cleanBaseURL)/movie/\(authPath)/\(streamId).\(ext)"
         return URL(string: urlString)
     }
@@ -64,7 +88,7 @@ struct PlaybackURLBuilder {
     /// Builds URL for a series episode.
     func seriesURL(streamId: String, containerExtension: String?) -> URL? {
         if let mock = MockFixture.demoPlaybackURL(playlistId: playlist.id) { return mock }
-        let ext = containerExtension ?? "mp4"
+        let ext = Self.normalizedContainerExtension(containerExtension)
         let urlString = "\(cleanBaseURL)/series/\(authPath)/\(streamId).\(ext)"
         return URL(string: urlString)
     }

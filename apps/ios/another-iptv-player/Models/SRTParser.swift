@@ -7,11 +7,11 @@ struct SubtitleEntry: Identifiable, Equatable {
     let text: String
 }
 
-/// Blok bazlı SRT ayrıştırıcı. Eski Scanner sürümü varsayılan whitespace atlama yüzünden
-/// bloklar arası boş satırları yutuyor ve TÜM dosya tek girdiye yapışıyordu.
+/// Block-based SRT parser. The old Scanner version, because of its default whitespace skipping,
+/// swallowed the blank lines between blocks and the WHOLE file collapsed into a single entry.
 final class SRTParser {
     func parse(content: String) -> [SubtitleEntry] {
-        // BOM at, satır sonlarını normalize etmeden Character.isNewline ile böl.
+        // Skip the BOM; split with Character.isNewline without normalizing line endings.
         var text = Substring(content)
         if text.hasPrefix("\u{FEFF}") { text = text.dropFirst() }
         let lines = text.split(omittingEmptySubsequences: false, whereSeparator: { $0.isNewline })
@@ -20,27 +20,27 @@ final class SRTParser {
         var i = 0
         let n = lines.count
         while i < n {
-            // Boş satırları atla.
+            // Skip blank lines.
             while i < n, lines[i].trimmingCharacters(in: .whitespaces).isEmpty { i += 1 }
             guard i < n else { break }
 
-            // Opsiyonel index satırı.
+            // Optional index line.
             if Int(lines[i].trimmingCharacters(in: .whitespaces)) != nil { i += 1 }
             guard i < n else { break }
 
-            // Zaman satırı: 00:00:01,000 --> 00:00:04,000
+            // Time line: 00:00:01,000 --> 00:00:04,000
             let timeLine = lines[i].trimmingCharacters(in: .whitespaces)
             let times = timeLine.components(separatedBy: " --> ")
             guard times.count == 2,
                   let start = parseTime(times[0]),
                   let end = parseTime(times[1]) else {
-                // Bozuk blok: sonraki boş satıra kadar atla.
+                // Broken block: skip to the next blank line.
                 while i < n, !lines[i].trimmingCharacters(in: .whitespaces).isEmpty { i += 1 }
                 continue
             }
             i += 1
 
-            // Metin satırları: boş satıra veya dosya sonuna kadar.
+            // Text lines: up to a blank line or end of file.
             var textLines: [String] = []
             while i < n {
                 let line = String(lines[i])
@@ -57,7 +57,7 @@ final class SRTParser {
         return entries
     }
 
-    /// SRT'de yaygın süsleme tag'leri (<i>, <b>, <u>, <font ...>) kaldırılır.
+    /// Common decoration tags in SRT (<i>, <b>, <u>, <font ...>) are removed.
     private func stripBasicTags(_ line: String) -> String {
         guard line.contains("<") else { return line }
         return line.replacingOccurrences(

@@ -3,11 +3,11 @@ import Combine
 import GRDB
 import GRDBQuery
 
-/// İçerik detay ekranlarında gösterilen, 4 state'li indirme butonu.
-/// State'ler DB + DownloadManager ilerlemesinden türetilir, item düşüyor/geliyor
+/// The 4-state download button shown on content detail screens.
+/// The states are derived from the DB + DownloadManager progress; as items drop/arrive
 /// diye view'da state tutmaya gerek yok.
 struct DownloadButton: View {
-    /// `DownloadManager.idFor(vod:streamId:)` veya `.idFor(episode:episodeId:)` ile üret.
+    /// Produce it with `DownloadManager.idFor(vod:streamId:)` or `.idFor(episode:episodeId:)`.
     let id: String
     let playlistId: UUID
     let streamId: String
@@ -21,11 +21,17 @@ struct DownloadButton: View {
     var seasonNumber: Int? = nil
     var episodeNumber: Int? = nil
 
-    /// Kompakt variant — dizi bölüm satırları gibi dar alanlar için.
+    /// Compact variant — for narrow areas like series episode rows.
     var compact: Bool = false
 
     @ObservedObject private var manager = DownloadManager.shared
     @Query<DownloadedItemByIDRequest> private var item: DBDownloadedItem?
+    /// Round 8 (F-3): the primary tap in the downloading/queued and
+    /// completed states used to be a dead `break` (cancel/delete hid in
+    /// the context menu only). The tap now asks first — these two flags
+    /// drive the confirmation dialogs on `body`.
+    @SwiftUI.State private var showCancelConfirm = false
+    @SwiftUI.State private var showDeleteConfirm = false
 
     init(
         id: String,
@@ -79,7 +85,71 @@ struct DownloadButton: View {
             labelContent
         }
         .buttonStyle(.plain)
+        // Round 15 (C1): dynamic accessibility label + value for
+        // all five states — the label names the title + action,
+        // the value states the progress and what a tap does.
+        .accessibilityLabel(accessibilityLabelText)
+        .accessibilityValue(accessibilityValueText)
+        // Round 15 (C12): the download-complete UI sound, fired on
+        // this button's own transition into the completed state
+        // (detail screens); DownloadsView covers its own surface.
+        .onChange(of: item?.downloadStatus) { _, newStatus in
+            if newStatus == .completed {
+                AppSound.play(.downloadComplete)
+            }
+        }
         .contextMenu { contextMenuItems }
+        // Round 14 (A3): centered alerts replace the bottom-anchored
+        // confirmation dialogs (owner's round-13 point 3).
+        .alert(
+            L("download.cancel.title"),
+            isPresented: $showCancelConfirm
+        ) {
+            Button(L("download.cancel"), role: .destructive) {
+                manager.cancel(id: id)
+            }
+            Button(L("download.keep"), role: .cancel) {}
+        } message: {
+            Text(L("download.cancel.message"))
+        }
+        .alert(
+            L("download.delete.title"),
+            isPresented: $showDeleteConfirm
+        ) {
+            Button(L("download.delete"), role: .destructive) {
+                Task { await manager.delete(id: id) }
+            }
+            Button(L("common.cancel"), role: .cancel) {}
+        } message: {
+            Text(L("download.delete.message"))
+        }
+    }
+
+    // MARK: - Accessibility (round 15, C1)
+
+    private var accessibilityLabelText: String {
+        switch state {
+        case .idle: return "\(title) — \(L("download.action"))"
+        case .queued: return "\(title) — \(L("download.status.queued"))"
+        case .downloading: return "\(title) — \(L("download.status.downloading"))"
+        case .completed: return "\(title) — \(L("download.completed"))"
+        case .failed: return "\(title) — \(L("download.retry"))"
+        }
+    }
+
+    private var accessibilityValueText: String {
+        switch state {
+        case .idle:
+            return L("download.a11y.tap_download")
+        case .queued:
+            return L("download.a11y.queued_value")
+        case .downloading(let p):
+            return L("download.a11y.downloading_value", Int((p * 100).rounded()))
+        case .completed:
+            return L("download.a11y.completed_value")
+        case .failed:
+            return L("download.a11y.failed_value")
+        }
     }
 
     @ViewBuilder
@@ -113,11 +183,11 @@ struct DownloadButton: View {
         .padding(.horizontal, compact ? 8 : 12)
         .padding(.vertical, compact ? 6 : 11)
         .background(
-            RoundedRectangle(cornerRadius: compact ? 8 : 12, style: .continuous)
+            RoundedRectangle(cornerRadius: compact ? AppTheme.smallCornerRadius : AppTheme.cornerRadius, style: .continuous)
                 .fill(.ultraThinMaterial)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: compact ? 8 : 12, style: .continuous)
+            RoundedRectangle(cornerRadius: compact ? AppTheme.smallCornerRadius : AppTheme.cornerRadius, style: .continuous)
                 .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
         )
     }
@@ -137,7 +207,7 @@ struct DownloadButton: View {
         .padding(.horizontal, compact ? 8 : 12)
         .padding(.vertical, compact ? 6 : 11)
         .background(
-            RoundedRectangle(cornerRadius: compact ? 8 : 12, style: .continuous)
+            RoundedRectangle(cornerRadius: compact ? AppTheme.smallCornerRadius : AppTheme.cornerRadius, style: .continuous)
                 .fill(.ultraThinMaterial)
         )
     }
@@ -193,21 +263,24 @@ struct DownloadButton: View {
                 )
             }
         case .downloading, .queued:
-            // İndirme sürerken veya kuyruktayken butona tıklama yok sayılır; iptal için context menu kullanılır.
-            break
+            // Round 8 (F-3): was a dead `break` — the tap now opens the
+            // cancel confirmation (the manager has no pause/resume; the
+            // context menu keeps the same direct cancel).
+            showCancelConfirm = true
         case .completed:
-            // Completed state için tıklama boş bırakılır; context menu ile sil.
-            break
+            // Round 8 (F-3): was a dead `break` — the tap now opens the
+            // delete confirmation for the downloaded file.
+            showDeleteConfirm = true
         }
     }
 }
 
 // MARK: - M3U context-menu items
 
-/// M3U kanal kartının context menüsünde kullanılan indirme item'ı.
-/// State'e göre tek bir buton gösterir: idle → "İndir", downloading/queued → "İptal",
-/// completed/failed → "Sil". Yalnızca contextMenu açıldığında değerlendirildiği için
-/// kart başına @Query maliyeti pratik olarak yok.
+/// The download item used in the M3U channel card's context menu.
+/// Shows a single button by state: idle → "Download", downloading/queued → "Cancel",
+/// completed/failed → "Delete". Because it is only evaluated when the contextMenu opens,
+/// the per-card @Query cost is practically zero.
 struct M3UDownloadMenuItems: View {
     let id: String
     let playlistId: UUID

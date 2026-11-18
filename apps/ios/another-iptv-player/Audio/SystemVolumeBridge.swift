@@ -4,7 +4,7 @@ import MediaPlayer
 import SwiftUI
 import UIKit
     
-/// Donanım / Kontrol Merkezi ile aynı sistem çıkış sesi (`MPVolumeView` iç `UISlider`).
+/// The same system output volume as the hardware buttons / Control Center (the `UISlider` inside `MPVolumeView`).
 final class SystemVolumeBridge: NSObject, ObservableObject {
   @Published private(set) var outputVolume: Float
 
@@ -48,7 +48,7 @@ final class SystemVolumeBridge: NSObject, ObservableObject {
 
 // MARK: - Görünmez MPVolumeView
 
-/// Görünmez `MPVolumeView`; SwiftUI kaydırıcısı `SystemVolumeBridge` ile bağlanır.
+/// Invisible `MPVolumeView`; the SwiftUI slider binds through `SystemVolumeBridge`.
 struct MPVolumeViewHost: UIViewRepresentable {
   @ObservedObject var bridge: SystemVolumeBridge
 
@@ -61,7 +61,7 @@ struct MPVolumeViewHost: UIViewRepresentable {
   }
 }
 
-/// `UIViewRepresentable` dönüş tipi en az `internal` olmalı (`private` Swift derleyicisinde reddedilir).
+/// The `UIViewRepresentable` return type must be at least `internal` (`private` is rejected by the Swift compiler).
 final class MPVolumeHostingView: UIView {
   var bridge: SystemVolumeBridge
   private let volumeView: MPVolumeView

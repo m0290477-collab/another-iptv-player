@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Katalog yüklemesi başarısız olduğunda üç sekmenin (Canlı/Film/Dizi) boş ekran yerine
-/// gösterdiği ortak hata durumu: mesaj + satır içi "Tekrar Dene". Eskiden hata yalnızca
-/// Dashboard'daki tek seferlik alert'te görünüyor, OK'a basan kullanıcı çıkışsız boş
-/// sekmelerle kalıyordu (tek kurtuluş Ayarlar → Tümünü Yenile'ydi).
+/// When the catalog load fails, the shared error state the three tabs (Live/Movies/Series) show instead of a blank screen:
+/// message + inline "Try Again". Previously the error only appeared
+/// in a one-time alert on the Dashboard, and a user who tapped OK was left with blank tabs
+/// and no way out (the only escape was Settings → Refresh All).
 struct CatalogLoadErrorView: View {
     let message: String
     let onRetry: () -> Void

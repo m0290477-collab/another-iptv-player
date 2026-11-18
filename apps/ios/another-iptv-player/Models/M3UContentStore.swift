@@ -2,10 +2,10 @@ import Foundation
 import GRDB
 import Combine
 
-/// M3U playlist için aktif kanalları bellekte tutar. Xtream'in PlaylistContentStore'undan ayrıdır.
+/// Keeps the active channels for an M3U playlist in memory. Separate from Xtream's PlaylistContentStore.
 ///
-/// 310K+ kanalda grouping main thread'i durdurmasın diye `Task.detached`'te yapılır;
-/// `loadToken` ile eşzamanlı load isteklerinde yalnızca sonuncusu store'a uygulanır.
+/// Grouping is done in a `Task.detached` so grouping 310K+ channels does not stall the main thread;
+/// with `loadToken`, of concurrent load requests only the last one is applied to the store.
 @MainActor
 final class M3UContentStore: ObservableObject {
     static let shared = M3UContentStore()
@@ -18,20 +18,20 @@ final class M3UContentStore: ObservableObject {
     @Published private(set) var channelsByGroup: [String: [DBM3UChannel]] = [:]
     @Published private(set) var groupNames: [String] = []
 
-    /// `group-title` boş olan kanallar için kullanılan KANONİK anahtar. Lookup'lar
-    /// (queue, panel, hidden-category id'leri) her zaman bu anahtarı kullanmalı;
-    /// kullanıcıya gösterirken `displayName(forGroup:)` ile yerelleştirilir.
-    /// Not: HiddenCategoryStore bu değeri id olarak persist ettiği için değiştirmek
-    /// mevcut kullanıcıların gizli kategori seçimlerini bozar — "Diğer" kalmalı.
+    /// The CANONICAL key used for channels with an empty `group-title`. Lookups
+    /// (queue, panel, hidden-category ids) must always use this key;
+    /// it is localized with `displayName(forGroup:)` when shown to the user.
+    /// Note: because HiddenCategoryStore persists this value as an id, changing it
+    /// would break existing users' hidden-category choices — it must stay "Diğer".
     nonisolated static let ungroupedLabel = "Diğer"
 
-    /// Görünen ad: kanonik ungrouped anahtarı aktif dile çevrilir, diğerleri aynen döner.
-    /// Panel kurucuları detached task'ta çalıştığı için nonisolated.
+    /// Display name: the canonical ungrouped key is translated into the active language; others are returned as-is.
+    /// nonisolated because the panel builders run in detached tasks.
     nonisolated static func displayName(forGroup group: String) -> String {
         group == ungroupedLabel ? L("m3u.ungrouped_label") : group
     }
 
-    /// Aktif playlist'in filtre bayrağı — toggle değişince güncellenir ve sonraki load'da uygulanır.
+    /// The active playlist's filter flag — updated when the toggle changes and applied on the next load.
     private var filterAdultContent: Bool = false
 
     private var loadToken: UUID?
@@ -67,7 +67,7 @@ final class M3UContentStore: ObservableObject {
         }
     }
 
-    /// Dashboard'dan çıkışta 310K+ kanallık kopyalar singleton'da kalmasın (bkz.
+    /// So 310K+ channel copies do not stay in the singleton after leaving the dashboard (see
     /// PlaylistContentStore.unload).
     func unload() {
         loadToken = nil
@@ -121,7 +121,7 @@ final class M3UContentStore: ObservableObject {
         }
     }
 
-    /// 310K kanalı ana thread'de gruplamak 100-500ms takılmaya yol açar; detached task'a at.
+    /// Grouping 310K channels on the main thread causes 100-500ms stalls; send it to a detached task.
     private func groupOffMain(_ channels: [DBM3UChannel]) async -> Grouping {
         let label = Self.ungroupedLabel
         return await Task.detached(priority: .userInitiated) {
@@ -134,8 +134,8 @@ final class M3UContentStore: ObservableObject {
         var names: [String]
     }
 
-    /// Kanal adı veya group-title'ı yetişkin anahtar kelimesi içeriyorsa kanalı eler.
-    /// DB'yi değiştirmez — sadece görünür seti filtreler. Toggle anlık etki eder.
+    /// Drops the channel if its name or group-title contains an adult keyword.
+    /// Does not modify the DB — only filters the visible set. The toggle takes effect instantly.
     nonisolated private func applyAdultFilter(_ channels: [DBM3UChannel], enabled: Bool) -> [DBM3UChannel] {
         guard enabled else { return channels }
         return channels.filter { ch in

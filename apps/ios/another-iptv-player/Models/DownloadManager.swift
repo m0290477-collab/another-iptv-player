@@ -1,11 +1,12 @@
 import Foundation
 import GRDB
 import Combine
+import Network
 import os.log
 
 private let downloadLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "app", category: "Downloads")
 
-/// İndirme ilerlemesinin bellek içi temsili — UI sıkça değiştiği için DB'ye yazmayız.
+/// In-memory representation of download progress — we don't write it to the DB because the UI changes frequently.
 struct DownloadProgress: Equatable {
     let totalBytes: Int64
     let downloadedBytes: Int64
@@ -15,59 +16,83 @@ struct DownloadProgress: Equatable {
     }
 }
 
-/// Seri kuyruk: aynı anda yalnızca 1 indirme çalışır. Gerisi `.queued` DB status'üyle bekler.
-/// `createdAt`'a göre sıralanır; biri bitince bir sonraki otomatik başlar. Uygulama yeniden
-/// açıldığında yarım kalan indirmeler kuyruğun başına geri alınıp tek tek devam ettirilir.
+/// Serial queue: only 1 download runs at a time. The rest wait with the `.queued` DB status.
+/// Sorted by `createdAt`; when one finishes, the next starts automatically. When the app is
+/// reopened, half-finished downloads are taken back to the head of the queue and resumed one by one.
 ///
-/// Background indirme için `URLSessionConfiguration.background` kullanır; OS uygulamayı
-/// sonlandırsa bile iOS indirmeyi sürdürür ve bitince app'i uyandırarak delegate'i çağırır.
+/// Uses `URLSessionConfiguration.background` for background downloads; even if the OS
+/// terminates the app, iOS continues the download and, when it finishes, wakes the app and calls the delegate.
 @MainActor
 final class DownloadManager: NSObject, ObservableObject {
     static let shared = DownloadManager()
 
     static let sessionIdentifier = (Bundle.main.bundleIdentifier ?? "app") + ".downloads"
-    /// Aynı playlist için aynı anda kaç indirme paralel çalışabilir. Üstü kuyruğa alınır.
-    /// Başka playlist'lerin kuyruğu etkilenmez — her playlist'in kendi slotu vardır.
-    /// Server connection limitinin playlist bazlı olduğunu varsayıyoruz.
-    static let maxConcurrentPerPlaylist = 1
-    /// Bir indirme hata alınca kaç kez otomatik kuyruğun sonuna geri eklenir. Aşılınca `.failed`.
+    /// Fallback concurrency when the provider's real `max_connections`
+    /// is unknown (M3U, or the verify probe failed). C10 (Round 15):
+    /// the live limit is derived per playlist from the provider's own
+    /// `max_connections` (see `concurrencyLimit(for:)`), capped at 3.
+    static let fallbackConcurrentPerPlaylist = 1
+    /// C10: hard cap for the provider-derived concurrency.
+    static let maxConcurrentCap = 3
+    /// How many times a failed download is automatically re-added to the end of the queue. Once exceeded, `.failed`.
     private static let maxAutoRetries = 3
-    /// Disk dolmadan bırakılacak güvenlik payı — sistem ve diğer uygulamalar için.
+    /// Safety margin to leave before the disk fills — for the system and other apps.
     private static let minFreeDiskMargin: Int64 = 200 * 1024 * 1024
 
-    /// Aktif indirmelerin ilerlemesi, view'ların gözlemlemesi için.
+    /// The progress of active downloads, for views to observe.
     @Published private(set) var progress: [String: DownloadProgress] = [:]
-    /// DB yazmalarından sonra artan counter — GRDBQuery dışındaki view'ların refresh tetiği.
+    /// A counter incremented after DB writes — the refresh trigger for views outside GRDBQuery.
     @Published private(set) var dbVersion: Int = 0
 
     private var session: URLSession!
-    /// URLSessionTask.taskIdentifier → downloadedItem.id haritası.
+    /// URLSessionTask.taskIdentifier → downloadedItem.id map.
     private var taskToId: [Int: String] = [:]
-    /// downloadedItem.id → URLSessionDownloadTask (iptal için).
+    /// downloadedItem.id → URLSessionDownloadTask (for cancellation).
     private var idToTask: [String: URLSessionDownloadTask] = [:]
-    /// downloadedItem.id → playlistId; per-playlist slot sayımı için.
+    /// downloadedItem.id → playlistId; for per-playlist slot counting.
     private var idToPlaylistId: [String: UUID] = [:]
-    /// URLSessionTask.taskIdentifier → hedef relative path (delegate'de DB lookup yapmamak için).
+    /// URLSessionTask.taskIdentifier → target relative path (so the delegate does not do a DB lookup).
     private var taskToRelativePath: [Int: String] = [:]
-    /// `enqueue` async DB write yaparken — aynı id'ye ikinci çağrı gelmesin diye in-memory guard.
+    /// An in-memory guard so a second call for the same id doesn't arrive while `enqueue` performs an async DB write.
     private var enqueueInFlight: Set<String> = []
-    /// Aynı task için didWriteData defalarca tetiklenir; totalBytes'i sadece ilk gerçek değerde DB'ye yazıyoruz.
+    /// didWriteData fires many times for the same task; we write totalBytes to the DB only on the first real value.
     private var totalBytesPersistedFor: Set<Int> = []
-    /// Son yayınlanan yüzde (taskIdentifier → 0…100). didWriteData saniyede onlarca kez
-    /// tetiklenir; her seferinde @Published progress'e yazmak tüm DownloadButton'ları ve
-    /// DownloadsView'ı yeniden render eder. Yüzde değişmeden publish edilmez.
+    /// The last published percentage (taskIdentifier → 0…100). didWriteData fires dozens of times per second;
+    /// writing to @Published progress every time re-renders all DownloadButtons and
+    /// DownloadsView. Nothing is published unless the percentage changed.
     private var lastPublishedPercent: [Int: Int] = [:]
-    /// Hata alan indirmelerin bellek içi yeniden-deneme sayacı.
+    /// In-memory retry counter for downloads that errored.
     private var autoRetryCountById: [String: Int] = [:]
-    /// Disk alanı yetmediği için bizim iptal ettiğimiz indirmeler: delegate'in cancelled
-    /// dalında requeue yerine kalıcı failed işaretlenir.
+    /// Downloads we cancelled because disk space ran out: in the delegate's cancelled
+    /// branch they are marked permanently failed instead of being requeued.
     private var spaceFailedIds: Set<String> = []
-    /// `pumpQueue` aynı anda bir kere çalışsın diye — paralel çağrılar `pumpPending`'ı set eder.
+    /// S1 (Round 14): downloads the server refused (HTTP error status or an HTML
+    /// error page): permanently failed instead of requeued in the cancelled branch.
+    private var serverRefusedIds: Set<String> = []
+    /// Whether the HTTP response was inspected once per task (for the early cut in didWriteData).
+    private var responseValidatedFor: Set<Int> = []
+    /// So `pumpQueue` runs only once at a time — parallel calls set `pumpPending`.
     private var pumpInFlight = false
-    /// Pump çalışırken başka bir pump tetiklendiyse, mevcut pump bitmeden önce bir kez daha döner.
+    /// If another pump was triggered while a pump is running, it loops once more before the current pump ends.
     private var pumpPending = false
-    /// AppDelegate'in verdiği background completion handler; `urlSessionDidFinishEvents` çağırınca tetiklenir.
+    /// The background completion handler given by AppDelegate; fired when it calls `urlSessionDidFinishEvents`.
     var backgroundCompletionHandler: (() -> Void)?
+
+    // MARK: C2-wifi-resume + C10 state
+    /// C2-wifi-resume: live network-path monitor. The resume-data path
+    /// (`downloadTask(withResumeData:)`) cannot carry
+    /// `allowsCellularAccess`, so Wi-Fi-only must be enforced BEFORE a
+    /// resume task is created: while the path is cellular-only, resume
+    /// attempts are deferred (row stays queued, resume blob kept) and
+    /// the queue is re-pumped when the path gains Wi-Fi.
+    private let pathMonitor = NWPathMonitor()
+    private var pathMonitorStarted = false
+    /// Ids currently deferred by the Wi-Fi-only resume gate.
+    private var wifiDeferredIds: Set<String> = []
+    /// C10: provider `max_connections` per playlist, probed once per
+    /// session from the real verify response; absent = fallback 1.
+    private var providerMaxConnections: [UUID: Int] = [:]
+    private var providerMaxConnectionsProbed: Set<UUID> = []
 
     override private init() {
         super.init()
@@ -76,14 +101,42 @@ final class DownloadManager: NSObject, ObservableObject {
         config.isDiscretionary = false
         config.httpMaximumConnectionsPerHost = 6
         self.session = URLSession(configuration: config, delegate: self, delegateQueue: .main)
+        startPathMonitor()
         Task { await restoreOutstandingTasks() }
+    }
+
+    /// C2-wifi-resume: watches for a Wi-Fi path appearing; when it does,
+    /// deferred resumes are released into the queue pump.
+    private func startPathMonitor() {
+        guard !pathMonitorStarted else { return }
+        pathMonitorStarted = true
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            guard path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet) else { return }
+            Task { @MainActor [weak self] in
+                guard let self, !self.wifiDeferredIds.isEmpty else { return }
+                self.wifiDeferredIds.removeAll()
+                await self.pumpQueue()
+            }
+        }
+        pathMonitor.start(queue: DispatchQueue(label: "superx.downloads.path-monitor"))
+    }
+
+    /// True when the current path is cellular WITHOUT Wi-Fi/Ethernet —
+    /// the only state the Wi-Fi-only resume gate blocks on. Unknown /
+    /// satisfied non-cellular paths are not blocked.
+    private var isCellularOnlyPath: Bool {
+        let path = pathMonitor.currentPath
+        guard path.status == .satisfied else { return false }
+        return path.usesInterfaceType(.cellular)
+            && !path.usesInterfaceType(.wifi)
+            && !path.usesInterfaceType(.wiredEthernet)
     }
 
     // MARK: - App lifecycle
 
-    /// App açıldığında: background session'da hâlâ canlı task varsa eşleştir, yoksa DB'de
-    /// "downloading" olarak kalmış kayıtları tekrar `.queued`'e çevir (createdAt korunur →
-    /// kuyruk sırası kaybolmaz). Sonra kuyruğu çalıştır.
+    /// On app launch: if there is still a live task in the background session, match it; otherwise convert records
+    /// left as "downloading" in the DB back to `.queued` (createdAt is preserved →
+    /// the queue order is not lost). Then run the queue.
     private func restoreOutstandingTasks() async {
         let downloadingRows: [DBDownloadedItem] = (try? await AppDatabase.shared.read { db in
             try DBDownloadedItem
@@ -95,8 +148,22 @@ final class DownloadManager: NSObject, ObservableObject {
         if !downloadingRows.isEmpty {
             let tasks = await session.allTasks
             for task in tasks {
+                // C2 (Round 15): background-task restore matches by
+                // URL + PLAYLIST, not URL alone — the same provider URL
+                // can exist under two playlists. Tasks created by
+                // `startTask` carry their download id in
+                // `taskDescription`, and the id embeds the playlistId
+                // (`vod.<playlistId>.…`), so an exact id match IS a
+                // URL+playlist match; the URL is still verified against
+                // the row. Legacy tasks without a description fall back
+                // to URL-only matching (unchanged old behavior).
                 guard let url = task.originalRequest?.url?.absoluteString,
-                      let match = downloadingRows.first(where: { $0.remoteURL == url }),
+                      let match = downloadingRows.first(where: { row in
+                          if let describedId = task.taskDescription, !describedId.isEmpty {
+                              return row.id == describedId && row.remoteURL == url
+                          }
+                          return row.remoteURL == url
+                      }),
                       let downloadTask = task as? URLSessionDownloadTask else {
                     continue
                 }
@@ -112,9 +179,9 @@ final class DownloadManager: NSObject, ObservableObject {
             }
         }
 
-        // Force-kill / OS-terminate sonrası iOS background task'i de düşürmüş olabilir.
-        // DB "downloading" diyor ama session'da karşılık yok → kuyruğa geri al, sırayla devam etsin.
-        // createdAt DEĞİŞTİRİLMEZ ki kullanıcının orjinal sırası korunsun.
+        // After a force-kill / OS termination, iOS may have dropped the background task too.
+        // The DB says "downloading" but there is no counterpart in the session → take it back into the queue so it continues in order.
+        // createdAt is NOT CHANGED, so the user's original order is preserved.
         let orphans = downloadingRows.filter { !matchedIds.contains($0.id) }
         if !orphans.isEmpty {
             _ = try? await AppDatabase.shared.write { db in
@@ -138,13 +205,43 @@ final class DownloadManager: NSObject, ObservableObject {
             dbVersion &+= 1
         }
 
+        await sweepOrphanedDownloadFiles()
         await pumpQueue()
+    }
+
+    /// C2 (Round 15) launch sweep: deletes media files under the
+    /// Downloads root that have NO DB row (left behind by a delete that
+    /// raced a completion, an old crash, or a removed playlist whose
+    /// folder cleanup was skipped). Resume blobs (`.resume`) are not
+    /// media files and are left alone; any file whose relative path
+    /// matches a row — in ANY status — is kept.
+    private func sweepOrphanedDownloadFiles() async {
+        let knownPaths: Set<String> = Set(
+            ((try? await AppDatabase.shared.read { db in
+                try DBDownloadedItem.fetchAll(db)
+            }) ?? []).map(\.localPath)
+        )
+        await Task.detached(priority: .background) {
+            guard let root = try? DownloadStorage.rootDirectory() else { return }
+            let fm = FileManager.default
+            guard let enumerator = fm.enumerator(
+                at: root, includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else { return }
+            for case let fileURL as URL in enumerator {
+                let relative = fileURL.path.replacingOccurrences(of: root.path + "/", with: "")
+                if !knownPaths.contains(relative) {
+                    try? fm.removeItem(at: fileURL)
+                    downloadLog.info("orphan-sweep removed \(relative, privacy: .public)")
+                }
+            }
+        }.value
     }
 
     // MARK: - Public API
 
-    /// İndirmeyi kuyruğa ekler. Kuyruk boşsa hemen başlar, değilse `.queued` olarak bekler.
-    /// Aynı `id` zaten indiriliyor/kuyrukta ise çağrı yok sayılır.
+    /// Adds the download to the queue. If the queue is empty it starts immediately; otherwise it waits as `.queued`.
+    /// If the same `id` is already downloading/queued, the call is ignored.
     func enqueue(
         id: String,
         playlistId: UUID,
@@ -164,7 +261,10 @@ final class DownloadManager: NSObject, ObservableObject {
         defer { enqueueInFlight.remove(id) }
         autoRetryCountById.removeValue(forKey: id)
 
-        let ext = containerExtension ?? "mp4"
+        // Round 17 (R17-4): same normalization as playback URLs —
+        // an empty panel extension must not produce a "12345."
+        // file path either.
+        let ext = PlaybackURLBuilder.normalizedContainerExtension(containerExtension)
         let relPath = DownloadStorage.relativePath(playlistId: playlistId, type: type, streamId: streamId, ext: ext)
 
         do {
@@ -181,8 +281,8 @@ final class DownloadManager: NSObject, ObservableObject {
             return
         }
 
-        // Her indirmeyi önce `.queued` olarak yaz; pump hemen sonra kuyruğu çalıştırır.
-        // Bu sayede slot atama tek bir yerde (pumpQueue) olur, yarış durumu olmaz.
+        // Write every download as `.queued` first; the pump runs the queue right after.
+        // That way slot assignment happens in one place (pumpQueue) and there is no race.
         do {
             try await AppDatabase.shared.write { db in
                 let item = DBDownloadedItem(
@@ -209,8 +309,8 @@ final class DownloadManager: NSObject, ObservableObject {
                 try item.save(db)
             }
         } catch {
-            // Sessiz yutma: kullanıcı Download'a bastı, buton idle kaldı, hiçbir iz yok.
-            // failed satırı yaz ki DownloadsView'da görünsün ve retry edilebilsin.
+            // Silent swallowing: the user tapped Download, the button stayed idle, no trace at all.
+            // Write a failed row so it appears in DownloadsView and can be retried.
             downloadLog.error("enqueue id=\(id, privacy: .public) — DB insert failed: \(error.localizedDescription, privacy: .public)")
             await persistFailed(
                 id: id, playlistId: playlistId, streamId: streamId, type: type,
@@ -227,8 +327,8 @@ final class DownloadManager: NSObject, ObservableObject {
         await pumpQueue()
     }
 
-    /// Devam eden veya kuyruktaki bir indirmeyi iptal eder; kısmi dosyayı ve DB row'unu siler.
-    /// Aktif task iptal edildiyse kuyruktan sıradaki başlar.
+    /// Cancels an in-progress or queued download; deletes the partial file and the DB row.
+    /// If the active task was cancelled, the next one in the queue starts.
     func cancel(id: String) {
         let hadActiveTask = idToTask[id] != nil
         if let task = idToTask[id] {
@@ -246,7 +346,7 @@ final class DownloadManager: NSObject, ObservableObject {
         }
     }
 
-    /// Tamamlanmış/başarısız/kuyruktaki bir kaydı ve dosyasını siler.
+    /// Deletes a completed/failed/queued record and its file.
     func delete(id: String) async {
         let hadActiveTask = idToTask[id] != nil
         if let task = idToTask[id] {
@@ -262,10 +362,10 @@ final class DownloadManager: NSObject, ObservableObject {
         if hadActiveTask { await pumpQueue() }
     }
 
-    /// Bir playlist silindiğinde çağrılır: ilgili task'leri iptal eder ve klasörü siler.
+    /// Called when a playlist is deleted: cancels the related tasks and deletes the folder.
     func cleanupPlaylist(playlistId: UUID) {
-        // Aktif task'ler: idToPlaylistId'den playlist eşleşmesiyle bul. `idToTask.keys`'i
-        // string parse ile süzmek yerine playlist map'i daha güvenilir.
+        // Active tasks: find them by playlist match from idToPlaylistId. While iterating `idToTask.keys`
+        // the playlist map is more reliable than filtering by string parsing.
         let idsToCancel = idToPlaylistId.filter { $0.value == playlistId }.map(\.key)
         var hadAny = false
         for id in idsToCancel {
@@ -285,7 +385,7 @@ final class DownloadManager: NSObject, ObservableObject {
         if hadAny { Task { await pumpQueue() } }
     }
 
-    /// Tamamlanmış bir indirmenin local file URL'i (oynatma için).
+    /// The local file URL of a completed download (for playback).
     func localURL(forId id: String) async -> URL? {
         do {
             let row: DBDownloadedItem? = try await AppDatabase.shared.read { db in
@@ -300,8 +400,8 @@ final class DownloadManager: NSObject, ObservableObject {
         }
     }
 
-    /// Sadece belirli bir playlist'e ait tüm indirmeleri (her statüde) siler.
-    /// Aktif task'leri iptal eder, dosyaları diskten kaldırır, DB row'larını siler.
+    /// Deletes all downloads belonging to one specific playlist only (in every status).
+    /// Cancels the active tasks, removes the files from disk, deletes the DB rows.
     func deleteAll(playlistId: UUID) async {
         // Aktif task'ler
         let activeIds = idToPlaylistId.filter { $0.value == playlistId }.map(\.key)
@@ -317,14 +417,14 @@ final class DownloadManager: NSObject, ObservableObject {
             progress.removeValue(forKey: id)
             autoRetryCountById.removeValue(forKey: id)
         }
-        // DB row'ları (bu playlist'e ait olanlar) ve dosyalar
+        // The DB rows (those belonging to this playlist) and the files
         let rows: [DBDownloadedItem] = (try? await AppDatabase.shared.read { db in
             try DBDownloadedItem.filter(Column("playlistId") == playlistId).fetchAll(db)
         }) ?? []
         for row in rows {
             DownloadStorage.removeFile(relativePath: row.localPath)
         }
-        // Playlist klasörünü tamamen kaldır (subdir + olası boş klasörler).
+        // Remove the playlist folder entirely (subdir + any empty folders).
         DownloadStorage.removePlaylistDirectory(playlistId: playlistId)
         DownloadStorage.removeResumeData(playlistId: playlistId)
         _ = try? await AppDatabase.shared.write { db in
@@ -334,7 +434,7 @@ final class DownloadManager: NSObject, ObservableObject {
         if hadAny { await pumpQueue() }
     }
 
-    /// Tüm playlist'lerin indirmelerini (her statüde) siler.
+    /// Deletes the downloads of all playlists (in every status).
     func deleteAll() async {
         for (id, task) in idToTask {
             task.cancel()
@@ -365,7 +465,7 @@ final class DownloadManager: NSObject, ObservableObject {
     static func idFor(episode playlistId: UUID, episodeId: String) -> String {
         "episode.\(playlistId.uuidString).\(episodeId)"
     }
-    /// M3U channel id'si UUID ile karışmasın diye `m3u_` prefix'i kullanırız.
+    /// We use the `m3u_` prefix so an M3U channel id doesn't get confused with a UUID.
     static func idFor(m3uChannel playlistId: UUID, channelId: String) -> String {
         "vod.\(playlistId.uuidString).m3u_\(channelId)"
     }
@@ -375,22 +475,61 @@ final class DownloadManager: NSObject, ObservableObject {
         UserDefaults.standard.bool(forKey: "download.wifi_only")
     }
 
+    // MARK: - S1 (Round 14) response validation
+
+    /// Is it a provider refusal? On accounts whose subscription expired / that hit the connection limit,
+    /// the panel often serves a small error page instead of the media, and it used to be saved as if it were
+    /// it returns with 200 or 4xx; if the status code goes unchecked, that page is saved as
+    /// the media file and the download was marked `.completed`.
+    /// If there is an HTTP response: 2xx is required and the Content-Type must not be `text/html`.
+    /// A non-HTTP response (local/mock) does not pass this check — the body-signature
+    /// check (`fileLooksLikeHTMLPage`) covers it too.
+    nonisolated static func responseLooksLikeServerRefusal(_ response: URLResponse?) -> Bool {
+        guard let http = response as? HTTPURLResponse else { return false }
+        if !(200...299).contains(http.statusCode) { return true }
+        let contentType = (http.value(forHTTPHeaderField: "Content-Type") ?? http.mimeType ?? "")
+            .lowercased()
+        return contentType.contains("text/html")
+    }
+
+    /// Does the head of the downloaded body carry an HTML/XML error-page signature?
+    /// Real media (MP4/MKV/TS) never starts with `<`.
+    nonisolated static func fileLooksLikeHTMLPage(_ url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 512), !data.isEmpty else { return false }
+        let head = String(decoding: data, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return head.hasPrefix("<!doctype") || head.hasPrefix("<html")
+            || head.hasPrefix("<head") || head.hasPrefix("<?xml")
+    }
+
+    /// The reason for an S1 refusal shown to the user (appears as the error text
+    /// of the failed row in DownloadsView).
+    nonisolated static func serverRefusedError() -> NSError {
+        NSError(
+            domain: "Download", code: -5,
+            userInfo: [NSLocalizedDescriptionKey: L("download.error.server_refused")]
+        )
+    }
+
     // MARK: - Queue pump
 
-    /// Playlist için aktif (indiriliyor) download sayısı.
+    /// The number of active (downloading) downloads for a playlist.
     private func activeDownloadCount(for playlistId: UUID) -> Int {
         idToPlaylistId.values.reduce(into: 0) { $0 += ($1 == playlistId ? 1 : 0) }
     }
 
-    /// Verilen playlist için aktif bir indirme var mı — player warning'i için.
+    /// Whether there is an active download for the given playlist — for the player warning.
     func hasActiveDownload(playlistId: UUID) -> Bool {
         activeDownloadCount(for: playlistId) > 0
     }
 
-    /// Kuyruğu işler: her playlist için `maxConcurrentPerPlaylist` kadar aktif task'e
-    /// kadar `.queued` row'ları `.downloading`'e çeker. createdAt artan sırayla bakılır —
-    /// playlist'inde slot varsa başlat, yoksa atla ve sonraki row'a bak.
-    /// Aynı anda yalnızca bir pump çalışır; çakışan çağrılar `pumpPending` ile işaretlenir.
+    /// Processes the queue: for each playlist, pulls `.queued` rows into `.downloading` up to
+    /// `maxConcurrentPerPlaylist` active tasks. Rows are looked at in ascending createdAt order —
+    /// if the playlist has a slot, start it; otherwise skip and look at the next row.
+    /// Only one pump runs at a time; overlapping calls are marked with `pumpPending`.
     private func pumpQueue() async {
         if pumpInFlight {
             pumpPending = true
@@ -411,11 +550,12 @@ final class DownloadManager: NSObject, ObservableObject {
 
             var remaining = queuedRows
             while !remaining.isEmpty {
-                // İlk playlist'inde boş slot olan row'u al.
+                // Take the first row whose playlist has a free slot.
                 guard let idx = remaining.firstIndex(where: { row in
-                    activeDownloadCount(for: row.playlistId) < Self.maxConcurrentPerPlaylist
+                    activeDownloadCount(for: row.playlistId) < concurrencyLimit(for: row.playlistId)
                 }) else { break }
                 let next = remaining.remove(at: idx)
+                probeProviderMaxConnectionsIfNeeded(playlistId: next.playlistId)
 
                 guard let url = URL(string: next.remoteURL) else {
                     downloadLog.error("pumpQueue id=\(next.id, privacy: .public) — URL bozuk, failed işaretleniyor")
@@ -427,7 +567,7 @@ final class DownloadManager: NSObject, ObservableObject {
                     continue
                 }
 
-                // Boyut önceki denemeden biliniyorsa başlamadan sığacağını doğrula.
+                // If the size is known from a previous attempt, verify it will fit before starting.
                 if next.totalBytes > 0 {
                     let remainingBytes = Int64(max(next.totalBytes - next.downloadedBytes, 0))
                     if let available = DownloadStorage.availableCapacityBytes(),
@@ -454,12 +594,65 @@ final class DownloadManager: NSObject, ObservableObject {
         } while pumpPending
     }
 
-    /// DB row'u zaten var kabul edilir. URLSession task'ini kurar ve bellek içi haritalara yazar.
-    /// Önceki denemeden resume data varsa kaldığı yerden devam eder, yoksa sıfırdan başlar.
+    /// C10 (Round 15): per-playlist concurrency from the provider's
+    /// REAL `max_connections` (verify response, probed once per
+    /// session, cached), clamped to 1…3; unknown (M3U / probe failure)
+    /// falls back to 1 — never guessed upward.
+    private func concurrencyLimit(for playlistId: UUID) -> Int {
+        guard let maxConnections = providerMaxConnections[playlistId] else {
+            return Self.fallbackConcurrentPerPlaylist
+        }
+        return min(max(maxConnections, 1), Self.maxConcurrentCap)
+    }
+
+    /// Probes `max_connections` for a playlist once per session.
+    /// Fire-and-forget from the pump: the current pump keeps the
+    /// fallback limit; the NEXT pump uses the probed value.
+    private func probeProviderMaxConnectionsIfNeeded(playlistId: UUID) {
+        guard !providerMaxConnectionsProbed.contains(playlistId) else { return }
+        providerMaxConnectionsProbed.insert(playlistId)
+        Task {
+            guard let playlist = try? await AppDatabase.shared.read({ db in
+                try Playlist.fetchOne(db, key: playlistId)
+            }), playlist.kind == .xtream else { return }
+            let client = XtreamAPIClient(playlist: playlist)
+            guard let response = try? await client.verify(),
+                  let raw = response.userInfo?.maxConnections,
+                  let value = Int(raw.trimmingCharacters(in: .whitespaces)), value > 0
+            else { return }
+            providerMaxConnections[playlistId] = value
+            await pumpQueue()
+        }
+    }
+
+    /// The DB row is assumed to already exist. Sets up the URLSession task and writes the in-memory maps.
+    /// If there is resume data from a previous attempt, it resumes where it left off; otherwise it starts from scratch.
     private func startTask(id: String, playlistId: UUID, remoteURL: URL, relPath: String) {
         downloadLog.info("start id=\(id, privacy: .public) playlist=\(playlistId.uuidString, privacy: .public) url=\(remoteURL.absoluteString, privacy: .public)")
         let task: URLSessionDownloadTask
         if let resumeData = DownloadStorage.loadResumeData(forId: id) {
+            // C2-wifi-resume: `downloadTask(withResumeData:)` cannot
+            // carry `allowsCellularAccess` — a resumed task would use
+            // cellular even with Wi-Fi-only ON. Gate BEFORE creating
+            // it: on a cellular-only path, keep the resume blob, put
+            // the row back to `.queued`, and let the path monitor's
+            // Wi-Fi callback re-pump. Fresh downloads are unaffected
+            // (their request sets allowsCellularAccess directly).
+            if Self.wifiOnly && isCellularOnlyPath {
+                wifiDeferredIds.insert(id)
+                downloadLog.info("start id=\(id, privacy: .public) — resume DEFERRED (Wi-Fi-only, cellular path)")
+                Task {
+                    _ = try? await AppDatabase.shared.write { db in
+                        if var row = try DBDownloadedItem.filter(Column("id") == id).fetchOne(db),
+                           row.status == DownloadStatus.downloading.rawValue {
+                            row.status = DownloadStatus.queued.rawValue
+                            try row.update(db)
+                        }
+                    }
+                    dbVersion &+= 1
+                }
+                return
+            }
             // Consume the blob up front: if this attempt fails again we either get
             // fresh resume data (persisted anew in didCompleteWithError) or the next
             // retry falls back to a clean full download.
@@ -471,6 +664,9 @@ final class DownloadManager: NSObject, ObservableObject {
             request.allowsCellularAccess = !Self.wifiOnly
             task = session.downloadTask(with: request)
         }
+        // C2: the id (which embeds the playlistId) rides the task so a
+        // post-relaunch restore can match URL + playlist, not URL alone.
+        task.taskDescription = id
         taskToId[task.taskIdentifier] = id
         taskToRelativePath[task.taskIdentifier] = relPath
         idToTask[id] = task
@@ -545,7 +741,7 @@ final class DownloadManager: NSObject, ObservableObject {
 }
 
 // MARK: - URLSessionDownloadDelegate
-// Delegate queue = main queue olarak yapılandırıldığı için main-actor state'ine direkt erişebiliriz.
+// Because the delegate queue is configured as the main queue, we can access main-actor state directly.
 
 extension DownloadManager: URLSessionDownloadDelegate {
     nonisolated func urlSession(
@@ -558,6 +754,19 @@ extension DownloadManager: URLSessionDownloadDelegate {
         MainActor.assumeIsolated {
             let taskId = downloadTask.taskIdentifier
             guard let id = self.taskToId[taskId] else { return }
+            // S1 (Round 14): inspect as soon as the response header is known —
+            // cut a server refusal (expired subscription / connection limit) before the whole error
+            // page downloads; the cancelled branch marks this id permanently failed
+            // instead of requeueing it.
+            if !self.responseValidatedFor.contains(taskId) {
+                self.responseValidatedFor.insert(taskId)
+                if Self.responseLooksLikeServerRefusal(downloadTask.response) {
+                    downloadLog.error("server-refused id=\(id, privacy: .public) status=\((downloadTask.response as? HTTPURLResponse)?.statusCode ?? -1, privacy: .public)")
+                    self.serverRefusedIds.insert(id)
+                    downloadTask.cancel()
+                    return
+                }
+            }
             let newProgress = DownloadProgress(
                 totalBytes: max(0, totalBytesExpectedToWrite),
                 downloadedBytes: max(0, totalBytesWritten)
@@ -569,8 +778,8 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 self.lastPublishedPercent[taskId] = percent
                 self.progress[id] = newProgress
             }
-            // Content-Length öğrenilir öğrenilmez sığmayacak dosyayı kes: 2 GB boş alana
-            // 6 GB film indirmek saatler sonra disk-dolu hatasıyla (ve 3 retry ile) bitiyordu.
+            // As soon as Content-Length is known, cut a file that won't fit: downloading a 6 GB movie into 2 GB of free space
+            // used to end hours later with a disk-full error (and 3 retries).
             if totalJustBecameKnown {
                 let remaining = totalBytesExpectedToWrite - totalBytesWritten
                 if let available = DownloadStorage.availableCapacityBytes(),
@@ -602,12 +811,28 @@ extension DownloadManager: URLSessionDownloadDelegate {
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
-        // Dosya bu delegate metodu dönünce silinir; SENKRON taşımak zorundayız.
+        // The file is deleted when this delegate method returns; we MUST move it SYNCHRONOUSLY.
         let (id, relPath) = MainActor.assumeIsolated { () -> (String?, String?) in
             let taskId = downloadTask.taskIdentifier
             return (self.taskToId[taskId], self.taskToRelativePath[taskId])
         }
         guard let id, let relPath else { return }
+
+        // S1 (Round 14): verify the response BEFORE counting it as COMPLETED.
+        // If the HTTP status is not 2xx or the body is an HTML error page
+        // (including the 200 + HTML case that escaped the header check), the file is NOT
+        // MOVED to the destination; the download is marked failed with a reason the user can understand
+        // it is marked failed. Tasks arriving via resume also pass through the same
+        // delegate path, so this check covers them too.
+        if Self.responseLooksLikeServerRefusal(downloadTask.response)
+            || Self.fileLooksLikeHTMLPage(location) {
+            downloadLog.error("server-refused-finish id=\(id, privacy: .public) status=\((downloadTask.response as? HTTPURLResponse)?.statusCode ?? -1, privacy: .public)")
+            MainActor.assumeIsolated {
+                DownloadStorage.removeResumeData(forId: id)
+                _ = Task { await self.markFailed(id: id, error: Self.serverRefusedError()) }
+            }
+            return
+        }
 
         let fm = FileManager.default
         let sourceSize: Int64 = {
@@ -639,7 +864,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
         }
 
         MainActor.assumeIsolated {
-            _ = Task { await self.markCompleted(id: id, fallbackSize: sourceSize) }
+            _ = Task { await self.markCompleted(id: id, fallbackSize: sourceSize, relPath: relPath) }
         }
     }
 
@@ -651,9 +876,10 @@ extension DownloadManager: URLSessionDownloadDelegate {
         MainActor.assumeIsolated {
             let taskId = task.taskIdentifier
             self.totalBytesPersistedFor.remove(taskId)
+            self.responseValidatedFor.remove(taskId)
             self.lastPublishedPercent.removeValue(forKey: taskId)
-            // Guard'dan ÖNCE temizle: cancel/delete yolları taskToId'yi çoktan silmiş
-            // olabilir; aksi halde her iptal edilen indirme bir path girdisi sızdırır.
+            // Clean BEFORE the guard: the cancel/delete paths may already have removed taskToId;
+            // otherwise every cancelled download leaks a path entry.
             self.taskToRelativePath.removeValue(forKey: taskId)
             let resumeData = (error as NSError?)?.userInfo[NSURLSessionDownloadTaskResumeData] as? Data
             guard let id = self.taskToId[taskId] else {
@@ -664,7 +890,10 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 // where it stopped instead of restarting at byte 0.
                 if let resumeData,
                    let url = task.originalRequest?.url?.absoluteString ?? task.currentRequest?.url?.absoluteString {
-                    Task { await self.adoptOrphanResumeData(resumeData, remoteURL: url) }
+                    // C2: a taskDescription carries the download id
+                    // (URL + playlist identity); use it when present.
+                    let describedId = task.taskDescription
+                    Task { await self.adoptOrphanResumeData(resumeData, remoteURL: url, describedId: describedId) }
                 }
                 return
             }
@@ -679,7 +908,18 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 // (session invalidation, OS reclaim). Keep the resume data and requeue;
                 // for a genuine user cancel there is nothing to do (row already deleted).
                 if ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled {
-                    // Disk alanı yetmediği için bizim kestiğimiz task: requeue etme.
+                    // S1 (Round 14): a task we cut because of a server refusal:
+                    // the retry/red queue is meaningless — permanently failed.
+                    if self.serverRefusedIds.remove(id) != nil {
+                        DownloadStorage.removeResumeData(forId: id)
+                        self.autoRetryCountById.removeValue(forKey: id)
+                        Task {
+                            await self.markFailed(id: id, error: Self.serverRefusedError())
+                            await self.pumpQueue()
+                        }
+                        return
+                    }
+                    // A task we cut because disk space ran out: do not requeue.
                     if self.spaceFailedIds.remove(id) != nil {
                         DownloadStorage.removeResumeData(forId: id)
                         self.autoRetryCountById.removeValue(forKey: id)
@@ -702,8 +942,8 @@ extension DownloadManager: URLSessionDownloadDelegate {
                     }
                     return
                 }
-                // Disk dolu hatası retry ile düzelmez — 3 kez baştan indirmeye çalışmak
-                // gigabaytlarca boşa trafik demek. Doğrudan failed işaretle.
+                // A disk-full error is not fixed by retrying — trying to download from scratch 3 times
+                // means gigabytes of wasted traffic. Mark it failed directly.
                 let isDiskFull = (ns.domain == NSCocoaErrorDomain && ns.code == NSFileWriteOutOfSpaceError)
                     || (ns.domain == NSPOSIXErrorDomain && ns.code == Int(ENOSPC))
                 if isDiskFull {
@@ -741,7 +981,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
                     }
                 }
             } else {
-                // Başarılı tamamlanma: markCompleted didFinishDownloadingTo'da çağrıldı.
+                // Successful completion: markCompleted was called in didFinishDownloadingTo.
                 self.autoRetryCountById.removeValue(forKey: id)
                 Task { await self.pumpQueue() }
             }
@@ -756,10 +996,10 @@ extension DownloadManager: URLSessionDownloadDelegate {
         }
     }
 
-    /// Hata alan bir indirmeyi kuyruğun sonuna geri koyar. `createdAt` güncellenir ki
-    /// diğer bekleyenler bloklanmasın.
-    /// `preserveProgress`: resume data saklandıysa true — byte sayaçları korunur ki
-    /// UI "kaldığı yerden devam edecek" durumunu doğru göstersin.
+    /// Puts a failed download back at the end of the queue. `createdAt` is updated so
+    /// the other waiting downloads are not blocked.
+    /// `preserveProgress`: true if resume data was kept — the byte counters are preserved so
+    /// the UI correctly shows the "will resume where it left off" state.
     private func requeueAfterError(id: String, errorMessage: String, preserveProgress: Bool = false) async {
         _ = try? await AppDatabase.shared.write { db in
             if var row = try DBDownloadedItem.filter(Column("id") == id).fetchOne(db) {
@@ -777,11 +1017,20 @@ extension DownloadManager: URLSessionDownloadDelegate {
         dbVersion &+= 1
     }
 
-    /// Relaunch sonrası eşleşmesiz gelen delegate hatasındaki resume data'yı, URL üzerinden
-    /// DB row'una bağlar ve row'u kuyruğa geri alır. Best-effort: eşleşme yoksa sessizce düşer.
-    private func adoptOrphanResumeData(_ data: Data, remoteURL: String) async {
+    /// Links the resume data in a delegate error that arrived unmatched after relaunch, via the URL,
+    /// to the DB row and takes the row back into the queue. Best-effort: if there is no match, it drops silently.
+    private func adoptOrphanResumeData(_ data: Data, remoteURL: String, describedId: String? = nil) async {
+        // C2 (Round 15): match by id (= URL + playlist) when the task
+        // carried one; URL-only matching could attach resume data to
+        // another playlist's identical URL.
         let row: DBDownloadedItem? = try? await AppDatabase.shared.read { db in
-            try DBDownloadedItem
+            if let describedId, !describedId.isEmpty {
+                return try DBDownloadedItem
+                    .filter(Column("id") == describedId && Column("remoteURL") == remoteURL)
+                    .filter([DownloadStatus.downloading.rawValue, DownloadStatus.queued.rawValue].contains(Column("status")))
+                    .fetchOne(db)
+            }
+            return try DBDownloadedItem
                 .filter(Column("remoteURL") == remoteURL)
                 .filter([DownloadStatus.downloading.rawValue, DownloadStatus.queued.rawValue].contains(Column("status")))
                 .fetchOne(db)
@@ -797,12 +1046,22 @@ extension DownloadManager: URLSessionDownloadDelegate {
         await pumpQueue()
     }
 
-    private func markCompleted(id: String, fallbackSize: Int64 = 0) async {
+    private func markCompleted(id: String, fallbackSize: Int64 = 0, relPath: String? = nil) async {
         let now = Date()
         let row: DBDownloadedItem? = try? await AppDatabase.shared.read { db in
             try DBDownloadedItem.filter(Column("id") == id).fetchOne(db)
         }
         guard let row else {
+            // C2 (Round 15) delete-vs-complete race: the user deleted
+            // this download while the task was finishing — the file was
+            // already moved into place by didFinishDownloadingTo, but
+            // its row is gone, so the file is an orphan. Delete it
+            // instead of leaving unowned bytes on disk (the launch
+            // sweep is only the backstop).
+            if let relPath {
+                DownloadStorage.removeFile(relativePath: relPath)
+                downloadLog.info("complete-after-delete id=\(id, privacy: .public) — row gone, file removed")
+            }
             progress.removeValue(forKey: id)
             return
         }
@@ -835,6 +1094,89 @@ extension DownloadManager: URLSessionDownloadDelegate {
         DownloadStorage.removeResumeData(forId: id)
         progress.removeValue(forKey: id)
         dbVersion &+= 1
+        // C12 (Round 15): completion signal for in-app banners in
+        // other sections (Home observes it; the Downloads section's
+        // own ring->checkmark morph lives in its own UI).
+        NotificationCenter.default.post(name: Notification.Name("superx.downloadCompleted"), object: id)
+        // B3 (Round 14): if "auto-download the next episode" is on, queue the next one.
+        await enqueueNextEpisodeIfEnabled(completedRow: row)
+    }
+
+    /// B3 (Round 14): When an EPISODE download finishes successfully and
+    /// the `downloads.autoDownloadNextEpisode` setting is on (the Settings
+    /// toggle is bound via `@AppStorage` to exactly this key), it queues the next episode
+    /// of the same series. The order is the `SeriesPlaybackOrdering` order the player
+    /// uses for prev/next. If there is no next episode, or it is already
+    /// If there is no next episode, or it is already downloaded/queued/downloading,
+    /// nothing is done. A failed episode row (failed) can be
+    /// re-queued — `enqueue` overwrites it as `.queued`.
+    private func enqueueNextEpisodeIfEnabled(completedRow row: DBDownloadedItem) async {
+        guard row.type == "episode",
+              UserDefaults.standard.bool(forKey: "downloads.autoDownloadNextEpisode"),
+              let seriesIdString = row.seriesId,
+              let seriesId = Int(seriesIdString)
+        else { return }
+
+        struct NextEpisodePayload {
+            let episode: DBEpisode
+            let playlist: Playlist
+            let seriesName: String?
+            let seriesCover: String?
+            let existingStatus: DownloadStatus?
+        }
+
+        let payload: NextEpisodePayload? = try? await AppDatabase.shared.read { db in
+            let ordered = try SeriesPlaybackOrdering.orderedEpisodes(
+                seriesId: seriesId, playlistId: row.playlistId, db: db
+            )
+            guard let index = SeriesPlaybackOrdering.index(playbackStreamId: row.streamId, in: ordered),
+                  index + 1 < ordered.count else { return nil }
+            let next = ordered[index + 1]
+            guard let playlist = try Playlist.fetchOne(db, key: row.playlistId) else { return nil }
+            let series = try DBSeries
+                .filter(Column("seriesId") == seriesId && Column("playlistId") == row.playlistId)
+                .fetchOne(db)
+            let nextDownloadId = DownloadManager.idFor(
+                episode: row.playlistId, episodeId: next.episodeId ?? next.id
+            )
+            let existing = try DBDownloadedItem
+                .filter(Column("id") == nextDownloadId)
+                .fetchOne(db)
+            return NextEpisodePayload(
+                episode: next,
+                playlist: playlist,
+                seriesName: series?.name,
+                seriesCover: series?.cover,
+                existingStatus: existing?.downloadStatus
+            )
+        }
+        guard let payload else { return }
+        if let status = payload.existingStatus,
+           status == .completed || status == .queued || status == .downloading {
+            return
+        }
+
+        let next = payload.episode
+        let nextEpisodeId = next.episodeId ?? next.id
+        guard let remoteURL = PlaybackURLBuilder(playlist: payload.playlist).seriesURL(
+            streamId: nextEpisodeId, containerExtension: next.containerExtension
+        ) else { return }
+
+        downloadLog.info("auto-next id=\(row.id, privacy: .public) → sıradaki bölüm kuyruğa alınıyor: \(nextEpisodeId, privacy: .public)")
+        await enqueue(
+            id: DownloadManager.idFor(episode: row.playlistId, episodeId: nextEpisodeId),
+            playlistId: row.playlistId,
+            streamId: nextEpisodeId,
+            type: "episode",
+            title: next.title ?? payload.seriesName ?? row.secondaryTitle ?? row.title,
+            secondaryTitle: payload.seriesName ?? row.secondaryTitle,
+            imageURL: next.cover ?? payload.seriesCover,
+            remoteURL: remoteURL,
+            containerExtension: next.containerExtension,
+            seriesId: row.seriesId,
+            seasonNumber: next.seasonId.split(separator: "_").last.flatMap { Int($0) },
+            episodeNumber: next.episodeNum
+        )
     }
 
     private func markFailed(id: String, error: Error) async {

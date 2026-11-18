@@ -5,15 +5,15 @@ import Libavutil
 import Libswresample
 
 /// FFmpeg remux: kaynak URL (mkv/ts/avi…) → HLS segmentleri. Video daima passthrough
-/// (H.264/HEVC); ses uyumluysa passthrough, değilse (MP2/DTS/TrueHD…) AAC'ye transcode
-/// edilir. Arka plan kuyruğunda koşar.
+/// (H.264/HEVC); if the audio is compatible it is passed through, otherwise (MP2/DTS/TrueHD…) it is transcoded to AAC.
+/// It runs on a background queue.
 ///
-/// İki segment biçimi:
-/// - H.264 → MPEG-TS segmentleri (FFmpegKit'te `hls` muxer'ı derli değil; mpegts muxer
-///   ile segmentasyon + m3u8 üretimi elle yapılır, cihazda doğrulandı).
-/// - HEVC → fMP4 segmentleri (HLS spec'i HEVC'yi TS'te kabul etmez): tek `mp4` muxer,
-///   `frag_custom` ile bizim sınırlarımızda fragment üretir; custom AVIO ile byte'lar
-///   yakalanıp init.mp4 + segNNNNN.m4s dosyalarına bölünür.
+/// Two segment forms:
+/// - H.264 → MPEG-TS segments (the `hls` muxer is not compiled into FFmpegKit; segmentation with the mpegts muxer
+///   + m3u8 production is done manually, verified on device).
+/// - HEVC → fMP4 segments (the HLS spec does not accept HEVC in TS): a single `mp4` muxer,
+///   It produces fragments at our boundaries with `frag_custom`; the bytes are captured via custom AVIO
+///   and split into init.mp4 + segNNNNN.m4s files.
 final class RemuxHLSWriter {
   enum RemuxError: LocalizedError {
     case openInputFailed(Int32)
@@ -45,8 +45,8 @@ final class RemuxHLSWriter {
   static let compatibleVideoCodecs: Set<UInt32> = [
     AV_CODEC_ID_H264.rawValue, AV_CODEC_ID_HEVC.rawValue,
   ]
-  /// Passthrough'a uygun ses; biçime göre değişir. Liste dışındaki her ses AAC'ye
-  /// transcode edilir (decoder varsa; yoksa ses düşürülür, video sessiz gider).
+  /// Audio suitable for passthrough; it varies by form. Every audio outside the list is transcoded
+  /// to AAC (if a decoder exists; otherwise the audio is dropped and the video goes silent).
   private static let fmp4AudioPassthrough: Set<UInt32> = [
     AV_CODEC_ID_AAC.rawValue, AV_CODEC_ID_AC3.rawValue, AV_CODEC_ID_EAC3.rawValue,
   ]
@@ -60,21 +60,21 @@ final class RemuxHLSWriter {
   private let startSeconds: TimeInterval
   private let isLive: Bool
   private let userAgent: String?
-  /// Girdi açılmadan önce beklenecek süre: az önce kapatılmış bir bağlantının
-  /// (önceki oturum / telefon oynatıcısı) panelde ölmesine fırsat verir —
-  /// bağlantı-limitli panellerde ilk açılış çakışması kalıcı hataya dönüyordu.
-  /// `readyToOpen` verilmişse bu değer sabit gecikme değil ÜST SINIRDIR.
+  /// The time to wait before the input is opened: it gives a just-closed connection
+  /// (previous session / phone player) a chance to die at the panel —
+  /// on connection-limited panels, a first-open collision was turning into a permanent error.
+  /// If `readyToOpen` is given, this value is not a fixed delay but an UPPER LIMIT.
   private let openDelaySeconds: Double
-  /// Verilirse: girdi açmadan önce bu koşul true olana (ya da `openDelaySeconds`
-  /// sınırına) kadar bekle. Zap'ta önceki oturumun kaynak bağlantısı fiilen
-  /// kapanana dek bekleyip panelin slotu boşaltmasını garantiler.
+  /// If given: before opening the input, wait until this condition becomes true (or the `openDelaySeconds`
+  /// limit is reached). On a zap, it guarantees waiting until the previous session's source connection actually
+  /// closes and the panel frees its slot.
   private let readyToOpen: (() -> Bool)?
   private let targetSegmentSeconds: Double
-  /// Canlıda playlist'te tutulan segment sayısı (kayan pencere). VOD event-playlist
-  /// kullanır (tüm segmentler kalır): kayan-pencere/canlı-görünüm denemesi sahada
-  /// tekleme ve pencere-kaçması sorunları üretti, kullanıcı kararıyla geri alındı.
+  /// The number of segments kept in the playlist on live (sliding window). VOD uses an event playlist
+  /// (all segments stay): the sliding-window/live-view attempt produced stall and window-escape
+  /// problems in the field and was reverted by the user's decision.
   private let liveWindowSize = 8
-  /// Test için biçimi zorlamaya izin verir; nil = codec'e göre otomatik.
+  /// Allows forcing the form for testing; nil = automatic by codec.
   let forcedFormat: SegmentFormat?
 
   /// External subtitle to expose to the AirPlay target as an HLS WebVTT rendition.
@@ -97,10 +97,10 @@ final class RemuxHLSWriter {
   }
 
   private let queue = DispatchQueue(label: "AirPlayRemux.writer", qos: .userInitiated)
-  /// Interrupt callback okur; blocking av_read_frame'i iptalde kırar.
+  /// The interrupt callback reads it; it breaks the blocking av_read_frame on cancellation.
   private let cancelled = UnsafeMutablePointer<Int32>.allocate(capacity: 1)
-  /// Remux döngüsü tamamen çözülüp kaynak bağlantısı (avformat_close_input) kapandı.
-  /// Sonraki oturum, panel slotunun boşaldığını buradan anlar.
+  /// The remux loop has fully resolved and the source connection (avformat_close_input) has closed.
+  /// The next session understands from here that the panel slot has been freed.
   private let closedLock = NSLock()
   private var sourceClosed = false
   var isClosed: Bool {
@@ -109,10 +109,10 @@ final class RemuxHLSWriter {
     return sourceClosed
   }
   private(set) var playlistURL: URL
-  /// Kaynağın toplam süresi (girdi açılınca yazılır; canlıda 0 kalır).
+  /// The source's total duration (written when the input opens; stays 0 on live).
   private(set) var sourceDurationSeconds: TimeInterval = 0
-  /// Girdi seek'inin GERÇEKTE düştüğü konum. `av_seek_frame` başarısız olursa
-  /// (seek edilemeyen kaynak) 0'a döner — zaman çizelgesi muhasebesi buna bakmalı,
+  /// The position the input seek ACTUALLY landed at. If `av_seek_frame` fails
+  /// (unseekable source) it returns to 0 — the timeline accounting must look at this,
   /// aksi halde UI istenen konumu gösterirken cast 0:00'dan oynar.
   private(set) var effectiveStartSeconds: TimeInterval
 
@@ -120,14 +120,14 @@ final class RemuxHLSWriter {
 
   // MARK: - VOD pacing (round-16 leaky bucket)
 
-  /// VOD'da yazıcı, oynatma konumunun en fazla bu kadar ilerisine yazar. Sınırsız
-  /// bırakılırsa tüm film hat hızında iner: panelin bağlantı sınırı doyar
-  /// (devir hataları), disk/pil boşa gider.
+  /// On VOD the writer writes at most this far ahead of the playback position. If left unlimited,
+  /// the whole movie downloads at line speed: the panel's connection limit saturates
+  /// (handover errors), disk/battery are wasted.
   private let pacingAheadSeconds: Double = 25
   private let positionLock = NSLock()
   private var playbackPositionSeconds: Double = 0
 
-  /// Cast oynatıcısının kaynak-zamanı konumu; pacing kapısını besler.
+  /// The cast player's source-time position; feeds the pacing gate.
   func updatePlaybackPosition(_ seconds: TimeInterval) {
     positionLock.lock()
     playbackPositionSeconds = seconds
@@ -140,9 +140,9 @@ final class RemuxHLSWriter {
     return playbackPositionSeconds
   }
 
-  /// Yazılan medya zamanı izin verilen pencerenin ilerisindeyse bekler (iptal duyarlı).
-  /// Oynatma başlamadan önce taban gerçek başlangıç konumudur (seek başarısızsa 0):
-  /// oturum, başlangıç tamponunu (12 sn < 25 sn pencere) engellenmeden biriktirir.
+  /// If the written media time is ahead of the allowed window, it waits (cancellation-aware).
+  /// Before playback starts, the base is the real start position (0 if the seek failed):
+  /// the session accumulates the start buffer (12 sec < 25 sec window) unblocked.
   private func waitForPacing(mediaSeconds: Double) {
     guard !isLive else { return }
     while cancelled.pointee == 0 {
@@ -196,8 +196,8 @@ final class RemuxHLSWriter {
           DispatchQueue.main.async { [weak self] in self?.onError?(error) }
         }
       }
-      // Döngü çözüldü → defer'daki avformat_close_input koştu → kaynak bağlantısı
-      // kapandı. Sonraki oturum bunu bekliyor olabilir.
+      // The loop resolved → the avformat_close_input in defer ran → the source connection
+      // closed. The next session may be waiting for this.
       closedLock.lock()
       sourceClosed = true
       closedLock.unlock()
@@ -210,12 +210,12 @@ final class RemuxHLSWriter {
 
   // MARK: - Ses transcode (MP2/DTS/… → AAC)
 
-  /// Decode → swresample (FLTP) → FIFO → AAC encode zinciri. Zaman damgaları girdinin
-  /// mutlak zaman çizelgesine oturtulur (ilk decode edilen frame'in PTS'inden başlar).
+  /// Decode → swresample (FLTP) → FIFO → AAC encode chain. Timestamps are seated on the input's
+  /// absolute timeline (starting from the PTS of the first decoded frame).
   private final class AudioTranscoder {
     let decoder: UnsafeMutablePointer<AVCodecContext>
     let encoder: UnsafeMutablePointer<AVCodecContext>
-    /// Encoder çıkış paketlerinin time base'i: 1/sampleRate.
+    /// The time base of the encoder output packets: 1/sampleRate.
     var encoderTimeBase: AVRational { AVRational(num: 1, den: sampleRate) }
     private var swr: OpaquePointer?
     private let fifo: OpaquePointer
@@ -224,7 +224,7 @@ final class RemuxHLSWriter {
     private let convertedFrame = av_frame_alloc()
     private let encodeFrame = av_frame_alloc()
     private let encodedPacket = av_packet_alloc()
-    /// Bir sonraki encode frame'inin PTS'i (örnek biriminde); ilk frame'de kurulur.
+    /// The PTS of the next encode frame (in sample units); set on the first frame.
     private var nextPts: Int64 = .min
 
     init?(inStream: UnsafeMutablePointer<AVStream>) {
@@ -259,7 +259,7 @@ final class RemuxHLSWriter {
       encCtx.pointee.sample_fmt = AV_SAMPLE_FMT_FLTP
       encCtx.pointee.bit_rate = 160_000
       encCtx.pointee.time_base = AVRational(num: 1, den: rate)
-      // mp4/fMP4 için extradata (AudioSpecificConfig) global header'da olmalı.
+      // For mp4/fMP4, the extradata (AudioSpecificConfig) must be in the global header.
       encCtx.pointee.flags |= 1 << 22  // AV_CODEC_FLAG_GLOBAL_HEADER (makro import edilmiyor)
       guard avcodec_open2(encCtx, encCodec, nil) >= 0 else {
         var f1: UnsafeMutablePointer<AVCodecContext>? = decCtx
@@ -293,7 +293,7 @@ final class RemuxHLSWriter {
       av_packet_free(&p)
     }
 
-    /// Girdi ses paketini işler; üretilen her AAC paketi için `emit` çağrılır.
+    /// Processes the input audio packet; `emit` is called for every AAC packet produced.
     func process(
       packet: UnsafeMutablePointer<AVPacket>?,
       emit: (UnsafeMutablePointer<AVPacket>) throws -> Void
@@ -309,9 +309,9 @@ final class RemuxHLSWriter {
           if nextPts == .min {
             nextPts = framePtsSamples
           } else {
-            // Kaynakta zaman sıçraması (reconnect/gap): sentetik PTS düz devam ederse
-            // ses her sıçramada videodan biraz daha kayar (birikimli desync). 200 ms'den
-            // büyük sapmada senkronu kaynağın zamanına yeniden kilitle.
+            // A time jump in the source (reconnect/gap): if the synthetic PTS continues flat,
+            // the audio drifts a little more from the video at every jump (cumulative desync). On a deviation larger than 200 ms,
+            // re-lock the sync to the source's time.
             let expected = nextPts + Int64(av_audio_fifo_size(fifo))
             if abs(framePtsSamples - expected) > Int64(sampleRate / 5) {
               nextPts = framePtsSamples - Int64(av_audio_fifo_size(fifo))
@@ -332,7 +332,7 @@ final class RemuxHLSWriter {
             throw RemuxError.openOutputFailed(-1)
           }
         }
-        // Dönüştür ve FIFO'ya yaz.
+        // Convert and write to the FIFO.
         convertedFrame.pointee.sample_rate = sampleRate
         convertedFrame.pointee.format = AV_SAMPLE_FMT_FLTP.rawValue
         av_channel_layout_copy(&convertedFrame.pointee.ch_layout, &encoder.pointee.ch_layout)
@@ -360,7 +360,7 @@ final class RemuxHLSWriter {
       }
     }
 
-    /// Kaynak bitti/iptal: kalan örnekleri encode edip encoder'ı boşaltır.
+    /// Source finished/cancelled: encodes the remaining samples and flushes the encoder.
     func finish(emit: (UnsafeMutablePointer<AVPacket>) throws -> Void) throws {
       try? process(packet: nil, emit: emit)  // decoder drain
       try drainEncoder(flush: true, emit: emit)
@@ -404,19 +404,19 @@ final class RemuxHLSWriter {
     }
   }
 
-  // MARK: - Zaman damgası onarımı
+  // MARK: - Timestamp repair
 
-  /// MKV/HEVC konteyner dts'i güvenilmez: çoğu karede yok, olanlarda eşit/geri
-  /// gelebiliyor. Muxer'ın tahmini mp4'te -22, TS'te SESSİZ HİZA KAYMASI üretir
-  /// (sahadaki ses kaymasının kökü — 18. tur). dts konteynerden beklenmeden
-  /// deterministik üretilir: decode-sırası saati = önceki dts + kare süresi.
-  /// İki segment döngüsü de bu tek implementasyonu paylaşır; saf değer tipi
-  /// olduğu için tablo-testlenebilir.
+  /// MKV/HEVC container dts is unreliable: missing on most frames, and equal/backwards
+  /// on those that have it. The muxer's estimate produces -22 in mp4 and a SILENT ALIGNMENT SHIFT in TS
+  /// (the root of the field audio drift — round 18). dts is produced deterministically without
+  /// waiting for the container: decode-order clock = previous dts + frame duration.
+  /// Both segment loops share this single implementation; because it is a pure value type
+  /// it is table-testable.
   struct TimestampRepair {
     private var lastDTS: Int64?
     private var lastDuration: Int64 = 0
 
-    /// Video: dts daima sentezlenir. nil = paket atlanmalı (ilk karede pts yok).
+    /// Video: dts is always synthesized. nil = the packet must be skipped (no pts on the first frame).
     mutating func repairVideo(pts: Int64, duration: Int64) -> (pts: Int64, dts: Int64)? {
       let dur = max(duration > 0 ? duration : lastDuration, 1)
       let outPts: Int64
@@ -425,14 +425,14 @@ final class RemuxHLSWriter {
         var dts = last + dur
         if pts != Int64.min, dts > pts { dts = pts }
         if dts <= last { dts = last + 1 }
-        // Geriye zaman sıçramasında monotonluk bump'ı dts'i pts'in üstüne
-        // itebilir; muxer EINVAL ile ölmesin diye pts kaldırılır.
+        // On a backwards time jump, the monotonicity bump can push dts above pts;
+        // pts is lifted so the muxer doesn't die with EINVAL.
         outPts = (pts != Int64.min && pts < dts) ? dts : pts
         outDts = dts
       } else {
         guard pts != Int64.min else { return nil }
-        // İlk kare (keyframe): decode saati pts'in ~4 kare gerisinden başlar ki
-        // B-frame'lerde dts ≤ pts hep sağlansın (mp4 edit list telafi eder).
+        // First frame (keyframe): the decode clock starts ~4 frames behind pts so that
+        // dts ≤ pts always holds on B-frames (the mp4 edit list compensates).
         outPts = pts
         outDts = pts - dur * 4
       }
@@ -441,8 +441,8 @@ final class RemuxHLSWriter {
       return (outPts, outDts)
     }
 
-    /// Ses: konteyner ts'i güvenilir; yalnız eksik/geri durumda düzeltilir.
-    /// nil = paket atlanmalı (henüz referans yokken iki damga da eksik).
+    /// Audio: the container ts is reliable; it is only corrected when missing/backwards.
+    /// nil = the packet must be skipped (both stamps missing while there is no reference yet).
     mutating func repairAudio(
       pts: Int64, dts: Int64, duration: Int64
     ) -> (pts: Int64, dts: Int64)? {
@@ -466,7 +466,7 @@ final class RemuxHLSWriter {
     }
   }
 
-  // MARK: - Ortak durum
+  // MARK: - Shared state
 
   private struct SegmentRecord {
     let index: Int
@@ -475,14 +475,14 @@ final class RemuxHLSWriter {
   }
 
   private var segments: [SegmentRecord] = []
-  /// Playlist penceresinden çıkmış ama dosyası henüz silinmemiş segmentler:
+  /// Segments that have left the playlist window but whose file has not yet been deleted:
   /// pencerenin ucundan okuyan (geciken) TV, playlist güncellemesini görmeden
-  /// istek atarsa 404 yememeli — birkaç segmentlik silme payı bırakılır.
+  /// if they request one they should not get a 404 — a deletion margin of a few segments is left.
   private var retiredSegments: [SegmentRecord] = []
 
   private func recordSegment(index: Int, fileName: String, duration: Double, final: Bool) {
-    // İleri süreksizlikte (kaynak zaman sıçraması) lastSeconds-startSeconds saçma
-    // büyür; absürt EXTINF, AVPlayer'ın seekable haritasını bozar — makul tavana kırp.
+    // On a forward discontinuity (a source time jump), lastSeconds-startSeconds grows
+    // absurdly; an absurd EXTINF breaks AVPlayer's seekable map — crop it to a reasonable ceiling.
     let clamped = min(duration, targetSegmentSeconds * 4)
     segments.append(SegmentRecord(index: index, fileName: fileName, duration: clamped))
     if isLive {
@@ -512,7 +512,10 @@ final class RemuxHLSWriter {
     else { return }
     subtitleAssetsWritten = true  // attempt once, regardless of outcome
     guard firstSegment.fileName.hasSuffix(".ts"), !isLive else { return }
-    guard let built = AirPlaySubtitleRendition.build(fromSRTFile: subtitleFileURL) else {
+    // Round 15 (C2): routed through the format-aware builder —
+    // imported .vtt files now parse as WebVTT (not SRT) and
+    // legacy-encoded files decode via the fallback chain.
+    guard let built = AirPlaySubtitleRendition.build(fromSubtitleFile: subtitleFileURL) else {
       Log.error("AirPlayRemux", "subtitle file unreadable/empty; casting video-only")
       return
     }
@@ -545,7 +548,7 @@ final class RemuxHLSWriter {
     }
   }
 
-  /// İlk segment kısa tutulur ki playlist (ve TV'deki ilk kare) erken hazır olsun.
+  /// The first segment is kept short so the playlist (and the first frame on the TV) is ready early.
   private func targetDuration(forSegmentIndex index: Int) -> Double {
     index == 0 ? min(1.5, targetSegmentSeconds) : targetSegmentSeconds
   }
@@ -564,12 +567,12 @@ final class RemuxHLSWriter {
     }
   }
 
-  // MARK: - Remux loop (queue üzerinde)
+  // MARK: - Remux loop (on the queue)
 
   private func runRemuxLoop() throws {
     if let readyToOpen {
-      // Önceki oturumun kaynak bağlantısı kapanana kadar bekle (panel slotu boşalsın);
-      // openDelaySeconds üst sınır. Kapanınca kısa bir yerleşme payı bırak.
+      // Wait until the previous session's source connection closes (so the panel slot frees);
+      // openDelaySeconds is the upper limit. When it closes, leave a short settling margin.
       let cap = Date().addingTimeInterval(openDelaySeconds > 0 ? openDelaySeconds : 3.0)
       var drained = false
       while cancelled.pointee == 0, Date() < cap {
@@ -605,9 +608,9 @@ final class RemuxHLSWriter {
     if isLive {
       av_dict_set(&inputOpts, "analyzeduration", "2000000", 0)
       av_dict_set(&inputOpts, "probesize", "1500000", 0)
-      // Canlı yayın EOF'lamaz: panel resetleri temiz EOF olarak görünebiliyor.
-      // Protokol katmanında yeniden bağlan — aksi halde EOF üst katmanda kopma
-      // sayılır ve cast düşer (canlı zap'ta "görüntü kesiliyor").
+      // Live does not EOF: panel resets can look like a clean EOF.
+      // Reconnect at the protocol layer — otherwise the EOF counts as a disconnect at the upper layer
+      // and cast drops ("the picture cuts out" on a live zap).
       av_dict_set(&inputOpts, "reconnect_at_eof", "1", 0)
     }
 
@@ -626,22 +629,22 @@ final class RemuxHLSWriter {
     }
 
     if !isLive, startSeconds > 1 {
-      // stream_index=-1 → zaman damgası paketlerle aynı orijinde olmalı: start_time
-      // sıfır olmayan kaynaklarda (TS catchup kayıtları) eklenmezse yanlış yere düşer.
+      // stream_index=-1 → the timestamp must be at the same origin as the packets: on sources with a non-zero start_time
+      // (TS catchup recordings), if it is not added it lands in the wrong place.
       var ts = Int64(startSeconds * Double(AV_TIME_BASE))
       if input.pointee.start_time != Int64.min {
         ts += input.pointee.start_time
       }
       let seekResult = av_seek_frame(input, -1, ts, AVSEEK_FLAG_BACKWARD)
       if seekResult < 0 {
-        // Seek edilemeyen kaynak: 0:00'dan yazılacak — zaman çizelgesi muhasebesi
-        // bunu bilmezse UI istenen konumu gösterirken cast baştan oynar.
+        // Unseekable source: it will be written from 0:00 — if the timeline accounting doesn't
+        // know this, the UI shows the requested position while cast plays from the start.
         Log.error("AirPlayRemux", "input seek failed (\(seekResult)); remuxing from 0:00")
         effectiveStartSeconds = 0
       }
     }
 
-    // Stream seçimi: ilk uyumlu video + ilk ses (uyumsuzsa transcode).
+    // Stream selection: the first compatible video + the first audio (transcode if incompatible).
     let streamCount = Int(input.pointee.nb_streams)
     var videoInputIndex = -1
     var videoIsHEVC = false
@@ -697,7 +700,7 @@ final class RemuxHLSWriter {
     }
   }
 
-  /// Paket zaman damgası → saniye (girdi time base'inde). Int64.min == AV_NOPTS_VALUE.
+  /// Packet timestamp → seconds (in the input time base). Int64.min == AV_NOPTS_VALUE.
   private func packetSeconds(
     _ packet: AVPacket,
     inStream: UnsafeMutablePointer<AVStream>,
@@ -707,7 +710,7 @@ final class RemuxHLSWriter {
     return rawTS != Int64.min ? Double(rawTS) * av_q2d(inStream.pointee.time_base) : fallback
   }
 
-  /// Çıkış ctx'ine video(0) + varsa ses(1) stream'lerini kurar.
+  /// Sets up the video(0) + audio(1, if any) streams on the output ctx.
   private func addOutputStreams(
     to output: UnsafeMutablePointer<AVFormatContext>,
     input: UnsafeMutablePointer<AVFormatContext>,
@@ -720,7 +723,7 @@ final class RemuxHLSWriter {
     var result = avcodec_parameters_copy(videoOut.pointee.codecpar, videoIn.pointee.codecpar)
     guard result >= 0 else { throw RemuxError.openOutputFailed(result) }
     if videoOut.pointee.codecpar.pointee.codec_id == AV_CODEC_ID_HEVC {
-      // Apple, HLS'te HEVC için yalnız 'hvc1' sample entry kabul eder ('hev1' → -12848).
+      // Apple only accepts the 'hvc1' sample entry for HEVC in HLS ('hev1' → -12848).
       videoOut.pointee.codecpar.pointee.codec_tag =
         UInt32(UInt8(ascii: "h")) | UInt32(UInt8(ascii: "v")) << 8
         | UInt32(UInt8(ascii: "c")) << 16 | UInt32(UInt8(ascii: "1")) << 24
@@ -834,17 +837,17 @@ final class RemuxHLSWriter {
     var videoClock = TimestampRepair()
     var audioClock = TimestampRepair()
     var packet = AVPacket()
-    // Yazılan son video medya zamanı (kaynak zaman çizelgesinde) — pacing kapısı
-    // ve erken-EOF tespiti buna bakar.
+    // The last written video media time (on the source timeline) — the pacing gate
+    // and the early-EOF detection looks at it.
     var paceClock = effectiveStartSeconds
     while cancelled.pointee == 0 {
       waitForPacing(mediaSeconds: paceClock)
       if cancelled.pointee != 0 { break }
       let readResult = av_read_frame(input, &packet)
       if readResult == Self.avErrorEOF {
-        // Canlı yayın "bitmez": EOF = kaynak koptu. VOD'da sürenin belirgin
-        // gerisindeki EOF de kopmadır (panel bağlantıyı temiz kapatmış olabilir) —
-        // ikisi de tamamlanma DEĞİL hatadır; ENDLIST yazılırsa film ortasında
+        // Live never "ends": EOF = the source dropped. On VOD, an EOF well behind the duration
+        // is also a drop (the panel may have closed the connection cleanly) —
+        // both are errors, NOT completion; if ENDLIST were written, the movie would end mid-way
         // sahte "bitti" + auto-next tetiklenir.
         if isLive { throw RemuxError.readFailed(readResult) }
         if sourceDurationSeconds > 0, paceClock < sourceDurationSeconds - 30 {
@@ -907,8 +910,8 @@ final class RemuxHLSWriter {
         throw RemuxError.writeFailed(writeResult)
       }
     }
-    // İptalde final flush atlanır: yarım muxer'ı boşaltmak hem gürültü ("Cannot write
-    // moov…") hem panelin bağlantı sınırını meşgul eden gereksiz kapanış işi üretir.
+    // On cancellation the final flush is skipped: flushing a half muxer both makes noise ("Cannot write
+    // moov…") and produces needless closing work that occupies the panel's connection limit.
     if cancelled.pointee == 0, case let .transcode(_, transcoder) = audioMode, current != nil {
       try? transcoder.finish { encoded in
         try writeTranscodedPacket(encoded, transcoder: transcoder)
@@ -925,7 +928,7 @@ final class RemuxHLSWriter {
 
   // MARK: - fMP4 segment yolu (HEVC)
 
-  /// Custom AVIO'nun yazdığı byte'ları biriktirir; fragment sınırında dosyaya bölünür.
+  /// Accumulates the bytes the custom AVIO writes; split into a file at a fragment boundary.
   private final class ByteSink {
     var data = Data()
   }
@@ -978,9 +981,9 @@ final class RemuxHLSWriter {
     )
 
     var headerOpts: OpaquePointer?
-    // frag_custom: fragment sınırlarını biz belirleriz (NULL-frame flush);
-    // delay_moov: moov ilk flush'ta yazılır — EAC3 gibi codec'ler moov'daki kutular için
-    // önce paket görmek ister; skip_trailer: mfra üretme.
+    // frag_custom: we determine the fragment boundaries (NULL-frame flush);
+    // delay_moov: the moov is written on the first flush — for codecs like EAC3, for the boxes in the moov
+    // wants to see a packet first; skip_trailer: do not produce mfra.
     av_dict_set(
       &headerOpts, "movflags",
       "+empty_moov+default_base_moof+frag_custom+delay_moov+skip_trailer", 0
@@ -996,9 +999,9 @@ final class RemuxHLSWriter {
     var initWritten = false
 
     func emitFragment(final: Bool) throws {
-      // Önce interleave kuyruğu boşaltılır; sonra av_write_frame(NULL) muxer'ı flush eder —
+      // First the interleave queue is drained; then av_write_frame(NULL) flushes the muxer —
       // frag_custom'da fragment (moof+mdat) ancak bununla üretilir (interleaved NULL yetmez).
-      // delay_moov ile ilk flush moov'u da üretir; kutu sınırından bölünür.
+      // with delay_moov the first flush also produces the moov; it is split at the box boundary.
       _ = av_interleaved_write_frame(out, nil)
       _ = av_write_frame(out, nil)
       if !initWritten {
@@ -1009,7 +1012,7 @@ final class RemuxHLSWriter {
       if !initWritten {
         let (initData, fragmentData) = Self.splitAtFirstFragmentBox(sink.data)
         guard !initData.isEmpty else { return }
-        // Disk hatası (dolu disk vb.) yutulursa TV sessizce donar; hata olarak yüzer.
+        // If a disk error (full disk, etc.) is swallowed, the TV freezes silently; let it surface as an error.
         try initData.write(to: outputDirectory.appendingPathComponent("init.mp4"))
         Log.info(
           "AirPlayRemux",
@@ -1053,8 +1056,8 @@ final class RemuxHLSWriter {
       if cancelled.pointee != 0 { break }
       let readResult = av_read_frame(input, &packet)
       if readResult == Self.avErrorEOF {
-        // Bkz. TS döngüsündeki not: canlıda ve sürenin belirgin gerisindeki VOD'da
-        // EOF kopmadır — tamamlanma değil.
+        // See the note in the TS loop: on live and on VOD well behind its duration,
+        // EOF is a disconnect — not completion.
         if isLive { throw RemuxError.readFailed(readResult) }
         if sourceDurationSeconds > 0, paceClock < sourceDurationSeconds - 30 {
           throw RemuxError.readFailed(readResult)
@@ -1133,8 +1136,8 @@ final class RemuxHLSWriter {
     }
   }
 
-  /// MP4 kutu akışını ilk 'moof'/'styp' kutusunda böler: öncesi init (ftyp+moov),
-  /// sonrası ilk media fragment'ı.
+  /// Splits the MP4 box stream at the first 'moof'/'styp' box: before it is the init (ftyp+moov),
+  /// after it the first media fragment.
   static func splitAtFirstFragmentBox(_ data: Data) -> (initData: Data, fragmentData: Data) {
     var offset = data.startIndex
     while offset + 8 <= data.endIndex {
@@ -1158,12 +1161,12 @@ final class RemuxHLSWriter {
 
   // MARK: - Playlist
 
-  /// m3u8 atomik yazım: AVPlayer yarım playlist okumasın.
+  /// Atomic m3u8 writing: so AVPlayer doesn't read a half playlist.
   private func writePlaylist(final: Bool) {
     guard !segments.isEmpty else { return }
     let usesFMP4 = segments[0].fileName.hasSuffix(".m4s")
-    // Taban targetSegmentSeconds: ilk (kısa) segmentte TD'nin 2'den başlayıp sonra
-    // büyümesi yerine kararlı başlar; seyrek keyframe'li kaynakta yine büyüyebilir.
+    // Base targetSegmentSeconds: instead of the TD starting at 2 and then growing on the first (short) segment,
+    // it starts stably; on a source with sparse keyframes it can still grow.
     let target = max(
       Int(segments.map(\.duration).max()!.rounded(.up)),
       Int(targetSegmentSeconds.rounded(.up))
@@ -1176,10 +1179,10 @@ final class RemuxHLSWriter {
       "#EXT-X-MEDIA-SEQUENCE:\(segments[0].index)",
     ]
     if !isLive {
-      // Büyüyen event playlist'i taze bir istemci canlı sanıp YAYIN UCUNDAN katılır.
-      // AirPlay'de Apple TV playlist'i KENDİSİ çektiğinden telefon tarafındaki seek
-      // düzeltmesi TV'nin katılımını koruyamaz — ilk açılıştaki donma + sessiz ileri
-      // sıçramanın kökü. EVENT + START=0 her taze istemciyi baştan başlatır.
+      // A fresh client takes the growing event playlist for live and joins FROM THE BROADCAST EDGE.
+      // On AirPlay, because Apple TV fetches the playlist ITSELF, the phone-side seek
+      // correction cannot preserve the TV's join — the root of the freeze + silent forward
+      // jump at first open. EVENT + START=0 starts every fresh client from the beginning.
       lines.append("#EXT-X-PLAYLIST-TYPE:EVENT")
       lines.append("#EXT-X-START:TIME-OFFSET=0,PRECISE=YES")
     }
@@ -1197,7 +1200,7 @@ final class RemuxHLSWriter {
     do {
       try content.write(to: playlistURL, atomically: true, encoding: .utf8)
     } catch {
-      // Bayat playlist TV'yi sessizce dondurur (disk dolu/sandbox): hata olarak yüz.
+      // A stale playlist silently freezes the TV (disk full/sandbox): surface it as an error.
       Log.error("AirPlayRemux", "playlist write failed: \(error.localizedDescription)")
       if cancelled.pointee == 0 {
         DispatchQueue.main.async { [weak self] in self?.onError?(error) }
@@ -1205,7 +1208,7 @@ final class RemuxHLSWriter {
     }
   }
 
-  /// Motor tarafında hızlı codec ön-kontrolü: adaylık artık yalnız videoya bakar —
+  /// Fast codec pre-check on the engine side: candidacy now looks only at the video —
   /// uyumsuz ses AAC'ye transcode edilir. Profil ekli adlar normalize edilir.
   static func isCompatible(videoFourCC: String, audioFourCC _: String? = nil) -> Bool {
     ["avc1", "h264", "hvc1", "hev1", "hevc"].contains(normalizeCodec(videoFourCC))

@@ -2,7 +2,7 @@ import SwiftUI
 import GRDB
 import GRDBQuery
 
-/// İndirilen ve indirilmekte olan içerikleri listeler. Tamamlananlarda tıklayınca local dosyadan oynatır.
+/// Lists downloaded and downloading content. On completed items, tapping plays from the local file.
 struct DownloadsView: View {
     let playlist: Playlist
 
@@ -15,9 +15,19 @@ struct DownloadsView: View {
     @State private var debounceTask: Task<Void, Never>?
     @State private var pendingMovieDetail: DBVODStream?
     @State private var pendingSeriesDetail: DBSeries?
-    /// "Tamamlandı" görünen ama dosyası diskte olmayan kayıt (cihaz geri yükleme sonrası
-    /// tipik durum — Downloads klasörü yedeğe girmez). Alert ile yeniden indirme önerilir.
+    /// A record that looks "Completed" but whose file is not on disk (the typical case after a device restore
+    /// — the Downloads folder is not included in the backup). Re-downloading is offered with an alert.
     @State private var missingFileItem: DBDownloadedItem?
+    /// Round 8 (F-3): tapping a downloading/queued row used to hit a
+    /// dead `break` — the row looked tappable and did nothing. The tap
+    /// now offers the one real management action for an active
+    /// download, cancel, behind this confirmation.
+    @State private var cancelCandidate: DBDownloadedItem?
+    /// Round 14 (B3): "type_streamId" keys of watch-history rows the
+    /// user has FINISHED (≥98% — the app's one finished threshold),
+    /// loaded from the DB; drives "Delete watched downloads".
+    @State private var finishedHistoryKeys: Set<String> = []
+    @State private var showDeleteWatchedAlert = false
 
     init(playlist: Playlist) {
         self.playlist = playlist
@@ -34,8 +44,8 @@ struct DownloadsView: View {
     }
 
     private var inProgress: [DBDownloadedItem] { filteredItems.filter { $0.downloadStatus == .downloading } }
-    /// Kuyruk `createdAt` artan sırayla gösterilir — sıradaki (en eski) en üstte.
-    /// `AllDownloadsRequest` varsayılan olarak desc döner, burada özellikle ters çeviriyoruz.
+    /// The queue is shown in ascending `createdAt` order — the next (oldest) is at the top.
+    /// `AllDownloadsRequest` returns desc by default; here we deliberately reverse it.
     private var queued: [DBDownloadedItem] {
         filteredItems
             .filter { $0.downloadStatus == .queued }
@@ -48,8 +58,27 @@ struct DownloadsView: View {
         completed.filter { $0.type == "vod" }
     }
 
-    /// Tamamlanan bölümleri seri bazlı gruplar. Anahtar seriesId + secondaryTitle pair'i,
-    /// böylece seriesId nil ise ada göre gruplayabiliriz.
+    /// Round 14 (B3): total size of everything in this playlist's
+    /// downloads — completed items at their full size, in-progress
+    /// ones at the bytes actually on disk so far.
+    private var totalDownloadsBytes: Int64 {
+        items.reduce(Int64(0)) { sum, item in
+            sum + (item.downloadStatus == .completed ? Int64(item.totalBytes) : Int64(item.downloadedBytes))
+        }
+    }
+
+    /// Round 14 (B3): completed downloads whose watch-history row is
+    /// finished (≥98%). History type is "vod" for movies and
+    /// "series" for episodes (the same mapping `play(_:)` uses).
+    private var watchedDownloads: [DBDownloadedItem] {
+        completed.filter { item in
+            let historyType = item.type == "episode" ? "series" : "vod"
+            return finishedHistoryKeys.contains("\(historyType)_\(item.streamId)")
+        }
+    }
+
+    /// Groups completed episodes by series. The key is the seriesId + secondaryTitle pair,
+    /// so that when seriesId is nil we can group by name.
     private var completedEpisodeGroups: [(title: String, episodes: [DBDownloadedItem])] {
         let episodes = completed.filter { $0.type == "episode" }
         let grouped = Dictionary(grouping: episodes) { $0.secondaryTitle ?? $0.seriesId ?? "-" }
@@ -77,6 +106,23 @@ struct DownloadsView: View {
                 ContentUnavailableView.search(text: searchText)
             } else {
                 List {
+                    // Round 14 (B3): total size + delete-watched.
+                    Section {
+                        HStack {
+                            Text(L("download.storage_used"))
+                            Spacer()
+                            Text(ByteCountFormatter.string(fromByteCount: totalDownloadsBytes, countStyle: .file))
+                                .foregroundStyle(.secondary)
+                        }
+                        if !watchedDownloads.isEmpty {
+                            Button(role: .destructive) {
+                                showDeleteWatchedAlert = true
+                            } label: {
+                                Text(L("download.delete_watched"))
+                            }
+                        }
+                    }
+
                     if !inProgress.isEmpty {
                         Section(L("download.status.downloading")) {
                             ForEach(inProgress) { item in
@@ -115,6 +161,7 @@ struct DownloadsView: View {
                     }
                 }
                 .listStyle(.insetGrouped)
+                .cinematicScrollBackground()
             }
         }
         .navigationTitle(L("download.title"))
@@ -152,9 +199,66 @@ struct DownloadsView: View {
         } message: { _ in
             Text(L("download.missing_file.message"))
         }
+        .alert(
+            L("download.cancel.title"),
+            isPresented: Binding(
+                get: { cancelCandidate != nil },
+                set: { if !$0 { cancelCandidate = nil } }
+            ),
+            presenting: cancelCandidate
+        ) { item in
+            Button(L("download.cancel"), role: .destructive) {
+                manager.cancel(id: item.id)
+            }
+            Button(L("download.keep"), role: .cancel) {}
+        } message: { _ in
+            Text(L("download.cancel.message"))
+        }
+        .alert(L("download.delete_watched"), isPresented: $showDeleteWatchedAlert) {
+            Button(L("common.cancel"), role: .cancel) {}
+            Button(L("common.confirm_delete_yes"), role: .destructive) {
+                Task {
+                    for item in watchedDownloads {
+                        await manager.delete(id: item.id)
+                    }
+                }
+            }
+        } message: {
+            Text(L("download.delete_watched.message"))
+        }
+        .task {
+            await loadFinishedHistory()
+        }
+        // Round 15 (C12): the download-complete UI sound for this
+        // surface — fires when the completed count grows.
+        .onChange(of: completed.count) { oldCount, newCount in
+            if newCount > oldCount {
+                AppSound.play(.downloadComplete)
+            }
+        }
+        .onChange(of: manager.dbVersion) { _, _ in
+            Task { await loadFinishedHistory() }
+        }
     }
 
-    /// Dosyası kaybolmuş kaydı aynı id ile yeniden kuyruğa alır (failed retry ile aynı yol).
+    /// Loads the finished (≥98%) watch-history keys for this
+    /// playlist — the data "Delete watched downloads" matches on.
+    private func loadFinishedHistory() async {
+        let pid = playlist.id
+        let keys: Set<String> = (try? await AppDatabase.shared.read { db in
+            let rows = try DBWatchHistory
+                .filter(Column("playlistId") == pid)
+                .fetchAll(db)
+            var finished: Set<String> = []
+            for row in rows where row.durationMs > 0 && row.lastTimeMs * 100 >= row.durationMs * 98 {
+                finished.insert("\(row.type)_\(row.streamId)")
+            }
+            return finished
+        }) ?? []
+        await MainActor.run { finishedHistoryKeys = keys }
+    }
+
+    /// Re-queues a record whose file is lost, with the same id (the same path as a failed retry).
     private func redownload(_ item: DBDownloadedItem) {
         guard let url = URL(string: item.remoteURL) else { return }
         Task {
@@ -176,7 +280,7 @@ struct DownloadsView: View {
     }
 
     /// Tek tap = birincil aksiyon (tekrar dene/oynat),
-    /// trailing swipe = sil/iptal. Bu pattern tüm download statülerine uygulanır.
+    /// trailing swipe = delete/cancel. This pattern is applied to all download statuses.
     @ViewBuilder
     private func actionableRow(_ item: DBDownloadedItem) -> some View {
         Button {
@@ -206,9 +310,13 @@ struct DownloadsView: View {
     private func performPrimaryAction(_ item: DBDownloadedItem) {
         switch item.downloadStatus {
         case .downloading, .queued:
-            break
+            // Round 8 (F-3): was a dead `break`. The manager has no
+            // pause/resume, so the tap's real action is cancel —
+            // confirmed via the alert above (same manager call the
+            // swipe action and context menu already used).
+            cancelCandidate = item
         case .failed:
-            // Retry: sadece aynı id ile yeniden enqueue. Manager zaten failed row'un üzerine yazar.
+            // Retry: just re-enqueue with the same id. The manager already overwrites the failed row.
             guard let url = URL(string: item.remoteURL) else { return }
             Task {
                 await manager.enqueue(
@@ -240,7 +348,7 @@ struct DownloadsView: View {
                 iconName: item.type == "episode" ? "play.tv" : "film",
                 loadProfile: .grid
             )
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)
@@ -260,7 +368,7 @@ struct DownloadsView: View {
         .padding(.vertical, 2)
     }
 
-    /// Satırın birincil aksiyonunu görsel olarak bildirir (tıklanabilir değil — tüm satır butondur).
+    /// Visually signals the row's primary action (not tappable — the whole row is the button).
     @ViewBuilder
     private func primaryActionIcon(for item: DBDownloadedItem) -> some View {
         switch item.downloadStatus {
@@ -278,7 +386,7 @@ struct DownloadsView: View {
         case .completed:
             Image(systemName: "play.circle.fill")
                 .font(.title2)
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(AppTheme.accent)
         }
     }
 
@@ -323,13 +431,13 @@ struct DownloadsView: View {
         Task {
             guard let localURL = try? DownloadStorage.absoluteURL(forRelativePath: item.localPath),
                   FileManager.default.fileExists(atPath: localURL.path) else {
-                // Sessizce yutma: satır "tamamlandı" görünürken hiçbir şey olmaması
-                // kullanıcıya donmuş gibi gelir. Alert + yeniden indirme yolu sun.
+                // Silent swallowing: while the row looks "completed", nothing happening
+                // feels frozen to the user. Offer an alert + a re-download path.
                 await MainActor.run { missingFileItem = item }
                 return
             }
 
-            // Bölüm ise history.type "series", film ise "vod" olarak DB'de saklanır.
+            // If it is an episode it is stored in the DB as history.type "series"; if a movie, as "vod".
             let historyType = item.type == "episode" ? "series" : "vod"
             let existingHistory: DBWatchHistory? = try? await AppDatabase.shared.read { db in
                 try DBWatchHistory
@@ -343,8 +451,8 @@ struct DownloadsView: View {
 
             await MainActor.run {
                 if item.type == "episode" {
-                    // Diziye ait — HistorySeriesPlayerShell hem resume hem de bir sonraki/önceki
-                    // bölüme geçişi yönetir (sıralama dizinin kendi episode order'ı, indirme sırası değil).
+                    // Belongs to a series — HistorySeriesPlayerShell handles both resume and the next/previous
+                    // manages the transition to the episode (the ordering is the series' own episode order, not the download order).
                     let history = existingHistory ?? DBWatchHistory(
                         id: "\(playlist.id)_series_\(item.streamId)",
                         playlistId: playlist.id,
@@ -368,7 +476,7 @@ struct DownloadsView: View {
                         )
                     }
                 } else {
-                    // Film — prev/next yok, sadece local oynatım + resume.
+                    // Movie — no prev/next, only local playback + resume.
                     playerOverlay.present(skipDownloadCheck: true, playlistId: playlist.id) {
                         PlayerView(
                             url: localURL,
@@ -390,7 +498,7 @@ struct DownloadsView: View {
         }
     }
 
-    /// Player'da başlığa tıklandığında film detayına git.
+    /// When the title is tapped in the player, go to the movie detail.
     private func navigateToMovieDetail(type: String, id: String) {
         guard type == "vod", let vId = Int(id) else { return }
         Task {
@@ -406,7 +514,7 @@ struct DownloadsView: View {
         }
     }
 
-    /// Player'da başlığa tıklandığında dizi detayına git.
+    /// When the title is tapped in the player, go to the series detail.
     private func navigateToSeriesDetail(type: String, id: String) {
         guard let sId = Int(id) else { return }
         Task {

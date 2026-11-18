@@ -125,9 +125,9 @@ struct XtreamCategory: Codable, Identifiable {
     let categoryName: String?
     let parentId: Int?
     
-    // Deterministik fallback: her erişimde yeni UUID üretmek hem SwiftUI diff'ini
-    // bozuyor hem de her yeniden senkronda DB'ye yeni mükerrer kategori satırı
-    // ekletiyordu (id upsert anahtarı).
+    // Deterministic fallback: generating a new UUID on every access both broke the SwiftUI diff
+    // and made every re-sync add a new duplicate category row to the DB
+    // (the id is the upsert key).
     var id: String { categoryId ?? "noid-\(categoryName ?? "")" }
     
     enum CodingKeys: String, CodingKey {
@@ -348,10 +348,35 @@ struct XtreamSeriesDetails: Codable {
         releaseDate = container?.decodeFlexibleStringIfPresent(forKey: .releaseDate)
         lastModified = container?.decodeFlexibleStringIfPresent(forKey: .lastModified)
         rating5Based = try? container?.decodeIfPresent(Double.self, forKey: .rating5Based)
-        backdropPath = try? container?.decodeIfPresent([String].self, forKey: .backdropPath)
+        backdropPath = Self.decodeBackdropPaths(container)
         youtubeTrailer = container?.decodeFlexibleStringIfPresent(forKey: .youtubeTrailer)
         episodeRunTime = container?.decodeFlexibleStringIfPresent(forKey: .episodeRunTime)
     }
+
+    /// Round 19 (R19-2): panels are inconsistent about
+    /// `backdrop_path` — most return an ARRAY of URLs whose FIRST
+    /// element is often an empty string, some return a plain STRING,
+    /// and some return relative TMDB paths. The old strict
+    /// `[String]` decode plus `backdropPath?.first` at the call
+    /// sites let an empty/unloadable value reach the image loader
+    /// (which then failed and showed the warning placeholder).
+    /// Normalize here: accept array or string, trim, drop empties.
+    fileprivate static func decodeBackdropPaths(
+        _ container: KeyedDecodingContainer<CodingKeys>?
+    ) -> [String]? {
+        guard let container else { return nil }
+        var raw: [String] = []
+        if let arr = try? container.decodeIfPresent([String].self, forKey: .backdropPath) {
+            raw = arr
+        } else if let s = container.decodeFlexibleStringIfPresent(forKey: .backdropPath) {
+            raw = [s]
+        }
+        let cleaned = raw
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
 }
 
 struct XtreamSeason: Codable, Identifiable {
@@ -485,13 +510,38 @@ struct XtreamVODInfo: Codable {
         genre = container?.decodeFlexibleStringIfPresent(forKey: .genre)
         releaseDate = container?.decodeFlexibleStringIfPresent(forKey: .releaseDate)
         rating = container?.decodeFlexibleStringIfPresent(forKey: .rating)
-        backdropPath = try? container?.decodeIfPresent([String].self, forKey: .backdropPath)
+        backdropPath = Self.decodeBackdropPaths(container)
         youtubeTrailer = container?.decodeFlexibleStringIfPresent(forKey: .youtubeTrailer)
         duration = container?.decodeFlexibleStringIfPresent(forKey: .duration)
         durationSecs = container?.decodeFlexibleIntIfPresent(forKey: .durationSecs)
         tmdbId = container?.decodeFlexibleStringIfPresent(forKey: .tmdbId)
         kinopoiskURL = container?.decodeFlexibleStringIfPresent(forKey: .kinopoiskURL)
     }
+
+    /// Round 19 (R19-2): panels are inconsistent about
+    /// `backdrop_path` — most return an ARRAY of URLs whose FIRST
+    /// element is often an empty string, some return a plain STRING,
+    /// and some return relative TMDB paths. The old strict
+    /// `[String]` decode plus `backdropPath?.first` at the call
+    /// sites let an empty/unloadable value reach the image loader
+    /// (which then failed and showed the warning placeholder).
+    /// Normalize here: accept array or string, trim, drop empties.
+    fileprivate static func decodeBackdropPaths(
+        _ container: KeyedDecodingContainer<CodingKeys>?
+    ) -> [String]? {
+        guard let container else { return nil }
+        var raw: [String] = []
+        if let arr = try? container.decodeIfPresent([String].self, forKey: .backdropPath) {
+            raw = arr
+        } else if let s = container.decodeFlexibleStringIfPresent(forKey: .backdropPath) {
+            raw = [s]
+        }
+        let cleaned = raw
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
 }
 
 struct XtreamVODMovieData: Codable {
