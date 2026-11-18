@@ -38,18 +38,32 @@ struct ContentView: View {
             }
             .onAppear {
                 if playlists != nil { dismissSplash() }
-                if AppDatabase.isEphemeral || AppDatabase.didResetCorruptStore {
+                if AppDatabase.isEphemeral || AppDatabase.didResetCorruptStore
+                    || AppDatabase.didRestorePreMigrationBackup {
                     showStorageWarning = true
                 }
             }
             .alert(
-                AppDatabase.isEphemeral ? L("db.error.ephemeral_title") : L("db.error.reset_title"),
+                storageWarningTitle,
                 isPresented: $showStorageWarning
             ) {
                 Button(L("common.ok"), role: .cancel) {}
             } message: {
-                Text(AppDatabase.isEphemeral ? L("db.error.ephemeral_message") : L("db.error.reset_message"))
+                Text(storageWarningMessage)
             }
+    }
+
+    // Build 61 (B9, G1): the restored-backup state gets its own
+    // honest wording (data intact, old schema) next to the two
+    // pre-existing storage warnings.
+    private var storageWarningTitle: String {
+        if AppDatabase.didRestorePreMigrationBackup { return L("repair.restored_title") }
+        return AppDatabase.isEphemeral ? L("db.error.ephemeral_title") : L("db.error.reset_title")
+    }
+
+    private var storageWarningMessage: String {
+        if AppDatabase.didRestorePreMigrationBackup { return L("repair.restored_message") }
+        return AppDatabase.isEphemeral ? L("db.error.ephemeral_message") : L("db.error.reset_message")
     }
 
     private var storageAwareBody: some View {

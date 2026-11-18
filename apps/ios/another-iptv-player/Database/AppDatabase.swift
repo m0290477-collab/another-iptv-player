@@ -7,12 +7,38 @@ import GRDB
 nonisolated struct AppDatabase {
     private let dbWriter: any DatabaseWriter
     
-    init(_ dbWriter: any DatabaseWriter) throws {
+    /// Build 61 (B9, G1): `runMigrations: false` exists ONLY for the
+    /// migration-safety layer's restore path — when this build's
+    /// migrations have just failed against the live file, the
+    /// pre-migration backup is restored and opened WITHOUT running
+    /// the migrator again, so the app keeps running on the old
+    /// schema instead of crash-looping or wiping (see Persistence).
+    init(_ dbWriter: any DatabaseWriter, runMigrations: Bool = true) throws {
         self.dbWriter = dbWriter
-        try migrator.migrate(dbWriter)
+        if runMigrations {
+            try Self.migrator.migrate(dbWriter)
+        }
     }
-    
-    private var migrator: DatabaseMigrator {
+
+    /// Build 61 (B9, G1): every migration identifier registered
+    /// below, in registration order. The safety layer diffs this
+    /// list against the identifiers already applied to the on-disk
+    /// database to decide whether a pre-migration backup is due
+    /// before the first new migration runs. Any builder adding a
+    /// migration in this update registers it in `migrator` below —
+    /// this list is derived from that same registry, so it can
+    /// never drift from the real schema path.
+    static var registeredMigrationIdentifiers: [String] {
+        migrator.migrations
+    }
+
+    /// The migration identifiers already applied to an opened
+    /// database (GRDB's `grdb_migrations` record).
+    static func appliedMigrationIdentifiers(_ db: Database) throws -> Set<String> {
+        try migrator.appliedIdentifiers(db)
+    }
+
+    private static var migrator: DatabaseMigrator {
         var migrator = DatabaseMigrator()
 
         migrator.registerMigration("initial") { db in
