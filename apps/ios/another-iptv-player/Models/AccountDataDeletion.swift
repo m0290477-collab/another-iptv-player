@@ -126,6 +126,13 @@ enum AccountDataDeletion {
         // account setup; a fresh start must not inherit it.
         PINStore.clearPIN()
 
+        // === B15 (build 61) W1: the app-open lock belongs to the
+        // erased setup too — clear its PIN hash and its enable
+        // flag so a fresh start never comes up locked. ===
+        AppLockService.clearPIN()
+        defaults.removeObject(forKey: AppLockService.enabledKey)
+        // === End B15 W1 ===
+
         // N4 (B13): the erase also deletes the synchronizable
         // playlist-credential mirror items — otherwise a reinstall
         // restore would resurrect playlists the user just erased.

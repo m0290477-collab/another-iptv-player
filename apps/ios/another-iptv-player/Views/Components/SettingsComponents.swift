@@ -936,6 +936,118 @@ struct ParentalPINSection: View {
     }
 }
 
+// MARK: - App-open lock (build 61, B15, W1)
+
+/// W1: the APP-open lock group, shown directly under the parental
+/// PIN group in both settings screens. This lock guards opening
+/// the app itself (cold start + return from background) and is a
+/// DIFFERENT lock from the parental PIN above: separate Keychain
+/// item (salted hash), separate purpose, and the copy says so.
+/// Unlock is by Face ID / Touch ID with the device passcode always
+/// available as fallback, or by the app PIN when one is set — the
+/// passcode path is what guarantees the user can never be locked
+/// out permanently, so turning the lock on requires at least one
+/// working unlock method (device auth evaluable, or set a PIN
+/// first — the toggle routes there).
+struct AppLockSection: View {
+    @AppStorage(AppLockService.enabledKey) private var appLockEnabled = false
+    @ObservedObject private var lockService = AppLockService.shared
+    @State private var hasPIN = AppLockService.hasPIN
+    @State private var showSetup = false
+    @State private var showRemoveEntry = false
+    @State private var pendingEnable = false
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("applock.title"), thisPlaylist: false)) {
+            Toggle(isOn: Binding(get: { appLockEnabled }, set: { setEnabled($0) })) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "lock.shield.fill", tint: AppTheme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("applock.enable"))
+                        Text(L("applock.enable.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if hasPIN {
+                Button {
+                    showSetup = true
+                } label: {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "lock.rotation", tint: .gray)
+                        Text(L("applock.pin_change"))
+                            .foregroundColor(.primary)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Button(role: .destructive) {
+                    showRemoveEntry = true
+                } label: {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "lock.open.fill", tint: .red)
+                        Text(L("applock.pin_remove"))
+                    }
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button {
+                    showSetup = true
+                } label: {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "lock.fill", tint: AppTheme.accent)
+                        Text(L("applock.pin_set"))
+                            .foregroundColor(.primary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+
+            Text(L("applock.note"))
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Text(L("applock.passcode_note"))
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .sheet(isPresented: $showSetup) {
+            AppPINSetupSheet {
+                hasPIN = AppLockService.hasPIN
+                if pendingEnable, AppLockService.hasPIN {
+                    appLockEnabled = true
+                }
+                pendingEnable = false
+            }
+        }
+        .sheet(isPresented: $showRemoveEntry) {
+            AppPINEntrySheet {
+                AppLockService.clearPIN()
+                hasPIN = false
+            }
+        }
+        .onAppear { hasPIN = AppLockService.hasPIN }
+    }
+
+    /// Turning the lock on requires a working unlock method: when
+    /// the device offers neither biometrics nor a passcode AND no
+    /// app PIN exists yet, route to PIN setup first and enable
+    /// only once a PIN is stored.
+    private func setEnabled(_ newValue: Bool) {
+        guard newValue else {
+            appLockEnabled = false
+            return
+        }
+        if AppLockService.hasPIN || lockService.canUseDeviceOwnerAuthentication() {
+            appLockEnabled = true
+        } else {
+            pendingEnable = true
+            showSetup = true
+        }
+    }
+}
+
 // MARK: - Image cache row (C5) — REMOVED in build 61 (B3, O6)
 //
 // The round-15 image-cache size/clear row that lived here (and
