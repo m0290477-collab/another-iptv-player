@@ -26,6 +26,13 @@ struct AddM3UPlaylistView: View {
     @State private var name: String
     @State private var url: String
 
+    // Build 61 (B10, K2/G2/G4/Q18): connection-extras fields,
+    // pre-filled from the SAME record being edited.
+    @State private var backupURL: String
+    @State private var epgURL: String
+    @State private var userAgent: String
+    @State private var headersText: String
+
     /// Has a local file been uploaded? (Mutually exclusive with URL mode.)
     @State private var localFileName: String? = nil
     @State private var localContent: String? = nil
@@ -41,6 +48,27 @@ struct AddM3UPlaylistView: View {
         self.editingPlaylist = editingPlaylist
         _name = State(initialValue: editingPlaylist.name)
         _url = State(initialValue: editingPlaylist.serverURL)
+        _backupURL = State(initialValue: editingPlaylist.backupURL ?? "")
+        _epgURL = State(initialValue: editingPlaylist.epgURLOverride ?? "")
+        _userAgent = State(initialValue: editingPlaylist.customUserAgent ?? "")
+        _headersText = State(initialValue: editingPlaylist.customHeadersText)
+    }
+
+    /// Optional-field trim (nil when empty), as on the gate.
+    private func optionalField(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Applies the connection-extras fields onto a playlist copy.
+    private func applyingExtras(to playlist: Playlist) -> Playlist {
+        var copy = playlist
+        copy.backupURL = optionalField(backupURL)
+        copy.epgURLOverride = optionalField(epgURL)
+        copy.customUserAgent = optionalField(userAgent)
+        copy.customHeadersJSON = Playlist.encodeCustomHeaders(Playlist.parseHeaderLines(headersText))
+        copy.createdAt = editingPlaylist.createdAt
+        return copy
     }
 
     private var hasLocalFile: Bool { localContent != nil }
@@ -123,6 +151,47 @@ struct AddM3UPlaylistView: View {
                         Text(L("add_m3u.section.source_footer"))
                             .font(.caption)
                             .foregroundColor(.secondary)
+                    }
+
+                    // Build 61 (B10, K2): connection extras —
+                    // Q18 backup URL, G4 custom EPG URL, G2
+                    // User-Agent + custom headers.
+                    SettingsGroupHeader(title: L("addplaylist.section.connection"))
+                    SettingsFormCard {
+                        VStack(alignment: .leading, spacing: 6) {
+                            SettingsFieldLabel(title: L("addplaylist.field.backup_url"))
+                            TextField(L("addplaylist.field.backup_url.placeholder"), text: $backupURL)
+                                .keyboardType(.URL)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .settingsFieldChrome()
+                            Text(L("headers.backup.note"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            SettingsFieldLabel(title: L("addplaylist.field.epg_url"))
+                            TextField(L("addplaylist.field.epg_url.placeholder"), text: $epgURL)
+                                .keyboardType(.URL)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .settingsFieldChrome()
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            SettingsFieldLabel(title: L("headers.user_agent"))
+                            TextField(L("headers.user_agent.placeholder"), text: $userAgent)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .settingsFieldChrome()
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            SettingsFieldLabel(title: L("headers.custom"))
+                            TextField(L("headers.custom.placeholder"), text: $headersText, axis: .vertical)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .lineLimit(2...4)
+                                .settingsFieldChrome()
+                        }
                     }
                 }
                 .padding(16)
@@ -221,7 +290,7 @@ struct AddM3UPlaylistView: View {
         // this, local-file playlists could never be renamed at all, and URL playlists
         // re-downloaded the entire list just to change the name.
         if !hasLocalFile, trimmedURL == editingPlaylist.serverURL {
-            var updated = editingPlaylist
+            var updated = applyingExtras(to: editingPlaylist)
             updated.name = trimmedName
             do {
                 try await AppDatabase.shared.write { db in
@@ -249,7 +318,7 @@ struct AddM3UPlaylistView: View {
         // Editing an M3U playlist never converts it (that would orphan
         // its favorites and watch history); a changed source simply
         // re-imports under the same playlist id below.
-        let newPlaylist = Playlist(
+        let basePlaylist = Playlist(
             id: editingPlaylist.id,
             name: trimmedName,
             serverURL: hasLocalFile ? "" : trimmedURL,
@@ -259,26 +328,36 @@ struct AddM3UPlaylistView: View {
             type: .m3u,
             m3uEpgURL: nil
         )
+        let newPlaylist = applyingExtras(to: basePlaylist)
 
         do {
-            // Round 16 (F2): fetch → parse → replace is the shared
-            // PlaylistSaveService pipeline (identical to the gate's);
-            // this sheet's copy never checked cancellation between
-            // steps, so checkCancellation stays false here.
-            try await PlaylistSaveService.importM3U(
+            // Build 61 (B10, Q17+K2): probe (fetch + parse) BEFORE
+            // saving — distinct plain failures, and on failure the
+            // OLD record stays untouched. The import writes
+            // exactly what the probe parsed, under the SAME id.
+            let probed = try await PlaylistValidationService.probeM3U(
                 playlist: newPlaylist,
-                localContent: localContent,
-                remoteURLString: trimmedURL,
-                clearServerURL: hasLocalFile,
-                checkCancellation: false
-            ) { message in
-                self.progressMessage = message
-            }
+                localContent: localContent
+            )
+            progressMessage = L("add_m3u.saving_db")
+            try await M3UImporter.replace(
+                playlist: newPlaylist,
+                channels: probed.parsed.channels,
+                epgURL: probed.parsed.epgURL,
+                clearServerURL: hasLocalFile
+            )
 
             await MainActor.run {
                 self.isLoading = false
                 self.progressMessage = nil
                 self.dismiss()
+            }
+        } catch let failure as PlaylistValidationService.ValidationFailure {
+            await MainActor.run {
+                self.errorMessage = failure.errorDescription
+                self.showError = true
+                self.isLoading = false
+                self.progressMessage = nil
             }
         } catch {
             await MainActor.run {

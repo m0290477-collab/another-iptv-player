@@ -295,6 +295,16 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     // audioFilters, so the toggle has no effect there (reported).
     if UserDefaults.standard.bool(forKey: "player.loudnessNormalization") {
       options.audioFilters = ["dynaudnorm"]
+    // Build 61 (B10, Q5): night/dialogue audio mode — when the
+    // user enabled it (key "player.nightAudioMode", toggled in
+    // the track-settings sheet), APPEND the dynamic-range
+    // compressor to KSOptions' FFmpeg audio-filter list. Append,
+    // never assign: B9's Q1 loudness filter shares this one list
+    // and the two compose in a single filter chain. Only the
+    // FFmpeg decode path consumes audioFilters; the native
+    // AVPlayer path is unaffected (documented in NightAudioMode).
+    if UserDefaults.standard.bool(forKey: NightAudioMode.defaultsKey) {
+      options.audioFilters.append(NightAudioMode.ffmpegFilter)
     }
     // Let a single IO on a stalled socket fail in 10 sec; FFmpeg returns the real error code
     // before the watchdog (12s) kicks in. Only the FFmpeg path (AVPlayer ignores this).

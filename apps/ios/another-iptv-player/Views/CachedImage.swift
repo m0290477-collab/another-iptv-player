@@ -12,6 +12,13 @@ enum IPTVRemoteImagePipeline {
     private static let installLock = NSLock()
     private static var didInstall = false
 
+    /// Build 61 (B10, Q21): immediate memory trim when the user
+    /// turns "Reduce effects" on mid-session (the install-time
+    /// bounds in `installAsShared` cover the next launch).
+    static func trimMemoryCache() {
+        ImagePipeline.shared.cache.removeAll()
+    }
+
     static func installAsShared() {
         installLock.lock()
         defer { installLock.unlock() }
@@ -38,9 +45,13 @@ enum IPTVRemoteImagePipeline {
         let loader = DataLoader(configuration: urlConf)
 
         // Cap the memory cache: left unbounded it can fill all of RAM.
+        // Build 61 (B10, Q21): with "Reduce effects" on
+        // (`appearance.reduceEffects`), the memory cache is
+        // trimmed to a quarter of the normal bounds.
+        let reduceEffects = UserDefaults.standard.bool(forKey: "appearance.reduceEffects")
         let memoryCache = ImageCache()
-        memoryCache.costLimit = 150 * 1024 * 1024  // 150 MB
-        memoryCache.countLimit = 1500
+        memoryCache.costLimit = reduceEffects ? 40 * 1024 * 1024 : 150 * 1024 * 1024  // 150 MB
+        memoryCache.countLimit = reduceEffects ? 400 : 1500
 
         // Round 15 (C10): explicit disk DataCache capped at ~300 MB
         // (previously Nuke's implicit default governed disk use).

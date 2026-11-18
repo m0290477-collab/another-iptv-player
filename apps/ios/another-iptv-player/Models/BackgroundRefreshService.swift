@@ -98,7 +98,7 @@ enum BackgroundRefreshService {
             if playlist.kind == .m3u {
                 if playlist.serverURL.isEmpty {
                     await M3UContentStore.shared.reloadIfActive(playlist: playlist)
-                } else if let content = try? await M3UService().fetchRemote(urlString: playlist.serverURL),
+                } else if let content = try? await M3UService().fetchRemote(urlString: playlist.serverURL, playlist: playlist),
                           let parsed = try? await M3UParser.parseAsync(content) {
                     try? await M3UImporter.replace(
                         playlist: playlist,

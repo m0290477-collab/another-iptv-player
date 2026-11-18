@@ -18,6 +18,11 @@ struct SearchView: View {
     @State private var debouncedQuery = ""
     @State private var debounceTask: Task<Void, Never>?
     @State private var selectedFilter: SearchFilter = .movies
+    /// Build 61 (B10, Q14): persisted recent queries (the ONE
+    /// SearchHistoryStore — the same store Settings ▸ Storage
+    /// clears), shown while the field is empty/short.
+    @State private var historyQueries: [String] = SearchHistoryStore.queries
+    @State private var historyRecordTask: Task<Void, Never>?
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
@@ -67,15 +72,60 @@ struct SearchView: View {
             Divider()
 
             if debouncedQuery.count < 2 {
-                Spacer()
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 44))
-                    .foregroundColor(.secondary.opacity(0.4))
-                    .padding(.bottom, 8)
-                Text(L("search.min_chars"))
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                Spacer()
+                if historyQueries.isEmpty {
+                    Spacer()
+                    Image(systemName: "magnifyingglass")
+                        .font(.largeTitle)
+                        .foregroundColor(.secondary.opacity(0.4))
+                        .padding(.bottom, 8)
+                    Text(L("search.min_chars"))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                } else {
+                    // Q14: recent searches, tap to re-run, one
+                    // clear for the whole list (same store the
+                    // Settings row clears).
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(L("searchhistory.title"))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button {
+                                SearchHistoryStore.clear()
+                                historyQueries = []
+                            } label: {
+                                Text(L("searchhistory.clear"))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(AppTheme.accent)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                        ForEach(historyQueries, id: \.self) { item in
+                            Button {
+                                searchText = item
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "clock.arrow.circlepath")
+                                        .foregroundStyle(.secondary)
+                                    Text(item)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityHint(L("searchhistory.rerun.hint"))
+                        }
+                        Spacer()
+                    }
+                }
             } else {
                 SearchResultsView(
                     playlist: playlist,
@@ -97,7 +147,26 @@ struct SearchView: View {
                 await MainActor.run { debouncedQuery = q }
             }
         }
-        .onDisappear { debounceTask?.cancel() }
+        .onChange(of: debouncedQuery) { _, q in
+            // Q14: a query is recorded only after it SETTLES
+            // (unchanged for 1.5 s) — intermediate keystroke
+            // prefixes never land in the history.
+            historyRecordTask?.cancel()
+            guard q.count >= 2 else { return }
+            historyRecordTask = Task {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    SearchHistoryStore.record(q)
+                    historyQueries = SearchHistoryStore.queries
+                }
+            }
+        }
+        .onAppear { historyQueries = SearchHistoryStore.queries }
+        .onDisappear {
+            debounceTask?.cancel()
+            historyRecordTask?.cancel()
+        }
         .cinematicBackground()
     }
 
@@ -446,9 +515,10 @@ private struct SearchResultsView: View {
                 // whose cast/director list contains the query joins
                 // the results after the title matches (relevance
                 // sort still leads with title hits).
+                // Build 61 (B10, Q13): title matching is typo-tolerant (fuzzy tier per Z8).
                 let titleMatches = source.filter {
                     !hidden.contains($0.stream.categoryId ?? "")
-                        && CatalogTextSearch.matches(search: q, text: $0.stream.name)
+                        && CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name)
                 }
                 let titleIds = Set(titleMatches.map(\.stream.streamId))
                 let peopleMatches = source.filter { item in
@@ -469,9 +539,10 @@ private struct SearchResultsView: View {
             let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")
             let result = await Task.detached(priority: .userInitiated) {
                 // Round 15 (C7): people names match too, as above.
+                // Build 61 (B10, Q13): title matching is typo-tolerant (fuzzy tier per Z8).
                 let titleMatches = source.filter {
                     !hidden.contains($0.series.categoryId ?? "")
-                        && CatalogTextSearch.matches(search: q, text: $0.series.name)
+                        && CatalogTextSearch.matchesFuzzy(search: q, text: $0.series.name)
                 }
                 let titleIds = Set(titleMatches.map(\.series.seriesId))
                 let peopleMatches = source.filter { item in
@@ -491,9 +562,16 @@ private struct SearchResultsView: View {
             let source = contentStore.liveStreams
             let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")
             let result = await Task.detached(priority: .userInitiated) {
+                // Build 61 (B10, Q13): typo-tolerant title
+                // matching. H5 search half: the multi-field fuzzy
+                // matcher (`matchesFuzzyAny`) is in CatalogTextSearch
+                // ready for the provider channel number, but this
+                // base tree's stream models carry no number field
+                // yet (B8 owns capture/display) — nothing is matched
+                // against a number that does not exist.
                 let filtered = source.filter {
                     !hidden.contains($0.stream.categoryId ?? "")
-                        && CatalogTextSearch.matches(search: q, text: $0.stream.name)
+                        && CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name)
                 }
                 return Array(CatalogTextSearch.sortLiveByRelevance(filtered, search: q).prefix(Self.resultCap))
             }.value
@@ -545,16 +623,30 @@ private struct SearchResultsView: View {
                                       stream: stream)
                 }
             }
-            let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            // Build 61 (B10, Q13 + Z8): programme matching is
+            // the SAME fuzzy core as the other sections, and the
+            // ordering is the SAME deterministic tiering — exact
+            // title → prefix → fuzzy (typo tolerance only inside
+            // the fuzzy tier) — with start time as the tiebreak
+            // inside a tier.
             let matches = await Task.detached(priority: .userInitiated) { () -> [EPGProgramme] in
                 var found: [EPGProgramme] = []
                 for key in orderedKeys {
                     guard let programmes = byKey[key] else { continue }
-                    for programme in programmes where programme.searchTitle.contains(q) {
+                    for programme in programmes
+                    where CatalogTextSearch.matchesFuzzy(search: query, text: programme.title) {
                         found.append(programme)
                     }
                 }
-                found.sort { $0.start < $1.start }
+                found.sort { a, b in
+                    let tierA = CatalogTextSearch.rankingTier(search: query, text: a.title)
+                    let tierB = CatalogTextSearch.rankingTier(search: query, text: b.title)
+                    if tierA != tierB { return tierA < tierB }
+                    let scoreA = CatalogTextSearch.fuzzyScore(search: query, text: a.title) ?? .max
+                    let scoreB = CatalogTextSearch.fuzzyScore(search: query, text: b.title) ?? .max
+                    if scoreA != scoreB { return scoreA < scoreB }
+                    return a.start < b.start
+                }
                 return Array(found.prefix(Self.resultCap))
             }.value
             guard !Task.isCancelled else { epgSearchRunning = false; return }

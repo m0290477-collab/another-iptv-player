@@ -439,7 +439,7 @@ struct MyPlaylistsView: View {
                 if active.serverURL.isEmpty {
                     await M3UContentStore.shared.reloadIfActive(playlist: active)
                 } else {
-                    let content = try await M3UService().fetchRemote(urlString: active.serverURL)
+                    let content = try await M3UService().fetchRemote(urlString: active.serverURL, playlist: active)
                     let parsed = try await M3UParser.parseAsync(content)
                     try await M3UImporter.replace(
                         playlist: active,

@@ -20,8 +20,12 @@ nonisolated struct EPGDownloader {
     ///   - etag/lastModified: prior validators for `If-None-Match`/`If-Modified-Since`.
     ///   - username/password: for credential redaction in thrown errors only.
     func downloadGuide(url: URL, etag: String?, lastModified: String?,
-                       username: String? = nil, password: String? = nil) async throws -> GuideDownload {
+                       username: String? = nil, password: String? = nil,
+                       playlist: Playlist? = nil) async throws -> GuideDownload {
         var request = URLRequest(url: url)
+        // Build 61 (B10, G2): the playlist's custom headers +
+        // User-Agent ride on the guide fetch when set.
+        if let playlist { playlist.applyCustomHeaders(to: &request) }
         // Force a network trip so a real 304 reaches us instead of URLCache
         // synthesizing a 200 from a cached body.
         request.cachePolicy = .reloadIgnoringLocalCacheData

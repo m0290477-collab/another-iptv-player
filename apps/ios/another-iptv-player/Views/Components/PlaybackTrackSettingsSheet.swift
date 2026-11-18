@@ -47,6 +47,7 @@ struct PlaybackTrackSettingsSheet: View {
                 }
                 speedSection
                 sleepTimerSection
+                nightAudioSection
                 Section(L("player.dev_section")) {
                     Toggle(L("player.show_debug_overlay"), isOn: $showDebugOverlay)
                 }
@@ -205,6 +206,33 @@ struct PlaybackTrackSettingsSheet: View {
 
     private func countdownText(_ seconds: Int) -> String {
         String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    // MARK: - Build 61 (B10, Q5): dialogue / night audio mode
+    //
+    // ONE additive section beside B4's speed/sleep sections. The
+    // toggle writes the persisted preference the engine reads in
+    // `KSPlayerEngine.makeOptions` (NightAudioMode): dynamic-range
+    // compression via KSOptions' FFmpeg audio filters, so quiet
+    // dialogue stays clear at low volume. It takes effect from
+    // the next stream start (KSOptions are consumed at load) and
+    // only on the FFmpeg decode path — the footer says both.
+
+    @State private var nightAudioEnabled = NightAudioMode.isEnabled
+
+    private var nightAudioSection: some View {
+        Section {
+            Toggle(isOn: $nightAudioEnabled) {
+                Text(L("nightmode.title"))
+            }
+            .onChange(of: nightAudioEnabled) { _, newValue in
+                NightAudioMode.setEnabled(newValue)
+            }
+        } header: {
+            Text(L("nightmode.section"))
+        } footer: {
+            Text(L("nightmode.footer"))
+        }
     }
 
     private var audioDelaySection: some View {

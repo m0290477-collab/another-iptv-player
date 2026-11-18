@@ -95,7 +95,8 @@ final class M3UContentStore: ObservableObject {
     func search(_ query: String) -> [DBM3UChannel] {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return [] }
-        return channels.filter { CatalogTextSearch.matches(search: q, text: $0.name) }
+        // Build 61 (B10, Q13): typo-tolerant, like the Xtream store's global search.
+        return channels.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.name) }
     }
 
     // MARK: - Internal

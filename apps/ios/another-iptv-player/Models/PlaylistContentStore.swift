@@ -262,21 +262,24 @@ final class PlaylistContentStore: ObservableObject {
     func liveStreams(searchText: String) -> [LiveStreamWithCategory] {
         let q = searchText.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return [] }
-        let filtered = liveStreams.filter { CatalogTextSearch.matches(search: q, text: $0.stream.name) }
+        // Build 61 (B10, Q13): the global-search API is typo-tolerant.
+        let filtered = liveStreams.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name) }
         return CatalogTextSearch.sortLiveByRelevance(filtered, search: q)
     }
 
     func vodStreams(searchText: String) -> [VODWithCategory] {
         let q = searchText.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return [] }
-        let filtered = vodStreams.filter { CatalogTextSearch.matches(search: q, text: $0.stream.name) }
+        // Build 61 (B10, Q13): the global-search API is typo-tolerant.
+        let filtered = vodStreams.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name) }
         return CatalogTextSearch.sortVODByRelevance(filtered, search: q)
     }
 
     func seriesItems(searchText: String) -> [SeriesWithCategory] {
         let q = searchText.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return [] }
-        let filtered = seriesItems.filter { CatalogTextSearch.matches(search: q, text: $0.series.name) }
+        // Build 61 (B10, Q13): the global-search API is typo-tolerant.
+        let filtered = seriesItems.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.series.name) }
         return CatalogTextSearch.sortSeriesByRelevance(filtered, search: q)
     }
 

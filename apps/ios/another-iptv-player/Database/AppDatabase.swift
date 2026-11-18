@@ -459,6 +459,20 @@ nonisolated struct AppDatabase {
         // Parse refreshed XMLTV data into staging tables first. Publishing then
         // becomes one short transaction, so guide readers never observe the gap
         // between deleting the old guide and filling the new one batch by batch.
+        // Build 61 (B10, G1-registered): per-playlist connection
+        // extras — Q18 backup server URL, G2 custom User-Agent and
+        // custom HTTP headers (JSON). All nullable text columns;
+        // existing rows read back as nil = previous behaviour.
+        // (G4's custom EPG URL reuses the existing `epgURLOverride`
+        // column from `addEPGSupport` — no new column needed.)
+        migrator.registerMigration("b61B10PlaylistConnectionFields") { db in
+            try db.alter(table: "playlist") { t in
+                t.add(column: "backupURL", .text)
+                t.add(column: "customUserAgent", .text)
+                t.add(column: "customHeadersJSON", .text)
+            }
+        }
+
         migrator.registerMigration("addEPGRefreshStaging") { db in
             try db.create(table: "epgProgrammeStaging") { t in
                 t.column("playlistId", .text).notNull()

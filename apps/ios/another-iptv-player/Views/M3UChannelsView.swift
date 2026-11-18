@@ -221,7 +221,7 @@ struct M3UChannelsView: View {
             return
         }
         do {
-            let content = try await M3UService().fetchRemote(urlString: url)
+            let content = try await M3UService().fetchRemote(urlString: url, playlist: playlist)
             let parsed = try await M3UParser.parseAsync(content)
             try await M3UImporter.replace(
                 playlist: playlist,
@@ -728,7 +728,9 @@ struct M3UPlayerShell: View {
                     type: classification.playbackType,
                     resumeTimeMs: resumeTimeMs,
                     containerExtension: classification.containerExtension,
-                    userAgent: activeChannel.userAgent,
+                    // Build 61 (B10, G2): the playlist's own
+                    // User-Agent wins over the per-channel one.
+                    userAgent: playlist.playbackUserAgent(channelUserAgent: activeChannel.userAgent),
                     epgChannelKey: classification.isLive ? EPGChannelKey.forM3U(activeChannel) : nil,
                     canGoToPreviousChannel: hasQueueNav && currentIndex > 0,
                     canGoToNextChannel: hasQueueNav && currentIndex < queue.count - 1,

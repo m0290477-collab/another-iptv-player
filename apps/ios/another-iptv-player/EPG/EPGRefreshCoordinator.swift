@@ -56,7 +56,8 @@ nonisolated struct EPGRefreshCoordinator {
                         url: url,
                         etag: prior?.etag,
                         lastModified: prior?.lastModified,
-                        username: playlist.username, password: playlist.password
+                        username: playlist.username, password: playlist.password,
+                        playlist: playlist
                     )
                     switch download {
                     case .notModified:
@@ -114,6 +115,13 @@ nonisolated struct EPGRefreshCoordinator {
     private func sourceCandidates(playlist: Playlist) throws -> [URL] {
         switch playlist.kind {
         case .xtream:
+            // Build 61 (B10, G4): a custom XMLTV URL set on the
+            // playlist wins over the provider's own xmltv.php —
+            // for Xtream playlists too, not just M3U (whose
+            // `effectiveEPGURL` already prefers the override).
+            if let custom = playlist.customEPGURL, let url = URL(string: custom) {
+                return [url]
+            }
             guard let url = PlaybackURLBuilder(playlist: playlist).xmltvURL() else { throw EPGError.noSource }
             return [url]
         case .m3u:

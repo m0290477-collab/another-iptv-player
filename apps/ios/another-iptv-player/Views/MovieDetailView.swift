@@ -640,6 +640,8 @@ struct MovieDetailView: View {
                 type: "vod",
                 resumeTimeMs: r,
                 containerExtension: currentMovie.containerExtension,
+                // Build 61 (B10, G2): playlist User-Agent to the engine load path.
+                userAgent: playlist.playbackUserAgent(channelUserAgent: nil),
                 onNavigateToDetail: navigateToDetail
             )
         }

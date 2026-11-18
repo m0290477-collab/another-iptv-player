@@ -35,6 +35,8 @@ struct HistorySeriesPlayerShell: View {
             seriesId: session.seriesId,
             resumeTimeMs: session.resumeTimeMs,
             containerExtension: session.containerExtension,
+            // Build 61 (B10, G2): playlist User-Agent to the engine load path.
+            userAgent: playlist.playbackUserAgent(channelUserAgent: nil),
             canGoToPreviousEpisode: neighborPrev != nil,
             canGoToNextEpisode: neighborNext != nil,
             onPreviousEpisode: { jumpTo(neighborPrev) },

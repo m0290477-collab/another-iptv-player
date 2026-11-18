@@ -32,6 +32,26 @@ final class PlayerOverlayController: ObservableObject {
         playlistId: UUID? = nil,
         @ViewBuilder content: () -> Content
     ) {
+        // Build 61 (B10, L4): the expired-playlist guard lives
+        // HERE — at the present-player call site, not inside
+        // PlayerView. A playback attempt against an expired
+        // playlist presents the plain expired message instead of
+        // the player (never a spinner over a dead stream). The
+        // verdict is ProviderExpiryStore's real provider data.
+        if let playlistId, let expiredDate = ExpiredPlaylistGuard.blockedState(playlistId: playlistId) {
+            let notice = PlayerOverlayPresentation(
+                root: AnyView(
+                    ExpiredPlaybackNoticeView(expiryDate: expiredDate) { [weak self] in
+                        self?.dismiss()
+                    }
+                    .preferredColorScheme(nil)
+                ),
+                onDismiss: onDismiss
+            )
+            mode = .fullscreen
+            presentation = notice
+            return
+        }
         // Build 60: build 33 had no forced appearance anywhere — the
         // player followed the system color scheme. The app root now
         // forces dark for the rest of the app (AppRootView), so this

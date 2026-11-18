@@ -16,6 +16,11 @@ struct ContentView: View {
     /// when a saved playlist exists.
     @State private var suppressAutoLoad = false
     @State private var showStorageWarning = false
+    /// Build 61 (B10, L4): the full-screen expired state for the
+    /// playlist auto-load would have entered, plus its Renew
+    /// (edit-form) sheet.
+    @State private var expiredCandidate: Playlist?
+    @State private var playlistToRenew: Playlist?
     /// Build 61 (D2, B6): the branded splash covers the cold start
     /// until the playlists query has answered — the moment the gate
     /// or the auto-loaded dashboard underneath is ready. No timer,
@@ -126,6 +131,42 @@ struct ContentView: View {
                         RatingManager.shared.requestReviewIfAppropriate()
                     }
                 }
+            } else if let expired = expiredCandidate, let expiredDate = ExpiredPlaylistGuard.blockedState(playlist: expired), let playlists = playlists {
+                // Build 61 (B10, L4): the active playlist is
+                // expired — the app opens to the full-screen
+                // expired state instead of blind-entering it or
+                // sitting on the gate. Renew opens the K2 edit
+                // form for the SAME record; Switch exists only
+                // when another playlist does; Remove runs the
+                // shared deletion path.
+                ExpiredPlaylistView(
+                    playlist: expired,
+                    expiryDate: expiredDate,
+                    canSwitch: playlists.contains { $0.id != expired.id },
+                    onRenew: { playlistToRenew = expired },
+                    onSwitch: {
+                        if let other = playlists.first(where: {
+                            $0.id != expired.id
+                                && ExpiredPlaylistGuard.blockedState(playlist: $0) == nil
+                        }) ?? playlists.first(where: { $0.id != expired.id }) {
+                            expiredCandidate = nil
+                            selectPlaylist(other)
+                        }
+                    },
+                    onRemove: {
+                        Task {
+                            _ = await AccountDataDeletion.deletePlaylistData(expired)
+                            expiredCandidate = nil
+                        }
+                    }
+                )
+                .sheet(item: $playlistToRenew) { playlist in
+                    if playlist.kind == .m3u {
+                        AddM3UPlaylistView(editingPlaylist: playlist)
+                    } else {
+                        AddPlaylistView(editingPlaylist: playlist)
+                    }
+                }
             } else if let playlists = playlists {
                 // Round 4: the branded gate takes over the playlist
                 // picker's role at this exact decision point.
@@ -195,9 +236,14 @@ struct ContentView: View {
             if aLast != bLast { return aLast }
             return false // stable: keep the saved library order
         }
-        guard let pick = ranked.first,
-              !ProviderExpiryStore.isExpired(expiryDate: ProviderExpiryStore.expiryDate(playlistId: pick.id)) else {
-            return // all expired → the gate's all-expired state
+        guard let pick = ranked.first else { return }
+        if let blockedDate = ExpiredPlaylistGuard.blockedState(playlist: pick) {
+            // Build 61 (B10, L4): the would-be active playlist is
+            // expired → open to the full-screen expired state
+            // (Renew / Switch / Remove), not the gate's passive
+            // all-expired card and never the dead dashboard.
+            expiredCandidate = pick
+            return
         }
         selectedPlaylist = pick
         // Build 61 (B9, E1): keep a warm connection to the active
