@@ -205,25 +205,15 @@ struct MiniPlayerChrome: View {
                                 .progressViewStyle(.circular)
                                 .tint(.white)
                                 .frame(width: 32, height: 32)
-                                // Round 15 (C1): same 44 pt hit
-                                // footprint as the button it replaces.
-                                .frame(width: 44, height: 44, alignment: .topLeading)
                         } else {
                             Button {
                                 player.togglePlayPause()
                             } label: {
-                                // Round 15 (C1): the visible disc
-                                // stays 32 pt, but the hit area is
-                                // 44 pt (anchored top-leading so the
-                                // disc doesn't move) via an enlarged
-                                // content shape.
                                 Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                                     .font(.system(size: 15, weight: .bold))
                                     .foregroundStyle(.white)
                                     .frame(width: 32, height: 32)
                                     .background(.black.opacity(0.4), in: Circle())
-                                    .frame(width: 44, height: 44, alignment: .topLeading)
-                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(player.isPlaying ? L("player.a11y.pause") : L("player.a11y.play"))
@@ -233,15 +223,11 @@ struct MiniPlayerChrome: View {
                     Spacer()
 
                     Button(action: onClose) {
-                        // Round 15 (C1): visible disc stays 26 pt;
-                        // hit area 44 pt, anchored top-trailing.
                         Image(systemName: "xmark")
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(width: 26, height: 26)
                             .background(.black.opacity(0.45), in: Circle())
-                            .frame(width: 44, height: 44, alignment: .topTrailing)
-                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(L("common.close"))

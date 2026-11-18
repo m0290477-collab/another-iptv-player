@@ -12,14 +12,15 @@ struct EPGProgrammeDetailSheet: View {
     let channelIcon: URL?
     /// Xtream live stream for this channel — enables live play + catch-up. nil for M3U.
     let liveStream: DBLiveStream?
-    /// Finisher wiring: forwarded to catch-up playback as the player's
-    /// `onNavigateToDetail`, so tapping the player title goes to this
-    /// channel's detail/schedule. Supplied by presenters that HAVE a
-    /// channel-detail destination (the guide pushes
-    /// `ChannelEPGDetailView`); left nil by presenters that are already
-    /// showing that destination (ChannelEPGDetailView itself), where
-    /// the title tap stays inert rather than pushing a copy of the
-    /// screen the user is already on.
+    /// Supplied by presenters that HAVE a channel-detail destination
+    /// (the guide pushes `ChannelEPGDetailView`); left nil by
+    /// presenters that are already showing that destination
+    /// (ChannelEPGDetailView itself). Build 60: no longer forwarded
+    /// into catch-up playback — the catch-up player's title tap is
+    /// inert, exactly as in pristine build 33, whose
+    /// `CatchupPlayerShell`/`CatchupPlaybackController` have no
+    /// navigation forwarding. The property is kept so existing
+    /// presenters (EPGGuideView) still compile unchanged.
     var onNavigateToChannelDetail: ((DBLiveStream) -> Void)? = nil
 
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
@@ -149,10 +150,7 @@ struct EPGProgrammeDetailSheet: View {
                                                            startUTC: programme.start, stopUTC: programme.stop)
                     Task {
                         await catchup.play(
-                            playlist: playlist, stream: stream, programme: programmeBridge, overlay: playerOverlay,
-                            onNavigateToDetail: onNavigateToChannelDetail == nil ? nil : { _, _ in
-                                onNavigateToChannelDetail?(stream)
-                            }
+                            playlist: playlist, stream: stream, programme: programmeBridge, overlay: playerOverlay
                         )
                         // Only close once playback actually resolved; keep the sheet open to show the error otherwise.
                         if catchup.errorMessage == nil {

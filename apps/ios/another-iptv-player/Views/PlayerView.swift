@@ -186,10 +186,6 @@ private struct PlayerViewImpl: View {
     }
 
     @State private var showControls = true
-    /// Preserved invisible plumbing (round 15 C10): last EPG
-    /// fullscreen-stamp heartbeat write.
-    @State private var lastEPGStampAt: Date = .distantPast
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var timer: Timer?
     @State private var saveHistoryTimer: Timer?
     @State private var hasInitialSeeked = false
@@ -457,17 +453,8 @@ private struct PlayerViewImpl: View {
         // an endless spinner on the handset.
         if player.isAirPlayPlaybackActive { return false }
         if !player.engine.isReady { return true }
-        if !player.engine.isPlaybackEstablished {
-            // Preserved fault fix (round 18 R18-1): before
-            // establishment, the loading state ends the moment
-            // frames actually render (`hasRenderedFirstFrame`) —
-            // keying on establishment alone left the spinner drawn
-            // over playing video (endless-spinner family). After
-            // establishment the buffering state below drives the
-            // stall spinner as before.
-            return !player.engine.hasRenderedFirstFrame
-        }
         if player.state == .buffering { return true }
+        if !player.engine.isPlaybackEstablished { return true }
         return false
     }
 
@@ -730,22 +717,6 @@ private struct PlayerViewImpl: View {
             .statusBarHidden(statusBarHiddenInCurrentMode)
         .onAppear {
             log.info("Opening player: \(title, privacy: .public)")
-            // Preserved invisible plumbing (round 9): landscape is
-            // allowed ONLY inside the fullscreen player — the app's
-            // browse lock defaults to portrait, so the player must
-            // raise it here or it could never rotate.
-            syncOrientationLockForPlayerMode()
-            // Preserved invisible plumbing (round 15 C10): opening
-            // fullscreen starts the EPG tick-lengthening stamp
-            // (heartbeat in the timeMs handler keeps it fresh;
-            // mini/disappear clear it).
-            if overlayMode == .fullscreen {
-                lastEPGStampAt = Date()
-                UserDefaults.standard.set(
-                    Date().timeIntervalSince1970,
-                    forKey: EPGStore.fullscreenPlaybackStampKey
-                )
-            }
             resetTimer()
             player.setupAudioHandler()
             // Defer to the next run loop: the KSPlayer surface's view setup and
@@ -795,11 +766,6 @@ private struct PlayerViewImpl: View {
             player.setPlaybackPresentation(makePresentation())
         }
         .onDisappear {
-            // Preserved invisible plumbing (round 9 + round 15 C10):
-            // leaving the player restores the portrait browse lock
-            // and ends the EPG fullscreen stamp.
-            restoreBrowseOrientationLock()
-            UserDefaults.standard.set(0, forKey: EPGStore.fullscreenPlaybackStampKey)
             timer?.invalidate()
             saveHistoryTimer?.invalidate()
             // Save under the applied playback identity, not the (possibly newer)
@@ -837,29 +803,11 @@ private struct PlayerViewImpl: View {
                 cancelAutoAdvanceCountdown(resetEndHandling: true)
             }
         }
-        .onChange(of: player.timeMs) { _, _ in
-            // Preserved invisible plumbing (round 15 C10): EPG
-            // fullscreen-stamp heartbeat (throttled to ~20 s) while
-            // playback runs fullscreen.
-            if overlayMode == .fullscreen,
-               Date().timeIntervalSince(lastEPGStampAt) > 20 {
-                lastEPGStampAt = Date()
-                UserDefaults.standard.set(
-                    Date().timeIntervalSince1970,
-                    forKey: EPGStore.fullscreenPlaybackStampKey
-                )
-            }
-        }
         .onChange(of: overlayMode) { _, newMode in
             expandControlsGeneration &+= 1
             let gen = expandControlsGeneration
             switch newMode {
             case .mini:
-                // Preserved invisible plumbing (round 9 + C10):
-                // docked to the mini card the browse portrait lock
-                // returns and the EPG stamp clears.
-                restoreBrowseOrientationLock()
-                UserDefaults.standard.set(0, forKey: EPGStore.fullscreenPlaybackStampKey)
                 // The gesture path already animated `miniProgress`; here only settle chrome.
                 // Covers any external minimize too.
                 timer?.invalidate()
@@ -868,15 +816,6 @@ private struct PlayerViewImpl: View {
                     withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { miniProgress = 1 }
                 }
             case .fullscreen:
-                // Preserved invisible plumbing (round 9 + C10):
-                // growing back to fullscreen re-opens rotation and
-                // restamps the EPG flag.
-                AppDelegate.setOrientationLock(.allButUpsideDown)
-                lastEPGStampAt = Date()
-                UserDefaults.standard.set(
-                    Date().timeIntervalSince1970,
-                    forKey: EPGStore.fullscreenPlaybackStampKey
-                )
                 cardDrag.offset = .zero
                 cardDrag.dismissOpacity = 1
                 // Keep the (heavy) fullscreen chrome hidden during the grow so its layout doesn't
@@ -1505,16 +1444,6 @@ private struct PlayerViewImpl: View {
 
     private func playerChromeAndVideo(outerSafeAreaInsets: EdgeInsets) -> some View {
         GeometryReader { geo in
-            // Preserved fault fix (round 16 P1): the chrome's insets
-            // are read from THIS reader, not from the body-level
-            // reader passed in. The outer insets travel through the
-            // mini-morph container (drag layer + mask/scale/offset
-            // transforms) and on the owner's phone in build 50 no
-            // longer matched the visible screen, so every
-            // edge-anchored control rendered partially off-screen in
-            // portrait. Sourcing the insets locally keeps all chrome
-            // inside the real safe area, portrait and landscape.
-            let outerSafeAreaInsets = geo.safeAreaInsets
             let fittedSize = fittedVideoSize(in: geo.size)
             ZStack {
                 MPVolumeViewHost(bridge: systemVolumeBridge)
@@ -1824,53 +1753,37 @@ private struct PlayerViewImpl: View {
                     .zIndex(10)
                 }
 
-                // Preserved fault fixes (build 56, round 14 A2 +
-                // round 12/15 expiry gate): the failure surface —
-                // a CENTERED, dismissible card with the real cause
-                // and a Close button, replacing the pristine
-                // bottom-left banner, so a failed stream never
-                // leaves an endless spinner or a silent black
-                // screen. If the provider account is expired
-                // (ProviderExpiryStore exp_date verdict), the
-                // EXPIRED state is presented instead of the
-                // generic failure. Kept from the build-56 tree by
-                // the owner's fault-fix preservation order while
-                // all other chrome returns to build 33.
-                Group {
-                    if showFailureCard, let msg = player.playbackFailureMessage {
-                        Group {
-                            if let expired = ProviderExpiryStore.blockedExpiry(playlistId: playlistId) {
-                                SubscriptionExpiredView(
-                                    expiryDate: expired,
-                                    onOpenSettings: { performPlayerDismiss() },
-                                    onClose: { performPlayerDismiss() }
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                                .shadow(color: .black.opacity(0.45), radius: 24, y: 10)
-                                .padding(.horizontal, 28)
-                            } else {
-                                playbackFailureCard(message: msg)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.black.opacity(0.45))
-                        .transition(
-                            reduceMotion
-                                ? .opacity
-                                : .move(edge: .bottom).combined(with: .opacity)
-                        )
-                        .onAppear {
-                            UINotificationFeedbackGenerator().notificationOccurred(.error)
-                        }
+                // Hata banner'ı krom görünürlüğünden bağımsız: 5 sn auto-hide sonrası
+                // patlayan yayında kullanıcı sessiz siyah ekranla kalmasın.
+                if hasPlaybackFailure, let msg = player.playbackFailureMessage {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "wifi.exclamationmark")
+                            .font(.caption.weight(.bold))
+                            .accessibilityHidden(true)
+                        Text(msg)
+                            .font(.caption2.weight(.semibold))
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: max(0, min(geo.size.width - 24, 280)), alignment: .leading)
+                    .background(
+                        Color(red: 0.72, green: 0.12, blue: 0.14).opacity(0.94),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding(.leading, 12)
+                    .padding(.bottom, (showControls ? 92 : 12) + outerSafeAreaInsets.bottom)
+                    .allowsHitTesting(false)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(L("player.playback_error"))
+                    .accessibilityValue(msg)
+                    .opacity(fullChromeOpacity)
+                    .zIndex(25)
                 }
-                // Value-scoped animation drives the slide+fade
-                // entrance (round 15, C12) and nothing else.
-                .animation(
-                    reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86),
-                    value: showFailureCard
-                )
-                .zIndex(45)
 
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -2005,80 +1918,6 @@ private struct PlayerViewImpl: View {
                 log.error("Failed to save watch history: \(error)")
             }
         }
-    }
-
-    // MARK: - Orientation (round 9)
-
-    /// Landscape exists ONLY inside the fullscreen player: fullscreen
-    /// raises the AppDelegate lock to free rotation; the mini card and
-    /// dismissal restore the portrait browse lock. (The unreferenced
-    /// `LiveChannelBrowserScreen` below assigns the lock directly to
-    /// force `.landscape` over the player and restores the player's
-    /// mask on exit — untouched by this change.)
-    private func syncOrientationLockForPlayerMode() {
-        if overlayMode == .fullscreen {
-            AppDelegate.setOrientationLock(.allButUpsideDown)
-        } else {
-            restoreBrowseOrientationLock()
-        }
-    }
-
-    private func restoreBrowseOrientationLock() {
-        let browse = AppDelegate.browseOrientationLock
-        AppDelegate.setOrientationLock(
-            browse,
-            forceOrientation: browse == .portrait ? .portrait : nil
-        )
-    }
-
-    /// Preserved fault fix (build 56): the failure card is up when a failure
-    /// message exists that the user hasn't already closed the
-    /// player over. (Close dismisses the player itself.)
-    private var showFailureCard: Bool {
-        hasPlaybackFailure
-    }
-
-    /// The centered failure card: real cause (from the engine's
-    /// mapping — HTTP status / refusal / codec), plain language,
-    /// one Close that leaves the player. Accent is AppTheme.live
-    /// (round 15, B9 — no hard-coded reds in the player).
-    private func playbackFailureCard(message: String) -> some View {
-        VStack(spacing: 14) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 38))
-                .foregroundStyle(AppTheme.live)
-            Text(L("player.playback_error"))
-                .font(.title3.weight(.bold))
-                .foregroundStyle(.white)
-            Text(message)
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.75))
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-            Button {
-                performPlayerDismiss()
-            } label: {
-                Text(L("common.close"))
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(AppTheme.accent, in: Capsule())
-            }
-            .buttonStyle(PressScaleButtonStyle())
-        }
-        .padding(24)
-        .frame(maxWidth: 340)
-        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
-        )
-        .shadow(color: .black.opacity(0.45), radius: 24, y: 10)
-        .padding(.horizontal, 28)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(L("player.playback_error"))
-        .accessibilityValue(message)
     }
 
     // MARK: - Chrome
