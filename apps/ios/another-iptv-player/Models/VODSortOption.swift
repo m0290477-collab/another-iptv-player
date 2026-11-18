@@ -10,6 +10,9 @@ nonisolated enum VODSortOption: String, CaseIterable, Identifiable {
     case nameDesc
     case ratingDesc
     case recentlyAdded
+    /// Build 61 (B8, C1): newest-first by the record's own release
+    /// year (parsed from `releaseDate`); undated items go last.
+    case yearDesc
 
     var id: String { rawValue }
 
@@ -22,6 +25,7 @@ nonisolated enum VODSortOption: String, CaseIterable, Identifiable {
         case .nameDesc: return "sort.name_desc"
         case .ratingDesc: return "sort.rating_desc"
         case .recentlyAdded: return "sort.recently_added"
+        case .yearDesc: return "filter.sort_year"
         }
     }
 
@@ -32,6 +36,7 @@ nonisolated enum VODSortOption: String, CaseIterable, Identifiable {
         case .nameDesc: return "arrow.down"
         case .ratingDesc: return "star"
         case .recentlyAdded: return "clock"
+        case .yearDesc: return "calendar"
         }
     }
 
@@ -61,6 +66,13 @@ nonisolated enum VODSortOption: String, CaseIterable, Identifiable {
                 let t1 = a.stream.added.flatMap(Int.init) ?? Int.min
                 let t2 = b.stream.added.flatMap(Int.init) ?? Int.min
                 if t1 != t2 { return t1 > t2 }
+                return a.stream.sortIndex < b.stream.sortIndex
+            }
+        case .yearDesc:
+            return items.sorted { a, b in
+                let y1 = DetailFormatting.releaseYear(from: a.stream.releaseDate) ?? Int.min
+                let y2 = DetailFormatting.releaseYear(from: b.stream.releaseDate) ?? Int.min
+                if y1 != y2 { return y1 > y2 }
                 return a.stream.sortIndex < b.stream.sortIndex
             }
         }

@@ -9,6 +9,8 @@ nonisolated enum SeriesSortOption: String, CaseIterable, Identifiable {
     case nameDesc
     case ratingDesc
     case recentlyAdded
+    /// Build 61 (B8, C1): newest-first by release year.
+    case yearDesc
 
     var id: String { rawValue }
 
@@ -21,6 +23,7 @@ nonisolated enum SeriesSortOption: String, CaseIterable, Identifiable {
         case .nameDesc: return "sort.name_desc"
         case .ratingDesc: return "sort.rating_desc"
         case .recentlyAdded: return "sort.recently_added"
+        case .yearDesc: return "filter.sort_year"
         }
     }
 
@@ -31,6 +34,7 @@ nonisolated enum SeriesSortOption: String, CaseIterable, Identifiable {
         case .nameDesc: return "arrow.down"
         case .ratingDesc: return "star"
         case .recentlyAdded: return "clock"
+        case .yearDesc: return "calendar"
         }
     }
 
@@ -59,6 +63,13 @@ nonisolated enum SeriesSortOption: String, CaseIterable, Identifiable {
                 let t1 = a.series.lastModified.flatMap(Int.init) ?? Int.min
                 let t2 = b.series.lastModified.flatMap(Int.init) ?? Int.min
                 if t1 != t2 { return t1 > t2 }
+                return a.series.sortIndex < b.series.sortIndex
+            }
+        case .yearDesc:
+            return items.sorted { a, b in
+                let y1 = DetailFormatting.releaseYear(from: a.series.releaseDate) ?? Int.min
+                let y2 = DetailFormatting.releaseYear(from: b.series.releaseDate) ?? Int.min
+                if y1 != y2 { return y1 > y2 }
                 return a.series.sortIndex < b.series.sortIndex
             }
         }

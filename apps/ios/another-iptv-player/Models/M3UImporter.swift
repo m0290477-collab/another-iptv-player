@@ -54,7 +54,8 @@ enum M3UImporter {
                     sortIndex: index,
                     catchup: ch.catchup,
                     catchupSource: ch.catchupSource,
-                    catchupDays: ch.catchupDays
+                    catchupDays: ch.catchupDays,
+                    tvgChno: ch.tvgChno
                 )
                 try row.save(db)
             }
