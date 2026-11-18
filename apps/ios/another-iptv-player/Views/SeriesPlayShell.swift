@@ -29,10 +29,6 @@ struct SeriesPlayShell: View {
     @State private var session: EpisodePlaySession?
     @State private var neighborPrev: DBEpisode?
     @State private var neighborNext: DBEpisode?
-    /// F-58: the next episode's numbers for the T-50 card line,
-    /// resolved with the neighbors in `refreshNeighbors`.
-    @State private var nextSeasonNumber: Int?
-    @State private var nextEpisodeNumber: Int?
     @State private var loadFailed = false
     @Environment(\.playerOverlayDismiss) private var overlayDismiss
     @Environment(\.dismiss) private var dismiss
@@ -58,8 +54,6 @@ struct SeriesPlayShell: View {
                     canGoToNextEpisode: neighborNext != nil,
                     onPreviousEpisode: { jumpTo(neighborPrev) },
                     onNextEpisode: { jumpTo(neighborNext) },
-                    nextEpisodeSeason: nextSeasonNumber,
-                    nextEpisodeEpisode: nextEpisodeNumber,
                     onNavigateToDetail: onNavigateToDetail == nil ? nil : { _, _ in onNavigateToDetail?(series) }
                 )
             } else if loadFailed {
@@ -95,8 +89,6 @@ struct SeriesPlayShell: View {
         session = nil
         neighborPrev = nil
         neighborNext = nil
-        nextSeasonNumber = nil
-        nextEpisodeNumber = nil
         loadFailed = false
 
         // 1. Episodes must exist locally; fetch them exactly like the
@@ -207,8 +199,6 @@ struct SeriesPlayShell: View {
         guard let session else {
             neighborPrev = nil
             neighborNext = nil
-            nextSeasonNumber = nil
-            nextEpisodeNumber = nil
             return
         }
         let ctx = try? await AppDatabase.shared.read { db in
@@ -221,8 +211,6 @@ struct SeriesPlayShell: View {
         }
         neighborPrev = ctx?.previous
         neighborNext = ctx?.next
-        nextSeasonNumber = ctx?.nextSeasonNumber
-        nextEpisodeNumber = ctx?.nextEpisodeNumber
     }
 
     private func jumpTo(_ episode: DBEpisode?) {
@@ -231,8 +219,6 @@ struct SeriesPlayShell: View {
         guard targetSid != session?.streamId else { return }
         neighborPrev = nil
         neighborNext = nil
-        nextSeasonNumber = nil
-        nextEpisodeNumber = nil
         Task {
             let hist: DBWatchHistory? = try? await AppDatabase.shared.read { db in
                 try DBWatchHistory

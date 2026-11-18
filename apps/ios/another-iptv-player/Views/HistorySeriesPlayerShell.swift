@@ -10,10 +10,6 @@ struct HistorySeriesPlayerShell: View {
     @State private var session: SeriesPlaybackSession
     @State private var neighborPrev: DBEpisode?
     @State private var neighborNext: DBEpisode?
-    /// F-58: the next episode's numbers for the T-50 card line,
-    /// resolved with the neighbors in `refreshNeighbors`.
-    @State private var nextSeasonNumber: Int?
-    @State private var nextEpisodeNumber: Int?
     @Environment(\.playerOverlayPresentationID) private var overlayPresentationID
     
     var onNavigateToDetail: ((String, String) -> Void)? = nil
@@ -43,8 +39,6 @@ struct HistorySeriesPlayerShell: View {
             canGoToNextEpisode: neighborNext != nil,
             onPreviousEpisode: { jumpTo(neighborPrev) },
             onNextEpisode: { jumpTo(neighborNext) },
-            nextEpisodeSeason: nextSeasonNumber,
-            nextEpisodeEpisode: nextEpisodeNumber,
             onNavigateToDetail: onNavigateToDetail
         )
         .task(id: session.streamId) {
@@ -60,8 +54,6 @@ struct HistorySeriesPlayerShell: View {
         guard session != target else { return }
         neighborPrev = nil
         neighborNext = nil
-        nextSeasonNumber = nil
-        nextEpisodeNumber = nil
         session = target
     }
 
@@ -69,7 +61,6 @@ struct HistorySeriesPlayerShell: View {
         guard let seriesIdStr = session.seriesId, let seriesId = Int(seriesIdStr) else {
             await MainActor.run {
                 neighborPrev = nil; neighborNext = nil
-                nextSeasonNumber = nil; nextEpisodeNumber = nil
             }
             return
         }
@@ -97,8 +88,6 @@ struct HistorySeriesPlayerShell: View {
         await MainActor.run {
             neighborPrev = ctx?.previous
             neighborNext = ctx?.next
-            nextSeasonNumber = ctx?.nextSeasonNumber
-            nextEpisodeNumber = ctx?.nextEpisodeNumber
         }
     }
 
@@ -181,8 +170,6 @@ struct HistorySeriesPlayerShell: View {
         guard targetSid != session.streamId else { return }
         neighborPrev = nil
         neighborNext = nil
-        nextSeasonNumber = nil
-        nextEpisodeNumber = nil
         Task {
             let sid = targetSid
             // If the episode is downloaded, play it from the local file; otherwise use the remote URL.

@@ -1207,8 +1207,6 @@ struct SeriesDetailView: View {
     @State private var episodeNavNext: DBEpisode?
     /// F-58: the next episode's numbers for the T-50 card line,
     /// resolved with the neighbors in `loadEpisodeNeighbors`.
-    @State private var episodeNavNextSeason: Int?
-    @State private var episodeNavNextEpisode: Int?
     /// Round 10: the Episodes/About tab under the action bar.
     @State private var detailTab = 0
     /// The episode the watch history points at (for the
@@ -1522,8 +1520,6 @@ struct SeriesDetailView: View {
         // A new episode's player must never render the PREVIOUS
         // episode's next-episode numbers: clear the pair here; the
         // presented player's neighbor load fills in this episode's.
-        episodeNavNextSeason = nil
-        episodeNavNextEpisode = nil
         let remoteURL = PlaybackURLBuilder(playlist: playlist).seriesURL(
             streamId: ep.episodeId ?? ep.id, containerExtension: ep.containerExtension
         )
@@ -1546,8 +1542,6 @@ struct SeriesDetailView: View {
                 canGoToNextEpisode: episodeNavNext != nil,
                 onPreviousEpisode: { selectAdjacentEpisode(goBack: true) },
                 onNextEpisode: { selectAdjacentEpisode(goBack: false) },
-                nextEpisodeSeason: episodeNavNextSeason,
-                nextEpisodeEpisode: episodeNavNextEpisode
                 // Round 8 (F-7): the inert `onNavigateToDetail: { _, _ in }`
                 // that used to sit here is REMOVED, not wired — this
                 // player is presented FROM SeriesDetailView, so the
@@ -1884,8 +1878,6 @@ struct SeriesDetailView: View {
         // Clear first, for the same reason as in
         // `presentEpisodeOverlay`: until this episode's neighbors
         // land, no numbers are better than a previous episode's.
-        episodeNavNextSeason = nil
-        episodeNavNextEpisode = nil
         let playId = ep.episodeId ?? ep.id
         let ctx = try? await AppDatabase.shared.read { db in
             try SeriesPlaybackOrdering.navigationContext(
@@ -1900,8 +1892,6 @@ struct SeriesDetailView: View {
             let oldNext = episodeNavNext
             episodeNavPrevious = ctx?.previous
             episodeNavNext = ctx?.next
-            episodeNavNextSeason = ctx?.nextSeasonNumber
-            episodeNavNextEpisode = ctx?.nextEpisodeNumber
             let neighborsChanged =
                 oldPrev?.id != episodeNavPrevious?.id || oldNext?.id != episodeNavNext?.id
             if neighborsChanged,
