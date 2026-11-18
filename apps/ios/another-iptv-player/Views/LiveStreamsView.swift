@@ -2,29 +2,84 @@ import SwiftUI
 import GRDB
 import GRDBQuery
 
+/// Round 20 (R20-5): combined trigger for the Live tab's catalog
+/// recompute — the live row count rides along so the pass re-runs
+/// the moment the live fetch publishes (the store publishes live →
+/// vod → series progressively) instead of waiting for
+/// `streamsLoaded`, which only flips after the LAST type lands.
+private struct LiveRecomputeToken: Equatable {
+    let loaded: Bool
+    let liveCount: Int
+}
+
 struct LiveStreamsView: View {
     let playlist: Playlist
     @ObservedObject private var contentStore = PlaylistContentStore.shared
     @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
+    @ObservedObject private var orderStore = CategoryOrderStore.shared
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
+    @Environment(\.epgSnapshot) private var epgSnapshot
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.posterMetrics) private var posterMetrics
+    @State private var heroScrollVisible = false
+    @Query<RecentWatchHistoryRequest> private var recentLiveHistory: [DBWatchHistory]
 
-    @State private var searchText = ""
-    @State private var debouncedQuery = ""
-    @State private var debounceTask: Task<Void, Never>?
-    @State private var isSearchActive = false
+    @State private var showSearchSheet = false
+    @State private var homeSearchText = ""
+    // B3 (Round 14): Live tab Favorites filter chip — when on, the
+    // shelves/queue below contain favorite channels only (real
+    // DBFavorite rows via FavoriteLiveRequest).
+    @State private var favoritesOnly = false
+    @Query<FavoriteLiveRequest> private var favoriteLiveChannels: [LiveStreamWithCategory]
+
+    // Round 8 (D-4/D-5): Live's round-5 filter chips are GONE. The
+    // Favorites chip duplicated the nav-bar star's FavoritesView and
+    // the History chip duplicated the Continue Watching row — the
+    // no-duplication rule keeps ONE entry each (star + row), and Live
+    // never had a Newest data path (DBLiveStream carries no added
+    // date), so no chips remain on this tab. The favorites/history chip
+    // grids and their queries went with the chips.
+    init(playlist: Playlist) {
+        self.playlist = playlist
+        _recentLiveHistory = Query(
+            RecentWatchHistoryRequest(playlistId: playlist.id, limit: 1, type: "live"),
+            in: \.appDatabase
+        )
+        _favoriteLiveChannels = Query(
+            FavoriteLiveRequest(playlistId: playlist.id),
+            in: \.appDatabase
+        )
+    }
 
     @State private var displayCategories: [DBCategory] = []
     @State private var displayItemsByCategory: [String: [LiveStreamWithCategory]] = [:]
+    /// Round 8 (audit A3): the derived channel sections, cached by
+    /// `recomputeFilter()` — the only place their two inputs change.
+    /// They used to be a computed property that re-mapped every channel
+    /// wrapper on each body pass (count line, hero, trending and the
+    /// playback queue each re-ran the mapping).
+    @State private var liveChannelSections: [LiveChannelCategorySection] = []
 
+    private var liveHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "live") }
     @State private var showingCategoryPicker = false
     @State private var pendingScrollTarget: String? = nil
 
     private var livePlaybackQueue: [DBLiveStream] {
-        displayCategories.flatMap { displayItemsByCategory[$0.id]?.map(\.stream) ?? [] }
+        // Round 8 (audit A3): flattened from the cached sections. The
+        // sections are the non-empty visible categories in shelf order,
+        // so this is content- and order-identical to the old per-category
+        // flatMap (empty categories contributed nothing).
+        liveChannelSections.flatMap(\.streams)
     }
 
     private var pickerEntries: [CategoryPickerSheet.Entry] {
-        contentStore.liveCategories.map { cat in
+        // B1 (Round 14): hidden categories are NOT jump targets —
+        // the picker only lists visible categories (the picker sheet
+        // itself stays the place where hiding is managed).
+        orderStore.applyOrder(
+            contentStore.liveCategories.filter { !liveHiddenIds.contains($0.id) },
+            playlistId: playlist.id, type: "live"
+        ) { $0.id }.map { cat in
             CategoryPickerSheet.Entry(
                 id: cat.id,
                 name: cat.name,
@@ -33,22 +88,77 @@ struct LiveStreamsView: View {
         }
     }
 
-    private var liveChannelSections: [LiveChannelCategorySection] {
-        displayCategories.compactMap { cat in
-            let streams = displayItemsByCategory[cat.id]?.map(\.stream) ?? []
-            guard !streams.isEmpty else { return nil }
-            return LiveChannelCategorySection(id: cat.id, title: cat.name, streams: streams)
-        }
-    }
-
     private func liveQueueIndex(for stream: DBLiveStream) -> Int? {
         livePlaybackQueue.firstIndex(where: { $0.streamId == stream.streamId })
+    }
+
+    /// Hero channel rule (deterministic): the most recently watched live
+    /// channel when watch history holds one that still exists in the
+    /// catalog; otherwise the first channel of the first category (the
+    /// head of the playback queue).
+    private var heroStream: DBLiveStream? {
+        if let item = recentLiveHistory.first, let match = liveStream(for: item) {
+            return match
+        }
+        return livePlaybackQueue.first
+    }
+
+    private func heroHistory(for stream: DBLiveStream) -> DBWatchHistory? {
+        guard let item = recentLiveHistory.first, Int(item.streamId) == stream.streamId else { return nil }
+        return item
+    }
+
+    /// The hero subtitle is the channel's REAL current EPG programme title;
+    /// nil when the guide has nothing for the channel (subtitle omitted).
+    private func heroNowTitle(for stream: DBLiveStream) -> String? {
+        guard let snapshot = epgSnapshot else { return nil }
+        return snapshot[EPGChannelKey.forXtream(stream)]?.now?.title
+    }
+
+    /// The hero's live preview may run only while the hero is actually on
+    /// screen and nothing covers the tab: hero inside the scroll viewport,
+    /// app in the foreground (also pre-empts any automatic PiP hand-off of
+    /// the preview surface), no player overlay (fullscreen or mini), and no
+    /// sheet up (global search, category picker).
+    private var heroPreviewActive: Bool {
+        heroScrollVisible
+            && scenePhase == .active
+            && playerOverlay.presentation == nil
+            && playerOverlay.pendingPresentation == nil
+            && !showSearchSheet
+            && !showingCategoryPicker
+    }
+
+    /// Trending rule (round 3): the FIRST channel of each visible category,
+    /// in category order, capped at 15. Round 2 took the first 15 queue
+    /// entries, which on real playlists is one category's near-identical
+    /// logos repeated; one-per-category keeps the row diverse. Sections are
+    /// the visible (non-hidden, non-empty) categories in shelf order.
+    private var trendingStreams: [DBLiveStream] {
+        var result: [DBLiveStream] = []
+        for section in liveChannelSections {
+            guard let first = section.streams.first else { continue }
+            result.append(first)
+            if result.count == 15 { break }
+        }
+        return result
     }
 
     var body: some View {
         Group {
             if displayCategories.isEmpty {
-                if contentStore.isLoading || playlist.id != contentStore.activePlaylistId {
+                // Round 20 (R20-5): the Home tab's round-12 guard,
+                // which this tab never got. Phase 1 of the catalog
+                // load sets isLoading=false with categories only,
+                // while streamsLoaded stays false until ALL of phase
+                // 2 lands — the old condition fell through to
+                // "No category found" for that whole window on every
+                // cold open (owner recording, build 54). Until the
+                // streams have actually loaded (and there is no error
+                // to show instead), an empty display set means
+                // LOADING, not empty.
+                if contentStore.isLoading || playlist.id != contentStore.activePlaylistId
+                    || (!contentStore.streamsLoaded && contentStore.loadError == nil) {
                     VStack(spacing: 16) {
                         ProgressView()
                             .scaleEffect(1.2)
@@ -57,7 +167,7 @@ struct LiveStreamsView: View {
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let loadError = contentStore.loadError, debouncedQuery.isEmpty {
+                } else if let loadError = contentStore.loadError {
                     CatalogLoadErrorView(message: loadError) {
                         Task { await contentStore.loadPlaylist(playlist) }
                     }
@@ -66,7 +176,7 @@ struct LiveStreamsView: View {
                         Image(systemName: "tv.slash")
                             .font(.largeTitle)
                             .foregroundColor(.secondary)
-                        Text(debouncedQuery.isEmpty ? L("live.empty.no_category") : L("list.no_result"))
+                        Text(L("live.empty.no_category"))
                             .foregroundColor(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -75,21 +185,15 @@ struct LiveStreamsView: View {
                 contentList
             }
         }
-        .searchable(text: $searchText, isPresented: $isSearchActive, prompt: L("live.search_placeholder"))
-        .onChange(of: searchText) { _, new in
-            debounceTask?.cancel()
-            debounceTask = Task {
-                try? await Task.sleep(nanoseconds: 250_000_000)
-                guard !Task.isCancelled else { return }
-                await MainActor.run { debouncedQuery = new }
-            }
-        }
-        .onChange(of: isSearchActive) { _, active in
-            if !active { searchText = ""; debouncedQuery = "" }
-        }
-        .task(id: debouncedQuery) { await recomputeFilter() }
-        .task(id: contentStore.streamsLoaded) { await recomputeFilter() }
+        // Round 3: the tab's native `.searchable` bar is GONE — the Live tab
+        // has exactly ONE search entry, the HomeSearchBar in the home header
+        // (mockup position), which presents the global SearchView. In-tab
+        // shelf filtering went with it; AllLiveView and the category
+        // detail screens keep their own search fields.
+        .task(id: LiveRecomputeToken(loaded: contentStore.streamsLoaded, liveCount: contentStore.liveStreams.count)) { await recomputeFilter() }
         .task(id: hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")) { await recomputeFilter() }
+        .task(id: orderStore.orderedIds(playlistId: playlist.id, type: "live")) { await recomputeFilter() }
+        .task(id: favoritesOnly) { await recomputeFilter() }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 NavigationLink {
@@ -100,16 +204,10 @@ struct LiveStreamsView: View {
                 }
                 .accessibilityLabel(L("epg.guide.title"))
             }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                NavigationLink {
-                    AllLiveView(playlist: playlist)
-                } label: {
-                    Image(systemName: "square.grid.2x2")
-                        .font(.body.weight(.semibold))
-                }
-                .disabled(contentStore.liveStreams.isEmpty)
-                .accessibilityLabel(L("browse.all_live"))
-            }
+            // Round 8 (D-2): NO toolbar grid icon — AllLiveView was
+            // reachable twice from this tab (here + the Trending
+            // shelf's "See all"). The shelf entry stays as the ONE
+            // path, matching the Movies/Series treatment.
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     showingCategoryPicker = true
@@ -132,6 +230,14 @@ struct LiveStreamsView: View {
                 pendingScrollTarget = id
             }
         }
+        .sheet(isPresented: $showSearchSheet) {
+            NavigationStack {
+                // Round 10: SearchView owns its big title — the
+                // wrapper's inline title was removed.
+                SearchView(playlist: playlist, searchText: $homeSearchText)
+            }
+        }
+        .cinematicBackground()
     }
 
     private func presentLiveSelection(_ selection: LivePlayerSelection) {
@@ -190,9 +296,82 @@ struct LiveStreamsView: View {
         }
     }
 
+    /// Home header. Round 5 order was count → search → chips → hero.
+    /// Round 7 (owner's direct order: "search must be at the top"): the
+    /// search bar is the FIRST element under the title, above the count
+    /// line and the hero. The tab still has exactly ONE search entry.
+    /// Round 8 removed the chips row (see the init note), so the hero
+    /// and Trending shelf render unconditionally.
+    @ViewBuilder
+    private var homeHeader: some View {
+        HomeSearchBar(placeholder: L("home.search_placeholder")) {
+            showSearchSheet = true
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+
+        // B3: Favorites filter chip (the tab's one filter chip).
+        HStack(spacing: 8) {
+            PillChipButton(title: L("favorites.title"), isSelected: favoritesOnly) {
+                favoritesOnly.toggle()
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+
+        Text(L("home.count_channels", CatalogCountFormatter.string(liveChannelSections.reduce(0) { $0 + $1.streams.count })))
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+
+        Group {
+            if let hero = heroStream {
+                LiveHeroCard(
+                    stream: hero,
+                    nowProgramTitle: heroNowTitle(for: hero),
+                    previewURL: PlaybackURLBuilder(playlist: playlist).liveURL(streamId: hero.streamId),
+                    previewActive: heroPreviewActive
+                ) {
+                    presentLiveSelection(LivePlayerSelection(stream: hero, history: heroHistory(for: hero)))
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                // Round 7 (landscape): the hero is 16:9 over the full
+                // content width — in landscape that is ~820 pt wide ×
+                // ~461 pt tall, taller than the whole viewport. Cap the
+                // card at 560 pt wide (≈315 pt tall) and center it;
+                // portrait widths (~361 pt) never reach the cap.
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity)
+                .onScrollVisibilityChange(threshold: 0.25) { visible in
+                    heroScrollVisible = visible
+                }
+            }
+
+            if trendingStreams.count >= 4 {
+                TrendingChannelsShelf(
+                    playlist: playlist,
+                    items: trendingStreams,
+                    onStreamSelected: { stream, history in
+                        presentLiveSelection(LivePlayerSelection(stream: stream, history: history))
+                    }
+                )
+                .padding(.top, 18)
+            }
+        }
+    }
+
     private var contentList: some View {
         ScrollViewReader { proxy in
             ScrollView {
+                homeHeader
+
+                // Round 8: no chip switch anymore (see the init note) —
+                // the shelves are the tab's only content arrangement,
+                // with the Continue Watching row as its one History
+                // surface.
                 ContinueWatchingRow(
                     playlist: playlist,
                     typeFilter: "live",
@@ -223,12 +402,17 @@ struct LiveStreamsView: View {
                 }
             }
             .refreshable {
-                // SwiftUI, ScrollView yeniden çizilince refreshable task'ını iptal
-                // edebiliyor; iptal child URLSession isteklerine yayılıp "cancelled"
-                // hatası üretiyordu. Bağımsız Task iptalden etkilenmez; await task.value
-                // spinner'ı iş bitene dek tutar.
+                // SwiftUI can cancel the refreshable task when the ScrollView redraws;
+                // the cancellation propagated to the child URLSession requests and produced a "cancelled"
+                // error. An independent Task is not affected by cancellation; await task.value
+                // keeps the spinner until the work finishes.
                 let work = Task { await contentStore.refreshFromNetwork(playlist: playlist, only: .live) }
                 await work.value
+                // C12: success haptic + UI sound on real completion.
+                if contentStore.loadError == nil {
+                    Haptics.success()
+                    AppSound.play(.refreshSuccess)
+                }
             }
             .onChange(of: pendingScrollTarget) { _, target in
                 guard let target else { return }
@@ -258,39 +442,37 @@ struct LiveStreamsView: View {
         }
     }
 
+    /// Round 3: with the native search bar removed there is no in-tab
+    /// query anymore — the display set is simply every visible category
+    /// with its streams, exactly what the old empty-query path produced.
     private func recomputeFilter() async {
         guard playlist.id == contentStore.activePlaylistId else {
-            displayCategories = []; displayItemsByCategory = [:]; return
+            displayCategories = []; displayItemsByCategory = [:]; liveChannelSections = []; return
         }
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")
-        let allCats = contentStore.liveCategories.filter { !hidden.contains($0.id) }
-        let allByCategory = contentStore.liveStreamsByCategoryId
-        let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
-
-        if q.isEmpty {
-            displayCategories = allCats
-            displayItemsByCategory = allByCategory
-            return
-        }
-
-        let result = await Task.detached(priority: .userInitiated) {
-            var cats: [DBCategory] = []
-            var byCategory: [String: [LiveStreamWithCategory]] = [:]
-            for cat in allCats {
-                let catMatch = CatalogTextSearch.matches(search: q, text: cat.name)
-                let items = allByCategory[cat.id] ?? []
-                let filtered = catMatch ? items : items.filter { CatalogTextSearch.matches(search: q, text: $0.stream.name) }
-                if catMatch || !filtered.isEmpty {
-                    cats.append(cat)
-                    byCategory[cat.id] = filtered
-                }
+        displayCategories = orderStore.applyOrder(
+            contentStore.liveCategories.filter { !hidden.contains($0.id) },
+            playlistId: playlist.id, type: "live"
+        ) { $0.id }
+        displayItemsByCategory = contentStore.liveStreamsByCategoryId
+        if favoritesOnly {
+            // B3: keep only favorite channels (and categories that
+            // still hold one) — hero, trending and the play queue all
+            // derive from these same display values.
+            let favoriteIds = Set(favoriteLiveChannels.map(\.stream.streamId))
+            displayItemsByCategory = displayItemsByCategory.mapValues { items in
+                items.filter { favoriteIds.contains($0.stream.streamId) }
             }
-            return (cats, byCategory)
-        }.value
-
-        guard !Task.isCancelled else { return }
-        displayCategories = result.0
-        displayItemsByCategory = result.1
+            displayCategories = displayCategories.filter { !(displayItemsByCategory[$0.id]?.isEmpty ?? true) }
+        }
+        // Round 8 (audit A3): cache the sections here — the old computed
+        // property's mapping, verbatim — so body, hero, trending and the
+        // count line read this instead of re-mapping per render.
+        liveChannelSections = displayCategories.compactMap { cat in
+            let streams = displayItemsByCategory[cat.id]?.map(\.stream) ?? []
+            guard !streams.isEmpty else { return nil }
+            return LiveChannelCategorySection(id: cat.id, title: cat.name, streams: streams)
+        }
     }
 
     private func liveStream(for item: DBWatchHistory) -> DBLiveStream? {
@@ -298,8 +480,8 @@ struct LiveStreamsView: View {
         if let match = livePlaybackQueue.first(where: { $0.streamId == streamId }) {
             return match
         }
-        // Lazy arama: eager flatMap+map tüm katalogu iki kez kopyalayıp tap gecikmesine
-        // onlarca ms ekliyordu; .lazy.joined() ara dizi kurmaz, .first eşleşmede durur.
+        // Lazy search: the eager flatMap+map was copying the whole catalog twice and adding
+        // tens of ms to the tap latency; .lazy.joined() builds no intermediate array and stops at the .first match.
         return contentStore.liveStreamsByCategoryId.values
             .lazy
             .joined()
@@ -310,7 +492,7 @@ struct LiveStreamsView: View {
 
 // MARK: - Category shelf (horizontal preview)
 private enum CategoryShelf {
-    static let prefetchHeadCount = 32
+    static let prefetchHeadCount = 16 // Round 7: 32 → 16 (see ListImagePrefetch — bounds speculative decode work per shelf)
 }
 
 struct LiveCategoryShelfRow: View, Equatable {
@@ -331,22 +513,13 @@ struct LiveCategoryShelfRow: View, Equatable {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                NavigationLink {
-                    LiveCategoryDetailView(playlist: playlist, category: category)
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(category.name)
-                            .font(.headline)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .foregroundStyle(.primary)
-                }
-                Spacer()
+            // Round 8: the ONE shelf-header style — was a headline +
+            // chevron NavigationLink with a trailing count badge; now
+            // CinematicSectionHeader carries the same destination and
+            // the same real per-category count badge (elite pattern).
+            CinematicSectionHeader(title: category.name, count: items.isEmpty ? nil : items.count) {
+                LiveCategoryDetailView(playlist: playlist, category: category)
             }
-            .padding(.horizontal, 16)
 
             if items.isEmpty {
                 if isStreamsLoading {
@@ -360,7 +533,7 @@ struct LiveCategoryShelfRow: View, Equatable {
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: 12) {
-                        ForEach(items) { item in
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                             LiveStreamCard(
                                 playlistId: playlist.id,
                                 stream: item.stream,
@@ -370,12 +543,33 @@ struct LiveCategoryShelfRow: View, Equatable {
                             ) { stream, history in
                                 onStreamSelected?(stream, history)
                             }
+                            .liveCardContextMenu(
+                                playlist: playlist,
+                                stream: item.stream,
+                                categoryId: category.id,
+                                categoryName: category.name
+                            )
+                            // Round 20 (R20-5): as each cell appears,
+                            // warm the logos just ahead of it — the
+                            // old head-only prefetch left every logo
+                            // past the first 16 a cold request during
+                            // fast horizontal scrolls.
+                            .onAppear {
+                                prefetchWindow(from: items, after: index)
+                            }
                         }
                     }
                     .padding(.horizontal, 16)
                 }
                 .onAppear {
                     prefetchIcons(from: items)
+                }
+                .onDisappear {
+                    // Round 20 (R20-5): retract this shelf's
+                    // not-yet-started head batch so a fast vertical
+                    // fling doesn't leave the shared prefetch queue
+                    // full of shelves the user already passed.
+                    stopPrefetchIcons(from: items)
                 }
             }
         }
@@ -387,6 +581,34 @@ struct LiveCategoryShelfRow: View, Equatable {
             .compactMap { $0.stream.streamIcon }
             .compactMap { URL(string: $0) }
         ListImagePrefetch.start(
+            urls: urls,
+            width: posterMetrics.liveShelfIcon,
+            height: posterMetrics.liveShelfIcon,
+            loadProfile: .shelf
+        )
+    }
+
+    /// Round 20 (R20-5): the scroll window ahead of the cell at
+    /// `index` (see ListImagePrefetch.scrollWindow).
+    private func prefetchWindow(from list: [LiveStreamWithCategory], after index: Int) {
+        let start = index + 1
+        guard start < list.count else { return }
+        let urls = list[start..<min(start + ListImagePrefetch.scrollWindow, list.count)]
+            .compactMap { $0.stream.streamIcon }
+            .compactMap { URL(string: $0) }
+        ListImagePrefetch.start(
+            urls: urls,
+            width: posterMetrics.liveShelfIcon,
+            height: posterMetrics.liveShelfIcon,
+            loadProfile: .shelf
+        )
+    }
+
+    private func stopPrefetchIcons(from list: [LiveStreamWithCategory]) {
+        let urls = list.prefix(CategoryShelf.prefetchHeadCount)
+            .compactMap { $0.stream.streamIcon }
+            .compactMap { URL(string: $0) }
+        ListImagePrefetch.stop(
             urls: urls,
             width: posterMetrics.liveShelfIcon,
             height: posterMetrics.liveShelfIcon,
@@ -414,7 +636,7 @@ struct LiveStreamCard: View {
                     url: stream.streamIcon.flatMap { URL(string: $0) },
                     width: iconSize,
                     height: iconSize,
-                    cornerRadius: 12,
+                    cornerRadius: AppTheme.cornerRadius,
                     iconName: "tv",
                     loadProfile: imageLoadProfile
                 )
@@ -434,6 +656,86 @@ struct LiveStreamCard: View {
             }
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Trending Channels shelf (home header)
+
+/// "Trending Channels" row on the Live home header. There is no popularity
+/// signal in the catalog, so the row is deterministic: the FIRST channel of
+/// each visible category, in category order (round 3 — one per category
+/// keeps the tiles diverse instead of repeating one category's logos).
+/// Tiles are the existing `LiveStreamCard` (real logo, name, and real EPG
+/// now-line). "See all" opens the existing All Channels grid — the tab's
+/// ONE all-grid entry (round 8 dedupe removed the toolbar grid button
+/// that duplicated it).
+struct TrendingChannelsShelf: View {
+    let playlist: Playlist
+    let items: [DBLiveStream]
+    var onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil
+
+    @Environment(\.posterMetrics) private var posterMetrics
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // B1 (Round 14): renamed — the row is the first channel
+            // of each category, i.e. a categories browse, not trending.
+            CinematicSectionHeader(title: L("home.browse_categories")) {
+                AllLiveView(playlist: playlist)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(items.indices, id: \.self) { index in
+                        LiveStreamCard(
+                            playlistId: playlist.id,
+                            stream: items[index],
+                            width: posterMetrics.liveShelfLabelWidth,
+                            iconSize: posterMetrics.liveShelfIcon,
+                            imageLoadProfile: .shelf
+                        ) { stream, history in
+                            onStreamSelected?(stream, history)
+                        }
+                        .liveCardContextMenu(
+                            playlist: playlist,
+                            stream: items[index],
+                            categoryId: items[index].categoryId,
+                            categoryName: PlaylistContentStore.shared.liveCategories
+                                .first(where: { $0.id == items[index].categoryId })?.name
+                        )
+                        .shelfCardAppear(index: index)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .onAppear {
+                prefetchIcons(from: items)
+            }
+        }
+        .padding(.bottom, 6)
+    }
+
+    /// Round 9 (owner recording, build 45): the trending tiles and the
+    /// category-shelf tiles are the SAME `LiveStreamCard` with the same
+    /// URL field (`streamIcon`), size and profile — but the category
+    /// shelves prefetch their head icons with the exact render request
+    /// (see `LiveCategoryShelfRow.prefetchIcons`) while this shelf never
+    /// did. Its 15 tiles therefore fired cold in the open-time request
+    /// storm (hero logo + live preview + EPG over 4 connections/host),
+    /// and a first attempt that timed out left the placeholder up for
+    /// the whole session while the same channel's prefetched logo
+    /// rendered fine in its category row. Same fix as the rows: warm
+    /// the identical requests on appear.
+    private func prefetchIcons(from list: [DBLiveStream]) {
+        let urls = list.prefix(CategoryShelf.prefetchHeadCount)
+            .compactMap { $0.streamIcon }
+            .compactMap { URL(string: $0) }
+        ListImagePrefetch.start(
+            urls: urls,
+            width: posterMetrics.liveShelfIcon,
+            height: posterMetrics.liveShelfIcon,
+            loadProfile: .shelf
+        )
     }
 }
 
@@ -520,6 +822,7 @@ struct LiveCategoryContent: View, Equatable {
     @Environment(\.posterMetrics) private var posterMetrics
 
     @AppStorage(LiveSortOption.storageKey) private var sortOption: LiveSortOption = .defaultOrder
+    @State private var showSortSheet = false
     /// Screen-local toggle filters (catch-up / EPG).
     @State private var filter: LiveStreamFilter = []
     /// Sort/filter output, recomputed off the main thread on input changes.
@@ -557,7 +860,13 @@ struct LiveCategoryContent: View, Equatable {
 
     private func loadMore() {
         guard visibleCount < displayItems.count else { return }
+        let pageStart = visibleCount
         visibleCount = min(visibleCount + Self.pageSize, displayItems.count)
+        // Round 20 (R20-5): warm the page that is about to be
+        // revealed — the old flow only ever prefetched the grid's
+        // first 24 logos (at recompute), so every paged-in page
+        // painted cold during fast scrolling.
+        prefetch(displayItems, startingAt: pageStart)
     }
 
     var body: some View {
@@ -587,6 +896,12 @@ struct LiveCategoryContent: View, Equatable {
                                 imageLoadProfile: .grid,
                                 onStreamSelected: onStreamSelected
                             )
+                            .liveCardContextMenu(
+                                playlist: playlist,
+                                stream: item.stream,
+                                categoryId: item.stream.categoryId,
+                                categoryName: item.categoryName
+                            )
                             .onAppear { if index >= visibleCount - 15 { loadMore() } }
                         }
                     }
@@ -610,50 +925,50 @@ struct LiveCategoryContent: View, Equatable {
         .task(id: filter.rawValue) { await recompute() }
     }
 
+    /// Round 10 (point 13): the raw popover `Menu` is now the
+    /// styled `SortFilterSheet` bottom sheet — same state, same
+    /// options, same toggle/clear behavior.
     private var sortFilterMenu: some View {
-        Menu {
-            Picker(L("sort.title"), selection: $sortOption) {
-                ForEach(LiveSortOption.allCases) { option in
-                    Label(L(option.titleKey), systemImage: option.systemImage).tag(option)
-                }
-            }
-
-            Section(L("filter.title")) {
-                Button {
-                    filter.formSymmetricDifference(.catchup)
-                } label: {
-                    if filter.contains(.catchup) {
-                        Label(L("filter.catchup"), systemImage: "checkmark")
-                    } else {
-                        Text(L("filter.catchup"))
-                    }
-                }
-                Button {
-                    filter.formSymmetricDifference(.hasEPG)
-                } label: {
-                    if filter.contains(.hasEPG) {
-                        Label(L("filter.has_epg"), systemImage: "checkmark")
-                    } else {
-                        Text(L("filter.has_epg"))
-                    }
-                }
-                if !filter.isEmpty {
-                    Button(role: .destructive) {
-                        filter = []
-                    } label: {
-                        Label(L("filter.clear"), systemImage: "xmark.circle")
-                    }
-                }
-            }
+        Button {
+            showSortSheet = true
         } label: {
             Image(systemName: isFilterActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                 .font(.body.weight(.semibold))
         }
         .accessibilityLabel(L("sort.title"))
+        .sheet(isPresented: $showSortSheet) {
+            SortFilterSheet(
+                sortRows: LiveSortOption.allCases.map { option in
+                    SortFilterSheet.Row(
+                        id: option.rawValue,
+                        title: L(option.titleKey),
+                        systemImage: option.systemImage,
+                        isSelected: sortOption == option
+                    ) { sortOption = option }
+                },
+                filterTitle: L("filter.title"),
+                filterRows: [
+                    SortFilterSheet.Row(
+                        id: "catchup",
+                        title: L("filter.catchup"),
+                        isSelected: filter.contains(.catchup)
+                    ) { filter.formSymmetricDifference(.catchup) },
+                    SortFilterSheet.Row(
+                        id: "hasEPG",
+                        title: L("filter.has_epg"),
+                        isSelected: filter.contains(.hasEPG)
+                    ) { filter.formSymmetricDifference(.hasEPG) }
+                ],
+                // B1 (Round 14): Clear resets the FILTERS and the
+                // SORT together — the old clear left a non-default
+                // sort silently in force.
+                onClearFilters: { filter = []; sortOption = .defaultOrder }
+            )
+        }
     }
 
-    private func prefetch(_ list: [LiveStreamWithCategory]) {
-        let urls = list.prefix(ListImagePrefetch.maxBatch)
+    private func prefetch(_ list: [LiveStreamWithCategory], startingAt: Int = 0) {
+        let urls = list.dropFirst(startingAt).prefix(ListImagePrefetch.maxBatch)
             .compactMap { $0.stream.streamIcon }
             .compactMap { URL(string: $0) }
         ListImagePrefetch.start(urls: urls, width: posterMetrics.liveGridIconSize, height: posterMetrics.liveGridIconSize, loadProfile: .grid)
@@ -712,6 +1027,7 @@ struct AllLiveView: View {
         .task(id: debouncedQuery) { await recompute() }
         .task(id: contentStore.streamsLoaded) { await recompute() }
         .task(id: hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")) { await recompute() }
+        .cinematicBackground()
     }
 
     private func recompute() async {
@@ -764,8 +1080,8 @@ struct LivePlayerShell: View {
         self.subtitle = subtitle
         self.initialStream = initialStream
         self.initialHistory = initialHistory
-        // Sections shell ömrü boyunca değişmez; her body değerlendirmesinde (kanal zap,
-        // panel aç/kapa) on binlerce kanalı yeniden map'lemek yerine bir kez kur.
+        // The sections do not change for the shell's lifetime; build them once instead of re-mapping tens of thousands of channels on every body evaluation (channel zap,
+        // panel open/close).
         self.panelSections = sections.map { section in
             ChannelPanelSection(
                 id: section.id,
