@@ -51,12 +51,25 @@ nonisolated enum DatabaseSafety {
     /// open + probe flow decides what that means).
     static func pendingMigrations(at url: URL) -> [String]? {
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
-        do {
+        func appliedIdentifiers(readonly: Bool) throws -> Set<String> {
             var config = Configuration()
-            config.readonly = true
+            config.readonly = readonly
             let queue = try DatabaseQueue(path: url.path, configuration: config)
-            let applied = try queue.read { db in
+            return try queue.read { db in
                 try AppDatabase.appliedMigrationIdentifiers(db)
+            }
+        }
+        do {
+            // Read-only first. A WAL database whose -shm sidecar
+            // is absent can refuse a read-only open, so fall back
+            // to a plain read-write open — a bare GRDB queue runs
+            // NO migrations (AppDatabase owns those), it only
+            // performs standard WAL recovery.
+            let applied: Set<String>
+            if let viaReadonly = try? appliedIdentifiers(readonly: true) {
+                applied = viaReadonly
+            } else {
+                applied = try appliedIdentifiers(readonly: false)
             }
             return AppDatabase.registeredMigrationIdentifiers.filter { !applied.contains($0) }
         } catch {
