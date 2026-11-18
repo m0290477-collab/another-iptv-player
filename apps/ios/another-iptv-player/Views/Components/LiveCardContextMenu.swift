@@ -13,10 +13,13 @@ import GRDB
 /// `DownloadManager.enqueue` call site is movie/episode only). Adding
 /// the row would be a fake action.
 ///
-/// State (favorite / watch-history presence) is resolved ONCE when the
-/// card appears — one small DB read per visible card, the same cost
-/// class as the existing per-card favorite lookups — never inside
+/// State (favorite / watch-history presence) is resolved when the
+/// card appears (`.task` + `.onAppear`, so returning from the player
+/// refreshes the facts) — one small DB read per visible card, the same
+/// cost class as the existing per-card favorite lookups — never inside
 /// `body` or the menu builder, which only read the resolved values.
+/// The actions themselves re-resolve their fact fresh at tap time, so
+/// a stale cached value can never make a tap throw or silently no-op.
 struct LiveCardContextMenu: ViewModifier {
     let playlist: Playlist
     let stream: DBLiveStream
@@ -31,6 +34,12 @@ struct LiveCardContextMenu: ViewModifier {
             .task(id: "\(playlist.id.uuidString)-\(stream.streamId)") {
                 await resolveState()
             }
+            .onAppear {
+                // Re-resolve on every appearance: the card may have
+                // stayed mounted while the favorite/history facts
+                // changed elsewhere (e.g. inside the player).
+                Task { await resolveState() }
+            }
             .contextMenu {
                 Button {
                     toggleFavorite()
@@ -39,7 +48,7 @@ struct LiveCardContextMenu: ViewModifier {
                           systemImage: isFavorite ? "star.slash" : "star")
                 }
 
-                if let categoryId, let categoryName, categoryId != "all" {
+                if let categoryId, let categoryName, categoryId != "all", !categoryId.isEmpty {
                     Button {
                         HiddenCategoryStore.shared.setHidden(
                             true, playlistId: playlist.id, type: "live", categoryId: categoryId
@@ -49,9 +58,9 @@ struct LiveCardContextMenu: ViewModifier {
                     }
                 }
 
-                if let historyRowId {
+                if historyRowId != nil {
                     Button(role: .destructive) {
-                        removeFromContinueWatching(id: historyRowId)
+                        removeFromContinueWatching()
                     } label: {
                         Label(L("continue_watching.remove"), systemImage: "xmark.circle")
                     }
@@ -83,13 +92,28 @@ struct LiveCardContextMenu: ViewModifier {
     }
 
     /// The same DBFavorite write `LivePlayerShell.toggleFavorite`
-    /// performs for the in-player star.
+    /// performs for the in-player star. The CURRENT favorite state is
+    /// read fresh at tap time and the insert/delete follows THAT
+    /// value: inserting when the row already exists would throw
+    /// against the (streamId, playlistId, type) composite primary key
+    /// and make the tap visibly do nothing, and deleting when it is
+    /// already gone must stay a harmless no-op.
     private func toggleFavorite() {
         let streamId = stream.streamId
         let playlistId = playlist.id
-        let nextValue = !isFavorite
-        isFavorite = nextValue
         Task {
+            let fresh = try? await AppDatabase.shared.read { db in
+                try DBFavorite
+                    .filter(Column("streamId") == streamId
+                        && Column("playlistId") == playlistId
+                        && Column("type") == "live")
+                    .fetchCount(db) > 0
+            }
+            // If the fresh read itself failed, fall back to the cached
+            // value rather than guessing the opposite.
+            let currentValue = fresh ?? isFavorite
+            let nextValue = !currentValue
+            isFavorite = nextValue
             do {
                 try await AppDatabase.shared.write { db in
                     if nextValue {
@@ -105,18 +129,28 @@ struct LiveCardContextMenu: ViewModifier {
                     }
                 }
             } catch {
-                isFavorite = !nextValue
+                isFavorite = currentValue
             }
         }
     }
 
     /// The same deletion `ContinueWatchingRow` performs for its
-    /// long-press Remove: delete the backing watch-history row.
-    private func removeFromContinueWatching(id: String) {
+    /// long-press Remove: delete the backing watch-history row. The
+    /// row is resolved at tap time by stream identity — not by the
+    /// cached row id — so a row created or removed since the card
+    /// appeared is handled correctly, and an already-gone row is a
+    /// harmless no-op.
+    private func removeFromContinueWatching() {
         historyRowId = nil
+        let streamId = stream.streamId
+        let playlistId = playlist.id
         Task {
             try? await AppDatabase.shared.write { db in
-                try DBWatchHistory.filter(Column("id") == id).deleteAll(db)
+                try DBWatchHistory
+                    .filter(Column("streamId") == String(streamId)
+                        && Column("playlistId") == playlistId
+                        && Column("type") == "live")
+                    .deleteAll(db)
             }
         }
     }
