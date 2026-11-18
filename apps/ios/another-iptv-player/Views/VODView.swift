@@ -45,7 +45,12 @@ struct VODView: View {
     private static let newestPageSize = 90
 
     private var pickerEntries: [CategoryPickerSheet.Entry] {
-        orderStore.applyOrder(contentStore.vodCategories, playlistId: playlist.id, type: "vod") { $0.id }.map { cat in
+        // Build 61 (B8, Z6): empty categories are not jump targets
+        // unless the user shows empty categories.
+        let visible = EmptyCategoryVisibility.visible(contentStore.vodCategories) {
+            contentStore.vodStreamsByCategoryId[$0.id]?.count ?? 0
+        }
+        return orderStore.applyOrder(visible, playlistId: playlist.id, type: "vod") { $0.id }.map { cat in
             CategoryPickerSheet.Entry(
                 id: cat.id,
                 name: cat.name,
@@ -387,7 +392,11 @@ struct VODView: View {
         ) { $0.id }
         let allByCategory = contentStore.vodStreamsByCategoryId
 
-        displayCategories = allCats
+        // Build 61 (B8, Z6): empty categories hidden by default once
+        // the catalog is loaded (Appearance toggle restores them).
+        displayCategories = contentStore.streamsLoaded
+            ? EmptyCategoryVisibility.visible(allCats) { allByCategory[$0.id]?.count ?? 0 }
+            : allCats
         displayItemsByCategory = allByCategory
         let visibleCatIds = Set(allCats.map(\.id))
         let allVODs = contentStore.vodStreams

@@ -26,6 +26,16 @@ struct LiveStreamsView: View {
 
     @State private var showSearchSheet = false
     @State private var homeSearchText = ""
+    // Build 61 (B8, Z13): the Live tab's browsing mode — "grid"
+    // (large logo grid) is the DEFAULT; "list" is the shelf layout.
+    // The choice persists in AppStorage.
+    @AppStorage("live.viewMode") private var liveViewMode = "grid"
+    @State private var gridSearchText = ""
+    @State private var gridDebouncedQuery = ""
+    @State private var gridDebounceTask: Task<Void, Never>?
+    @State private var gridItems: [LiveStreamWithCategory] = []
+    // Build 61 (B8, Z6): recompute when the empty-category toggle flips.
+    @AppStorage(EmptyCategoryVisibility.defaultsKey) private var showEmptyCategories = false
     // === B5 (build 61) Item 11: Multiview entry state — wave-2 (B8) preserve ===
     @State private var showMultiview = false
     // === End B5 Item 11 state ===
@@ -85,8 +95,13 @@ struct LiveStreamsView: View {
         // B1 (Round 14): hidden categories are NOT jump targets —
         // the picker only lists visible categories (the picker sheet
         // itself stays the place where hiding is managed).
-        orderStore.applyOrder(
-            contentStore.liveCategories.filter { !liveHiddenIds.contains($0.id) },
+        // Build 61 (B8, Z6): empty categories are not jump targets
+        // either, unless the user shows empty categories.
+        let visible = EmptyCategoryVisibility.visible(
+            contentStore.liveCategories.filter { !liveHiddenIds.contains($0.id) }
+        ) { contentStore.liveStreamsByCategoryId[$0.id]?.count ?? 0 }
+        return orderStore.applyOrder(
+            visible,
             playlistId: playlist.id, type: "live"
         ) { $0.id }.map { cat in
             CategoryPickerSheet.Entry(
@@ -201,6 +216,10 @@ struct LiveStreamsView: View {
         // detail screens keep their own search fields.
         .task(id: LiveRecomputeToken(loaded: contentStore.streamsLoaded, liveCount: contentStore.liveStreams.count)) { await recomputeFilter() }
         .task(id: hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")) { await recomputeFilter() }
+        // Build 61 (B8, H2): channel-hide changes refresh the shelves.
+        .task(id: HiddenChannelStore.shared.version) { await recomputeFilter() }
+        // Build 61 (B8, Z6): empty-category toggle changes refresh too.
+        .task(id: showEmptyCategories) { await recomputeFilter() }
         .task(id: orderStore.orderedIds(playlistId: playlist.id, type: "live")) { await recomputeFilter() }
         .task(id: favoritesOnly) { await recomputeFilter() }
         .toolbar {
@@ -225,6 +244,17 @@ struct LiveStreamsView: View {
                 .accessibilityLabel(L("multiview.title"))
             }
             // === End B5 Item 11 entry ===
+            // Build 61 (B8, Z13): grid/list view toggle — one tap
+            // switches the main browsing surface; choice persists.
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    liveViewMode = liveViewMode == "grid" ? "list" : "grid"
+                } label: {
+                    Image(systemName: liveViewMode == "grid" ? "list.bullet" : "square.grid.2x2")
+                        .font(.body.weight(.semibold))
+                }
+                .accessibilityLabel(L(liveViewMode == "grid" ? "channels.view.list" : "channels.view.grid"))
+            }
             // Round 8 (D-2): NO toolbar grid icon — AllLiveView was
             // reachable twice from this tab (here + the Trending
             // shelf's "See all"). The shelf entry stays as the ONE
@@ -294,6 +324,8 @@ struct LiveStreamsView: View {
             showParentalPIN = true
             return
         }
+        // Build 61 (B8, R2): opening the channel clears its NEW badge.
+        FirstSeenStore.shared.markOpened(playlistId: playlist.id, itemKey: "live:\(selection.stream.streamId)")
         playerOverlay.present(playlistId: playlist.id) {
             LivePlayerShell(
                 playlist: playlist,
@@ -417,6 +449,47 @@ struct LiveStreamsView: View {
     }
 
     private var contentList: some View {
+        // Build 61 (B8, Z13): grid is the default browsing surface;
+        // the shelf ("list") layout is one toolbar tap away.
+        if liveViewMode == "grid" {
+            gridContent
+        } else {
+            shelvesContent
+        }
+    }
+
+    /// Z13 grid mode: in-list search field (C11 — name + provider
+    /// number, as-you-type) atop the large logo grid. The grid itself
+    /// is the SAME `LiveCategoryContent` the category screens use
+    /// (one card system, O3), fed every visible channel.
+    private var gridContent: some View {
+        VStack(spacing: 0) {
+            CatalogSearchField(text: $gridSearchText, placeholder: L("live.search_placeholder"))
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+            LiveCategoryContent(
+                playlist: playlist,
+                items: gridItems,
+                onStreamSelected: { stream, history in
+                    presentLiveSelection(LivePlayerSelection(stream: stream, history: history))
+                }
+            )
+            .equatable()
+        }
+        .onChange(of: gridSearchText) { _, new in
+            gridDebounceTask?.cancel()
+            gridDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 280_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run { gridDebouncedQuery = new }
+            }
+        }
+        .onDisappear { gridDebounceTask?.cancel(); gridDebounceTask = nil }
+        .task(id: gridDebouncedQuery) { await recomputeFilter() }
+    }
+
+    private var shelvesContent: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 homeHeader
@@ -508,6 +581,14 @@ struct LiveStreamsView: View {
             playlistId: playlist.id, type: "live"
         ) { $0.id }
         displayItemsByCategory = contentStore.liveStreamsByCategoryId
+        // Build 61 (B8, H2): per-channel hides apply to the shelves
+        // as well as the category grids (same HiddenChannelStore).
+        let hiddenChannels = HiddenChannelStore.shared.hiddenIds(playlistId: playlist.id)
+        if !hiddenChannels.isEmpty {
+            displayItemsByCategory = displayItemsByCategory.mapValues { items in
+                items.filter { !hiddenChannels.contains($0.stream.streamId) }
+            }
+        }
         if favoritesOnly {
             // B3: keep only favorite channels (and categories that
             // still hold one) — hero, trending and the play queue all
@@ -517,6 +598,26 @@ struct LiveStreamsView: View {
                 items.filter { favoriteIds.contains($0.stream.streamId) }
             }
             displayCategories = displayCategories.filter { !(displayItemsByCategory[$0.id]?.isEmpty ?? true) }
+        }
+        // Build 61 (B8, Z6): once the catalog is actually loaded,
+        // empty categories leave the shelf list by default (the
+        // Appearance toggle brings them back). Applied AFTER the
+        // hidden-category and favorites filters, so an empty
+        // locked/hidden category stays hidden regardless.
+        if contentStore.streamsLoaded {
+            displayCategories = EmptyCategoryVisibility.visible(displayCategories) {
+                displayItemsByCategory[$0.id]?.count ?? 0
+            }
+        }
+        // Build 61 (B8, Z13): the grid surface's flat item list — the
+        // same display set as the shelves, flattened in category
+        // order, with the grid's in-list search applied (name +
+        // provider number, C11/H5).
+        let flat = displayCategories.flatMap { displayItemsByCategory[$0.id] ?? [] }
+        let q = gridDebouncedQuery.trimmingCharacters(in: .whitespaces)
+        gridItems = q.isEmpty ? flat : flat.filter {
+            CatalogTextSearch.matches(search: q, text: $0.stream.name)
+                || ($0.stream.channelNumber.map { String($0) == q } ?? false)
         }
         // Round 8 (audit A3): cache the sections here — the old computed
         // property's mapping, verbatim — so body, hero, trending and the
@@ -679,6 +780,10 @@ struct LiveStreamCard: View {
     var onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil
 
     @Environment(\.epgSnapshot) private var epgSnapshot
+    // Build 61 (B8): R2 NEW badge + C10 pin indicator, read from the
+    // stores at render (cards are cheap; the stores bump `version`).
+    @ObservedObject private var firstSeenStore = FirstSeenStore.shared
+    @ObservedObject private var pinnedStore = PinnedChannelStore.shared
 
     var body: some View {
         Button(action: {
@@ -693,6 +798,20 @@ struct LiveStreamCard: View {
                     iconName: "tv",
                     loadProfile: imageLoadProfile
                 )
+                .overlay(alignment: .topLeading) {
+                    if firstSeenStore.isNewLive(playlistId: playlistId, streamId: stream.streamId) {
+                        NewContentBadge()
+                            .padding(6)
+                    }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if pinnedStore.isPinned(playlistId: playlistId, streamId: stream.streamId) {
+                        Image(systemName: "pin.fill")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.accent)
+                            .padding(6)
+                    }
+                }
 
                 Text(stream.name)
                     .font(.caption)
@@ -701,6 +820,15 @@ struct LiveStreamCard: View {
                     .multilineTextAlignment(.center)
                     .frame(width: width)
                     .foregroundColor(.primary)
+
+                // Build 61 (B8, H5): the provider's channel number,
+                // only when the provider supplied one.
+                if let number = stream.channelNumber {
+                    Text(L("channels.number_format", number))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
 
                 if let snapshot = epgSnapshot {
                     EPGNowNextLine(nowNext: snapshot[EPGChannelKey.forXtream(stream)],
@@ -849,7 +977,12 @@ struct LiveCategoryDetailView: View {
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         if q.isEmpty { displayItems = base; return }
         let result = await Task.detached(priority: .userInitiated) {
-            let filtered = base.filter { CatalogTextSearch.matches(search: q, text: $0.stream.name) }
+            // Build 61 (B8, C11 + H5): the in-list field matches the
+            // provider channel number as well as the name.
+            let filtered = base.filter {
+                CatalogTextSearch.matches(search: q, text: $0.stream.name)
+                    || ($0.stream.channelNumber.map { String($0) == q } ?? false)
+            }
             return CatalogTextSearch.sortLiveByRelevance(filtered, search: q)
         }.value
         guard !Task.isCancelled else { return }
@@ -882,6 +1015,17 @@ struct LiveCategoryContent: View, Equatable {
     @State private var displayItems: [LiveStreamWithCategory] = []
     /// Paginated render count so a huge catalog doesn't build one giant ForEach.
     @State private var visibleCount = Self.pageSize
+    // Build 61 (B8): C10 pins / H2 hidden channels / O7 favorite tier.
+    @ObservedObject private var pinnedStore = PinnedChannelStore.shared
+    @ObservedObject private var hiddenChannelStore = HiddenChannelStore.shared
+    @Query<FavoriteLiveRequest> private var favoriteLiveChannels: [LiveStreamWithCategory]
+
+    init(playlist: Playlist, items: [LiveStreamWithCategory], onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil) {
+        self.playlist = playlist
+        self.items = items
+        self.onStreamSelected = onStreamSelected
+        _favoriteLiveChannels = Query(FavoriteLiveRequest(playlistId: playlist.id), in: \.appDatabase)
+    }
 
     private static let pageSize = 90
 
@@ -903,8 +1047,16 @@ struct LiveCategoryContent: View, Equatable {
         let source = items
         let sort = sortOption
         let activeFilter = filter
+        // Build 61 (B8): hidden channels drop out; O7 tiers
+        // (pinned → favorites) hold in front of the chosen sort,
+        // which supplies tier 3 (custom order / alphabetical).
+        let hidden = hiddenChannelStore.hiddenIds(playlistId: playlist.id)
+        let pinned = pinnedStore.pinnedIds(playlistId: playlist.id)
+        let favorites = Set(favoriteLiveChannels.map(\.stream.streamId))
         let result = await Task.detached(priority: .userInitiated) {
-            sort.apply(to: LiveStreamFilter.apply(source, activeFilter))
+            let visible = source.filter { !hidden.contains($0.stream.streamId) }
+            let sorted = sort.apply(to: LiveStreamFilter.apply(visible, activeFilter))
+            return ChannelOrdering.pinnedFavoritesFirst(sorted, pinned: pinned, favorites: favorites) { $0.stream.streamId }
         }.value
         displayItems = result
         visibleCount = min(Self.pageSize, result.count)
@@ -976,6 +1128,9 @@ struct LiveCategoryContent: View, Equatable {
         .task(id: itemsToken) { await recompute() }
         .task(id: sortOption) { await recompute() }
         .task(id: filter.rawValue) { await recompute() }
+        // Build 61 (B8): pin/hide changes re-run the same recompute.
+        .task(id: pinnedStore.version) { await recompute() }
+        .task(id: hiddenChannelStore.version) { await recompute() }
     }
 
     /// Round 10 (point 13): the raw popover `Menu` is now the
@@ -1092,7 +1247,11 @@ struct AllLiveView: View {
         let result = await Task.detached(priority: .userInitiated) {
             let base = source.filter { !hidden.contains($0.stream.categoryId ?? "") }
             if q.isEmpty { return base }
-            let filtered = base.filter { CatalogTextSearch.matches(search: q, text: $0.stream.name) }
+            // Build 61 (B8, C11 + H5): name OR provider channel number.
+            let filtered = base.filter {
+                CatalogTextSearch.matches(search: q, text: $0.stream.name)
+                    || ($0.stream.channelNumber.map { String($0) == q } ?? false)
+            }
             return CatalogTextSearch.sortLiveByRelevance(filtered, search: q)
         }.value
         guard !Task.isCancelled else { return }

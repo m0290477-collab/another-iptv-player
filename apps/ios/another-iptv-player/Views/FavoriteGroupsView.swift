@@ -227,16 +227,22 @@ struct FavoriteGroupsView: View {
 struct FavoriteGroupMenuItems: View {
     let playlist: Playlist
     let item: FavoriteGroupStore.Item
+    /// Context menus cannot host a NavigationLink reliably; callers
+    /// inside one pass false and the row simply appears once at least
+    /// one group exists (creation lives on FavoriteGroupsView).
+    var allowCreateLink: Bool = true
 
     @ObservedObject private var groupStore = FavoriteGroupStore.shared
 
     var body: some View {
         let groups = groupStore.groups(playlistId: playlist.id)
         if groups.isEmpty {
-            NavigationLink {
-                FavoriteGroupsView(playlist: playlist)
-            } label: {
-                Label(L("groups.add_to_group"), systemImage: "folder.badge.plus")
+            if allowCreateLink {
+                NavigationLink {
+                    FavoriteGroupsView(playlist: playlist)
+                } label: {
+                    Label(L("groups.add_to_group"), systemImage: "folder.badge.plus")
+                }
             }
         } else {
             Menu {

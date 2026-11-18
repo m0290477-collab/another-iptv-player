@@ -50,7 +50,12 @@ struct SeriesView: View {
     @State private var pendingSeriesDetail: DBSeries?
 
     private var pickerEntries: [CategoryPickerSheet.Entry] {
-        orderStore.applyOrder(contentStore.seriesCategories, playlistId: playlist.id, type: "series") { $0.id }.map { cat in
+        // Build 61 (B8, Z6): empty categories are not jump targets
+        // unless the user shows empty categories.
+        let visible = EmptyCategoryVisibility.visible(contentStore.seriesCategories) {
+            contentStore.seriesItemsByCategoryId[$0.id]?.count ?? 0
+        }
+        return orderStore.applyOrder(visible, playlistId: playlist.id, type: "series") { $0.id }.map { cat in
             CategoryPickerSheet.Entry(
                 id: cat.id,
                 name: cat.name,
@@ -394,7 +399,11 @@ struct SeriesView: View {
         ) { $0.id }
         let allByCategory = contentStore.seriesItemsByCategoryId
 
-        displayCategories = allCats
+        // Build 61 (B8, Z6): empty categories hidden by default once
+        // the catalog is loaded (Appearance toggle restores them).
+        displayCategories = contentStore.streamsLoaded
+            ? EmptyCategoryVisibility.visible(allCats) { allByCategory[$0.id]?.count ?? 0 }
+            : allCats
         displayItemsByCategory = allByCategory
         let visibleCatIds = Set(allCats.map(\.id))
         let allSeries = contentStore.seriesItems

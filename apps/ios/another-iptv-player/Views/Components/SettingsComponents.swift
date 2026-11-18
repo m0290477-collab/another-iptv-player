@@ -1467,6 +1467,9 @@ struct PlaybackSettingsSection: View {
 /// not duplicated here.
 struct AppearanceSettingsSection: View {
     @AppStorage("app.appearance") private var appearance = "dark"
+    // Build 61 (B8, Z6): empty provider categories are hidden by
+    // default; this toggle (default OFF) shows them again.
+    @AppStorage(EmptyCategoryVisibility.defaultsKey) private var showEmptyCategories = false
 
     var body: some View {
         Section(header: ScopedSectionHeader(title: L("settings.appearance.title"), thisPlaylist: false)) {
@@ -1479,6 +1482,18 @@ struct AppearanceSettingsSection: View {
                 Text(L("settings.appearance.system")).tag("system")
                 Text(L("settings.appearance.light")).tag("light")
                 Text(L("settings.appearance.dark")).tag("dark")
+            }
+
+            Toggle(isOn: $showEmptyCategories) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "folder", tint: .gray)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("settings.show_empty_categories.title"))
+                        Text(L("settings.show_empty_categories.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
     }
