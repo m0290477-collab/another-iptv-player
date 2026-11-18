@@ -46,10 +46,42 @@ enum BackupService {
         var movieIds: [Int]
     }
 
+    /// Build 61 (B8, J1): one favorite group, mirroring
+    /// `FavoriteGroupStore.Group` field-for-field (including the R6
+    /// display snapshots). Optional in the payload so pre-B8 backup
+    /// files still decode.
+    struct GroupItemDTO: Codable, Equatable {
+        var type: String
+        var itemId: String
+        var title: String
+        var imageURL: String?
+    }
+
+    struct GroupDTO: Codable, Equatable {
+        var id: String
+        var name: String
+        var items: [GroupItemDTO] = []
+    }
+
+    struct GroupsDTO: Codable, Equatable {
+        var playlistId: String
+        var groups: [GroupDTO] = []
+    }
+
+    /// Build 61 (B8, C2): one playlist's series Watch Later list.
+    struct SeriesWatchlistDTO: Codable, Equatable {
+        var playlistId: String
+        var seriesIds: [Int]
+    }
+
     struct LibraryDTO: Codable, Equatable {
         var favorites: [FavoriteDTO] = []
         var m3uFavorites: [M3UFavoriteDTO] = []
         var watchlist: [WatchlistDTO] = []
+        // Build 61 (B8) additive fields — defaulted, so old backup
+        // files decode unchanged.
+        var groups: [GroupsDTO] = []
+        var seriesWatchlist: [SeriesWatchlistDTO] = []
     }
 
     // MARK: - Export
@@ -80,6 +112,22 @@ enum BackupService {
             if !ids.isEmpty {
                 library.watchlist.append(WatchlistDTO(playlistId: id.uuidString, movieIds: ids))
             }
+            // Build 61 (B8): series Watch Later + favorite groups.
+            let seriesIds = await WatchlistStore.shared.seriesIds(playlistId: id)
+            if !seriesIds.isEmpty {
+                library.seriesWatchlist.append(SeriesWatchlistDTO(playlistId: id.uuidString, seriesIds: seriesIds))
+            }
+            let groups = await FavoriteGroupStore.shared.groups(playlistId: id)
+            if !groups.isEmpty {
+                library.groups.append(GroupsDTO(
+                    playlistId: id.uuidString,
+                    groups: groups.map { group in
+                        GroupDTO(id: group.id, name: group.name, items: group.items.map {
+                            GroupItemDTO(type: $0.type, itemId: $0.itemId, title: $0.title, imageURL: $0.imageURL)
+                        })
+                    }
+                ))
+            }
         }
         return library
     }
@@ -90,6 +138,9 @@ enum BackupService {
         var favoritesImported: Int = 0
         var watchlistImported: Int = 0
         var skippedUnmapped: Int = 0
+        // Build 61 (B8) additive counters.
+        var groupsImported: Int = 0
+        var seriesWatchlistImported: Int = 0
     }
 
     /// Applies a backup's library through the id map (source
@@ -159,6 +210,44 @@ enum BackupService {
                 UserDefaults.standard.set(merged, forKey: key)
                 result.watchlistImported += added
             }
+        }
+
+        // Build 61 (B8): series Watch Later — same union rule through
+        // the store's own key format ("watchlist.series.<playlistId>").
+        for dto in library.seriesWatchlist {
+            guard let target = playlistIdMap[dto.playlistId] else {
+                result.skippedUnmapped += 1
+                continue
+            }
+            let key = "watchlist.series.\(target.uuidString)"
+            let existing = UserDefaults.standard.array(forKey: key) as? [Int] ?? []
+            var merged = existing
+            var added = 0
+            for id in dto.seriesIds where !merged.contains(id) {
+                merged.append(id)
+                added += 1
+            }
+            if added > 0 {
+                UserDefaults.standard.set(merged, forKey: key)
+                result.seriesWatchlistImported += added
+            }
+        }
+
+        // Build 61 (B8, J1): favorite groups — union-merged into the
+        // target playlist's store (group ids are UUIDs, stable
+        // across devices; items union by identity).
+        for dto in library.groups {
+            guard let target = playlistIdMap[dto.playlistId] else {
+                result.skippedUnmapped += 1
+                continue
+            }
+            let storeGroups = dto.groups.map { group in
+                FavoriteGroupStore.Group(id: group.id, name: group.name, items: group.items.map {
+                    FavoriteGroupStore.Item(type: $0.type, itemId: $0.itemId, title: $0.title, imageURL: $0.imageURL)
+                })
+            }
+            await FavoriteGroupStore.shared.mergeImported(storeGroups, playlistId: target)
+            result.groupsImported += storeGroups.count
         }
         return result
     }

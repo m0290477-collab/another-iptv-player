@@ -28,6 +28,11 @@ struct LiveCardContextMenu: ViewModifier {
 
     @State private var isFavorite = false
     @State private var historyRowId: String?
+    // === B8 (build 61) state: preview sheet + pin/hide stores ===
+    @State private var showPreview = false
+    @ObservedObject private var pinnedStore = PinnedChannelStore.shared
+    @ObservedObject private var hiddenChannelStore = HiddenChannelStore.shared
+    // === End B8 state ===
 
     // MARK: - B2 (build 61) state: recording service + reorder sheet
     @ObservedObject private var recorder = LiveRecordingService.shared
@@ -62,6 +67,42 @@ struct LiveCardContextMenu: ViewModifier {
                     Label(isFavorite ? L("favorites.remove") : L("favorites.add"),
                           systemImage: isFavorite ? "star.slash" : "star")
                 }
+
+                // === B8 (build 61): C8 preview, C10 pin, H2 hide, J1 groups ===
+                Button {
+                    showPreview = true
+                } label: {
+                    Label(L("channels.preview.title"), systemImage: "eye")
+                }
+
+                Button {
+                    pinnedStore.toggle(playlistId: playlist.id, streamId: stream.streamId)
+                } label: {
+                    Label(
+                        pinnedStore.isPinned(playlistId: playlist.id, streamId: stream.streamId)
+                            ? L("channels.unpin") : L("channels.pin"),
+                        systemImage: pinnedStore.isPinned(playlistId: playlist.id, streamId: stream.streamId)
+                            ? "pin.slash" : "pin"
+                    )
+                }
+
+                FavoriteGroupMenuItems(
+                    playlist: playlist,
+                    item: FavoriteGroupStore.Item(
+                        type: "live",
+                        itemId: String(stream.streamId),
+                        title: stream.name,
+                        imageURL: stream.streamIcon
+                    ),
+                    allowCreateLink: false
+                )
+
+                Button {
+                    hiddenChannelStore.setHidden(true, playlistId: playlist.id, streamId: stream.streamId)
+                } label: {
+                    Label(L("channels.hide"), systemImage: "eye.slash")
+                }
+                // === End B8 menu items ===
 
                 if let categoryId, let categoryName, categoryId != "all", !categoryId.isEmpty {
                     Button {
@@ -119,6 +160,11 @@ struct LiveCardContextMenu: ViewModifier {
                 }
                 // ────────────────────────────────────────────────
             }
+            // === B8 (build 61): C8 quick preview sheet ===
+            .sheet(isPresented: $showPreview) {
+                ChannelQuickPreviewSheet(playlist: playlist, stream: stream)
+            }
+            // === End B8 preview sheet ===
     }
 
     /// One read for both menu facts: the DBFavorite row and the live
@@ -167,6 +213,12 @@ struct LiveCardContextMenu: ViewModifier {
             let currentValue = fresh ?? isFavorite
             let nextValue = !currentValue
             isFavorite = nextValue
+            // Build 61 (B8, R6): snapshot for the unavailable state.
+            if nextValue {
+                FavoriteSnapshotStore.shared.record(playlistId: playlistId, type: "live", streamId: streamId, title: stream.name, imageURL: stream.streamIcon)
+            } else {
+                FavoriteSnapshotStore.shared.remove(playlistId: playlistId, type: "live", streamId: streamId)
+            }
             do {
                 try await AppDatabase.shared.write { db in
                     if nextValue {

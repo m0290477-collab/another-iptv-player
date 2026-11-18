@@ -33,6 +33,10 @@ struct MovieDetailView: View {
     @State private var enlargedImage: IdentifiableURL?
     @State private var showNavTitle: Bool = false
     @State private var pendingMovieDetail: DBVODStream?
+    // Build 61 (B8, from B3's flags): parental-lock guard for the
+    // VOD detail-open path — mirrors LiveStreamsView's live guard.
+    @State private var parentalBlocked = false
+    @State private var showParentalPIN = false
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
     @Query<VODByIDRequest> private var movieRecord: DBVODStream?
     @Query<IsFavoriteRequest> private var isFavorite: Bool
@@ -234,8 +238,42 @@ struct MovieDetailView: View {
             }
         }
         .task {
+            // Build 61 (B8): parental guard + NEW-badge clearing.
+            if ParentalControlStore.shared.isBlocked(
+                playlistId: playlist.id, type: "vod", categoryId: currentMovie.categoryId
+            ) {
+                parentalBlocked = true
+                showParentalPIN = true
+            }
+            FirstSeenStore.shared.markOpened(playlistId: playlist.id, itemKey: "vod:\(currentMovie.streamId)")
             if !currentMovie.metadataLoaded {
                 await fetchMovieInfo()
+            }
+        }
+        .sheet(isPresented: $showParentalPIN) {
+            PINEntrySheet(message: L("parental.locked.enter_pin")) {
+                if let categoryId = currentMovie.categoryId {
+                    ParentalControlStore.shared.unlockForSession(
+                        playlistId: playlist.id, type: "vod", categoryId: categoryId
+                    )
+                }
+                parentalBlocked = false
+            }
+        }
+        .overlay {
+            if parentalBlocked {
+                VStack(spacing: 12) {
+                    Image(systemName: "lock.fill")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text(L("parental.locked.title"))
+                        .font(.headline)
+                    Button(L("parental.locked.enter_pin")) { showParentalPIN = true }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.accent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.ultraThinMaterial)
             }
         }
         .task(id: currentMovie.streamId) { await computeRelated() }
@@ -302,6 +340,20 @@ struct MovieDetailView: View {
                 watchlistRow
                     .padding(.top, -10)
 
+                // Build 61 (B8, J1): add to a custom favorite group.
+                FavoriteGroupMenuItems(
+                    playlist: playlist,
+                    item: FavoriteGroupStore.Item(
+                        type: "vod",
+                        itemId: String(currentMovie.streamId),
+                        title: currentMovie.name,
+                        imageURL: currentMovie.streamIcon
+                    )
+                )
+                .font(.footnote.weight(.semibold))
+                .padding(.horizontal, 16)
+                .padding(.top, -6)
+
                 if let downloadSizeText {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.down.circle")
@@ -356,6 +408,17 @@ struct MovieDetailView: View {
                     }
                 }
 
+                // Build 61 (B8, metadata completion): the remaining
+                // get_vod_info fields the provider returned — release
+                // date and country — each shown ONLY when present.
+                if let release = currentMovie.releaseDate?.trimmingCharacters(in: .whitespacesAndNewlines), !release.isEmpty {
+                    DetailInfoTextBlock(label: L("meta.release_date"), value: release)
+                }
+
+                if let country = currentMovie.country?.trimmingCharacters(in: .whitespacesAndNewlines), !country.isEmpty {
+                    DetailInfoTextBlock(label: L("meta.country"), value: country)
+                }
+
                 // B7: the container extension is real record data —
                 // shown on the detail page.
                 if let ext = currentMovie.containerExtension?.trimmingCharacters(in: .whitespaces), !ext.isEmpty {
@@ -370,7 +433,9 @@ struct MovieDetailView: View {
                     franchiseSection
                 }
 
-                if !moreLikeThisItems.isEmpty {
+                // Build 61 (B8, J2): More Like This renders only
+                // with at least 3 same-genre matches.
+                if moreLikeThisItems.count >= 3 {
                     moreLikeThisSection
                 }
             }
@@ -392,7 +457,13 @@ struct MovieDetailView: View {
     private var watchlistRow: some View {
         let inList = watchlistStore.contains(playlistId: playlist.id, streamId: currentMovie.streamId)
         return Button {
-            watchlistStore.toggle(playlistId: playlist.id, streamId: currentMovie.streamId)
+            // Build 61 (B8, R6): the toggle carries a display
+            // snapshot so a later-vanished entry stays listed,
+            // marked unavailable, instead of being dropped.
+            watchlistStore.toggleMovie(
+                playlistId: playlist.id, streamId: currentMovie.streamId,
+                title: currentMovie.name, imageURL: currentMovie.streamIcon
+            )
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: inList ? "bookmark.fill" : "bookmark")
@@ -662,12 +733,20 @@ struct MovieDetailView: View {
                 var updatedMovie = base
                 updatedMovie.metadataLoaded = true
                 if let i = response.info {
-                    updatedMovie.cast = i.cast
+                    // Build 61 (B8, metadata completion): `actors`
+                    // is the panel's alternate cast field and
+                    // `description` its alternate plot field — used
+                    // only when the primary field is absent.
+                    updatedMovie.cast = i.cast ?? i.actors
                     updatedMovie.director = i.director
                     updatedMovie.genre = i.genre
-                    updatedMovie.plot = i.plot
+                    updatedMovie.plot = i.plot ?? i.descriptionText
                     updatedMovie.releaseDate = i.releaseDate
                     updatedMovie.rating = i.rating
+                    updatedMovie.country = i.country
+                    if let providerRating5 = i.rating5Based {
+                        updatedMovie.rating5Based = providerRating5
+                    }
                     updatedMovie.backdropPath = i.backdropPath?.first
                     updatedMovie.youtubeTrailer = i.youtubeTrailer
                     // Round 14 (B7): runtime is formatted from the
@@ -717,6 +796,12 @@ struct MovieDetailView: View {
                         let fav = DBFavorite(streamId: movie.streamId, playlistId: playlist.id, type: "vod")
                         try fav.insert(db)
                     }
+                }
+                // Build 61 (B8, R6): snapshot for the unavailable state.
+                if isFavorite {
+                    FavoriteSnapshotStore.shared.remove(playlistId: playlist.id, type: "vod", streamId: movie.streamId)
+                } else {
+                    FavoriteSnapshotStore.shared.record(playlistId: playlist.id, type: "vod", streamId: movie.streamId, title: movie.name, imageURL: movie.streamIcon)
                 }
             } catch {
                 Log.error("MovieDetail", "Failed to toggle favorite: \(error.localizedDescription)")

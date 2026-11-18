@@ -446,6 +446,23 @@ final class ICloudSyncService: NSObject {
         "hidden_categories.",
         "category_order.",
         "watchlist.vod.",
+        // Build 61 (B8): series Watch Later (C2), favorite groups
+        // (J1), pins (C10), per-channel hide (H2), audio-only choices
+        // (H1) and first-seen bookkeeping (R1) — ids/preferences
+        // only, no URLs or credentials, same rule as the prefixes
+        // above.
+        "watchlist.series.",
+        "watchlist.snapshots.",
+        "favgroups.",
+        "pinned.live.",
+        "pinned.m3u.",
+        "hidden_channels.",
+        "hidden_m3u_channels.",
+        "audioonly.on.",
+        "audioonly.off.",
+        "firstseen.",
+        "episodes.manually_watched.",
+        "episodes.manually_unwatched.",
     ]
 
     private static func isSyncedSettingsKey(_ key: String) -> Bool {

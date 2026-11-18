@@ -7,6 +7,8 @@ struct M3UChannelsView: View {
     let playlist: Playlist
     @ObservedObject private var store = M3UContentStore.shared
     @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
+    @ObservedObject private var pinnedStore = PinnedChannelStore.shared
+    @ObservedObject private var hiddenChannelStore = HiddenChannelStore.shared
     @ObservedObject private var orderStore = CategoryOrderStore.shared
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
 
@@ -144,15 +146,36 @@ struct M3UChannelsView: View {
             // As the store updates, re-apply the current search (if empty, the full list).
             Task { await recomputeFilter() }
         }
+        // Build 61 (B8, C10/H2): pin/hide changes re-run the filter.
+        .onChange(of: pinnedStore.version) { _, _ in Task { await recomputeFilter() } }
+        .onChange(of: hiddenChannelStore.version) { _, _ in Task { await recomputeFilter() } }
         .onAppear { applyFull() }
         .cinematicBackground()
     }
 
     /// Return to the full-list view instantly (skip the debounce).
+    /// Build 61 (B8): still applies the pin/hide transform.
     private func applyFull() {
         guard playlist.id == store.activePlaylistId else { return }
         displayGroups = store.groupNames
-        displayChannelsByGroup = store.channelsByGroup
+        displayChannelsByGroup = Self.processedByGroup(
+            store.channelsByGroup, playlistId: playlist.id
+        )
+    }
+
+    /// Build 61 (B8, C10/H2): hidden channels drop out, pins lead
+    /// each group (O7) — shared by the instant and filtered paths.
+    nonisolated static func processedByGroup(
+        _ raw: [String: [DBM3UChannel]], playlistId: UUID
+    ) -> [String: [DBM3UChannel]] {
+        let hidden = HiddenChannelStore.hiddenM3UIds(playlistId: playlistId)
+        let pinned = PinnedChannelStore.pinnedM3UIds(playlistId: playlistId)
+        var out: [String: [DBM3UChannel]] = [:]
+        for (g, items) in raw {
+            let visible = items.filter { !hidden.contains($0.id) }
+            out[g] = ChannelOrdering.pinnedFirstM3U(visible, pinned: pinned)
+        }
+        return out
     }
 
     private var shelvesList: some View {
@@ -242,7 +265,7 @@ struct M3UChannelsView: View {
             displayGroups = []; displayChannelsByGroup = [:]; return
         }
         let groups = store.groupNames
-        let byGroup = store.channelsByGroup
+        let rawByGroup = store.channelsByGroup
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         // Build 61 (B9, Q10): dead-channel set for the hide-dead
         // toggle (empty = filter off). M3U live identity uses the
@@ -259,6 +282,9 @@ struct M3UChannelsView: View {
                 ))
             }
         }
+        // Build 61 (B8, C10/H2): per-channel hides drop out and pins
+        // lead each group (O7) — same stores as the card menus.
+        let byGroup = Self.processedByGroup(rawByGroup, playlistId: playlist.id)
 
         if q.isEmpty {
             displayGroups = groups
@@ -282,7 +308,11 @@ struct M3UChannelsView: View {
                         ))
                     }
                 }
-                let filtered = groupMatch ? items : items.filter { CatalogTextSearch.matches(search: q, text: $0.name) }
+                // Build 61 (B8, C11/H5): name OR provider number.
+                let filtered = groupMatch ? items : items.filter {
+                    CatalogTextSearch.matches(search: q, text: $0.name)
+                        || ($0.tvgChno.map { $0 == q } ?? false)
+                }
                 if groupMatch || !filtered.isEmpty {
                     outGroups.append(g)
                     outBy[g] = filtered
@@ -471,6 +501,16 @@ struct M3UChannelCard: View {
                     .frame(width: width)
                     .foregroundColor(.primary)
 
+                // Build 61 (B8, H5): provider channel number
+                // (tvg-chno) — shown only when the playlist
+                // carries one.
+                if let number = channel.tvgChno, !number.isEmpty {
+                    Text(L("channels.number_format", number))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
                 if let snapshot = epgSnapshot {
                     EPGNowNextLine(nowNext: snapshot[EPGChannelKey.forM3U(channel)],
                                    width: width, reserveSpace: true)
@@ -489,6 +529,20 @@ struct M3UChannelCard: View {
             } label: {
                 Label(isFavorite ? L("favorites.remove") : L("favorites.add"),
                       systemImage: isFavorite ? "star.slash" : "star")
+            }
+            // Build 61 (B8, C10/H2): pin + per-channel hide — the
+            // same stores the Xtream surfaces use.
+            let isPinned = PinnedChannelStore.shared.isPinnedM3U(playlistId: channel.playlistId, channelId: channel.id)
+            Button {
+                PinnedChannelStore.shared.toggleM3U(playlistId: channel.playlistId, channelId: channel.id)
+            } label: {
+                Label(isPinned ? L("channels.unpin") : L("channels.pin"),
+                      systemImage: isPinned ? "pin.slash" : "pin")
+            }
+            Button(role: .destructive) {
+                HiddenChannelStore.shared.setHiddenM3U(true, playlistId: channel.playlistId, channelId: channel.id)
+            } label: {
+                Label(L("channels.hide"), systemImage: "eye.slash")
             }
             // Sadece VOD-tipi kanallar (mp4/mkv/... veya /vod/, /movie/ path'i) indirilebilir.
             // Live HLS/TS streams are not suitable for single-file download.
@@ -566,7 +620,10 @@ struct M3UGroupDetailView: View {
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         if q.isEmpty { displayItems = base; return }
         let result = await Task.detached(priority: .userInitiated) {
-            base.filter { CatalogTextSearch.matches(search: q, text: $0.name) }
+            base.filter {
+                CatalogTextSearch.matches(search: q, text: $0.name)
+                    || ($0.tvgChno.map { $0 == q } ?? false)
+            }
         }.value
         guard !Task.isCancelled else { return }
         displayItems = result

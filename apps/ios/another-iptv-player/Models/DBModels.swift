@@ -25,6 +25,10 @@ struct DBLiveStream: Identifiable, Codable, FetchableRecord, PersistableRecord, 
     /// real values are populated on the next live catalog refresh.
     var tvArchive: Int = 0
     var tvArchiveDuration: Int = 0
+    /// Build 61 (B8, H5): the provider's own channel number (Xtream
+    /// `num` in get_live_streams). Nil when the provider supplies
+    /// none — nothing is shown and nothing is faked.
+    var channelNumber: Int? = nil
 
     var id: String { "\(streamId)_\(playlistId)" }
 
@@ -57,9 +61,14 @@ struct DBVODStream: Identifiable, Codable, FetchableRecord, PersistableRecord, E
 
     var sortIndex: Int = 0
     var playlistId: UUID
-    
+    /// Build 61 (B8, metadata completion): the provider's own country
+    /// from get_vod_info, when it returns one. The list endpoints
+    /// carry no country, so this stays nil until a detail fetch
+    /// supplies it — honestly empty, never invented.
+    var country: String? = nil
+
     var id: String { "\(streamId)_\(playlistId)" }
-    
+
     static let databaseTableName = "vodStream"
 }
 
@@ -157,6 +166,9 @@ struct DBM3UChannel: Identifiable, Codable, FetchableRecord, PersistableRecord, 
     var catchup: String?
     var catchupSource: String?
     var catchupDays: Int?
+    /// Build 61 (B8, H5): the M3U `tvg-chno` attribute, when the
+    /// playlist carries one. Nil = no number shown, nothing faked.
+    var tvgChno: String? = nil
 
     static let databaseTableName = "m3uChannel"
 }

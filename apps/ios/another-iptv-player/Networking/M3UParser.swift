@@ -17,6 +17,8 @@ struct ParsedM3UChannel: Equatable, Sendable {
     var catchup: String?
     var catchupSource: String?
     var catchupDays: Int?
+    /// Build 61 (B8, H5): the `tvg-chno` attribute, when present.
+    var tvgChno: String? = nil
 }
 
 struct ParsedM3UPlaylist: Equatable, Sendable {
@@ -550,7 +552,8 @@ nonisolated enum M3UParser {
             // `catchup-type` is the common alias some providers emit instead of `catchup`.
             catchup: attrs["catchup"] ?? attrs["catchup-type"],
             catchupSource: attrs["catchup-source"],
-            catchupDays: attrs["catchup-days"].flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            catchupDays: attrs["catchup-days"].flatMap { Int($0.trimmingCharacters(in: .whitespaces)) },
+            tvgChno: attrs["tvg-chno"]
         )
     }
 

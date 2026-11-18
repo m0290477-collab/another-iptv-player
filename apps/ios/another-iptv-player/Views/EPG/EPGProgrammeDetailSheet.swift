@@ -73,6 +73,26 @@ struct EPGProgrammeDetailSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    // Build 61 (B8, H3): programme artwork — ONLY
+                    // when the EPG payload itself carries an image
+                    // URL; no placeholder is invented otherwise.
+                    if let iconURL = programme.iconURL,
+                       !iconURL.isEmpty,
+                       let url = URL(string: iconURL) {
+                        GeometryReader { geo in
+                            CachedImage(
+                                url: url,
+                                width: geo.size.width,
+                                height: 190,
+                                contentMode: .fill,
+                                cornerRadius: AppTheme.cornerRadius,
+                                iconName: "photo"
+                            )
+                        }
+                        .frame(height: 190)
+                        .clipped()
+                    }
+
                     HStack(spacing: 12) {
                         CachedImage(url: channelIcon, width: 44, height: 44, cornerRadius: AppTheme.smallCornerRadius, iconName: "tv")
                         Text(channelName).font(.headline)

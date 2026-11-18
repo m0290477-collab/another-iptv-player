@@ -456,6 +456,23 @@ nonisolated struct AppDatabase {
             }
         }
 
+        // Build 61 (B8, H5 + metadata completion): provider channel
+        // numbers (Xtream `num` / M3U `tvg-chno`) and the VOD country
+        // from get_vod_info. All nullable adds — existing rows keep
+        // NULL (= provider supplied nothing) and no data is rewritten.
+        // Registered per G1 through this migrator.
+        migrator.registerMigration("b61AddChannelNumbersAndVODCountry") { db in
+            try db.alter(table: "liveStream") { t in
+                t.add(column: "channelNumber", .integer)
+            }
+            try db.alter(table: "m3uChannel") { t in
+                t.add(column: "tvgChno", .text)
+            }
+            try db.alter(table: "vodStream") { t in
+                t.add(column: "country", .text)
+            }
+        }
+
         // Parse refreshed XMLTV data into staging tables first. Publishing then
         // becomes one short transaction, so guide readers never observe the gap
         // between deleting the old guide and filling the new one batch by batch.

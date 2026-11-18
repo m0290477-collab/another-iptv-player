@@ -1574,6 +1574,9 @@ struct AppearanceSettingsSection: View {
     /// the tab bar and Home. Home and Live have NO toggles here —
     /// they can never be hidden.
     @ObservedObject private var sectionVisibility = SectionVisibilityStore.shared
+    // Build 61 (B8, Z6): empty provider categories are hidden by
+    // default; this toggle (default OFF) shows them again.
+    @AppStorage(EmptyCategoryVisibility.defaultsKey) private var showEmptyCategories = false
 
     var body: some View {
         Section(header: ScopedSectionHeader(title: L("settings.appearance.title"), thisPlaylist: false)) {
@@ -1594,6 +1597,12 @@ struct AppearanceSettingsSection: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(L("reducefx.title"))
                         Text(L("reducefx.desc"))
+            Toggle(isOn: $showEmptyCategories) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "folder", tint: .gray)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("settings.show_empty_categories.title"))
+                        Text(L("settings.show_empty_categories.desc"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

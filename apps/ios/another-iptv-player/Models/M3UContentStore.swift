@@ -111,6 +111,16 @@ final class M3UContentStore: ObservableObject {
         self.channels = channels
         self.channelsByGroup = grouping.byGroup
         self.groupNames = grouping.names
+        // Build 61 (B8, R1): first-seen recording for M3U channels.
+        // `apply` is the single funnel for loads and post-reimport
+        // reloads; the store's baseline rule keeps the first-ever
+        // batch silent, and unchanged reloads record nothing new.
+        if let playlistId = activePlaylistId {
+            FirstSeenStore.shared.record(
+                playlistId: playlistId,
+                itemKeys: channels.map { "m3u:\($0.id)" }
+            )
+        }
     }
 
     private func fetchChannels(playlistId: UUID) async throws -> [DBM3UChannel] {

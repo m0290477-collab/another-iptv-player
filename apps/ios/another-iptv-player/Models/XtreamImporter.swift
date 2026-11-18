@@ -69,7 +69,7 @@ enum XtreamImporter {
             // Live Streams
             for (index, stream) in liveStreams.enumerated() {
                 if filterAdult, AdultContentFilter.isAdultLiveStream(stream, adultCategoryIds: adultLiveCatIds) { continue }
-                let dbStream = DBLiveStream(streamId: stream.id, name: stream.name ?? L("content.unnamed"), streamIcon: stream.streamIcon, epgChannelId: stream.epgChannelId, categoryId: stream.categoryId, sortIndex: index, playlistId: playlist.id, tvArchive: stream.tvArchive ?? 0, tvArchiveDuration: stream.tvArchiveDuration ?? 0)
+                let dbStream = DBLiveStream(streamId: stream.id, name: stream.name ?? L("content.unnamed"), streamIcon: stream.streamIcon, epgChannelId: stream.epgChannelId, categoryId: stream.categoryId, sortIndex: index, playlistId: playlist.id, tvArchive: stream.tvArchive ?? 0, tvArchiveDuration: stream.tvArchiveDuration ?? 0, channelNumber: stream.num)
                 try dbStream.save(db)
             }
 

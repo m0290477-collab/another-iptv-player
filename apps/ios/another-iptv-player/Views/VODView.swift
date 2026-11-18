@@ -45,7 +45,12 @@ struct VODView: View {
     private static let newestPageSize = 90
 
     private var pickerEntries: [CategoryPickerSheet.Entry] {
-        orderStore.applyOrder(contentStore.vodCategories, playlistId: playlist.id, type: "vod") { $0.id }.map { cat in
+        // Build 61 (B8, Z6): empty categories are not jump targets
+        // unless the user shows empty categories.
+        let visible = EmptyCategoryVisibility.visible(contentStore.vodCategories) {
+            contentStore.vodStreamsByCategoryId[$0.id]?.count ?? 0
+        }
+        return orderStore.applyOrder(visible, playlistId: playlist.id, type: "vod") { $0.id }.map { cat in
             CategoryPickerSheet.Entry(
                 id: cat.id,
                 name: cat.name,
@@ -387,7 +392,11 @@ struct VODView: View {
         ) { $0.id }
         let allByCategory = contentStore.vodStreamsByCategoryId
 
-        displayCategories = allCats
+        // Build 61 (B8, Z6): empty categories hidden by default once
+        // the catalog is loaded (Appearance toggle restores them).
+        displayCategories = contentStore.streamsLoaded
+            ? EmptyCategoryVisibility.visible(allCats) { allByCategory[$0.id]?.count ?? 0 }
+            : allCats
         displayItemsByCategory = allByCategory
         let visibleCatIds = Set(allCats.map(\.id))
         let allVODs = contentStore.vodStreams
@@ -1003,6 +1012,13 @@ struct VODCategoryContent: View, Equatable {
     /// Screen-local: file types are specific to the currently shown list, so this
     /// intentionally does not persist across screens.
     @State private var fileTypeFilter: Set<String> = []
+    // Build 61 (B8, C1): advanced facet selection + the facet values
+    // actually present in this list (built in recompute, off-main).
+    @State private var facetSelection = CatalogFacetSelection()
+    @State private var facetGenres: [String] = []
+    @State private var facetYears: [Int] = []
+    @State private var facetCountries: [String] = []
+    @State private var facetHasRatings = false
     /// Sort/filter output, recomputed off the main thread on input changes so large
     /// lists (e.g. "All Movies") don't re-sort on every body pass (watch-progress ticks).
     @State private var displayItems: [VODWithCategory] = []
@@ -1039,22 +1055,31 @@ struct VODCategoryContent: View, Equatable {
     }
 
     private var isFilterActive: Bool {
-        sortOption != .defaultOrder || !fileTypeFilter.isEmpty
+        sortOption != .defaultOrder || !fileTypeFilter.isEmpty || !facetSelection.isEmpty
     }
 
     private func recompute() async {
         let source = items
         let sort = sortOption
         let filter = fileTypeFilter
-        let (result, queue, types) = await Task.detached(priority: .userInitiated) { () -> ([VODWithCategory], [DBVODStream], [String]) in
-            let sorted = sort.apply(to: VODFileType.filter(source, selection: filter))
+        let facets = facetSelection
+        let (result, queue, types, facetValues) = await Task.detached(priority: .userInitiated) { () -> ([VODWithCategory], [DBVODStream], [String], (genres: [String], years: [Int], countries: [String])) in
+            let facetFiltered = facets.apply(to: VODFileType.filter(source, selection: filter))
+            let sorted = sort.apply(to: facetFiltered)
             // Options come from the full list so toggling one doesn't hide the others.
-            return (sorted, sorted.map(\.stream), VODFileType.available(in: source))
+            return (sorted, sorted.map(\.stream), VODFileType.available(in: source),
+                    CatalogFacets.vodFacets(in: source.map(\.stream)))
         }.value
         guard !Task.isCancelled else { return }
         displayItems = result
         streamQueue = queue
         fileTypes = types
+        facetGenres = facetValues.genres
+        facetYears = facetValues.years
+        facetCountries = facetValues.countries
+        facetHasRatings = items.contains {
+            ContentRating.normalizedRating10(rating: $0.stream.rating, rating5Based: $0.stream.rating5Based) != nil
+        }
         visibleCount = min(Self.pageSize, result.count)
         prefetch(result)
     }
@@ -1100,6 +1125,11 @@ struct VODCategoryContent: View, Equatable {
                                     )
                                 }
                                 .buttonStyle(.plain)
+                                // Build 61 (B8, C2/J1): long-press —
+                                // Watch Later + favorite groups.
+                                .contextMenu {
+                                    VODCardMenuItems(playlist: playlist, movie: item.stream)
+                                }
                                 // Load the next page while cells near the end scroll into view.
                                 // Triggered from inside the lazy grid so onAppear is reliable.
                                 .onAppear { if index >= visibleCount - 15 { loadMore() } }
@@ -1135,7 +1165,54 @@ struct VODCategoryContent: View, Equatable {
         .task(id: itemsToken) { await recompute() }
         .task(id: sortOption) { await recompute() }
         .task(id: fileTypeFilter) { await recompute() }
+        .task(id: facetSelection) { await recompute() }
         .cinematicBackground()
+    }
+
+    /// Build 61 (B8, C1): facet rows for the sort/filter sheet —
+    /// genres, years, countries and rating floors, built ONLY from
+    /// values present in this list (empty facet = no rows).
+    private var facetRows: [SortFilterSheet.Row] {
+        var rows: [SortFilterSheet.Row] = []
+        for genre in facetGenres.prefix(12) {
+            rows.append(SortFilterSheet.Row(
+                id: "genre-\(genre)", title: genre,
+                isSelected: facetSelection.genres.contains(genre)
+            ) { toggleFacetGenre(genre) })
+        }
+        for year in facetYears.prefix(12) {
+            rows.append(SortFilterSheet.Row(
+                id: "year-\(year)", title: String(year),
+                isSelected: facetSelection.years.contains(year)
+            ) { toggleFacetYear(year) })
+        }
+        for country in facetCountries.prefix(12) {
+            rows.append(SortFilterSheet.Row(
+                id: "country-\(country)", title: country,
+                isSelected: facetSelection.countries.contains(country)
+            ) { toggleFacetCountry(country) })
+        }
+        if facetHasRatings {
+            for floor in [7.0, 8.0, 9.0] {
+                rows.append(SortFilterSheet.Row(
+                    id: "rating-\(floor)", title: L("filter.rating_min_format", Int(floor)),
+                    isSelected: facetSelection.minRating == floor
+                ) { facetSelection.minRating = facetSelection.minRating == floor ? nil : floor })
+            }
+        }
+        return rows
+    }
+
+    private func toggleFacetGenre(_ genre: String) {
+        if facetSelection.genres.contains(genre) { facetSelection.genres.remove(genre) } else { facetSelection.genres.insert(genre) }
+    }
+
+    private func toggleFacetYear(_ year: Int) {
+        if facetSelection.years.contains(year) { facetSelection.years.remove(year) } else { facetSelection.years.insert(year) }
+    }
+
+    private func toggleFacetCountry(_ country: String) {
+        if facetSelection.countries.contains(country) { facetSelection.countries.remove(country) } else { facetSelection.countries.insert(country) }
     }
 
     /// Round 10 (point 13): the raw popover `Menu` is now the
@@ -1159,19 +1236,20 @@ struct VODCategoryContent: View, Equatable {
                         isSelected: sortOption == option
                     ) { sortOption = option }
                 },
-                filterTitle: fileTypes.count > 1 ? L("filter.file_type") : nil,
-                filterRows: fileTypes.count > 1 ? fileTypes.map { ext in
+                filterTitle: L("filter.title"),
+                filterRows: (fileTypes.count > 1 ? fileTypes.map { ext in
                     SortFilterSheet.Row(
                         id: "type-\(ext)",
                         title: ext.uppercased(),
                         isSelected: fileTypeFilter.contains(ext)
                     ) { toggleFileType(ext) }
-                } : [],
+                } : []) + facetRows,
                 // Round 14 (B1): Clear resets the SORT as well as the
-                // file-type filter.
-                onClearFilters: (sortOption == .defaultOrder && fileTypeFilter.isEmpty) ? nil : {
+                // file-type filter. B8: facets clear with them.
+                onClearFilters: (sortOption == .defaultOrder && fileTypeFilter.isEmpty && facetSelection.isEmpty) ? nil : {
                     sortOption = .defaultOrder
                     fileTypeFilter.removeAll()
+                    facetSelection.clear()
                 }
             )
         }
@@ -1524,13 +1602,26 @@ struct WatchlistView: View {
         return ids.compactMap { found[$0] }
     }
 
+    /// Build 61 (B8, R6): watch-later entries whose catalog record
+    /// has vanished — kept, rendered from their add-time snapshot,
+    /// marked unavailable, removable. Never silently dropped.
+    private var unavailableEntries: [(id: Int, title: String, imageURL: String?)] {
+        let ids = watchlistStore.movieIds(playlistId: playlist.id)
+        let available = Set(movies.map(\.streamId))
+        let snapshots = watchlistStore.snapshots(playlistId: playlist.id)
+        return ids.filter { !available.contains($0) }.map { id in
+            let snap = snapshots["vod:\(id)"]
+            return (id, snap?.first ?? L("groups.unavailable"), snap?.last.flatMap { $0.isEmpty ? nil : $0 })
+        }
+    }
+
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: posterMetrics.categoryGridPosterWidth), spacing: posterMetrics.gridSpacing)]
     }
 
     var body: some View {
         Group {
-            if movies.isEmpty {
+            if movies.isEmpty && unavailableEntries.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "bookmark")
                         .font(.largeTitle)
@@ -1558,6 +1649,38 @@ struct WatchlistView: View {
                         }
                     }
                     .padding()
+
+                    // Build 61 (B8, R6): unavailable entries stay.
+                    if !unavailableEntries.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(L("groups.unavailable"))
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.secondary)
+                            ForEach(unavailableEntries, id: \.id) { entry in
+                                HStack(spacing: 12) {
+                                    CachedImage(
+                                        url: entry.imageURL.flatMap { URL(string: $0) },
+                                        width: 44, height: 44,
+                                        cornerRadius: AppTheme.smallCornerRadius,
+                                        iconName: "film"
+                                    )
+                                    Text(entry.title)
+                                        .font(.subheadline.weight(.medium))
+                                        .lineLimit(2)
+                                    Spacer(minLength: 8)
+                                    Button(role: .destructive) {
+                                        watchlistStore.toggle(playlistId: playlist.id, streamId: entry.id)
+                                    } label: {
+                                        Image(systemName: "minus.circle")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom, 24)
+                    }
                 }
             }
         }

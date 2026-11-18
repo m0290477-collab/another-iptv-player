@@ -155,6 +155,9 @@ struct XtreamLiveStream: Codable, Identifiable {
     /// Catch-up flags — present in raw `get_live_streams` JSON, previously undecoded.
     let tvArchive: Int?
     let tvArchiveDuration: Int?
+    /// Build 61 (B8, H5): the provider's channel number (`num`),
+    /// present in raw get_live_streams JSON, previously undecoded.
+    let num: Int?
 
     var id: Int { streamId ?? 0 }
 
@@ -167,6 +170,7 @@ struct XtreamLiveStream: Codable, Identifiable {
         case isAdult = "is_adult"
         case tvArchive = "tv_archive"
         case tvArchiveDuration = "tv_archive_duration"
+        case num
     }
 
     init(from decoder: Decoder) throws {
@@ -179,6 +183,7 @@ struct XtreamLiveStream: Codable, Identifiable {
         isAdult = container?.decodeFlexibleIntIfPresent(forKey: .isAdult)
         tvArchive = container?.decodeFlexibleIntIfPresent(forKey: .tvArchive)
         tvArchiveDuration = container?.decodeFlexibleIntIfPresent(forKey: .tvArchiveDuration)
+        num = container?.decodeFlexibleIntIfPresent(forKey: .num)
     }
 }
 
@@ -325,7 +330,10 @@ struct XtreamSeriesDetails: Codable {
     let backdropPath: [String]?
     let youtubeTrailer: String?
     let episodeRunTime: String?
-    
+    /// Build 61 (B8, metadata completion): get_series_info also
+    /// returns the category id — previously undecoded.
+    let categoryId: String?
+
     enum CodingKeys: String, CodingKey {
         case name, cover, plot, cast, director, genre, rating
         case releaseDate = "releaseDate"
@@ -334,6 +342,7 @@ struct XtreamSeriesDetails: Codable {
         case backdropPath = "backdrop_path"
         case youtubeTrailer = "youtube_trailer"
         case episodeRunTime = "episode_run_time"
+        case categoryId = "category_id"
     }
     
     init(from decoder: Decoder) throws {
@@ -351,6 +360,7 @@ struct XtreamSeriesDetails: Codable {
         backdropPath = Self.decodeBackdropPaths(container)
         youtubeTrailer = container?.decodeFlexibleStringIfPresent(forKey: .youtubeTrailer)
         episodeRunTime = container?.decodeFlexibleStringIfPresent(forKey: .episodeRunTime)
+        categoryId = container?.decodeFlexibleStringIfPresent(forKey: .categoryId)
     }
 
     /// Round 19 (R19-2): panels are inconsistent about
@@ -486,7 +496,20 @@ struct XtreamVODInfo: Codable {
     let durationSecs: Int?
     let tmdbId: String?
     let kinopoiskURL: String?
-    
+    // Build 61 (B8, metadata completion): the remaining fields
+    // get_vod_info commonly returns, previously undecoded. All
+    // optional — panels that omit them decode nil and the detail
+    // page simply shows nothing for them.
+    let actors: String?
+    let descriptionText: String?
+    let originalName: String?
+    let age: String?
+    let mpaaRating: String?
+    let country: String?
+    let bitrate: String?
+    let status: String?
+    let rating5Based: Double?
+
     enum CodingKeys: String, CodingKey {
         case name, plot, cast, director, genre, rating, duration
         case movieImage = "movie_image"
@@ -497,8 +520,17 @@ struct XtreamVODInfo: Codable {
         case durationSecs = "duration_secs"
         case tmdbId = "tmdb_id"
         case kinopoiskURL = "kinopoisk_url"
+        case actors
+        case descriptionText = "description"
+        case originalName = "o_name"
+        case age
+        case mpaaRating = "mpaa_rating"
+        case country
+        case bitrate
+        case status
+        case rating5Based = "rating_5based"
     }
-    
+
     init(from decoder: Decoder) throws {
         let container = try? decoder.container(keyedBy: CodingKeys.self)
         name = container?.decodeFlexibleStringIfPresent(forKey: .name)
@@ -516,6 +548,15 @@ struct XtreamVODInfo: Codable {
         durationSecs = container?.decodeFlexibleIntIfPresent(forKey: .durationSecs)
         tmdbId = container?.decodeFlexibleStringIfPresent(forKey: .tmdbId)
         kinopoiskURL = container?.decodeFlexibleStringIfPresent(forKey: .kinopoiskURL)
+        actors = container?.decodeFlexibleStringIfPresent(forKey: .actors)
+        descriptionText = container?.decodeFlexibleStringIfPresent(forKey: .descriptionText)
+        originalName = container?.decodeFlexibleStringIfPresent(forKey: .originalName)
+        age = container?.decodeFlexibleStringIfPresent(forKey: .age)
+        mpaaRating = container?.decodeFlexibleStringIfPresent(forKey: .mpaaRating)
+        country = container?.decodeFlexibleStringIfPresent(forKey: .country)
+        bitrate = container?.decodeFlexibleStringIfPresent(forKey: .bitrate)
+        status = container?.decodeFlexibleStringIfPresent(forKey: .status)
+        rating5Based = try? container?.decodeIfPresent(Double.self, forKey: .rating5Based)
     }
 
     /// Round 19 (R19-2): panels are inconsistent about
