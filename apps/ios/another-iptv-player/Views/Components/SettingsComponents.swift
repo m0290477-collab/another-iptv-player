@@ -519,6 +519,10 @@ enum AppPreferenceKeys {
         "app.accent_preset", "app.selected_language",
         "motion.intensity", "settings.uiSounds",
         "dashboard_selected_tab",
+        // Build 61 (B3): appearance choice, buffer size and the
+        // play-last-channel-on-launch toggle.
+        "app.appearance", "player.bufferSize",
+        "app.playLastChannelOnLaunch",
         // Playback detail stores (audio delay, subtitle look,
         // per-kind track choices — all plain preferences)
         "playback.audioDelaySeconds", "playback.subtitleAppearance.v2",
@@ -591,6 +595,12 @@ enum BackupValue: Codable, Equatable {
 /// the C3 full backup (includesCredentials == true); the C5
 /// settings export always writes nil and import re-prompts.
 struct BackupPlaylistDTO: Codable, Equatable {
+    /// Build 61 (B3, S5): the source playlist's id — never a
+    /// credential; it exists so the backup's library entries
+    /// (favorites / watch-later, keyed by playlist id) can be
+    /// mapped onto the target playlist on import. Optional so
+    /// backup files written before build 61 still decode.
+    var id: String?
     var name: String
     var serverURL: String
     var username: String
@@ -602,6 +612,7 @@ struct BackupPlaylistDTO: Codable, Equatable {
     var epgEnabled: Bool
 
     init(playlist: Playlist, includePassword: Bool) {
+        id = playlist.id.uuidString
         name = playlist.name
         serverURL = playlist.serverURL
         username = playlist.username
@@ -635,6 +646,10 @@ struct SuperXBackupFile: Codable {
     var includesCredentials: Bool
     var settings: [String: BackupValue]
     var playlists: [BackupPlaylistDTO]
+    /// Build 61 (B3, S5): favorites + watch-later library
+    /// (`BackupService`). Optional: files written before build 61
+    /// have no library and import exactly as before.
+    var library: BackupService.LibraryDTO?
 
     static func make(playlists: [Playlist], includeCredentials: Bool) -> SuperXBackupFile {
         var settings: [String: BackupValue] = [:]
@@ -915,51 +930,15 @@ struct ParentalPINSection: View {
     }
 }
 
-// MARK: - Image cache row (C5)
-
-/// C5: the image cache's real current size — Nuke's memory cache
-/// total cost plus its DataCache total size. Finisher verification
-/// (C4 follow-up): this row and `CachedImage` use the SAME pipeline
-/// instance — `IPTVRemoteImagePipeline.installAsShared()` runs in
-/// the app's `init()` (before any view) and assigns
-/// `ImagePipeline.shared` with the 10-connection loader, the 150 MB
-/// memory cache and the explicit DataCache "com.superx.images"
-/// capped at 300 MB; the row reads that same `ImagePipeline.shared`.
-/// Clear wipes BOTH caches through the pipeline, so the displayed
-/// (memory + disk) size actually returns to zero.
-struct ImageCacheSettingsRow: View {
-    @State private var sizeBytes: Int64 = 0
-
-    var body: some View {
-        HStack(spacing: 12) {
-            SettingsIconTile(systemImage: "photo.stack", tint: .gray)
-            Text(L("settings.image_cache.title"))
-            Spacer()
-            Text(ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file))
-                .foregroundColor(.secondary)
-            Button(L("settings.image_cache.clear")) {
-                ImagePipeline.shared.cache.removeAll()
-                // The displayed size includes the disk DataCache;
-                // clearing only the memory cache would leave it
-                // non-zero. Wipe both (same shared pipeline).
-                (ImagePipeline.shared.configuration.dataCache as? DataCache)?.removeAll()
-                refreshSize()
-            }
-            .font(.subheadline.weight(.semibold))
-            .buttonStyle(.plain)
-            .foregroundColor(AppTheme.accent)
-            .disabled(sizeBytes == 0)
-        }
-        .onAppear { refreshSize() }
-    }
-
-    private func refreshSize() {
-        let pipeline = ImagePipeline.shared
-        let memory = (pipeline.configuration.imageCache as? ImageCache)?.totalCost ?? 0
-        let disk = (pipeline.configuration.dataCache as? DataCache)?.totalSize ?? 0
-        sizeBytes = Int64(memory) + Int64(disk)
-    }
-}
+// MARK: - Image cache row (C5) — REMOVED in build 61 (B3, O6)
+//
+// The round-15 image-cache size/clear row that lived here (and
+// was shown inside NewFeatureSettingsSection) is gone: build
+// 61's Storage group (StorageSettingsSection, below) is the ONE
+// cache size/clear control in Settings, per the owner's
+// single-instance rule. Its pipeline facts still hold — the
+// shared ImagePipeline ("com.superx.images" DataCache) is what
+// B2's StorageService measures and clears.
 
 // MARK: - New feature settings (C5)
 
@@ -973,7 +952,7 @@ struct ImageCacheSettingsRow: View {
 /// - Motion intensity: "motion.intensity" ("full"/"reduced"/"off").
 /// - T-50 card mode: "player.nextEpisodeCardMode" ("auto"/"ask").
 /// - UI sounds: "settings.uiSounds" (default ON, C12's gate).
-/// Plus the image-cache row. (The auto-download-next toggle with
+/// (The auto-download-next toggle with
 /// key "downloads.autoDownloadNextEpisode", default OFF, already
 /// lives in both screens' Downloads groups — not duplicated here.)
 struct NewFeatureSettingsSection: View {
@@ -1064,7 +1043,6 @@ struct NewFeatureSettingsSection: View {
                 }
             }
 
-            ImageCacheSettingsRow()
         }
     }
 }
@@ -1095,6 +1073,19 @@ struct BackupSettingsSection: View {
     @State private var showPasswordPrompt = false
     @State private var showResetConfirm = false
     @State private var showResetDone = false
+    // Build 61 (B3, S5): import is two-step — a decoded, validated
+    // file waits here behind a summary + explicit confirm before
+    // anything is applied.
+    @State private var pendingImportFile: SuperXBackupFile?
+    @State private var showImportSummary = false
+    @State private var importSummaryText = ""
+    /// Source playlist id → target playlist id, built as imported
+    /// playlists land; the library apply maps through it.
+    @State private var libraryIdMap: [String: UUID] = [:]
+    /// The confirmed file, kept while its Xtream passwords are
+    /// being re-entered — its library applies once those playlists
+    /// exist (the password sheet's Save finishes the import).
+    @State private var pendingLibraryFile: SuperXBackupFile?
 
     var body: some View {
         Section(header: ScopedSectionHeader(title: L("settings.backup.title"), thisPlaylist: false)) {
@@ -1160,15 +1151,30 @@ struct BackupSettingsSection: View {
             }
             .buttonStyle(.plain)
         }
-        .task(id: playlists.count) { prepareSettingsExport() }
+        .task(id: playlists.count) { await prepareSettingsExport() }
         .alert(L("settings.backup.full_warning.title"), isPresented: $showFullWarning) {
             Button(L("common.cancel"), role: .cancel) { }
             Button(L("settings.backup.export_full.confirm")) {
-                prepareFullExport()
-                fullExportReady = true
+                Task {
+                    await prepareFullExport()
+                    fullExportReady = true
+                }
             }
         } message: {
             Text(L("settings.backup.full_warning.message"))
+        }
+        // Build 61 (B3, S5): the summary + confirm step — nothing
+        // from the file is applied until the user confirms here.
+        .alert(L("backup.import.summary_title"), isPresented: $showImportSummary) {
+            Button(L("common.cancel"), role: .cancel) { pendingImportFile = nil }
+            Button(L("settings.backup.import")) {
+                if let file = pendingImportFile {
+                    pendingImportFile = nil
+                    Task { await performImport(file) }
+                }
+            }
+        } message: {
+            Text(importSummaryText)
         }
         .alert(L("settings.reset.title"), isPresented: $showResetConfirm) {
             Button(L("common.cancel"), role: .cancel) { }
@@ -1210,13 +1216,17 @@ struct BackupSettingsSection: View {
         return url
     }
 
-    private func prepareSettingsExport() {
-        let file = SuperXBackupFile.make(playlists: playlists, includeCredentials: false)
+    private func prepareSettingsExport() async {
+        var file = SuperXBackupFile.make(playlists: playlists, includeCredentials: false)
+        // Build 61 (B3, S5): the export also carries the library —
+        // favorites (both stores) + watch-later lists.
+        file.library = await BackupService.collectLibrary(playlistIds: playlists.map(\.id))
         settingsExportURL = writeTempFile(file, name: "superx-settings.json")
     }
 
-    private func prepareFullExport() {
-        let file = SuperXBackupFile.make(playlists: playlists, includeCredentials: true)
+    private func prepareFullExport() async {
+        var file = SuperXBackupFile.make(playlists: playlists, includeCredentials: true)
+        file.library = await BackupService.collectLibrary(playlistIds: playlists.map(\.id))
         fullExportURL = writeTempFile(file, name: "superx-full-backup.json")
     }
 
@@ -1234,6 +1244,10 @@ struct BackupSettingsSection: View {
     private func importFile(at url: URL) async {
         let secured = url.startAccessingSecurityScopedResource()
         defer { if secured { url.stopAccessingSecurityScopedResource() } }
+        // Build 61 (B3, S5): validate FIRST — an unreadable or
+        // non-Super X file fails here with the graceful error and
+        // nothing is applied. A valid file goes to the summary +
+        // confirm step; `performImport` runs only on confirm.
         guard let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(SuperXBackupFile.self, from: data),
               file.format == "superx-backup" else {
@@ -1241,7 +1255,22 @@ struct BackupSettingsSection: View {
             showImportResult = true
             return
         }
+        let favoriteCount = (file.library?.favorites.count ?? 0) + (file.library?.m3uFavorites.count ?? 0)
+        let watchlistCount = file.library?.watchlist.reduce(0) { $0 + $1.movieIds.count } ?? 0
+        importSummaryText = L(
+            "backup.import.summary_format",
+            file.playlists.count, favoriteCount, watchlistCount, file.settings.count
+        )
+        pendingImportFile = file
+        showImportSummary = true
+    }
+
+    /// Applies a confirmed backup file: settings, then playlists
+    /// (with the existing password re-prompt for credential-free
+    /// files), then the library through the source→target id map.
+    private func performImport(_ file: SuperXBackupFile) async {
         file.applySettings()
+        libraryIdMap = [:]
 
         var importedCount = 0
         var needsPassword: [BackupPlaylistDTO] = []
@@ -1250,19 +1279,26 @@ struct BackupSettingsSection: View {
                 if await saveImported(dto.makePlaylist(password: dto.password ?? "")) {
                     importedCount += 1
                 }
+                await recordLibraryMapping(for: dto)
             } else if dto.kind == PlaylistKind.m3u.rawValue {
                 if await saveImported(dto.makePlaylist(password: "")) {
                     importedCount += 1
                 }
+                await recordLibraryMapping(for: dto)
             } else {
                 needsPassword.append(dto)
             }
         }
         if needsPassword.isEmpty {
-            importMessage = L("settings.backup.import.done_format", importedCount)
+            let libraryResult = await applyPendingLibrary(file)
+            importMessage = libraryResult != nil
+                ? L("backup.import.done_library_format", importedCount,
+                    libraryResult!.favoritesImported, libraryResult!.watchlistImported)
+                : L("settings.backup.import.done_format", importedCount)
             showImportResult = true
         } else {
             pendingPasswordDTOs = needsPassword
+            pendingLibraryFile = file
             enteredPasswords = [:]
             showPasswordPrompt = true
             if importedCount > 0 {
@@ -1270,6 +1306,30 @@ struct BackupSettingsSection: View {
                 showImportResult = true
             }
         }
+    }
+
+    /// Maps one imported DTO's source id onto the playlist that
+    /// now exists locally (same identity rule `saveImported`
+    /// dedupes by: kind + server + username).
+    private func recordLibraryMapping(for dto: BackupPlaylistDTO) async {
+        guard let sourceId = dto.id else { return }
+        let target = try? await AppDatabase.shared.read { db in
+            try Playlist.fetchAll(db).first {
+                $0.kind.rawValue == dto.kind
+                    && $0.serverURL == dto.serverURL
+                    && $0.username == dto.username
+            }
+        }
+        if let target = target ?? nil {
+            libraryIdMap[sourceId] = target.id
+        }
+    }
+
+    /// Applies the file's library (favorites + watch-later) when
+    /// it has one; nil when the file carries no library.
+    private func applyPendingLibrary(_ file: SuperXBackupFile) async -> BackupService.ApplyResult? {
+        guard let library = file.library else { return nil }
+        return await BackupService.applyLibrary(library, playlistIdMap: libraryIdMap)
     }
 
     /// Saves one imported playlist unless an identical record
@@ -1330,14 +1390,670 @@ struct BackupSettingsSection: View {
                                 if await saveImported(dto.makePlaylist(password: password)) {
                                     count += 1
                                 }
+                                // Build 61 (B3, S5): now that this
+                                // playlist exists, its library
+                                // entries can be mapped + applied.
+                                await recordLibraryMapping(for: dto)
+                            }
+                            var libraryResult: BackupService.ApplyResult?
+                            if let file = pendingLibraryFile {
+                                libraryResult = await applyPendingLibrary(file)
+                                pendingLibraryFile = nil
                             }
                             showPasswordPrompt = false
-                            importMessage = L("settings.backup.import.done_format", count)
+                            importMessage = libraryResult != nil
+                                ? L("backup.import.done_library_format", count,
+                                    libraryResult!.favoritesImported, libraryResult!.watchlistImported)
+                                : L("settings.backup.import.done_format", count)
                             showImportResult = true
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+// MARK: - Build 61 (B3): Playback & Appearance, locks, storage,
+// subscriptions, support, danger zone
+
+/// Build 61 (B3) — owner rule O5 fixes the settings group order:
+/// Playback / Appearance / Downloads / Parental / Storage /
+/// Support & About. Each B3 section below belongs to exactly one
+/// group, and the two settings screens place them in that order.
+///
+/// PLAYBACK group (item 7b + T2): the buffer-size preference
+/// (Low / Default / High — read by KSPlayerEngine where its
+/// options are built) and the "Play last channel on launch"
+/// toggle (consumed at launch by LaunchResumeService through
+/// the existing pending-playback path). Bound to the exact
+/// UserDefaults keys the readers use.
+struct PlaybackSettingsSection: View {
+    @AppStorage("player.bufferSize") private var bufferSize = "default"
+    @AppStorage("app.playLastChannelOnLaunch") private var playLastChannel = false
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("settings.playback.title"), thisPlaylist: false)) {
+            SettingsPickerRow(
+                systemImage: "waveform.path",
+                tint: .teal,
+                title: L("settings.buffer.title"),
+                selection: $bufferSize
+            ) {
+                Text(L("settings.buffer.low")).tag("low")
+                Text(L("settings.buffer.default")).tag("default")
+                Text(L("settings.buffer.high")).tag("high")
+            }
+
+            Toggle(isOn: $playLastChannel) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "play.circle.fill", tint: AppTheme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("settings.play_last.title"))
+                        Text(L("settings.play_last.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// APPEARANCE group (item 7a): the appearance choice
+/// (System / Light / Dark, default Dark), read by the app root.
+/// The accent-colour picker stays where it already lives (the
+/// legacy App & Appearance group) — O6: one instance only, it is
+/// not duplicated here.
+struct AppearanceSettingsSection: View {
+    @AppStorage("app.appearance") private var appearance = "dark"
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("settings.appearance.title"), thisPlaylist: false)) {
+            SettingsPickerRow(
+                systemImage: "circle.lefthalf.filled",
+                tint: .gray,
+                title: L("settings.appearance.title"),
+                selection: $appearance
+            ) {
+                Text(L("settings.appearance.system")).tag("system")
+                Text(L("settings.appearance.light")).tag("light")
+                Text(L("settings.appearance.dark")).tag("dark")
+            }
+        }
+    }
+}
+
+/// Item 5: lock / unlock this playlist's categories behind the
+/// parental PIN. The locked set lives in `ParentalControlStore`;
+/// opening a locked category (category picker, live playback) is
+/// blocked until the PIN is entered. Without a PIN there is
+/// nothing to unlock with, so the section points at the PIN
+/// section instead of offering locks that could not be enforced.
+struct LockedCategoriesSection: View {
+    let playlist: Playlist
+
+    /// One lockable category row; `key` is unique across types
+    /// (the same category id can exist under live and vod).
+    private struct CategoryLockRow: Identifiable {
+        let type: String
+        let id: String
+        let name: String
+        var key: String { "\(type)|\(id)" }
+    }
+
+    @ObservedObject private var parentalStore = ParentalControlStore.shared
+    @State private var categories: [CategoryLockRow] = []
+    @State private var hasPIN = PINStore.hasPIN
+    @State private var showPINForUnlockAll = false
+    /// A lock toggle switched OFF, waiting for PIN verification.
+    @State private var pendingUnlock: (type: String, id: String)?
+    @State private var showPINForPendingUnlock = false
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("parental.locked.title"), thisPlaylist: true)) {
+            if !hasPIN {
+                Text(L("parental.locked.need_pin"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if categories.isEmpty {
+                Text(L("parental.locked.empty"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(categories, id: \.key) { category in
+                    Toggle(isOn: lockBinding(for: category)) {
+                        HStack(spacing: 12) {
+                            SettingsIconTile(
+                                systemImage: parentalStore.isLocked(playlistId: playlist.id, type: category.type, categoryId: category.id)
+                                    ? "lock.fill" : "lock.open.fill",
+                                tint: .gray
+                            )
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(category.name)
+                                    .lineLimit(1)
+                                Text(L(typeTitleKey(category.type)))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                if parentalStore.hasAnyLock(playlistId: playlist.id) {
+                    Button {
+                        showPINForUnlockAll = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            SettingsIconTile(systemImage: "lock.open.fill", tint: AppTheme.accent)
+                            Text(L("parental.locked.unlock_session"))
+                                .foregroundColor(.primary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .task { await loadCategories() }
+        .onAppear { hasPIN = PINStore.hasPIN }
+        .sheet(isPresented: $showPINForUnlockAll) {
+            PINEntrySheet(message: L("parental.locked.enter_pin")) {
+                parentalStore.unlockAllForSession(playlistId: playlist.id)
+            }
+        }
+        .sheet(isPresented: $showPINForPendingUnlock) {
+            PINEntrySheet(message: L("parental.locked.enter_pin")) {
+                if let pending = pendingUnlock {
+                    parentalStore.setLocked(false, playlistId: playlist.id, type: pending.type, categoryId: pending.id)
+                    pendingUnlock = nil
+                }
+            }
+        }
+    }
+
+    private func typeTitleKey(_ type: String) -> String {
+        switch type {
+        case "live": return "dashboard.live"
+        case "vod": return "dashboard.movies"
+        case "series": return "dashboard.series"
+        default: return "dashboard.channels"
+        }
+    }
+
+    /// Locking applies immediately; UNlocking a category here
+    /// requires the PIN first (the toggle snaps back until the
+    /// PIN sheet verifies).
+    private func lockBinding(for category: CategoryLockRow) -> Binding<Bool> {
+        Binding(
+            get: { parentalStore.isLocked(playlistId: playlist.id, type: category.type, categoryId: category.id) },
+            set: { newValue in
+                if newValue {
+                    parentalStore.setLocked(true, playlistId: playlist.id, type: category.type, categoryId: category.id)
+                } else {
+                    pendingUnlock = (type: category.type, id: category.id)
+                    showPINForPendingUnlock = true
+                }
+            }
+        )
+    }
+
+    private func loadCategories() async {
+        let pid = playlist.id
+        if playlist.kind == .m3u {
+            // M3U categories are the channels' group titles — the
+            // same ids the M3U category picker uses (type "m3u").
+            let groups = (try? await AppDatabase.shared.read { db in
+                try String.fetchAll(
+                    db,
+                    sql: "SELECT DISTINCT groupTitle FROM m3uChannel WHERE playlistId = ? AND groupTitle IS NOT NULL AND groupTitle != '' ORDER BY groupTitle",
+                    arguments: [pid]
+                )
+            }) ?? []
+            categories = groups.map { CategoryLockRow(type: "m3u", id: $0, name: $0) }
+        } else {
+            let rows = (try? await AppDatabase.shared.read { db in
+                try DBCategory
+                    .filter(Column("playlistId") == pid)
+                    .order(Column("sortIndex"))
+                    .fetchAll(db)
+            }) ?? []
+            categories = rows.map { CategoryLockRow(type: $0.type, id: $0.id, name: $0.name) }
+        }
+    }
+}
+
+/// STORAGE group (T1): the cache size with a cache-only Clear,
+/// on B2's `StorageService` contract (§5). (B2 builds
+/// StorageService in wave 2; this UI calls exactly the
+/// contracted statics.)
+///
+/// O5/O6 placement notes: the downloads size + Downloads link
+/// half of T1 already lives in the screens' Downloads group
+/// (the DownloadsView link and the storage-used row) — it is
+/// NOT duplicated here. And this section's cache row is now the
+/// ONE cache size/clear control in Settings: the round-15
+/// image-cache row that sat in the Advanced group was removed
+/// when this section landed (see the report).
+struct StorageSettingsSection: View {
+    @State private var cacheBytes: Int64 = 0
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("storage.title"), thisPlaylist: false)) {
+            HStack(spacing: 12) {
+                SettingsIconTile(systemImage: "photo.stack", tint: .gray)
+                Text(L("storage.cache"))
+                Spacer()
+                Text(ByteCountFormatter.string(fromByteCount: cacheBytes, countStyle: .file))
+                    .foregroundColor(.secondary)
+                Button(L("storage.clear_cache")) {
+                    StorageService.clearCache()
+                    refresh()
+                }
+                .font(.subheadline.weight(.semibold))
+                .buttonStyle(.plain)
+                .foregroundColor(AppTheme.accent)
+                .disabled(cacheBytes == 0)
+            }
+        }
+        .task { refresh() }
+    }
+
+    private func refresh() {
+        cacheBytes = StorageService.cacheSizeBytes()
+    }
+}
+
+/// T5: the subscription overview — EVERY saved playlist with its
+/// provider label, recorded expiry, days remaining and a plainly
+/// shown expired state. All values come from
+/// `ProviderExpiryStore` (recorded from real provider verifies);
+/// a playlist with no recorded expiry says so, and M3U playlists
+/// carry no provider account at all.
+struct SubscriptionSettingsSection: View {
+    let playlists: [Playlist]
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("subscription.title"), thisPlaylist: false)) {
+            NavigationLink {
+                SubscriptionOverviewView(playlists: playlists)
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "calendar.badge.clock", tint: .orange)
+                    Text(L("subscription.title"))
+                    Spacer()
+                    if !playlists.isEmpty {
+                        Text("\(playlists.count)")
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct SubscriptionOverviewView: View {
+    let playlists: [Playlist]
+
+    var body: some View {
+        List {
+            ForEach(playlists) { playlist in
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text(playlist.name)
+                            .font(.body.weight(.semibold))
+                            .lineLimit(1)
+                        Spacer()
+                        Text(playlist.kind == .m3u ? "M3U" : "Xtream")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.white.opacity(0.16), in: Capsule())
+                    }
+                    Text(providerLabel(for: playlist))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                    expiryLine(for: playlist)
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .cinematicScrollBackground()
+        .navigationTitle(L("subscription.title"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// The provider/server label: the server's host only — never
+    /// the full URL, and never a credential.
+    private func providerLabel(for playlist: Playlist) -> String {
+        if playlist.kind == .m3u { return L("subscription.m3u_source") }
+        if let host = URL(string: playlist.serverURL)?.host, !host.isEmpty {
+            return L("subscription.provider_format", host)
+        }
+        return L("subscription.provider_unknown")
+    }
+
+    @ViewBuilder
+    private func expiryLine(for playlist: Playlist) -> some View {
+        if playlist.kind == .m3u {
+            Text(L("settings.account.no_expiry"))
+                .font(.caption)
+                .foregroundColor(.secondary)
+        } else if let expiry = ProviderExpiryStore.expiryDate(playlistId: playlist.id) {
+            if ProviderExpiryStore.isExpired(expiryDate: expiry) {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundColor(.red)
+                    Text(L("subscription.expired_format", formatted(expiry)))
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.red)
+                }
+            } else {
+                Text(L("subscription.active_format", formatted(expiry), remainingText(expiry: expiry)))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        } else {
+            Text(L("settings.account.no_expiry"))
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func formatted(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
+
+    /// Same honest calendar-day math as the account card.
+    private func remainingText(expiry: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(expiry) { return L("settings.account.expires_today") }
+        let days = calendar.dateComponents(
+            [.day],
+            from: calendar.startOfDay(for: Date()),
+            to: calendar.startOfDay(for: expiry)
+        ).day ?? 0
+        if days <= 1 { return L("settings.account.day_left") }
+        return L("settings.account.days_left", days)
+    }
+}
+
+/// Item 13 (the missing half): the in-app FAQ and the diagnostics
+/// copy action. Privacy Policy / Terms already live in
+/// PrivacyLegalSection (verified) and are not duplicated here.
+/// There is deliberately NO contact row — the owner has not named
+/// a support destination. Diagnostics carry app version, OS,
+/// device model and playlist count/kinds ONLY — no server URLs,
+/// no usernames, no credentials.
+struct SupportSettingsSection: View {
+    let playlists: [Playlist]
+
+    @State private var diagnosticsCopied = false
+    @State private var copyResetTask: Task<Void, Never>?
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("support.title"), thisPlaylist: false)) {
+            NavigationLink {
+                FAQView()
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "questionmark.circle.fill", tint: AppTheme.accent)
+                    Text(L("support.faq.title"))
+                }
+            }
+
+            Button {
+                copyDiagnostics()
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "doc.on.doc.fill", tint: .gray)
+                    Text(L("support.diagnostics.copy"))
+                        .foregroundColor(.primary)
+                    Spacer()
+                    if diagnosticsCopied {
+                        Image(systemName: "checkmark")
+                            .font(.body.weight(.bold))
+                            .foregroundColor(.green)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+        }
+        .onDisappear { copyResetTask?.cancel() }
+    }
+
+    private func copyDiagnostics() {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"
+        let xtreamCount = playlists.filter { $0.kind == .xtream }.count
+        let m3uCount = playlists.count - xtreamCount
+        let text = """
+        Super X \(version) (\(build))
+        iOS \(UIDevice.current.systemVersion) · \(UIDevice.current.model)
+        \(L("support.diagnostics.playlists_format", playlists.count, xtreamCount, m3uCount))
+        \(L("support.diagnostics.language_format", LocalizationManager.shared.effectiveLanguageCode))
+        """
+        UIPasteboard.general.string = text
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        diagnosticsCopied = true
+        copyResetTask?.cancel()
+        copyResetTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if !Task.isCancelled { diagnosticsCopied = false }
+        }
+    }
+}
+
+/// The FAQ screen: real questions and answers about how this app
+/// actually works (bring-your-own-provider, local-only data,
+/// expiry, downloads, the PIN, backups).
+struct FAQView: View {
+    private let questionCount = 6
+
+    var body: some View {
+        List {
+            ForEach(1...questionCount, id: \.self) { index in
+                Section {
+                    Text(L("support.faq.a\(index)"))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                } header: {
+                    Text(L("support.faq.q\(index)"))
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                        .textCase(nil)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .cinematicScrollBackground()
+        .navigationTitle(L("support.faq.title"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// T6: the danger zone — "Sign out of all playlists" and "Erase
+/// all app data", EACH behind a double confirmation (an
+/// explanatory alert, then a second final confirm).
+///
+/// Erase is complete: it runs the ONE shared wipe
+/// (`AccountDataDeletion.deleteAllLocalData` — playlists +
+/// content, both favorite stores, watch history, downloads
+/// metadata AND files, EPG, PIN, hidden categories, watchlist,
+/// per-playlist stores) and then removes the ENTIRE UserDefaults
+/// persistent domain (every app setting), resetting the
+/// in-memory language/accent stores so the gate that follows is
+/// a genuine first-run state.
+///
+/// Stores cleared by Erase (audited by grep over
+/// @AppStorage / UserDefaults / GRDB tables):
+/// GRDB tables (via AccountDataDeletion): playlist, category,
+/// liveStream, vodStream, series, season, episode, favorite,
+/// m3uFavorite, m3uChannel, watchHistory, downloadedItem,
+/// epgProgramme, epgChannel, epgSource + staging tables.
+/// UserDefaults: the whole persistent domain — every
+/// @AppStorage preference, HiddenCategoryStore,
+/// CategoryOrderStore, WatchlistStore, ProviderExpiryStore,
+/// PlaylistHealthStore, PlaylistLibraryStore,
+/// ParentalControlStore locks, gate drafts/session keys,
+/// subtitle/audio-delay/track-preference stores, widget and
+/// intent keys. Keychain: the parental PIN. Files: download
+/// files + resume data, the Nuke image caches, URLCache.
+/// In-memory: both content stores unloaded, EPG store reset,
+/// widget snapshot emptied.
+struct DangerZoneSection: View {
+    let onExitToGate: () -> Void
+
+    @State private var showSignOutFirst = false
+    @State private var showSignOutFinal = false
+    @State private var showEraseFirst = false
+    @State private var showEraseFinal = false
+    /// The PIN guard the old Privacy & Legal "Delete Account" row
+    /// carried (round 15, C5) moves here with the erase: with a
+    /// parental PIN set, the PIN comes before both confirmations.
+    @State private var showPINForErase = false
+    @State private var isWorking = false
+    @State private var showError = false
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("danger.title"), thisPlaylist: false)) {
+            Button(role: .destructive) {
+                showSignOutFirst = true
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "rectangle.portrait.and.arrow.right", tint: .orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("danger.sign_out_all"))
+                        Text(L("danger.sign_out_all.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if isWorking { Spacer(); ProgressView() }
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isWorking)
+
+            Button(role: .destructive) {
+                if PINStore.hasPIN {
+                    showPINForErase = true
+                } else {
+                    showEraseFirst = true
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "trash.fill", tint: .red)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("danger.erase"))
+                        Text(L("danger.erase.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if isWorking { Spacer(); ProgressView() }
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isWorking)
+        }
+        .sheet(isPresented: $showPINForErase) {
+            PINEntrySheet(message: L("pin.guard.delete_account")) {
+                DispatchQueue.main.async { showEraseFirst = true }
+            }
+        }
+        // Sign out of all playlists: confirmation 1 of 2.
+        .alert(L("danger.sign_out_all"), isPresented: $showSignOutFirst) {
+            Button(L("common.cancel"), role: .cancel) {}
+            Button(L("danger.continue"), role: .destructive) {
+                DispatchQueue.main.async { showSignOutFinal = true }
+            }
+        } message: {
+            Text(L("danger.sign_out_all.message"))
+        }
+        // Sign out of all playlists: confirmation 2 of 2 (final).
+        .alert(L("danger.sign_out_all.final_title"), isPresented: $showSignOutFinal) {
+            Button(L("common.cancel"), role: .cancel) {}
+            Button(L("danger.sign_out_all.final_confirm"), role: .destructive) {
+                Task { await signOutAll() }
+            }
+        } message: {
+            Text(L("danger.sign_out_all.final_message"))
+        }
+        // Erase all app data: confirmation 1 of 2.
+        .alert(L("danger.erase"), isPresented: $showEraseFirst) {
+            Button(L("common.cancel"), role: .cancel) {}
+            Button(L("danger.continue"), role: .destructive) {
+                DispatchQueue.main.async { showEraseFinal = true }
+            }
+        } message: {
+            Text(L("danger.erase.message"))
+        }
+        // Erase all app data: confirmation 2 of 2 (final).
+        .alert(L("danger.erase.final_title"), isPresented: $showEraseFinal) {
+            Button(L("common.cancel"), role: .cancel) {}
+            Button(L("danger.erase.final_confirm"), role: .destructive) {
+                Task { await eraseAll() }
+            }
+        } message: {
+            Text(L("danger.erase.final_message"))
+        }
+        .alert(L("common.error"), isPresented: $showError) {
+            Button(L("common.ok"), role: .cancel) {}
+        } message: {
+            Text(L("danger.error_message"))
+        }
+    }
+
+    /// Removes every saved playlist and all of its per-playlist
+    /// data through the shared per-playlist deletion path; app
+    /// settings themselves are kept. Ends at the gate with no
+    /// active playlist.
+    private func signOutAll() async {
+        isWorking = true
+        let playlists = (try? await AppDatabase.shared.read { db in
+            try Playlist.fetchAll(db)
+        }) ?? []
+        var succeeded = true
+        for playlist in playlists {
+            if !(await AccountDataDeletion.deletePlaylistData(playlist)) {
+                succeeded = false
+            }
+            await ParentalControlStore.shared.removeAll(playlistId: playlist.id)
+        }
+        await PlaylistContentStore.shared.unload()
+        await M3UContentStore.shared.unload()
+        await EPGStore.shared.setActivePlaylist(nil)
+        isWorking = false
+        if succeeded {
+            onExitToGate()
+        } else {
+            showError = true
+        }
+    }
+
+    /// The full erase described in the type header.
+    private func eraseAll() async {
+        isWorking = true
+        let wiped = await AccountDataDeletion.deleteAllLocalData()
+        await ParentalControlStore.shared.removeAllEverywhere()
+        // Every remaining UserDefaults key — the entire app
+        // domain, no key list to fall behind the tree.
+        if let bundleId = Bundle.main.bundleIdentifier {
+            UserDefaults.standard.removePersistentDomain(forName: bundleId)
+        }
+        // The in-memory stores that mirror defaults must not
+        // repaint the erased values back.
+        AccentThemeStore.shared.preset = .blue
+        LocalizationManager.shared.selectedLanguage = "system"
+        isWorking = false
+        if wiped {
+            onExitToGate()
+        } else {
+            showError = true
         }
     }
 }
