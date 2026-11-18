@@ -229,11 +229,28 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     // time. NOTE: therefore preferredForwardBufferDuration/maxBufferDuration does NOT
     // delay the FIRST frame; it only manages the re-buffer cushion and seek/second-open.
     options.isSecondOpen = true
+    // Build 61 (B3, item 7b): the user's buffer-size preference
+    // (Settings ▸ Playback & Appearance; key "player.bufferSize",
+    // values "low" / "default" / "high"). "default" (and any
+    // missing/unknown value) keeps the exact build-33 cushions
+    // restored in round 20 (live 2/16, VOD 3/60); "low" shrinks
+    // the cushion for slow/metered connections, "high" deepens it
+    // for unstable ones. This is the ONLY reader of the key.
+    let bufferPreference = UserDefaults.standard.string(forKey: "player.bufferSize") ?? "default"
     if liveLowLatency {
       // Round 20 (R20-4): build-33 buffer cushion restored
       // (2 s forward / 16 s max); the round-18 deepening is removed.
-      options.preferredForwardBufferDuration = 2
-      options.maxBufferDuration = 16
+      switch bufferPreference {
+      case "low":
+        options.preferredForwardBufferDuration = 1
+        options.maxBufferDuration = 8
+      case "high":
+        options.preferredForwardBufferDuration = 4
+        options.maxBufferDuration = 32
+      default:
+        options.preferredForwardBufferDuration = 2
+        options.maxBufferDuration = 16
+      }
       // On the FFmpeg path, the first frame was stuck on avformat_find_stream_info's default 5 MB probe
       // being pulled over a slow IPTV socket. These two values are the values proven in the field
       // on the app's own remux input path (RemuxHLSWriter); on the AVPlayer/HLS [path]
@@ -245,8 +262,19 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     } else {
       // Round 20 (R20-4): build-33 VOD cushion restored
       // (3 s forward / 60 s max); the round-18 raising is removed.
-      options.preferredForwardBufferDuration = 3
-      options.maxBufferDuration = 60
+      // Build 61 (B3): scaled by the same buffer preference read
+      // above — default keeps 3/60 exactly.
+      switch bufferPreference {
+      case "low":
+        options.preferredForwardBufferDuration = 2
+        options.maxBufferDuration = 30
+      case "high":
+        options.preferredForwardBufferDuration = 6
+        options.maxBufferDuration = 120
+      default:
+        options.preferredForwardBufferDuration = 3
+        options.maxBufferDuration = 60
+      }
       // VOD (mkv/avi/ts): limit the worst-case analysis time without leaving multi-part headers closed.
       options.maxAnalyzeDuration = 3_000_000  // 3.0s tavan
     }
