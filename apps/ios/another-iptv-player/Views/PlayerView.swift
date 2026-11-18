@@ -210,6 +210,26 @@ private struct PlayerViewImpl: View {
     @State private var aspectToastText: String?
     @State private var aspectToastToken: UInt64 = 0
 
+    // MARK: - Build 61 (B14, V-pack) control-layer state
+    /// V2 screen lock: while true the chrome renders only the unlock capsule.
+    @State private var controlsLocked = false
+    /// V4 stream-info overlay visibility (top-bar info affordance).
+    @State private var showStreamInfo = false
+    /// V1 sleep row drives B4's PlaybackSleepTimer engine (shared singleton,
+    /// formerly driven from the track-settings sheet).
+    @ObservedObject private var sleepTimer = PlaybackSleepTimer.shared
+    /// V3 additive swipe state: direction locks on first significant movement.
+    private enum SwipeGestureKind {
+        case seek
+        case brightness
+        case volume
+    }
+    @State private var swipeKind: SwipeGestureKind?
+    @State private var swipeStartTimeMs: Int64 = 0
+    @State private var swipeStartLevel: Double = 0
+    @State private var swipeSeekTargetMs: Int64?
+    @State private var swipeLevelValue: Double?
+
     /// Dizi bölümü bitince sonraki bölüme otomatik geçiş geri sayımı. Token, iptal sonrası
     /// gecikmiş tick'lerin sayacı yeniden canlandırmasını engeller; `handled` bayrağı kullanıcı
     /// iptal ettiğinde aynı `.ended` durumu için sayacın tekrar başlamasını önler.
@@ -1506,6 +1526,7 @@ private struct PlayerViewImpl: View {
                     isSpeedHoldActive: isFastForwarding,
                     isSpeedHoldEnabled: speedUpOnLongPress
                         && player.isPlaying
+                        && !controlsLocked
                         && interactiveDismissAxis == nil,
                     edgeSliderTrackSize: CGSize(
                         width: isCompactWidth ? 52 : 64,
@@ -1529,7 +1550,23 @@ private struct PlayerViewImpl: View {
                     onVideoPanEnded: { translation in
                         handleVideoPanEnded(translation: translation)
                     },
-                    onVideoSurfaceTap: { onVideoSurfaceTap?() }
+                    onVideoSurfaceTap: { onVideoSurfaceTap?() },
+                    // Build 61 (B14, V3): additive swipes — disabled while
+                    // locked, zoomed, or mid-dismiss so pristine gestures win.
+                    swipeGesturesEnabled: !controlsLocked
+                        && videoZoomScale <= 1.02
+                        && interactiveDismissAxis == nil,
+                    onSurfacePanBegan: { location, container in
+                        handleSurfacePanBegan(location: location, container: container)
+                    },
+                    onSurfacePanChanged: { translation, location, container in
+                        handleSurfacePanChanged(
+                            translation: translation, location: location, container: container
+                        )
+                    },
+                    onSurfacePanEnded: { translation in
+                        handleSurfacePanEnded(translation: translation)
+                    }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .zIndex(1)
@@ -1563,6 +1600,14 @@ private struct PlayerViewImpl: View {
                     .opacity(fullChromeOpacity)
                     .zIndex(29)
 
+                    // Build 61 (B14, V2): while locked, the ONLY chrome is the
+                    // unlock capsule — every other control is unrendered (inert).
+                    if controlsLocked {
+                        lockedControlsChrome
+                            .opacity(fullChromeOpacity)
+                            .allowsHitTesting(miniProgress < 0.02)
+                            .zIndex(30)
+                    } else {
                     VStack(spacing: 0) {
                         topChrome
                         Spacer()
@@ -1612,6 +1657,61 @@ private struct PlayerViewImpl: View {
                     .opacity(fullChromeOpacity)
                     .allowsHitTesting(miniProgress < 0.02)
                     .zIndex(32)
+                    } // end B14 V2 unlocked chrome
+                }
+
+                // Build 61 (B14, V4): stream-info overlay — REAL engine-reported
+                // values only, reusing the debug panel's existing formatters
+                // (resolution / bitrate / network / buffer / fps / codec).
+                if showControls && !controlsLocked && showStreamInfo {
+                    VStack {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                streamInfoRow(label: L("player.info.resolution"), value: playbackDebugResolutionText)
+                                streamInfoRow(label: L("player.info.bitrate"), value: playbackDebugBitrateText)
+                                streamInfoRow(label: L("player.info.network"), value: playbackDebugNetText)
+                                streamInfoRow(label: L("player.info.buffer"), value: playbackDebugCacheText)
+                                streamInfoRow(label: "FPS", value: playbackDebugFpsText)
+                                streamInfoRow(label: "Codec", value: playbackDebugCodecText)
+                            }
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            Spacer()
+                        }
+                        .padding(.top, 78 + outerSafeAreaInsets.top)
+                        .padding(.leading, 16 + outerSafeAreaInsets.leading)
+                        Spacer()
+                    }
+                    .allowsHitTesting(false)
+                    .opacity(fullChromeOpacity)
+                    .zIndex(34)
+                }
+
+                // Build 61 (B14, V3): minimal swipe indicator (seek preview /
+                // brightness / volume), visible only mid-gesture.
+                if let target = swipeSeekTargetMs {
+                    swipeIndicatorCapsule {
+                        HStack(spacing: 6) {
+                            Image(systemName: target >= swipeStartTimeMs ? "goforward.10" : "gobackward.10")
+                                .accessibilityHidden(true)
+                            Text(formatMs(Int(target)))
+                                .monospacedDigit()
+                        }
+                    }
+                    .zIndex(35)
+                } else if let level = swipeLevelValue, let kind = swipeKind {
+                    swipeIndicatorCapsule {
+                        HStack(spacing: 6) {
+                            Image(systemName: kind == .brightness ? "sun.max.fill" : "speaker.wave.2.fill")
+                                .accessibilityHidden(true)
+                            Text("\(Int((level * 100).rounded()))%")
+                                .monospacedDigit()
+                        }
+                    }
+                    .zIndex(35)
                 }
 
                 // Kontroller gizliyken de yükleme/buffering geri bildirimi: yavaş panel
@@ -1979,6 +2079,12 @@ private struct PlayerViewImpl: View {
             favoriteTopChromeAction
             airPlayTopChromeAction
             castTopChromeAction
+            // Build 61 (B14, V2): screen-lock stays a direct top-bar button on
+            // compact too; V4 stream info lives in the overflow menu there.
+            groupedCapsuleButton(systemName: "lock.open") {
+                lockControls()
+            }
+            .accessibilityLabel(L("player.controls.lock"))
             compactTopChromeMoreMenu
         } else {
             favoriteTopChromeAction
@@ -2016,6 +2122,18 @@ private struct PlayerViewImpl: View {
                 // Build 61 (B10, Q24): accessibility MODIFIER ONLY — no layout/behaviour change.
                 .accessibilityHint(L("player.a11y.track_settings.hint"))
             }
+
+            // Build 61 (B14, V4): stream-info affordance (top bar, trailing).
+            groupedCapsuleButton(systemName: "info.circle") {
+                showStreamInfo.toggle()
+            }
+            .accessibilityLabel(L("player.info.title"))
+
+            // Build 61 (B14, V2): screen-lock button (top bar, trailing-most).
+            groupedCapsuleButton(systemName: "lock.open") {
+                lockControls()
+            }
+            .accessibilityLabel(L("player.controls.lock"))
         }
     }
 
@@ -2098,6 +2216,15 @@ private struct PlayerViewImpl: View {
                     Label(L("player.a11y.track_settings"), systemImage: "gearshape")
                 }
             }
+
+            // Build 61 (B14, V4): stream info (compact overflow placement).
+            Button {
+                resetTimer()
+                showStreamInfo.toggle()
+            } label: {
+                Label(L("player.info.title"), systemImage: "info.circle")
+            }
+
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 17, weight: .semibold))
@@ -2175,32 +2302,62 @@ private struct PlayerViewImpl: View {
     /// Alt gradient arkaplanı karartıyor, butonlar direkt üstünde durur.
     private var centerTransport: some View {
         HStack(spacing: transportSpacing) {
+            // Build 61 (B14, V1): VOD/catch-up center cluster is −10s / play /
+            // +10s (owner V1 text; was ±15s in pristine).
             if effectiveSeekable && !isCenterTransportLoading {
                 transparentTransportButton(
-                    systemName: "gobackward.15",
+                    systemName: "gobackward.10",
                     symbolSize: transportSkipSymbol,
                     hitFrame: transportSkipHit
                 ) {
-                    player.jump(seconds: -15)
+                    player.jump(seconds: -10)
                     UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
                 }
-                .accessibilityLabel(L("player.a11y.skip_back_15"))
+                .accessibilityLabel(L("player.a11y.skip_back_10"))
                 .disabled(hasPlaybackFailure)
                 .opacity(hasPlaybackFailure ? 0.4 : 1)
             }
 
-            centerPlayPauseOrLoadingButton
-
-            if effectiveSeekable && !isCenterTransportLoading {
+            // Build 61 (B14, V1): live center cluster is prev / next channel
+            // (moved here from the bottom row, which keeps only the list button).
+            if isLiveStream && showLiveChannelSkip && !isCenterTransportLoading {
                 transparentTransportButton(
-                    systemName: "goforward.15",
+                    systemName: "backward.end.fill",
                     symbolSize: transportSkipSymbol,
                     hitFrame: transportSkipHit
                 ) {
-                    player.jump(seconds: 15)
+                    onPreviousChannel?()
+                }
+                .accessibilityLabel(L("player.a11y.previous_channel"))
+                .disabled(!canGoToPreviousChannel || hasPlaybackFailure)
+                .opacity(!canGoToPreviousChannel || hasPlaybackFailure ? 0.4 : 1)
+            }
+
+            centerPlayPauseOrLoadingButton
+
+            if isLiveStream && showLiveChannelSkip && !isCenterTransportLoading {
+                transparentTransportButton(
+                    systemName: "forward.end.fill",
+                    symbolSize: transportSkipSymbol,
+                    hitFrame: transportSkipHit
+                ) {
+                    onNextChannel?()
+                }
+                .accessibilityLabel(L("player.a11y.next_channel"))
+                .disabled(!canGoToNextChannel || hasPlaybackFailure)
+                .opacity(!canGoToNextChannel || hasPlaybackFailure ? 0.4 : 1)
+            }
+
+            if effectiveSeekable && !isCenterTransportLoading {
+                transparentTransportButton(
+                    systemName: "goforward.10",
+                    symbolSize: transportSkipSymbol,
+                    hitFrame: transportSkipHit
+                ) {
+                    player.jump(seconds: 10)
                     UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
                 }
-                .accessibilityLabel(L("player.a11y.skip_forward_15"))
+                .accessibilityLabel(L("player.a11y.skip_forward_10"))
                 .disabled(hasPlaybackFailure)
                 .opacity(hasPlaybackFailure ? 0.4 : 1)
             }
@@ -2260,24 +2417,11 @@ private struct PlayerViewImpl: View {
     /// Bölüm atlama ayrı; zaman çubuğu yalnızca `scrubTimelineCard` içinde.
     private var bottomTransportChrome: some View {
         VStack(alignment: .trailing, spacing: 10) {
-            if showLiveChannelSkip || showLiveChannelListButton {
+            // Build 61 (B14, V1): live prev/next moved to the center cluster;
+            // this row now carries only the channel-list button.
+            if showLiveChannelListButton {
                 HStack(spacing: 8) {
                     Spacer(minLength: 0)
-                    if showLiveChannelSkip {
-                        glassIconButton(systemName: "chevron.left.circle.fill", size: 44, symbolSize: 17) {
-                            onPreviousChannel?()
-                        }
-                        .accessibilityLabel(L("player.a11y.previous_channel"))
-                        .disabled(!canGoToPreviousChannel)
-                        .opacity(canGoToPreviousChannel ? 1 : 0.38)
-
-                        glassIconButton(systemName: "chevron.right.circle.fill", size: 44, symbolSize: 17) {
-                            onNextChannel?()
-                        }
-                        .accessibilityLabel(L("player.a11y.next_channel"))
-                        .disabled(!canGoToNextChannel)
-                        .opacity(canGoToNextChannel ? 1 : 0.38)
-                    }
                     if showLiveChannelListButton, let toggle = onToggleLiveChannelSidePanel {
                         glassIconButton(
                             systemName: isLiveChannelSidePanelVisible ? "rectangle.bottomthird.inset.filled" : "rectangle.grid.1x2",
@@ -2332,10 +2476,321 @@ private struct PlayerViewImpl: View {
                 .padding(.horizontal, 12)
             }
 
+            // Build 61 (B14, V5): live Up Next strip — next programme from the
+            // loaded EPG snapshot; absent entirely without EPG data.
+            if isLiveStream, let next = currentNowNext?.next {
+                upNextStrip(next: next)
+            }
+
+            // Build 61 (B14, V1): the ONE bottom control row, directly above
+            // the progress bar: Speed · Subtitles · Audio · Sleep · Aspect.
+            bottomControlRow
+
             if !isLiveStream {
                 scrubTimelineCard
             }
         }
+    }
+
+    // MARK: - Build 61 (B14, V-pack) control row / strips / lock / info
+
+    private func upNextStrip(next: EPGProgramme) -> some View {
+        HStack(spacing: 8) {
+            Text(L("player.upnext"))
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white.opacity(0.72))
+            Text(next.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            Text(EPGTimeFormat.time(next.start))
+                .font(.caption2.weight(.medium))
+                .monospacedDigit()
+                .foregroundStyle(.white.opacity(0.72))
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 18)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var bottomControlRow: some View {
+        HStack(spacing: 0) {
+            // Speed — Menu driving the existing VideoPlayerController.setRate.
+            Menu {
+                ForEach(Self.speedRateOptions, id: \.self) { rate in
+                    Button {
+                        resetTimer()
+                        player.setRate(rate)
+                    } label: {
+                        if abs(player.rate - rate) < 0.01 {
+                            Label(Self.speedRateLabel(rate), systemImage: "checkmark")
+                        } else {
+                            Text(Self.speedRateLabel(rate))
+                        }
+                    }
+                }
+            } label: {
+                bottomRowLabel(
+                    systemName: "gauge.with.dots.needle.33percent",
+                    caption: player.rate == 1.0
+                        ? L("player.controls.speed")
+                        : Self.speedRateLabel(player.rate)
+                )
+            }
+            .accessibilityLabel(L("player.speed.title"))
+
+            // Subtitles — opens the existing track-settings sheet.
+            if !player.isAirPlayPlaybackActive {
+                Button {
+                    resetTimer()
+                    openTrackSettings()
+                } label: {
+                    bottomRowLabel(systemName: "captions.bubble", caption: L("player.tracks.subtitle"))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L("player.tracks.subtitle"))
+            }
+
+            // Audio — opens the existing track-settings sheet.
+            if !player.isAirPlayPlaybackActive {
+                Button {
+                    resetTimer()
+                    openTrackSettings()
+                } label: {
+                    bottomRowLabel(systemName: "speaker.wave.2", caption: L("player.tracks.audio"))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L("player.tracks.audio"))
+            }
+
+            // Sleep — Menu driving B4's PlaybackSleepTimer engine.
+            Menu {
+                Button {
+                    resetTimer()
+                    sleepTimer.cancel()
+                } label: {
+                    if sleepTimer.mode == .off {
+                        Label(L("player.sleep.off"), systemImage: "checkmark")
+                    } else {
+                        Text(L("player.sleep.off"))
+                    }
+                }
+                ForEach(Self.sleepMinuteOptions, id: \.self) { minutes in
+                    Button {
+                        resetTimer()
+                        sleepTimer.arm(minutes: minutes, player: player)
+                    } label: {
+                        if sleepTimer.mode == .minutes(minutes) {
+                            Label(L("player.sleep.minutes", minutes), systemImage: "checkmark")
+                        } else {
+                            Text(L("player.sleep.minutes", minutes))
+                        }
+                    }
+                }
+                if !isLiveStream {
+                    Button {
+                        resetTimer()
+                        sleepTimer.armEndOfEpisode(player: player)
+                    } label: {
+                        if sleepTimer.mode == .endOfEpisode {
+                            Label(L("player.sleep.end_of_episode"), systemImage: "checkmark")
+                        } else {
+                            Text(L("player.sleep.end_of_episode"))
+                        }
+                    }
+                }
+            } label: {
+                bottomRowLabel(
+                    systemName: "moon",
+                    caption: sleepCaption
+                )
+            }
+            .accessibilityLabel(L("player.sleep.title"))
+
+            // Aspect (V6) — cycles the existing VideoAspectMode set in place:
+            // fit (Original) → fill (Fill) → center (Crop/1:1), same order and
+            // same AppStorage value the top-chrome aspect button drives.
+            Button {
+                resetTimer()
+                cycleVideoAspectMode()
+            } label: {
+                bottomRowLabel(systemName: selectedAspectMode.iconName, caption: selectedAspectMode.title)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(selectedAspectMode.accessibilityLabel)
+        }
+        .padding(.horizontal, 18)
+    }
+
+    private static let speedRateOptions: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+    private static let sleepMinuteOptions: [Int] = [15, 30, 45, 60]
+
+    private static func speedRateLabel(_ rate: Float) -> String {
+        let trimmed = rate == rate.rounded()
+            ? String(format: "%.1f", rate)
+            : String(rate)
+        return "\(trimmed)×"
+    }
+
+    private var sleepCaption: String {
+        if let remaining = sleepTimer.remainingSeconds, sleepTimer.mode != .off {
+            return String(format: "%d:%02d", remaining / 60, remaining % 60)
+        }
+        return L("player.sleep_timer.short")
+    }
+
+    /// One bottom-row control: SF Symbol over a small caption, equal width so
+    /// the five controls share the row evenly.
+    private func bottomRowLabel(systemName: String, caption: String) -> some View {
+        VStack(spacing: 3) {
+            Image(systemName: systemName)
+                .font(.system(size: 19, weight: .semibold))
+            Text(caption)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(.white.opacity(0.96))
+        .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .contentShape(Rectangle())
+    }
+
+    private func streamInfoRow(label: String, value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .foregroundStyle(.white.opacity(0.6))
+            Text(value)
+        }
+    }
+
+    /// Centered minimal capsule used by the V3 swipe indicators.
+    private func swipeIndicatorCapsule<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                content()
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
+                Spacer()
+            }
+            Spacer()
+        }
+        .allowsHitTesting(false)
+        .opacity(fullChromeOpacity)
+    }
+
+    // MARK: - Build 61 (B14, V2) screen lock
+
+    private func lockControls() {
+        showStreamInfo = false
+        controlsLocked = true
+        resetTimer()
+    }
+
+    /// The only chrome rendered while locked: a small lock indicator capsule;
+    /// a long press (0.8s) on it is the unlock affordance. It hides/shows with
+    /// the normal controls auto-hide logic (resetTimer / surface tap).
+    private var lockedControlsChrome: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                HStack(spacing: 8) {
+                    Image(systemName: "lock.fill")
+                        .font(.footnote.weight(.bold))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(L("player.controls.locked"))
+                            .font(.footnote.weight(.semibold))
+                        Text(L("player.controls.unlock_hold"))
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.72))
+                    }
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
+                .contentShape(Capsule())
+                .onLongPressGesture(minimumDuration: 0.8) {
+                    controlsLocked = false
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    resetTimer()
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(L("player.controls.locked"))
+                .accessibilityHint(L("player.controls.unlock_hold"))
+                Spacer()
+            }
+            Spacer()
+        }
+    }
+
+    // MARK: - Build 61 (B14, V3) additive swipe gestures
+
+    private func handleSurfacePanBegan(location: CGPoint, container: CGSize) {
+        swipeKind = nil
+        swipeSeekTargetMs = nil
+        swipeLevelValue = nil
+        swipeStartTimeMs = player.timeMs
+    }
+
+    private func handleSurfacePanChanged(translation: CGSize, location: CGPoint, container: CGSize) {
+        if swipeKind == nil {
+            guard max(abs(translation.width), abs(translation.height)) > 12 else { return }
+            if abs(translation.width) > abs(translation.height) {
+                // Horizontal = seek; VOD/catch-up only (live is not seekable).
+                guard effectiveSeekable, player.durationMs > 0 else { return }
+                swipeKind = .seek
+            } else if location.x > container.width / 2 {
+                // Right half vertical = brightness (SPEC §3A V3).
+                swipeKind = .brightness
+                swipeStartLevel = Double(player.screenBrightness)
+            } else {
+                // Left half vertical = volume (SPEC §3A V3).
+                swipeKind = .volume
+                swipeStartLevel = Double(systemVolumeBridge.outputVolume)
+            }
+            // Keep the chrome (and this gesture's indicators) alive mid-swipe.
+            timer?.invalidate()
+        }
+
+        guard let kind = swipeKind else { return }
+        switch kind {
+        case .seek:
+            // Full-width swipe scrubs a quarter of the timeline; the preview
+            // updates live and the seek itself commits on release.
+            let deltaMs = Double(translation.width) / max(container.width, 1)
+                * 0.25 * Double(player.durationMs)
+            let target = Double(swipeStartTimeMs) + deltaMs
+            swipeSeekTargetMs = Int64(min(max(target, 0), Double(player.durationMs)))
+        case .brightness:
+            let value = min(max(swipeStartLevel - Double(translation.height) / 360.0, 0), 1)
+            swipeLevelValue = value
+            player.setScreenBrightness(CGFloat(value))
+        case .volume:
+            let value = min(max(swipeStartLevel - Double(translation.height) / 360.0, 0), 1)
+            swipeLevelValue = value
+            systemVolumeBridge.setOutputVolume(Float(value))
+        }
+    }
+
+    private func handleSurfacePanEnded(translation: CGSize) {
+        if swipeKind == .seek, let target = swipeSeekTargetMs {
+            player.seekAbsolute(to: Double(target) / 1000.0)
+        }
+        swipeKind = nil
+        swipeSeekTargetMs = nil
+        swipeLevelValue = nil
+        resetTimer()
     }
 
     /// iOS native player stili: kartsız, düz düzen; okunabilirlik alt gradient'ten gelir.
@@ -2389,8 +2844,9 @@ private struct PlayerViewImpl: View {
                 guard effectiveSeekable else { return }
                 resetTimer()
                 switch direction {
-                case .increment: player.jump(seconds: 15)
-                case .decrement: player.jump(seconds: -15)
+                // Build 61 (B14, V1): step matches the center cluster's ±10s.
+                case .increment: player.jump(seconds: 10)
+                case .decrement: player.jump(seconds: -10)
                 @unknown default: break
                 }
             }

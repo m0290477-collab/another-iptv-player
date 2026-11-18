@@ -57,6 +57,12 @@ final class PlayerMediaKitTouchContainerView: UIView, UIGestureRecognizerDelegat
   var videoZoomScale: CGFloat = 1 {
     didSet { videoPan.isEnabled = videoZoomScale > 1.02 }
   }
+  /// Build 61 (B14, V3): additive single-finger swipe recognizer (seek /
+  /// brightness / volume). Enabled only while not zoomed, so it can never
+  /// fight the zoom pan above; taps and the speed-hold are untouched.
+  var surfacePanEnabled: Bool = false {
+    didSet { surfacePan.isEnabled = surfacePanEnabled }
+  }
   var enableSpeedHold: Bool = false
   var isSpeedHoldActive: Bool = false
   var edgeSliderTrackSize: CGSize = .zero
@@ -66,6 +72,7 @@ final class PlayerMediaKitTouchContainerView: UIView, UIGestureRecognizerDelegat
   fileprivate let centerView = MediaKitCenterPanel()
   private let videoPinch = UIPinchGestureRecognizer()
   private let videoPan = UIPanGestureRecognizer()
+  private let surfacePan = UIPanGestureRecognizer()
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -85,6 +92,17 @@ final class PlayerMediaKitTouchContainerView: UIView, UIGestureRecognizerDelegat
     videoPan.maximumNumberOfTouches = 1
     videoPan.isEnabled = false  // yalnızca zoomluyken aktif
     addGestureRecognizer(videoPan)
+
+    // Build 61 (B14, V3): additive swipe recognizer. cancelsTouchesInView is
+    // false so the pristine tap / long-press recognizers keep their exact
+    // behaviour; the pan only reports once the finger actually moves.
+    surfacePan.addTarget(self, action: #selector(handleSurfacePan(_:)))
+    surfacePan.cancelsTouchesInView = false
+    surfacePan.delegate = self
+    surfacePan.minimumNumberOfTouches = 1
+    surfacePan.maximumNumberOfTouches = 1
+    surfacePan.isEnabled = false
+    addGestureRecognizer(surfacePan)
 
     addSubview(centerView)
   }
@@ -141,6 +159,39 @@ final class PlayerMediaKitTouchContainerView: UIView, UIGestureRecognizerDelegat
     default:
       break
     }
+  }
+
+  // Build 61 (B14, V3): swipe reporting + edge-slider exclusion. While the
+  // chrome is visible, a swipe starting on an edge-slider capsule belongs to
+  // that slider's own drag, not to the surface swipe.
+  @objc private func handleSurfacePan(_ g: UIPanGestureRecognizer) {
+    let translation = g.translation(in: self)
+    let size = CGSize(width: translation.x, height: translation.y)
+    switch g.state {
+    case .began:
+      coordinator?.onSurfacePanBegan(g.location(in: self), bounds.size)
+    case .changed:
+      coordinator?.onSurfacePanChanged(size, g.location(in: self), bounds.size)
+    case .ended, .cancelled, .failed:
+      coordinator?.onSurfacePanEnded(size)
+    default:
+      break
+    }
+  }
+
+  func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldReceive touch: UITouch
+  ) -> Bool {
+    guard gestureRecognizer === surfacePan else { return true }
+    guard coordinator?.showControls.wrappedValue == true else { return true }
+    return !PlayerEdgeSliderGestureExclusion.contains(
+      touch.location(in: self),
+      in: bounds,
+      trackSize: edgeSliderTrackSize,
+      leadingInset: edgeSliderLeadingInset,
+      trailingInset: edgeSliderTrailingInset
+    )
   }
 
   func gestureRecognizer(
@@ -287,6 +338,11 @@ struct PlayerMediaKitStyleTouchOverlay: UIViewRepresentable {
   let onVideoPanChanged: (CGSize) -> Void
   let onVideoPanEnded: (CGSize) -> Void
   var onVideoSurfaceTap: (() -> Void)? = nil
+  /// Build 61 (B14, V3): additive swipe callbacks (seek / brightness / volume).
+  var swipeGesturesEnabled: Bool = false
+  var onSurfacePanBegan: (CGPoint, CGSize) -> Void = { _, _ in }
+  var onSurfacePanChanged: (CGSize, CGPoint, CGSize) -> Void = { _, _, _ in }
+  var onSurfacePanEnded: (CGSize) -> Void = { _ in }
 
   func makeCoordinator() -> Coordinator {
     Coordinator(
@@ -300,7 +356,10 @@ struct PlayerMediaKitStyleTouchOverlay: UIViewRepresentable {
       onVideoPinchEnded: onVideoPinchEnded,
       onVideoPanChanged: onVideoPanChanged,
       onVideoPanEnded: onVideoPanEnded,
-      onVideoSurfaceTap: onVideoSurfaceTap
+      onVideoSurfaceTap: onVideoSurfaceTap,
+      onSurfacePanBegan: onSurfacePanBegan,
+      onSurfacePanChanged: onSurfacePanChanged,
+      onSurfacePanEnded: onSurfacePanEnded
     )
   }
 
@@ -322,6 +381,10 @@ struct PlayerMediaKitStyleTouchOverlay: UIViewRepresentable {
     context.coordinator.onVideoPanChanged = onVideoPanChanged
     context.coordinator.onVideoPanEnded = onVideoPanEnded
     context.coordinator.onVideoSurfaceTap = onVideoSurfaceTap
+    context.coordinator.onSurfacePanBegan = onSurfacePanBegan
+    context.coordinator.onSurfacePanChanged = onSurfacePanChanged
+    context.coordinator.onSurfacePanEnded = onSurfacePanEnded
+    uiView.surfacePanEnabled = swipeGesturesEnabled && interactionEnabled
     uiView.videoZoomScale = videoZoomScale
     uiView.enableSpeedHold = isSpeedHoldEnabled && !isSeekDisabled && videoZoomScale <= 1.02
     uiView.isSpeedHoldActive = isSpeedHoldActive
@@ -345,6 +408,9 @@ struct PlayerMediaKitStyleTouchOverlay: UIViewRepresentable {
     var onVideoPanChanged: (CGSize) -> Void
     var onVideoPanEnded: (CGSize) -> Void
     var onVideoSurfaceTap: (() -> Void)?
+    var onSurfacePanBegan: (CGPoint, CGSize) -> Void
+    var onSurfacePanChanged: (CGSize, CGPoint, CGSize) -> Void
+    var onSurfacePanEnded: (CGSize) -> Void
 
     init(
       showControls: Binding<Bool>,
@@ -357,7 +423,10 @@ struct PlayerMediaKitStyleTouchOverlay: UIViewRepresentable {
       onVideoPinchEnded: @escaping () -> Void,
       onVideoPanChanged: @escaping (CGSize) -> Void,
       onVideoPanEnded: @escaping (CGSize) -> Void,
-      onVideoSurfaceTap: (() -> Void)? = nil
+      onVideoSurfaceTap: (() -> Void)? = nil,
+      onSurfacePanBegan: @escaping (CGPoint, CGSize) -> Void = { _, _ in },
+      onSurfacePanChanged: @escaping (CGSize, CGPoint, CGSize) -> Void = { _, _, _ in },
+      onSurfacePanEnded: @escaping (CGSize) -> Void = { _ in }
     ) {
       self.showControls = showControls
       self.onResetTimer = onResetTimer
@@ -370,6 +439,9 @@ struct PlayerMediaKitStyleTouchOverlay: UIViewRepresentable {
       self.onVideoPanChanged = onVideoPanChanged
       self.onVideoPanEnded = onVideoPanEnded
       self.onVideoSurfaceTap = onVideoSurfaceTap
+      self.onSurfacePanBegan = onSurfacePanBegan
+      self.onSurfacePanChanged = onSurfacePanChanged
+      self.onSurfacePanEnded = onSurfacePanEnded
     }
 
     private func runOnMain(_ body: @escaping () -> Void) {

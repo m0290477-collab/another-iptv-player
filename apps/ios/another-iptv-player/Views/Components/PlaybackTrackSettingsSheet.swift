@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 
 struct PlaybackTrackSettingsSheet: View {
     @ObservedObject var player: VideoPlayerController
-    @ObservedObject private var sleepTimer = PlaybackSleepTimer.shared
     @Binding var showDebugOverlay: Bool
     let streamURL: URL
     @Environment(\.dismiss) private var dismiss
@@ -45,8 +44,10 @@ struct PlaybackTrackSettingsSheet: View {
                 if !player.isLiveStream {
                     importedSubtitlesSection
                 }
-                speedSection
-                sleepTimerSection
+                // Build 61 (B14, V1): B4's speed + sleep sections were REMOVED
+                // from this sheet — both controls now live ONLY in the player's
+                // bottom control row (single instance). The PlaybackSleepTimer
+                // engine below is unchanged and is driven from the player row.
                 nightAudioSection
                 Section(L("player.dev_section")) {
                     Toggle(L("player.show_debug_overlay"), isOn: $showDebugOverlay)
@@ -123,89 +124,6 @@ struct PlaybackTrackSettingsSheet: View {
         } footer: {
             Text(L("player.subtitle_import.footer"))
         }
-    }
-
-    private static let speedOptions: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
-    private static let sleepMinuteOptions: [Int] = [15, 30, 45, 60]
-
-    private var speedSection: some View {
-        Section(L("player.speed.title")) {
-            ForEach(Self.speedOptions, id: \.self) { rate in
-                optionRow(
-                    title: speedLabel(rate),
-                    isSelected: abs(player.rate - rate) < 0.01
-                ) {
-                    player.setRate(rate)
-                }
-            }
-        }
-    }
-
-    private var sleepTimerSection: some View {
-        Section {
-            optionRow(
-                title: L("player.sleep.off"),
-                isSelected: sleepTimer.mode == .off
-            ) {
-                sleepTimer.cancel()
-            }
-            ForEach(Self.sleepMinuteOptions, id: \.self) { minutes in
-                optionRow(
-                    title: L("player.sleep.minutes", minutes),
-                    isSelected: sleepTimer.mode == .minutes(minutes)
-                ) {
-                    sleepTimer.arm(minutes: minutes, player: player)
-                }
-            }
-            if !player.isLiveStream {
-                optionRow(
-                    title: L("player.sleep.end_of_episode"),
-                    isSelected: sleepTimer.mode == .endOfEpisode
-                ) {
-                    sleepTimer.armEndOfEpisode(player: player)
-                }
-            }
-        } header: {
-            Text(L("player.sleep.title"))
-        } footer: {
-            if let remaining = sleepTimer.remainingSeconds {
-                Text(L("player.sleep.remaining", countdownText(remaining)))
-            }
-        }
-    }
-
-    /// Row styled like the track rows above: title on the leading side,
-    /// accent checkmark on the trailing side when selected.
-    private func optionRow(
-        title: String,
-        isSelected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 10) {
-                Text(title)
-                    .foregroundStyle(.primary)
-                    .multilineTextAlignment(.leading)
-                Spacer(minLength: 8)
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
-                }
-            }
-        }
-    }
-
-    private func speedLabel(_ rate: Float) -> String {
-        // Numeric label, formatted like the audio-delay readout in this sheet.
-        let trimmed = rate == rate.rounded()
-            ? String(format: "%.1f", rate)
-            : String(rate)
-        return "\(trimmed)×"
-    }
-
-    private func countdownText(_ seconds: Int) -> String {
-        String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 
     // MARK: - Build 61 (B10, Q5): dialogue / night audio mode
