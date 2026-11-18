@@ -3,23 +3,9 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct PlaybackTrackSettingsSheet: View {
-    /// Round 8: the player's Audio / Subtitles quick-action buttons
-    /// deep-link into this sheet — `.audio` / `.subtitle` open it
-    /// already scrolled to that section. The gear button keeps `.all`
-    /// (opens at the top, exactly as before).
-    enum SectionFocus {
-        case all
-        case audio
-        case subtitle
-    }
-
     @ObservedObject var player: VideoPlayerController
+    @Binding var showDebugOverlay: Bool
     let streamURL: URL
-    var focus: SectionFocus = .all
-    /// Round 12 (point 2): the panel's close action, injected by the
-    /// player (the panel is an in-player overlay now, not a sheet).
-    /// Falls back to the environment dismiss when not provided.
-    var onClose: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var didCopyURL = false
     @State private var copyResetTask: Task<Void, Never>?
@@ -30,37 +16,8 @@ struct PlaybackTrackSettingsSheet: View {
     private static let subtitleContentTypes: [UTType] =
         ["srt", "ass", "ssa", "vtt", "sub", "smi"].compactMap { UTType(filenameExtension: $0) }
 
-    /// Round 8: ScrollViewReader anchors for the focus deep-links.
-    private static let audioAnchor = "tracks.audio"
-    private static let subtitleAnchor = "tracks.subtitle"
-
-    /// Round 12 (point 2): header replicating the old sheet chrome
-    /// (leading Close, centered title) without a navigation stack —
-    /// the panel floats over the video, so it carries its own bar.
-    private var panelHeader: some View {
-        ZStack {
-            Text(L("player.tracks.title"))
-                .font(.headline)
-            HStack {
-                Button(L("common.close")) { closePanel() }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppTheme.accent)
-                    .buttonStyle(.plain)
-                Spacer()
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-
-    private func closePanel() {
-        if let onClose { onClose() } else { dismiss() }
-    }
-
     var body: some View {
-        VStack(spacing: 0) {
-            panelHeader
-            ScrollViewReader { proxy in
+        NavigationStack {
             List {
                 trackSection(
                     title: L("player.tracks.video"),
@@ -76,7 +33,6 @@ struct PlaybackTrackSettingsSheet: View {
                     emptyLabel: L("player.tracks.empty.audio"),
                     select: { player.selectAudioTrack(id: $0) }
                 )
-                .id(Self.audioAnchor)
                 audioDelaySection
                 trackSection(
                     title: L("player.tracks.subtitle"),
@@ -85,20 +41,12 @@ struct PlaybackTrackSettingsSheet: View {
                     emptyLabel: L("player.tracks.empty.subtitle"),
                     select: { player.selectSubtitleTrack(id: $0) }
                 )
-                .id(Self.subtitleAnchor)
                 if !player.isLiveStream {
                     importedSubtitlesSection
                 }
-                // Round 14 (B1): the Debug row is REMOVED from this
-                // panel. Round 16 (R6): the dead debug overlay in
-                // PlayerView is removed too — its toggle died with
-                // that row. Round 15 (C3): in its
-                // place, a Stats section with REAL engine values —
-                // each row renders only when the engine actually
-                // reports that value, and the whole section hides
-                // when nothing is available (no fake/placeholder
-                // numbers anywhere).
-                statsSection
+                Section(L("player.dev_section")) {
+                    Toggle(L("player.show_debug_overlay"), isOn: $showDebugOverlay)
+                }
                 Section(L("player.stream_url.title")) {
                     Button(action: copyStreamURL) {
                         HStack(alignment: .top, spacing: 10) {
@@ -110,7 +58,7 @@ struct PlaybackTrackSettingsSheet: View {
                             Spacer(minLength: 8)
                             Image(systemName: didCopyURL ? "checkmark" : "doc.on.doc")
                                 .font(.body.weight(.semibold))
-                                .foregroundStyle(didCopyURL ? AppTheme.accent : .secondary)
+                                .foregroundStyle(didCopyURL ? Color.accentColor : .secondary)
                                 .accessibilityHidden(true)
                         }
                     }
@@ -119,28 +67,12 @@ struct PlaybackTrackSettingsSheet: View {
                     )
                 }
             }
-            // Round 12 (point 2): the panel behind is translucent —
-            // hide the List's own opaque background (rows keep
-            // theirs) and pin the style the sheet used to get from
-            // its presentation context.
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .onAppear {
-                // Round 8: deep-link scroll for the player's Audio /
-                // Subtitles quick actions. A short delay lets the List
-                // lay out its sections before the jump.
-                let anchor: String?
-                switch focus {
-                case .all: anchor = nil
-                case .audio: anchor = Self.audioAnchor
-                case .subtitle: anchor = Self.subtitleAnchor
+            .navigationTitle(L("player.tracks.title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L("common.close")) { dismiss() }
                 }
-                if let anchor {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        withAnimation { proxy.scrollTo(anchor, anchor: .top) }
-                    }
-                }
-            }
             }
         }
         .onAppear { player.updateTracks() }
@@ -163,51 +95,6 @@ struct PlaybackTrackSettingsSheet: View {
         .alert(L("player.subtitle_import.failed"), isPresented: $showSubtitleImportError) {
             Button(L("common.close"), role: .cancel) {}
         }
-    }
-
-    /// Round 15 (C3): live playback stats from the controller's
-    /// engine diagnostics (`KSPlayerEngine` via
-    /// `VideoPlayerController`). Every row is conditional on a
-    /// real, non-empty value; the section itself disappears when
-    /// the engine has reported nothing yet.
-    @ViewBuilder
-    private var statsSection: some View {
-        let hasResolution = player.videoWidth > 0 && player.videoHeight > 0
-        let hasBitrate = player.videoBitrate > 0
-        let hasBuffer = player.cacheAheadSeconds > 0
-        if hasResolution || hasBitrate || hasBuffer {
-            Section(L("player.stats.title")) {
-                if hasResolution {
-                    statsRow(label: L("player.stats.resolution"),
-                             value: "\(player.videoWidth)×\(player.videoHeight)")
-                }
-                if hasBitrate {
-                    statsRow(label: L("player.stats.bitrate"),
-                             value: Self.formatBitrate(player.videoBitrate))
-                }
-                if hasBuffer {
-                    statsRow(label: L("player.stats.buffer"),
-                             value: String(format: "%.0f s", player.cacheAheadSeconds))
-                }
-            }
-        }
-    }
-
-    private func statsRow(label: String, value: String) -> some View {
-        HStack {
-            Text(label)
-                .font(.subheadline.weight(.medium))
-            Spacer()
-            Text(value)
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private static func formatBitrate(_ bps: Double) -> String {
-        let mbps = bps / 1_000_000
-        if mbps >= 1 { return String(format: "%.2f Mbps", mbps) }
-        return String(format: "%.0f kbps", bps / 1_000)
     }
 
     /// Imported files are stored for this content and loaded automatically on future playbacks.
@@ -309,7 +196,7 @@ struct PlaybackTrackSettingsSheet: View {
                             if item.id == currentId {
                                 Image(systemName: "checkmark")
                                     .font(.body.weight(.semibold))
-                                    .foregroundStyle(AppTheme.accent)
+                                    .foregroundStyle(Color.accentColor)
                             }
                         }
                     }

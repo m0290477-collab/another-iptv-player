@@ -808,7 +808,7 @@ private struct PlayerViewImpl: View {
             player.teardown()
         }
         .sheet(isPresented: $showTrackSettings) {
-            PlaybackTrackSettingsSheet(player: player, streamURL: url)
+            PlaybackTrackSettingsSheet(player: player, showDebugOverlay: $showDebugOverlay, streamURL: url)
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showSubtitleAppearance) {
