@@ -244,10 +244,28 @@ struct M3UChannelsView: View {
         let groups = store.groupNames
         let byGroup = store.channelsByGroup
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
+        // Build 61 (B9, Q10): dead-channel set for the hide-dead
+        // toggle (empty = filter off). M3U live identity uses the
+        // same content-key triple as playback (type "live",
+        // streamId = the channel's UUID string).
+        let dead: Set<String> = ChannelHealthStore.hideDeadEnabled
+            ? ChannelHealthStore.shared.deadKeys() : []
+        let playlistId = playlist.id
+        func alive(_ channels: [DBM3UChannel]) -> [DBM3UChannel] {
+            guard !dead.isEmpty else { return channels }
+            return channels.filter {
+                !dead.contains(ImportedSubtitleStore.contentKey(
+                    playlistId: playlistId, type: "live", streamId: $0.id
+                ))
+            }
+        }
 
         if q.isEmpty {
             displayGroups = groups
-            displayChannelsByGroup = byGroup
+            displayChannelsByGroup = byGroup.mapValues { alive($0) }
+            if !dead.isEmpty {
+                displayGroups = groups.filter { !(displayChannelsByGroup[$0]?.isEmpty ?? true) }
+            }
             return
         }
 
@@ -256,7 +274,14 @@ struct M3UChannelsView: View {
             var outBy: [String: [DBM3UChannel]] = [:]
             for g in groups {
                 let groupMatch = CatalogTextSearch.matches(search: q, text: g)
-                let items = byGroup[g] ?? []
+                var items = byGroup[g] ?? []
+                if !dead.isEmpty {
+                    items = items.filter {
+                        !dead.contains(ImportedSubtitleStore.contentKey(
+                            playlistId: playlistId, type: "live", streamId: $0.id
+                        ))
+                    }
+                }
                 let filtered = groupMatch ? items : items.filter { CatalogTextSearch.matches(search: q, text: $0.name) }
                 if groupMatch || !filtered.isEmpty {
                     outGroups.append(g)
@@ -526,7 +551,18 @@ struct M3UGroupDetailView: View {
 
     private func recomputeItems() async {
         guard playlist.id == store.activePlaylistId else { displayItems = []; return }
-        let base = store.channelsByGroup[group] ?? []
+        var base = store.channelsByGroup[group] ?? []
+        // Build 61 (B9, Q10): hide dead channels when the toggle is on.
+        if ChannelHealthStore.hideDeadEnabled {
+            let dead = ChannelHealthStore.shared.deadKeys()
+            if !dead.isEmpty {
+                base = base.filter {
+                    !dead.contains(ImportedSubtitleStore.contentKey(
+                        playlistId: playlist.id, type: "live", streamId: $0.id
+                    ))
+                }
+            }
+        }
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         if q.isEmpty { displayItems = base; return }
         let result = await Task.detached(priority: .userInitiated) {
@@ -730,6 +766,20 @@ struct M3UPlayerShell: View {
                 }
             }
             .task(id: panelSectionsCacheKey) { await recomputeLivePanelSections() }
+            // Build 61 (B9, P1): warm the PREVIOUS + NEXT channel
+            // connections on every zap (live queues only;
+            // connection level only — see PlaybackPrewarmService).
+            .task(id: channel.id) {
+                if classification.isLive {
+                    PlaybackPrewarmService.shared.updateNeighbors(
+                        previous: currentIndex > 0 ? M3UParser.sanitizedURL(from: queue[currentIndex - 1].url) : nil,
+                        next: currentIndex < queue.count - 1 ? M3UParser.sanitizedURL(from: queue[currentIndex + 1].url) : nil
+                    )
+                }
+            }
+            .onDisappear {
+                PlaybackPrewarmService.shared.cancelNeighbors()
+            }
             .onChange(of: overlayPresentationID) { _, _ in
                 applyInitialSelectionIfNeeded()
             }

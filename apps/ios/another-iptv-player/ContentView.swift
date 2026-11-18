@@ -38,18 +38,32 @@ struct ContentView: View {
             }
             .onAppear {
                 if playlists != nil { dismissSplash() }
-                if AppDatabase.isEphemeral || AppDatabase.didResetCorruptStore {
+                if AppDatabase.isEphemeral || AppDatabase.didResetCorruptStore
+                    || AppDatabase.didRestorePreMigrationBackup {
                     showStorageWarning = true
                 }
             }
             .alert(
-                AppDatabase.isEphemeral ? L("db.error.ephemeral_title") : L("db.error.reset_title"),
+                storageWarningTitle,
                 isPresented: $showStorageWarning
             ) {
                 Button(L("common.ok"), role: .cancel) {}
             } message: {
-                Text(AppDatabase.isEphemeral ? L("db.error.ephemeral_message") : L("db.error.reset_message"))
+                Text(storageWarningMessage)
             }
+    }
+
+    // Build 61 (B9, G1): the restored-backup state gets its own
+    // honest wording (data intact, old schema) next to the two
+    // pre-existing storage warnings.
+    private var storageWarningTitle: String {
+        if AppDatabase.didRestorePreMigrationBackup { return L("repair.restored_title") }
+        return AppDatabase.isEphemeral ? L("db.error.ephemeral_title") : L("db.error.reset_title")
+    }
+
+    private var storageWarningMessage: String {
+        if AppDatabase.didRestorePreMigrationBackup { return L("repair.restored_message") }
+        return AppDatabase.isEphemeral ? L("db.error.ephemeral_message") : L("db.error.reset_message")
     }
 
     private var storageAwareBody: some View {
@@ -63,6 +77,9 @@ struct ContentView: View {
                             UserDefaults.standard.set(playlist.name, forKey: "gate.lastPlaylistName")
                             UserDefaults.standard.removeObject(forKey: lastPlaylistKey)
                             suppressAutoLoad = true
+                            // Build 61 (B9, E1): no active playlist
+                            // at the gate — host pre-warm stands down.
+                            PlaybackPrewarmService.shared.setActiveHost(nil)
                             withAnimation(Motion.animate(.easeInOut(duration: 0.35))) {
                                 selectedPlaylist = nil
                             }
@@ -78,6 +95,9 @@ struct ContentView: View {
                             UserDefaults.standard.set(playlist.name, forKey: "gate.lastPlaylistName")
                             UserDefaults.standard.removeObject(forKey: lastPlaylistKey)
                             suppressAutoLoad = true
+                            // Build 61 (B9, E1): no active playlist
+                            // at the gate — host pre-warm stands down.
+                            PlaybackPrewarmService.shared.setActiveHost(nil)
                             withAnimation(Motion.animate(.easeInOut(duration: 0.35))) {
                                 selectedPlaylist = nil
                             }
@@ -180,6 +200,9 @@ struct ContentView: View {
             return // all expired → the gate's all-expired state
         }
         selectedPlaylist = pick
+        // Build 61 (B9, E1): keep a warm connection to the active
+        // playlist's host while browsing.
+        PlaybackPrewarmService.shared.setActiveHost(URL(string: pick.serverURL))
     }
 
     /// Build 61 (D2): cross-fade the splash out as soon as content
@@ -193,6 +216,9 @@ struct ContentView: View {
 
     private func selectPlaylist(_ playlist: Playlist) {
         suppressAutoLoad = false
+        // Build 61 (B9, E1): warm connection to the newly active
+        // playlist's host while browsing.
+        PlaybackPrewarmService.shared.setActiveHost(URL(string: playlist.serverURL))
         // Round 15 (C12): cross-dissolve into the dashboard,
         // Motion-safe (duration collapses to 0 when reduced/off).
         withAnimation(Motion.animate(.easeInOut(duration: 0.35))) {

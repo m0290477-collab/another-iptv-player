@@ -523,6 +523,12 @@ enum AppPreferenceKeys {
         // play-last-channel-on-launch toggle.
         "app.appearance", "player.bufferSize",
         "app.playLastChannelOnLaunch",
+        // Build 61 (B9): loudness toggle, data-saver toggle,
+        // hide-dead toggle + channel-health records, per-content
+        // track/delay memory, TTFF samples.
+        "player.loudnessNormalization", "perf.datasaver_on_cellular",
+        "deadchannels.hide_dead", "deadchannels.health.v1",
+        "playback.perContentTrackPreferences.v1", "perf.ttff.samples.v1",
         // Playback detail stores (audio delay, subtitle look,
         // per-kind track choices — all plain preferences)
         "playback.audioDelaySeconds", "playback.subtitleAppearance.v2",
@@ -1431,6 +1437,11 @@ struct BackupSettingsSection: View {
 struct PlaybackSettingsSection: View {
     @AppStorage("player.bufferSize") private var bufferSize = "default"
     @AppStorage("app.playLastChannelOnLaunch") private var playLastChannel = false
+    // Build 61 (B9): Q1 loudness, P6 data saver, Q10 dead channels.
+    @AppStorage("player.loudnessNormalization") private var loudnessNormalization = false
+    @AppStorage(DataSaverService.toggleKey) private var dataSaverOnCellular = false
+    @AppStorage(ChannelHealthStore.hideDeadKey) private var hideDeadChannels = false
+    @ObservedObject private var channelHealth = ChannelHealthStore.shared
 
     var body: some View {
         Section(header: ScopedSectionHeader(title: L("settings.playback.title"), thisPlaylist: false)) {
@@ -1453,6 +1464,61 @@ struct PlaybackSettingsSection: View {
                         Text(L("settings.play_last.desc"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            // Build 61 (B9, Q1): loudness normalization — applied
+            // by KSPlayerEngine as an FFmpeg audio filter on the
+            // next load (see the engine hunk for the mechanism).
+            Toggle(isOn: $loudnessNormalization) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "waveform.badge.magnifyingglass", tint: .orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("loudness.title"))
+                        Text(L("loudness.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            // Build 61 (B9, P6): data saver — on cellular, defers
+            // background refresh and channel pre-warming.
+            Toggle(isOn: $dataSaverOnCellular) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "antenna.radiowaves.left.and.right", tint: .green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("datasaver.title"))
+                        Text(L("datasaver.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            // Build 61 (B9, Q10): dead-channel marking — channels
+            // that fail to play repeatedly can be hidden from the
+            // channel lists; markings are cleared here.
+            Toggle(isOn: $hideDeadChannels) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "tv.slash", tint: .red)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("deadchannels.hide.title"))
+                        Text(L("deadchannels.hide.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if channelHealth.deadCount() > 0 {
+                Button(role: .destructive) {
+                    channelHealth.clearAll()
+                } label: {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "arrow.counterclockwise", tint: .red)
+                        Text(L("deadchannels.clear.title", channelHealth.deadCount()))
                     }
                 }
             }

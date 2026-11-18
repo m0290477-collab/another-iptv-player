@@ -81,6 +81,18 @@ enum BackgroundRefreshService {
         let playlists = (try? await AppDatabase.shared.read { db in
             try Playlist.fetchAll(db)
         }) ?? []
+        // === Build 61 (B9, P6): data saver — while the toggle is
+        // on and the device is on cellular, the network-heavy
+        // catalog + EPG refresh is skipped; only the local
+        // expiry-alert rescheduling (no network of its own beyond
+        // already-recorded dates) still runs. ===
+        if DataSaverService.isActive {
+            for playlist in playlists {
+                if Task.isCancelled { return }
+                await NotificationScheduler.scheduleExpiryAlerts(for: [playlist])
+            }
+            return
+        }
         for playlist in playlists {
             if Task.isCancelled { return }
             if playlist.kind == .m3u {

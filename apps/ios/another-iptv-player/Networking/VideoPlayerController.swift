@@ -253,13 +253,43 @@ final class VideoPlayerController: ObservableObject {
   private var seekSourceTimeMs: Int64?
   /// When the first `isPlaybackEstablished` event arrives after `play`, the saved track preferences are applied.
   private var pendingPreferredTrackSelection = false
-  /// Recoverable open failures (timeout / host unreachable) trigger one silent reload
-  /// before the error is surfaced. Reset on every explicit `play(url:)`.
-  private var didAutoRetryCurrentLoad = false
-  // Round 20 (R20-4): the round-17 alternate-engine attempt and
-  // the round-14/18 total startup cap are REMOVED — build 33 has
-  // exactly one silent retry for a recoverable failure and no
-  // startup cap; build 33 wins.
+  // === Build 61 (B9, P2): auto-reconnect. ===
+  // Round 20 restored build 33's exactly-one silent retry for a
+  // recoverable failure; the build-61 SPEC's P2 explicitly
+  // supersedes that for this update: a recoverable failure — or a
+  // mid-stream stall (see the stall watchdog below) — is retried
+  // with backoff, up to 3 attempts, before the failure is allowed
+  // to reach the existing failure banner. NO new UI is involved:
+  // while a retry is pending or in flight, the failure message is
+  // simply not published yet. Reset on every explicit `play(url:)`
+  // and on every successful establishment.
+  private var autoReconnectAttempts = 0
+  private var pendingReconnectWorkItem: DispatchWorkItem?
+  private static let reconnectBackoffs: [TimeInterval] = [1, 3, 8]
+  private static let maxReconnectAttempts = 3
+  /// Stall watchdog: armed while an established stream reports
+  /// buffering; if the position has not meaningfully advanced
+  /// when it fires, the stream is treated as stalled and a
+  /// reconnect is spent on it.
+  private var stallWatchdogWorkItem: DispatchWorkItem?
+  private static let stallWatchdogDelay: TimeInterval = 20
+  /// Build 61 (B9, Q10): the current load's final failure has
+  /// been recorded into `ChannelHealthStore` (once per load).
+  private var healthFailureRecordedForCurrentLoad = false
+  /// Build 61 (B9, E6): wall-clock stamp of the current `play`
+  /// request; the first-frame edge turns it into a TTFF sample.
+  private var loadRequestedAt: Date?
+  private var ttffRecordedForCurrentLoad = false
+  private var lastEngineFirstFrame = false
+  /// Build 61 (B9, P3 + E2): adaptive buffer state. The base
+  /// values are the ones `KSPlayerEngine.makeOptions` applied
+  /// from the user's item-7 buffer setting for THIS load — the
+  /// tuner only ever moves `preferredForwardBufferDuration`
+  /// between the fast-start floor and that base, never above it.
+  private var bufferBaseForward: TimeInterval?
+  private var bufferRampFloor: TimeInterval = 1
+  private var lastBufferHealthCheckAt: Date?
+  private var lastBufferAheadSeconds: Double = 0
 
   /// Imported external subtitles (`ImportedSubtitleStore`): the content key comes from
   /// PlayerView; once playback is established the stored files are re-added to mpv.
@@ -382,6 +412,27 @@ final class VideoPlayerController: ObservableObject {
         let importedSelected = restoreImportedSubtitles()
         updateTracks(applyPreferences: true, skipSubtitleSelection: importedSelected)
       }
+      if established {
+        // === Build 61 (B9): a successful start resets the P2
+        // reconnect budget and records the Q10 success (which
+        // clears the channel's consecutive-failure streak). ===
+        autoReconnectAttempts = 0
+        cancelPendingReconnect()
+        cancelStallWatchdog()
+        if let key = importedSubtitleContentKey {
+          ChannelHealthStore.shared.recordSuccess(for: key)
+        }
+      }
+    }
+    // === Build 61 (B9, E6): time-to-first-frame sample ===
+    let firstFrame = engine.hasRenderedFirstFrame
+    if firstFrame != lastEngineFirstFrame {
+      lastEngineFirstFrame = firstFrame
+      if firstFrame, !ttffRecordedForCurrentLoad, let started = loadRequestedAt {
+        ttffRecordedForCurrentLoad = true
+        let ms = Int(Date().timeIntervalSince(started) * 1000)
+        TTFFLog.record(milliseconds: ms, isLive: currentLoadRequest?.isLiveStream ?? false)
+      }
     }
     let ready = engine.isReady
     if ready != lastEngineIsReady {
@@ -389,32 +440,62 @@ final class VideoPlayerController: ObservableObject {
       if ready { tryFlushPendingLoad() }
     }
     let castPresenting = castController?.isPresenting ?? false
-    // Auto-retry once on a recoverable open failure (timeout / host unreachable)
-    // before surfacing it — flaky IPTV panels frequently succeed on a second attempt.
-    // A fresh KSPlayerLayer is built by tryFlushPendingLoad, which also reinstalls the
-    // remote commands the previous layer's deinit wiped.
+    // === Build 61 (B9, P2): auto-reconnect with backoff. ===
+    // A recoverable failure (timeout / host unreachable / HTTP
+    // 5xx) spends one reconnect attempt after a backoff delay —
+    // up to `maxReconnectAttempts` — before the failure is
+    // published to the existing banner. While a reconnect is
+    // pending, the failure stays unpublished (the return below),
+    // so the user sees the loading state, never a flashing error.
+    // A fresh KSPlayerLayer is built by tryFlushPendingLoad, which
+    // also reinstalls the remote commands the previous layer's
+    // deinit wiped.
     if !castPresenting,
        engine.playbackFailureMessage != nil,
-       engine.playbackFailureIsRecoverable,
-       !didAutoRetryCurrentLoad,
        let request = currentLoadRequest {
-      didAutoRetryCurrentLoad = true
-      log.info("Auto-retrying playback after recoverable failure")
-      // Resume from the current position, not the original startSeconds — otherwise a
-      // mid-stream retry silently rewinds to wherever the user started this load from.
-      // (Build-33 form, restored in round 20: no live carve-out,
-      // no startup-cap gate, no alternate-engine second attempt.)
-      let resumeAt: TimeInterval? = engine.isPlaybackEstablished && engine.position > 0.5
-        ? engine.position
-        : request.startSeconds
-      pendingLoadRequest = PendingLoadRequest(
-        url: request.url,
-        startSeconds: resumeAt,
-        isLiveStream: request.isLiveStream,
-        userAgent: request.userAgent
-      )
-      tryFlushPendingLoad()
-      return
+      if engine.playbackFailureIsRecoverable,
+         autoReconnectAttempts < Self.maxReconnectAttempts,
+         pendingReconnectWorkItem == nil {
+        let delay = Self.reconnectBackoffs[min(autoReconnectAttempts, Self.reconnectBackoffs.count - 1)]
+        autoReconnectAttempts += 1
+        log.info("Auto-reconnect attempt \(self.autoReconnectAttempts) in \(delay)s after recoverable failure")
+        // Resume from the current position, not the original
+        // startSeconds — otherwise a mid-stream retry silently
+        // rewinds to wherever the user started this load from.
+        let resumeAt: TimeInterval? = engine.isPlaybackEstablished && engine.position > 0.5
+          ? engine.position
+          : request.startSeconds
+        let item = DispatchWorkItem { [weak self] in
+          guard let self, !self.isTornDown else { return }
+          self.pendingReconnectWorkItem = nil
+          self.pendingLoadRequest = PendingLoadRequest(
+            url: request.url,
+            startSeconds: resumeAt,
+            isLiveStream: request.isLiveStream,
+            userAgent: request.userAgent
+          )
+          self.tryFlushPendingLoad()
+        }
+        pendingReconnectWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+        return
+      }
+      if pendingReconnectWorkItem != nil {
+        // A reconnect is already scheduled: keep the failure
+        // unpublished until it has had its chance.
+        return
+      }
+      // The failure is final for this load (never recoverable, or
+      // the reconnect budget is exhausted): record it once for
+      // Q10 dead-channel marking, then let the message flow to
+      // the pristine banner below — unchanged.
+      recordHealthFailureIfNeeded()
+    }
+    // === Build 61 (B9, P2): stall watchdog arming. ===
+    if !castPresenting, engine.isPlaybackEstablished, engine.isBuffering, !engine.isPaused {
+      armStallWatchdogIfNeeded()
+    } else {
+      cancelStallWatchdog()
     }
     let failure = castPresenting ? nil : engine.playbackFailureMessage
     if playbackFailureMessage != failure { playbackFailureMessage = failure }
@@ -438,6 +519,119 @@ final class VideoPlayerController: ObservableObject {
     if isAirPlayPlaybackActive != airPlayActive { isAirPlayPlaybackActive = airPlayActive }
     if isCastPresenting != castPresenting { isCastPresenting = castPresenting }
     syncFromEngine()
+    updateAdaptiveBuffer()
+  }
+
+  // MARK: - Build 61 (B9): reconnect, health, adaptive buffer
+
+  private func cancelPendingReconnect() {
+    pendingReconnectWorkItem?.cancel()
+    pendingReconnectWorkItem = nil
+  }
+
+  private func cancelStallWatchdog() {
+    stallWatchdogWorkItem?.cancel()
+    stallWatchdogWorkItem = nil
+  }
+
+  /// P2 stall detection: while an established stream sits in
+  /// buffering, give it `stallWatchdogDelay` seconds; if the
+  /// playhead has not meaningfully advanced by then, spend one
+  /// reconnect attempt on a reload at the current position. The
+  /// watchdog re-arms only after it fires or is cancelled, so a
+  /// long rebuffer cannot spend the whole budget at once.
+  private func armStallWatchdogIfNeeded() {
+    guard stallWatchdogWorkItem == nil, currentLoadRequest != nil else { return }
+    let armedPosition = engine.position
+    let item = DispatchWorkItem { [weak self] in
+      guard let self, !self.isTornDown else { return }
+      self.stallWatchdogWorkItem = nil
+      guard self.engine.isPlaybackEstablished,
+            self.engine.isBuffering,
+            !self.engine.isPaused,
+            self.engine.position - armedPosition < 2,
+            self.autoReconnectAttempts < Self.maxReconnectAttempts,
+            self.pendingReconnectWorkItem == nil,
+            let request = self.currentLoadRequest
+      else { return }
+      self.autoReconnectAttempts += 1
+      self.log.info("Stall watchdog: reconnect attempt \(self.autoReconnectAttempts) after \(Self.stallWatchdogDelay)s without progress")
+      let resumeAt: TimeInterval? = self.engine.position > 0.5 ? self.engine.position : request.startSeconds
+      self.pendingLoadRequest = PendingLoadRequest(
+        url: request.url,
+        startSeconds: resumeAt,
+        isLiveStream: request.isLiveStream,
+        userAgent: request.userAgent
+      )
+      self.tryFlushPendingLoad()
+    }
+    stallWatchdogWorkItem = item
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.stallWatchdogDelay, execute: item)
+  }
+
+  /// Q10: record the current load's final failure, once, for
+  /// live content only (dead-CHANNEL marking — VOD/series
+  /// failures are not channel health).
+  private func recordHealthFailureIfNeeded() {
+    guard !healthFailureRecordedForCurrentLoad,
+          currentLoadRequest?.isLiveStream == true,
+          let key = importedSubtitleContentKey
+    else { return }
+    healthFailureRecordedForCurrentLoad = true
+    ChannelHealthStore.shared.recordFailure(for: key)
+  }
+
+  /// P3 + E2: adaptive buffer over the retained `KSOptions`.
+  ///
+  /// KSPlayerLayer keeps the very `KSOptions` instance the load
+  /// was built with, and both engines read
+  /// `preferredForwardBufferDuration` LIVE: KSAVPlayer sinks it
+  /// onto `AVPlayerItem.preferredForwardBufferDuration`
+  /// (KSAVPlayer.swift), and KSMEPlayer's `playable()` gate
+  /// compares buffered time against it on every capacity check
+  /// (KSOptions.swift). Mutating it here is therefore a real,
+  /// mid-playback adjustment on both paths — no engine fork.
+  ///
+  /// E2 fast start: on first sight of a load's options, the
+  /// forward buffer drops to the fast-start floor (1 s, or the
+  /// base itself when the user's base is lower), so the playable
+  /// gate opens as early as the stream allows.
+  /// P3 ramp/adaptation: about once a second, the tuner reads
+  /// the buffer-ahead trend — the cushion ahead of the playhead
+  /// only grows when delivered throughput outpaces playback, so
+  /// its trend IS the throughput signal available at this level.
+  /// While the cushion is healthy and not draining, the forward
+  /// buffer steps back UP toward the user's base; while the
+  /// cushion is nearly empty, it steps back DOWN toward the
+  /// floor so a rebuffer recovers sooner. The value NEVER
+  /// exceeds the base `KSPlayerEngine` applied from the user's
+  /// item-7 setting — the manual choice is the ceiling, always.
+  private func updateAdaptiveBuffer() {
+    guard let options = engine.layer?.options else { return }
+    if bufferBaseForward == nil {
+      let base = options.preferredForwardBufferDuration
+      bufferBaseForward = base
+      bufferRampFloor = min(1, base)
+      if options.preferredForwardBufferDuration > bufferRampFloor {
+        options.preferredForwardBufferDuration = bufferRampFloor
+      }
+      lastBufferAheadSeconds = 0
+      lastBufferHealthCheckAt = Date()
+      return
+    }
+    guard let base = bufferBaseForward else { return }
+    let now = Date()
+    if let last = lastBufferHealthCheckAt, now.timeIntervalSince(last) < 1 { return }
+    lastBufferHealthCheckAt = now
+    let ahead = cacheAheadSeconds
+    let draining = ahead < lastBufferAheadSeconds - 0.25
+    lastBufferAheadSeconds = ahead
+    let current = options.preferredForwardBufferDuration
+    if ahead >= current + 2, !draining, current < base {
+      options.preferredForwardBufferDuration = min(base, current + 1)
+    } else if ahead < 1, current > bufferRampFloor {
+      options.preferredForwardBufferDuration = max(bufferRampFloor, current - 1)
+    }
   }
 
   private func handleAudioSessionInterruption(_ note: Notification) {
@@ -648,6 +842,17 @@ final class VideoPlayerController: ObservableObject {
     engine.applySubtitleAppearanceFromSettings(saved)
     engine.setSubDelay(seconds: saved.delaySeconds)
     engine.setAudioDelay(seconds: AudioDelayPersistence.load())
+    // === Build 61 (B9, Q3): a delay stored FOR THIS CONTENT wins
+    // over the global one. The content context is set by
+    // PlayerView before every `play`, so it is already known here.
+    if let key = importedSubtitleContentKey {
+      if let subDelay = PerContentTrackPreferences.subtitleDelay(for: key) {
+        engine.setSubDelay(seconds: subDelay)
+      }
+      if let audioDelay = PerContentTrackPreferences.audioDelay(for: key) {
+        engine.setAudioDelay(seconds: audioDelay)
+      }
+    }
   }
 
   func setupAudioSession() {
@@ -672,7 +877,17 @@ final class VideoPlayerController: ObservableObject {
     userAgent: String? = nil
   ) {
     guard !isTornDown else { return }
-    didAutoRetryCurrentLoad = false
+    // === Build 61 (B9): fresh per-load state for P2/Q10/E6/P3 ===
+    autoReconnectAttempts = 0
+    cancelPendingReconnect()
+    cancelStallWatchdog()
+    healthFailureRecordedForCurrentLoad = false
+    loadRequestedAt = Date()
+    ttffRecordedForCurrentLoad = false
+    bufferBaseForward = nil
+    lastBufferHealthCheckAt = nil
+    lastBufferAheadSeconds = 0
+    PlaybackPrewarmService.shared.cancelNeighbors()
     currentLoadRequest = PendingLoadRequest(
       url: url,
       startSeconds: startSeconds,
@@ -832,21 +1047,34 @@ final class VideoPlayerController: ObservableObject {
       // Round 20 (R20-4): build-33 preference application restored
       // — the remembered video pick applies to live exactly as to
       // VOD (the round-12 live ABR carve-out is removed), and the
-      // GLOBAL preferences are the only ones applied (the round-15
-      // per-series override layer is removed).
-      if let pick = PlaybackTrackPreferences.pickVideo(from: video, prefs: prefs) {
+      // GLOBAL preferences are applied.
+      // === Build 61 (B9, Q2): the per-content memory
+      // (PerContentTrackPreferences) is consulted FIRST for this
+      // content's identity; the global preference remains the
+      // fallback when the content has no remembered choice. (The
+      // round-15 per-series layer was removed in round 20; this
+      // is its build-61 successor, keyed by the same content
+      // identity imported subtitles use, series included.) ===
+      let contentKey = self.importedSubtitleContentKey
+      let videoPick = contentKey.flatMap { PerContentTrackPreferences.pickVideo(from: video, for: $0) }
+        ?? PlaybackTrackPreferences.pickVideo(from: video, prefs: prefs)
+      if let pick = videoPick {
         self.engine.selectVideoTrack(id: pick)
         if self.currentVideoTrackId != pick { self.currentVideoTrackId = pick }
       }
-      if let pick = PlaybackTrackPreferences.pickAudio(from: audio, prefs: prefs) {
+      let audioPick = contentKey.flatMap { PerContentTrackPreferences.pickAudio(from: audio, for: $0) }
+        ?? PlaybackTrackPreferences.pickAudio(from: audio, prefs: prefs)
+      if let pick = audioPick {
         self.engine.selectAudioTrack(id: pick)
         if self.currentAudioTrackId != pick { self.currentAudioTrackId = pick }
       }
-      if !skipSubtitleSelection,
-         let pick = PlaybackTrackPreferences.pickSubtitle(from: subs, prefs: prefs)
-      {
-        self.engine.selectSubtitleTrack(id: pick)
-        if self.currentSubtitleTrackId != pick { self.currentSubtitleTrackId = pick }
+      if !skipSubtitleSelection {
+        let subtitlePick = contentKey.flatMap { PerContentTrackPreferences.pickSubtitle(from: subs, for: $0) }
+          ?? PlaybackTrackPreferences.pickSubtitle(from: subs, prefs: prefs)
+        if let pick = subtitlePick {
+          self.engine.selectSubtitleTrack(id: pick)
+          if self.currentSubtitleTrackId != pick { self.currentSubtitleTrackId = pick }
+        }
       }
     }
   }
@@ -856,6 +1084,10 @@ final class VideoPlayerController: ObservableObject {
     currentVideoTrackId = id
     if let opt = videoTracks.first(where: { $0.id == id }) {
       PlaybackTrackPreferences.saveVideo(from: opt)
+      // Build 61 (B9, Q2): also remember the pick for THIS content.
+      if let key = importedSubtitleContentKey {
+        PerContentTrackPreferences.saveVideo(from: opt, for: key)
+      }
     }
   }
 
@@ -864,6 +1096,10 @@ final class VideoPlayerController: ObservableObject {
     currentAudioTrackId = id
     if let opt = audioTracks.first(where: { $0.id == id }) {
       PlaybackTrackPreferences.saveAudio(from: opt)
+      // Build 61 (B9, Q2): also remember the pick for THIS content.
+      if let key = importedSubtitleContentKey {
+        PerContentTrackPreferences.saveAudio(from: opt, for: key)
+      }
     }
   }
 
@@ -872,6 +1108,10 @@ final class VideoPlayerController: ObservableObject {
     currentSubtitleTrackId = id
     if let opt = subtitleTracks.first(where: { $0.id == id }) {
       PlaybackTrackPreferences.saveSubtitle(from: opt)
+      // Build 61 (B9, Q2): also remember the pick for THIS content.
+      if let key = importedSubtitleContentKey {
+        PerContentTrackPreferences.saveSubtitle(from: opt, for: key)
+      }
       if let key = importedSubtitleContentKey {
         // Remember external track selection per content; picking embedded / off resets it.
         let importedName = opt.isExternal && importedFileNames.contains(opt.title) ? opt.title : nil
@@ -942,10 +1182,19 @@ final class VideoPlayerController: ObservableObject {
     SubtitleAppearancePersistence.save(settings)
     engine.applySubtitleAppearanceFromSettings(settings)
     engine.setSubDelay(seconds: settings.delaySeconds)
+    // Build 61 (B9, Q3): the delay half of the appearance is
+    // also remembered for this content.
+    if let key = importedSubtitleContentKey {
+      PerContentTrackPreferences.saveSubtitleDelay(settings.delaySeconds, for: key)
+    }
   }
 
   func applySubtitleDelaySeconds(_ seconds: Double) {
     engine.setSubDelay(seconds: seconds)
+    // Build 61 (B9, Q3): remember the delay for this content.
+    if let key = importedSubtitleContentKey {
+      PerContentTrackPreferences.saveSubtitleDelay(seconds, for: key)
+    }
   }
 
   /// UHF flow: set up the remux, when ready completion(true) — the UI opens the system picker at that moment.
@@ -1002,11 +1251,19 @@ final class VideoPlayerController: ObservableObject {
   func applyAudioDelaySeconds(_ seconds: Double) {
     AudioDelayPersistence.save(seconds)
     engine.setAudioDelay(seconds: seconds)
+    // Build 61 (B9, Q3): remember the delay for this content.
+    if let key = importedSubtitleContentKey {
+      PerContentTrackPreferences.saveAudioDelay(seconds, for: key)
+    }
   }
 
   func teardown() {
     if isTornDown { return }
     isTornDown = true
+    // Build 61 (B9, P2): no reconnect or stall work may fire
+    // into a torn-down controller.
+    cancelPendingReconnect()
+    cancelStallWatchdog()
     Self.unregister(self)
     seriesEpisodeOnPrevious = nil
     seriesEpisodeOnNext = nil
