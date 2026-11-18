@@ -6,5 +6,19 @@
 	<array>
 		<string>group.com.irqus.superx</string>
 	</array>
+	<!-- B5 (build 61) Item 3: iCloud — CloudKit private database
+	     (favorites) + NSUbiquitousKeyValueStore (settings whitelist).
+	     SIGNING RISK: the App ID must have the iCloud capability with
+	     this container enabled, or signing/archiving fails. -->
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>iCloud.com.irqus.superx</string>
+	</array>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudKit</string>
+	</array>
+	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
+	<string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
 </dict>
 </plist>

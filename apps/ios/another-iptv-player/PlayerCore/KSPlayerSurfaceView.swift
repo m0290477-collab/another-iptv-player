@@ -1,5 +1,6 @@
 import AVKit
 import Combine
+import GoogleCast
 import SwiftUI
 import UIKit
 
@@ -18,6 +19,30 @@ struct AirPlayRoutePickerButton: UIViewRepresentable {
 
   func updateUIView(_: AVRoutePickerView, context _: Context) {}
 }
+
+// === B5 (build 61) Item 9: Google Cast button — sits beside
+// AirPlayRoutePickerButton above in the player chrome (the surface
+// places it next to the AirPlay button). Creating it first sets up
+// the shared GCKCastContext (default media receiver) via
+// GoogleCastService; tapping it presents Google's own Cast device
+// dialog, and a started session loads the currently playing stream
+// (registered with GoogleCastService.updateNowPlaying) onto the
+// receiver through GCKRemoteMediaClient. ===
+struct GoogleCastButton: UIViewRepresentable {
+  var tintColor: UIColor = .white
+
+  func makeUIView(context _: Context) -> GCKUICastButton {
+    GoogleCastService.shared.setUpIfNeeded()
+    let button = GCKUICastButton(frame: CGRect(x: 0, y: 0, width: 40, height: 34))
+    button.tintColor = tintColor
+    return button
+  }
+
+  func updateUIView(_ uiView: GCKUICastButton, context _: Context) {
+    uiView.tintColor = tintColor
+  }
+}
+// === End B5 Item 9 hunk ===
 
 /// Görünmez route picker: `trigger` her arttığında sistem cihaz seçici popup'ını
 /// programatik açar. UHF akışında remux hazır olduktan sonra kullanılır.

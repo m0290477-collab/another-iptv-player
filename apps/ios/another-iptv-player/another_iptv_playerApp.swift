@@ -161,6 +161,10 @@ private struct AppRootView: View {
                 _ = AppDatabase.shared
                 MockFixture.seedIfNeeded()
                 await AppDatabase.shared.pruneWatchHistory()
+                // === B5 (build 61) Item 3: iCloud sync start (one line;
+                // the service degrades silently when iCloud is off) ===
+                ICloudSyncService.shared.startIfNeeded()
+                // === End B5 Item 3 ===
             }
             // Cinematic Dark is the app's only appearance.
             .preferredColorScheme(.dark)
