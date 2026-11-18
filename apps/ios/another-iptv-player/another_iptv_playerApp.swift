@@ -79,6 +79,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         // Cinematic Dark chrome for UIKit-backed bars (tab bar / nav bar).
         AppChrome.apply()
+        // Build 61 (B1, S3): BGAppRefreshTask registration must
+        // happen before launch finishes; the service schedules its
+        // first run itself.
+        BackgroundRefreshService.register()
         // C2 (Round 15): memory-warning response — trim the IMAGE
         // memory cache only; the catalog and all DB state stay. (The
         // pipeline itself lives in CachedImage.swift, which is not the
