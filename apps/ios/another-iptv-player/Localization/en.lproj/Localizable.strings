@@ -1134,3 +1134,46 @@
 "speedtest.verdict.weak" = "Connection is weak";
 "update.banner_format" = "Super X %@ is available";
 "update.dismiss" = "Dismiss";
+
+/* MARK: Build 61 (b7) */
+"b7.home.customize" = "Customize Home";
+"b7.home.move_down" = "Move down";
+"b7.home.move_up" = "Move up";
+"b7.loader.loading" = "Loading";
+
+/* MARK: Build 61 (b14) */
+"player.a11y.skip_back_10" = "Back 10 seconds";
+"player.a11y.skip_forward_10" = "Forward 10 seconds";
+"player.controls.lock" = "Lock controls";
+"player.controls.locked" = "Controls locked";
+"player.controls.speed" = "Speed";
+"player.controls.unlock_hold" = "Touch and hold to unlock";
+"player.info.bitrate" = "Bitrate";
+"player.info.buffer" = "Buffer";
+"player.info.network" = "Network";
+"player.info.resolution" = "Resolution";
+"player.info.title" = "Stream info";
+"player.upnext" = "Up next";
+
+/* MARK: Build 61 (b15) */
+"applock.enable" = "Lock App on Open";
+"applock.enable.desc" = "Require Face ID, your device passcode, or an app PIN every time you open Super X or return to it.";
+"applock.locked_desc" = "Unlock to continue.";
+"applock.locked_title" = "Super X is locked";
+"applock.note" = "This locks the whole app. It is separate from the parental PIN, which only locks categories inside the app.";
+"applock.passcode_note" = "You can always unlock with your device passcode, so you can never be locked out.";
+"applock.pin_change" = "Change App PIN";
+"applock.pin_confirm_new" = "Confirm new app PIN";
+"applock.pin_enter" = "Enter your app PIN";
+"applock.pin_enter_current" = "Current app PIN";
+"applock.pin_enter_new" = "New app PIN";
+"applock.pin_mismatch" = "The two PINs don't match.";
+"applock.pin_or" = "or use your app PIN";
+"applock.pin_remove" = "Remove App PIN";
+"applock.pin_set" = "Set App PIN";
+"applock.pin_wrong" = "That PIN doesn't match. Try again.";
+"applock.title" = "App Lock";
+"applock.unlock" = "Unlock";
+"applock.unlock_faceid" = "Unlock with Face ID";
+"applock.unlock_passcode" = "Unlock with Device Passcode";
+"applock.unlock_touchid" = "Unlock with Touch ID";

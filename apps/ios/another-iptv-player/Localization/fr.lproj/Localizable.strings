@@ -1116,3 +1116,46 @@
 "speedtest.verdict.weak" = "La connexion est faible";
 "update.banner_format" = "Super X %@ est disponible";
 "update.dismiss" = "Ignorer";
+
+/* MARK: Build 61 (b7) */
+"b7.home.customize" = "Personnaliser l'accueil";
+"b7.home.move_down" = "Descendre";
+"b7.home.move_up" = "Monter";
+"b7.loader.loading" = "Chargement";
+
+/* MARK: Build 61 (b14) */
+"player.a11y.skip_back_10" = "Reculer de 10 secondes";
+"player.a11y.skip_forward_10" = "Avancer de 10 secondes";
+"player.controls.lock" = "Verrouiller les commandes";
+"player.controls.locked" = "Commandes verrouillées";
+"player.controls.speed" = "Vitesse";
+"player.controls.unlock_hold" = "Touchez et maintenez pour déverrouiller";
+"player.info.bitrate" = "Débit";
+"player.info.buffer" = "Tampon";
+"player.info.network" = "Réseau";
+"player.info.resolution" = "Résolution";
+"player.info.title" = "Infos du flux";
+"player.upnext" = "À suivre";
+
+/* MARK: Build 61 (b15) */
+"applock.enable" = "Verrouiller l'app à l'ouverture";
+"applock.enable.desc" = "Exiger Face ID, le code de votre appareil ou un code PIN de l'app à chaque ouverture de Super X ou retour dans l'app.";
+"applock.locked_desc" = "Déverrouillez pour continuer.";
+"applock.locked_title" = "Super X est verrouillé";
+"applock.note" = "Ceci verrouille toute l'app. C'est distinct du code PIN parental, qui ne verrouille que des catégories dans l'app.";
+"applock.passcode_note" = "Vous pouvez toujours déverrouiller avec le code de votre appareil, vous ne serez donc jamais bloqué dehors.";
+"applock.pin_change" = "Changer le code PIN de l'app";
+"applock.pin_confirm_new" = "Confirmer le nouveau code PIN";
+"applock.pin_enter" = "Saisissez le code PIN de l'app";
+"applock.pin_enter_current" = "Code PIN actuel de l'app";
+"applock.pin_enter_new" = "Nouveau code PIN de l'app";
+"applock.pin_mismatch" = "Les deux codes PIN ne correspondent pas.";
+"applock.pin_or" = "ou utilisez le code PIN de l'app";
+"applock.pin_remove" = "Supprimer le code PIN de l'app";
+"applock.pin_set" = "Définir le code PIN de l'app";
+"applock.pin_wrong" = "Ce code PIN ne correspond pas. Réessayez.";
+"applock.title" = "Verrouillage de l'app";
+"applock.unlock" = "Déverrouiller";
+"applock.unlock_faceid" = "Déverrouiller avec Face ID";
+"applock.unlock_passcode" = "Déverrouiller avec le code de l'appareil";
+"applock.unlock_touchid" = "Déverrouiller avec Touch ID";

@@ -1116,3 +1116,46 @@
 "speedtest.verdict.weak" = "الاتصال ضعيف";
 "update.banner_format" = "Super X %@ متاح الآن";
 "update.dismiss" = "إغلاق";
+
+/* MARK: Build 61 (b7) */
+"b7.home.customize" = "تخصيص الرئيسية";
+"b7.home.move_down" = "نقل لأسفل";
+"b7.home.move_up" = "نقل لأعلى";
+"b7.loader.loading" = "جارٍ التحميل";
+
+/* MARK: Build 61 (b14) */
+"player.a11y.skip_back_10" = "رجوع 10 ثوانٍ";
+"player.a11y.skip_forward_10" = "تقديم 10 ثوانٍ";
+"player.controls.lock" = "قفل عناصر التحكم";
+"player.controls.locked" = "عناصر التحكم مقفلة";
+"player.controls.speed" = "السرعة";
+"player.controls.unlock_hold" = "المس مع الاستمرار للفتح";
+"player.info.bitrate" = "معدل البت";
+"player.info.buffer" = "التخزين المؤقت";
+"player.info.network" = "الشبكة";
+"player.info.resolution" = "الدقة";
+"player.info.title" = "معلومات البث";
+"player.upnext" = "التالي";
+
+/* MARK: Build 61 (b15) */
+"applock.enable" = "قفل التطبيق عند الفتح";
+"applock.enable.desc" = "اطلب Face ID أو رمز مرور الجهاز أو رمز PIN للتطبيق في كل مرة تفتح فيها Super X أو تعود إليه.";
+"applock.locked_desc" = "ألغِ القفل للمتابعة.";
+"applock.locked_title" = "Super X مقفل";
+"applock.note" = "هذا يقفل التطبيق بالكامل. وهو منفصل عن رمز PIN الأبوي، الذي يقفل الفئات داخل التطبيق فقط.";
+"applock.passcode_note" = "يمكنك دائماً إلغاء القفل برمز مرور جهازك، لذلك لن يُقفل التطبيق عليك نهائياً.";
+"applock.pin_change" = "تغيير رمز PIN للتطبيق";
+"applock.pin_confirm_new" = "تأكيد رمز PIN الجديد";
+"applock.pin_enter" = "أدخل رمز PIN للتطبيق";
+"applock.pin_enter_current" = "رمز PIN الحالي للتطبيق";
+"applock.pin_enter_new" = "رمز PIN جديد للتطبيق";
+"applock.pin_mismatch" = "رمزا PIN غير متطابقين.";
+"applock.pin_or" = "أو استخدم رمز PIN للتطبيق";
+"applock.pin_remove" = "إزالة رمز PIN للتطبيق";
+"applock.pin_set" = "تعيين رمز PIN للتطبيق";
+"applock.pin_wrong" = "رمز PIN غير صحيح. حاول مرة أخرى.";
+"applock.title" = "قفل التطبيق";
+"applock.unlock" = "إلغاء القفل";
+"applock.unlock_faceid" = "إلغاء القفل بـ Face ID";
+"applock.unlock_passcode" = "إلغاء القفل برمز مرور الجهاز";
+"applock.unlock_touchid" = "إلغاء القفل بـ Touch ID";

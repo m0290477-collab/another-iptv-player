@@ -1134,3 +1134,46 @@
 "speedtest.verdict.weak" = "Bağlantı zayıf";
 "update.banner_format" = "Super X %@ kullanılabilir";
 "update.dismiss" = "Kapat";
+
+/* MARK: Build 61 (b7) */
+"b7.home.customize" = "Ana Sayfayı Özelleştir";
+"b7.home.move_down" = "Aşağı Taşı";
+"b7.home.move_up" = "Yukarı Taşı";
+"b7.loader.loading" = "Yükleniyor";
+
+/* MARK: Build 61 (b14) */
+"player.a11y.skip_back_10" = "10 saniye geri";
+"player.a11y.skip_forward_10" = "10 saniye ileri";
+"player.controls.lock" = "Kontrolleri kilitle";
+"player.controls.locked" = "Kontroller kilitli";
+"player.controls.speed" = "Hız";
+"player.controls.unlock_hold" = "Kilidi açmak için basılı tutun";
+"player.info.bitrate" = "Bit hızı";
+"player.info.buffer" = "Arabellek";
+"player.info.network" = "Ağ";
+"player.info.resolution" = "Çözünürlük";
+"player.info.title" = "Yayın bilgisi";
+"player.upnext" = "Sıradaki";
+
+/* MARK: Build 61 (b15) */
+"applock.enable" = "Açılışta Uygulamayı Kilitle";
+"applock.enable.desc" = "Super X'i her açışınızda veya uygulamaya her dönüşünüzde Face ID, cihaz parolanız ya da bir uygulama PIN'i isteyin.";
+"applock.locked_desc" = "Devam etmek için kilidi açın.";
+"applock.locked_title" = "Super X kilitli";
+"applock.note" = "Bu, tüm uygulamayı kilitler. Yalnızca uygulama içindeki kategorileri kilitleyen ebeveyn PIN'inden ayrıdır.";
+"applock.passcode_note" = "Her zaman cihaz parolanızla kilidi açabilirsiniz, bu yüzden asla dışarıda kalmazsınız.";
+"applock.pin_change" = "Uygulama PIN'ini Değiştir";
+"applock.pin_confirm_new" = "Yeni uygulama PIN'ini onaylayın";
+"applock.pin_enter" = "Uygulama PIN'inizi girin";
+"applock.pin_enter_current" = "Mevcut uygulama PIN'i";
+"applock.pin_enter_new" = "Yeni uygulama PIN'i";
+"applock.pin_mismatch" = "İki PIN eşleşmiyor.";
+"applock.pin_or" = "veya uygulama PIN'inizi kullanın";
+"applock.pin_remove" = "Uygulama PIN'ini Kaldır";
+"applock.pin_set" = "Uygulama PIN'i Belirle";
+"applock.pin_wrong" = "Bu PIN eşleşmiyor. Tekrar deneyin.";
+"applock.title" = "Uygulama Kilidi";
+"applock.unlock" = "Kilidi Aç";
+"applock.unlock_faceid" = "Face ID ile Aç";
+"applock.unlock_passcode" = "Cihaz Parolasıyla Aç";
+"applock.unlock_touchid" = "Touch ID ile Aç";

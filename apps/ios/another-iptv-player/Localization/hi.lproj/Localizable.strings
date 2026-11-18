@@ -1116,3 +1116,46 @@
 "speedtest.verdict.weak" = "कनेक्शन कमज़ोर है";
 "update.banner_format" = "Super X %@ उपलब्ध है";
 "update.dismiss" = "बंद करें";
+
+/* MARK: Build 61 (b7) */
+"b7.home.customize" = "होम अनुकूलित करें";
+"b7.home.move_down" = "नीचे ले जाएँ";
+"b7.home.move_up" = "ऊपर ले जाएँ";
+"b7.loader.loading" = "लोड हो रहा है";
+
+/* MARK: Build 61 (b14) */
+"player.a11y.skip_back_10" = "10 सेकंड पीछे";
+"player.a11y.skip_forward_10" = "10 सेकंड आगे";
+"player.controls.lock" = "नियंत्रण लॉक करें";
+"player.controls.locked" = "नियंत्रण लॉक हैं";
+"player.controls.speed" = "गति";
+"player.controls.unlock_hold" = "अनलॉक करने के लिए दबाकर रखें";
+"player.info.bitrate" = "बिटरेट";
+"player.info.buffer" = "बफ़र";
+"player.info.network" = "नेटवर्क";
+"player.info.resolution" = "रिज़ॉल्यूशन";
+"player.info.title" = "स्ट्रीम जानकारी";
+"player.upnext" = "अगला कार्यक्रम";
+
+/* MARK: Build 61 (b15) */
+"applock.enable" = "खोलने पर ऐप लॉक करें";
+"applock.enable.desc" = "हर बार Super X खोलने या उसमें वापस आने पर Face ID, अपने डिवाइस पासकोड या ऐप PIN की मांग करें।";
+"applock.locked_desc" = "जारी रखने के लिए अनलॉक करें।";
+"applock.locked_title" = "Super X लॉक है";
+"applock.note" = "यह पूरे ऐप को लॉक करता है। यह माता-पिता PIN से अलग है, जो केवल ऐप के अंदर श्रेणियों को लॉक करता है।";
+"applock.passcode_note" = "आप हमेशा अपने डिवाइस पासकोड से अनलॉक कर सकते हैं, इसलिए आप कभी बाहर लॉक नहीं होंगे।";
+"applock.pin_change" = "ऐप PIN बदलें";
+"applock.pin_confirm_new" = "नए ऐप PIN की पुष्टि करें";
+"applock.pin_enter" = "अपना ऐप PIN दर्ज करें";
+"applock.pin_enter_current" = "मौजूदा ऐप PIN";
+"applock.pin_enter_new" = "नया ऐप PIN";
+"applock.pin_mismatch" = "दोनों PIN मेल नहीं खाते।";
+"applock.pin_or" = "या अपना ऐप PIN उपयोग करें";
+"applock.pin_remove" = "ऐप PIN हटाएं";
+"applock.pin_set" = "ऐप PIN सेट करें";
+"applock.pin_wrong" = "वह PIN मेल नहीं खाता। फिर से कोशिश करें।";
+"applock.title" = "ऐप लॉक";
+"applock.unlock" = "अनलॉक करें";
+"applock.unlock_faceid" = "Face ID से अनलॉक करें";
+"applock.unlock_passcode" = "डिवाइस पासकोड से अनलॉक करें";
+"applock.unlock_touchid" = "Touch ID से अनलॉक करें";

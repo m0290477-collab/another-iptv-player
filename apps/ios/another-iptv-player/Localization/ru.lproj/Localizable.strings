@@ -1116,3 +1116,46 @@
 "speedtest.verdict.weak" = "Соединение слабое";
 "update.banner_format" = "Доступна версия Super X %@";
 "update.dismiss" = "Закрыть";
+
+/* MARK: Build 61 (b7) */
+"b7.home.customize" = "Настроить главный экран";
+"b7.home.move_down" = "Вниз";
+"b7.home.move_up" = "Вверх";
+"b7.loader.loading" = "Загрузка";
+
+/* MARK: Build 61 (b14) */
+"player.a11y.skip_back_10" = "Назад на 10 секунд";
+"player.a11y.skip_forward_10" = "Вперёд на 10 секунд";
+"player.controls.lock" = "Заблокировать управление";
+"player.controls.locked" = "Управление заблокировано";
+"player.controls.speed" = "Скорость";
+"player.controls.unlock_hold" = "Нажмите и удерживайте, чтобы разблокировать";
+"player.info.bitrate" = "Битрейт";
+"player.info.buffer" = "Буфер";
+"player.info.network" = "Сеть";
+"player.info.resolution" = "Разрешение";
+"player.info.title" = "Сведения о потоке";
+"player.upnext" = "Далее";
+
+/* MARK: Build 61 (b15) */
+"applock.enable" = "Блокировать приложение при открытии";
+"applock.enable.desc" = "Требовать Face ID, код-пароль устройства или PIN приложения при каждом открытии Super X или возврате в него.";
+"applock.locked_desc" = "Разблокируйте, чтобы продолжить.";
+"applock.locked_title" = "Super X заблокирован";
+"applock.note" = "Это блокирует всё приложение. Это отдельно от родительского PIN, который блокирует только категории внутри приложения.";
+"applock.passcode_note" = "Вы всегда можете разблокировать код-паролем устройства, поэтому доступ не будет потерян навсегда.";
+"applock.pin_change" = "Изменить PIN приложения";
+"applock.pin_confirm_new" = "Подтвердите новый PIN";
+"applock.pin_enter" = "Введите PIN приложения";
+"applock.pin_enter_current" = "Текущий PIN приложения";
+"applock.pin_enter_new" = "Новый PIN приложения";
+"applock.pin_mismatch" = "Два PIN не совпадают.";
+"applock.pin_or" = "или используйте PIN приложения";
+"applock.pin_remove" = "Удалить PIN приложения";
+"applock.pin_set" = "Установить PIN приложения";
+"applock.pin_wrong" = "Этот PIN не подходит. Попробуйте ещё раз.";
+"applock.title" = "Блокировка приложения";
+"applock.unlock" = "Разблокировать";
+"applock.unlock_faceid" = "Разблокировать по Face ID";
+"applock.unlock_passcode" = "Разблокировать код-паролем устройства";
+"applock.unlock_touchid" = "Разблокировать по Touch ID";

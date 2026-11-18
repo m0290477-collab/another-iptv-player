@@ -1116,3 +1116,46 @@
 "speedtest.verdict.weak" = "Verbindung ist schwach";
 "update.banner_format" = "Super X %@ ist verfügbar";
 "update.dismiss" = "Schließen";
+
+/* MARK: Build 61 (b7) */
+"b7.home.customize" = "Startseite anpassen";
+"b7.home.move_down" = "Nach unten";
+"b7.home.move_up" = "Nach oben";
+"b7.loader.loading" = "Wird geladen";
+
+/* MARK: Build 61 (b14) */
+"player.a11y.skip_back_10" = "10 Sekunden zurück";
+"player.a11y.skip_forward_10" = "10 Sekunden vor";
+"player.controls.lock" = "Steuerung sperren";
+"player.controls.locked" = "Steuerung gesperrt";
+"player.controls.speed" = "Tempo";
+"player.controls.unlock_hold" = "Zum Entsperren berühren und halten";
+"player.info.bitrate" = "Bitrate";
+"player.info.buffer" = "Puffer";
+"player.info.network" = "Netzwerk";
+"player.info.resolution" = "Auflösung";
+"player.info.title" = "Stream-Info";
+"player.upnext" = "Als Nächstes";
+
+/* MARK: Build 61 (b15) */
+"applock.enable" = "App beim Öffnen sperren";
+"applock.enable.desc" = "Bei jedem Öffnen von Super X oder jeder Rückkehr zur App Face ID, Gerätecode oder eine App-PIN verlangen.";
+"applock.locked_desc" = "Zum Fortfahren entsperren.";
+"applock.locked_title" = "Super X ist gesperrt";
+"applock.note" = "Dies sperrt die gesamte App. Getrennt von der Eltern-PIN, die nur Kategorien in der App sperrt.";
+"applock.passcode_note" = "Sie können immer mit Ihrem Gerätecode entsperren, sodass Sie sich nie aussperren können.";
+"applock.pin_change" = "App-PIN ändern";
+"applock.pin_confirm_new" = "Neue App-PIN bestätigen";
+"applock.pin_enter" = "Geben Sie Ihre App-PIN ein";
+"applock.pin_enter_current" = "Aktuelle App-PIN";
+"applock.pin_enter_new" = "Neue App-PIN";
+"applock.pin_mismatch" = "Die beiden PINs stimmen nicht überein.";
+"applock.pin_or" = "oder verwenden Sie Ihre App-PIN";
+"applock.pin_remove" = "App-PIN entfernen";
+"applock.pin_set" = "App-PIN festlegen";
+"applock.pin_wrong" = "Diese PIN stimmt nicht. Versuchen Sie es erneut.";
+"applock.title" = "App-Sperre";
+"applock.unlock" = "Entsperren";
+"applock.unlock_faceid" = "Mit Face ID entsperren";
+"applock.unlock_passcode" = "Mit Gerätecode entsperren";
+"applock.unlock_touchid" = "Mit Touch ID entsperren";

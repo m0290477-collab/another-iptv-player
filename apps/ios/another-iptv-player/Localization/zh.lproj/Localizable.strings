@@ -1116,3 +1116,46 @@
 "speedtest.verdict.weak" = "连接较弱";
 "update.banner_format" = "Super X %@ 已发布";
 "update.dismiss" = "关闭";
+
+/* MARK: Build 61 (b7) */
+"b7.home.customize" = "自定义首页";
+"b7.home.move_down" = "下移";
+"b7.home.move_up" = "上移";
+"b7.loader.loading" = "加载中";
+
+/* MARK: Build 61 (b14) */
+"player.a11y.skip_back_10" = "后退10秒";
+"player.a11y.skip_forward_10" = "前进10秒";
+"player.controls.lock" = "锁定控制";
+"player.controls.locked" = "控制已锁定";
+"player.controls.speed" = "速度";
+"player.controls.unlock_hold" = "长按解锁";
+"player.info.bitrate" = "码率";
+"player.info.buffer" = "缓冲";
+"player.info.network" = "网络";
+"player.info.resolution" = "分辨率";
+"player.info.title" = "流信息";
+"player.upnext" = "接下来";
+
+/* MARK: Build 61 (b15) */
+"applock.enable" = "打开时锁定应用";
+"applock.enable.desc" = "每次打开 Super X 或返回应用时，要求使用 Face ID、设备密码或应用 PIN。";
+"applock.locked_desc" = "解锁后继续。";
+"applock.locked_title" = "Super X 已锁定";
+"applock.note" = "这会锁定整个应用。它与家长 PIN 不同，家长 PIN 仅锁定应用内的分类。";
+"applock.passcode_note" = "您始终可以使用设备密码解锁，因此永远不会被锁在外面。";
+"applock.pin_change" = "更改应用 PIN";
+"applock.pin_confirm_new" = "确认新应用 PIN";
+"applock.pin_enter" = "输入您的应用 PIN";
+"applock.pin_enter_current" = "当前应用 PIN";
+"applock.pin_enter_new" = "新应用 PIN";
+"applock.pin_mismatch" = "两次输入的 PIN 不一致。";
+"applock.pin_or" = "或使用您的应用 PIN";
+"applock.pin_remove" = "移除应用 PIN";
+"applock.pin_set" = "设置应用 PIN";
+"applock.pin_wrong" = "PIN 不正确。请重试。";
+"applock.title" = "应用锁";
+"applock.unlock" = "解锁";
+"applock.unlock_faceid" = "用 Face ID 解锁";
+"applock.unlock_passcode" = "用设备密码解锁";
+"applock.unlock_touchid" = "用 Touch ID 解锁";

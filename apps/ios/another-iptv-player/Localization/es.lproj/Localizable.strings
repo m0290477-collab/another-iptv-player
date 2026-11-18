@@ -1116,3 +1116,46 @@
 "speedtest.verdict.weak" = "La conexión es débil";
 "update.banner_format" = "Super X %@ está disponible";
 "update.dismiss" = "Descartar";
+
+/* MARK: Build 61 (b7) */
+"b7.home.customize" = "Personalizar inicio";
+"b7.home.move_down" = "Bajar";
+"b7.home.move_up" = "Subir";
+"b7.loader.loading" = "Cargando";
+
+/* MARK: Build 61 (b14) */
+"player.a11y.skip_back_10" = "Retroceder 10 segundos";
+"player.a11y.skip_forward_10" = "Adelantar 10 segundos";
+"player.controls.lock" = "Bloquear controles";
+"player.controls.locked" = "Controles bloqueados";
+"player.controls.speed" = "Velocidad";
+"player.controls.unlock_hold" = "Mantén pulsado para desbloquear";
+"player.info.bitrate" = "Tasa de bits";
+"player.info.buffer" = "Búfer";
+"player.info.network" = "Red";
+"player.info.resolution" = "Resolución";
+"player.info.title" = "Info de la transmisión";
+"player.upnext" = "A continuación";
+
+/* MARK: Build 61 (b15) */
+"applock.enable" = "Bloquear la app al abrirla";
+"applock.enable.desc" = "Requiere Face ID, el código de tu dispositivo o un PIN de la app cada vez que abras Super X o vuelvas a ella.";
+"applock.locked_desc" = "Desbloquea para continuar.";
+"applock.locked_title" = "Super X está bloqueado";
+"applock.note" = "Esto bloquea toda la app. Es independiente del PIN parental, que solo bloquea categorías dentro de la app.";
+"applock.passcode_note" = "Siempre puedes desbloquear con el código de tu dispositivo, así que nunca te quedarás fuera.";
+"applock.pin_change" = "Cambiar PIN de la app";
+"applock.pin_confirm_new" = "Confirmar nuevo PIN";
+"applock.pin_enter" = "Introduce tu PIN de la app";
+"applock.pin_enter_current" = "PIN actual de la app";
+"applock.pin_enter_new" = "Nuevo PIN de la app";
+"applock.pin_mismatch" = "Los dos PIN no coinciden.";
+"applock.pin_or" = "o usa tu PIN de la app";
+"applock.pin_remove" = "Eliminar PIN de la app";
+"applock.pin_set" = "Establecer PIN de la app";
+"applock.pin_wrong" = "Ese PIN no coincide. Inténtalo de nuevo.";
+"applock.title" = "Bloqueo de la app";
+"applock.unlock" = "Desbloquear";
+"applock.unlock_faceid" = "Desbloquear con Face ID";
+"applock.unlock_passcode" = "Desbloquear con el código del dispositivo";
+"applock.unlock_touchid" = "Desbloquear con Touch ID";
