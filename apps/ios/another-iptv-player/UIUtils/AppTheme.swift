@@ -127,6 +127,56 @@ enum AppTheme {
     }
 }
 
+// MARK: - Layout tokens (build 61, B7 — O3)
+
+/// O3: ONE card system. Identical corner radius, spacing and grid
+/// behaviour across Live / Movies / Series / Library come from these
+/// constants (poster pixel sizes stay in `PosterMetrics`, which is
+/// display-derived; geometry that is NOT display-derived lives here
+/// so no screen invents its own literals).
+enum LayoutTokens {
+    static let cardRadius: CGFloat = AppTheme.cornerRadius
+    static let heroRadius: CGFloat = AppTheme.heroCornerRadius
+    static let smallRadius: CGFloat = AppTheme.smallCornerRadius
+    static let screenMargin: CGFloat = AppTheme.spacingScreenMargin
+    static let shelfGap: CGFloat = AppTheme.spacingShelfGap
+    static let cardGap: CGFloat = AppTheme.spacingCardGap
+    /// ST3: the ONE bottom gradient scrim used wherever a title sits
+    /// on artwork (poster/channel cards, detail hero).
+    static let posterScrim = LinearGradient(
+        colors: [.clear, Color.black.opacity(0.55), Color.black.opacity(0.85)],
+        startPoint: .top, endPoint: .bottom
+    )
+    /// ST3: the ONE thin border on artwork cards.
+    static let posterBorder = AppTheme.cardBorderColor
+}
+
+/// ST2 (build 61, B7): the ONE signature glow token — a soft
+/// red-orange (accent) shadow used ONLY under primary buttons and
+/// the selected tab / hero actions. Do not apply it anywhere else;
+/// the critic greps for stray uses of this token.
+enum SignatureGlow {
+    static var color: Color { AppTheme.accent.opacity(0.45) }
+    static let radius: CGFloat = 14
+    static let y: CGFloat = 6
+}
+
+extension View {
+    /// ST2: applies the signature glow (see `SignatureGlow` — primary
+    /// buttons and selected tab / hero actions ONLY).
+    func signatureGlow() -> some View {
+        shadow(color: SignatureGlow.color, radius: SignatureGlow.radius, y: SignatureGlow.y)
+    }
+
+    /// ST1 (build 61, B7): subtle glass/blur for tab-bar / top-header
+    /// chrome — a system material tinted toward the Design-4
+    /// charcoal. Applied to chrome surfaces only, never per-cell.
+    func glassChrome() -> some View {
+        background(.ultraThinMaterial)
+            .background(AppTheme.background.opacity(0.72))
+    }
+}
+
 /// Per-section identity colors (B9 / owner point 7). LIVE keeps the
 /// reserved red; Movies follows the user's accent; Series is a
 /// hue-shifted derivative of the CURRENT accent preset — computed from
