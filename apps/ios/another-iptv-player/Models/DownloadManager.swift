@@ -43,6 +43,28 @@ final class DownloadManager: NSObject, ObservableObject {
     @Published private(set) var progress: [String: DownloadProgress] = [:]
     /// A counter incremented after DB writes — the refresh trigger for views outside GRDBQuery.
     @Published private(set) var dbVersion: Int = 0
+    /// B2 (build 61, T4): true while Wi-Fi-only is ON, the current
+    /// path is cellular-only, and downloads are waiting — shown as a
+    /// state banner in DownloadsView so the pause is visible, never
+    /// a silent stall.
+    @Published private(set) var isWaitingForWifi: Bool = false
+
+    /// Bumps `dbVersion` for services that write download rows
+    /// outside the manager (LiveRecordingService) so observing views
+    /// refresh.
+    func bumpDBVersion() { dbVersion &+= 1 }
+
+    // MARK: - B2 (build 61, T4) storage cap
+
+    /// The user's downloads storage cap in bytes. The picker in
+    /// DownloadsView writes `download.storage_cap_gb` (2/5/10/20);
+    /// unset = the largest option (20 GB), so the cap only ever
+    /// blocks at a limit the UI displays.
+    static var storageCapBytes: Int64 {
+        let gb = UserDefaults.standard.integer(forKey: "download.storage_cap_gb")
+        let effective = [2, 5, 10, 20].contains(gb) ? gb : 20
+        return Int64(effective) * 1024 * 1024 * 1024
+    }
 
     private var session: URLSession!
     /// URLSessionTask.taskIdentifier → downloadedItem.id map.
@@ -66,6 +88,11 @@ final class DownloadManager: NSObject, ObservableObject {
     /// Downloads we cancelled because disk space ran out: in the delegate's cancelled
     /// branch they are marked permanently failed instead of being requeued.
     private var spaceFailedIds: Set<String> = []
+    /// B2 (build 61, T4): downloads we cancelled because the known
+    /// total size would exceed the user's storage cap: permanently
+    /// failed with the cap notice in the cancelled branch, like
+    /// `spaceFailedIds`.
+    private var capFailedIds: Set<String> = []
     /// S1 (Round 14): downloads the server refused (HTTP error status or an HTML
     /// error page): permanently failed instead of requeued in the cancelled branch.
     private var serverRefusedIds: Set<String> = []
@@ -105,20 +132,49 @@ final class DownloadManager: NSObject, ObservableObject {
         Task { await restoreOutstandingTasks() }
     }
 
-    /// C2-wifi-resume: watches for a Wi-Fi path appearing; when it does,
-    /// deferred resumes are released into the queue pump.
+    /// C2-wifi-resume + B2/T4: watches the network path. When a
+    /// Wi-Fi path appears, deferred downloads are released into the
+    /// queue pump. On every change the published Wi-Fi-waiting state
+    /// is recomputed so DownloadsView can show WHY downloads are
+    /// paused on cellular (Wi-Fi-only ON) instead of stalling
+    /// silently.
     private func startPathMonitor() {
         guard !pathMonitorStarted else { return }
         pathMonitorStarted = true
         pathMonitor.pathUpdateHandler = { [weak self] path in
-            guard path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet) else { return }
+            let hasWifi = path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet)
             Task { @MainActor [weak self] in
-                guard let self, !self.wifiDeferredIds.isEmpty else { return }
-                self.wifiDeferredIds.removeAll()
-                await self.pumpQueue()
+                guard let self else { return }
+                if hasWifi, !self.wifiDeferredIds.isEmpty {
+                    self.wifiDeferredIds.removeAll()
+                    await self.pumpQueue()
+                }
+                await self.refreshWifiWaitingState()
             }
         }
         pathMonitor.start(queue: DispatchQueue(label: "superx.downloads.path-monitor"))
+    }
+
+    /// B2 (build 61, T4): recomputes `isWaitingForWifi` from the
+    /// live facts — Wi-Fi-only setting, cellular-only path, and
+    /// something actually waiting (a deferred id or a queued /
+    /// downloading row).
+    private func refreshWifiWaitingState() async {
+        guard Self.wifiOnly, isCellularOnlyPath else {
+            if isWaitingForWifi { isWaitingForWifi = false }
+            return
+        }
+        if !wifiDeferredIds.isEmpty {
+            isWaitingForWifi = true
+            return
+        }
+        let waitingCount: Int = (try? await AppDatabase.shared.read { db in
+            try DBDownloadedItem
+                .filter([DownloadStatus.queued.rawValue, DownloadStatus.downloading.rawValue].contains(Column("status")))
+                .filter(Column("type") != "recording")
+                .fetchCount(db)
+        }) ?? 0
+        isWaitingForWifi = waitingCount > 0
     }
 
     /// True when the current path is cellular WITHOUT Wi-Fi/Ethernet —
@@ -138,11 +194,44 @@ final class DownloadManager: NSObject, ObservableObject {
     /// left as "downloading" in the DB back to `.queued` (createdAt is preserved →
     /// the queue order is not lost). Then run the queue.
     private func restoreOutstandingTasks() async {
-        let downloadingRows: [DBDownloadedItem] = (try? await AppDatabase.shared.read { db in
+        let allDownloadingRows: [DBDownloadedItem] = (try? await AppDatabase.shared.read { db in
             try DBDownloadedItem
                 .filter(Column("status") == DownloadStatus.downloading.rawValue)
                 .fetchAll(db)
         }) ?? []
+
+        // B2 (build 61, item 2): rows left "downloading" by a live
+        // recording are NOT URLSession downloads — a recording cannot
+        // survive an app kill and must never be re-queued as a file
+        // download. Finalize them from what is actually on disk: a
+        // partial file with content becomes a completed recording;
+        // an empty/missing one is marked interrupted.
+        let recordingRows = allDownloadingRows.filter { $0.type == "recording" }
+        if !recordingRows.isEmpty {
+            _ = try? await AppDatabase.shared.write { db in
+                for var row in recordingRows {
+                    var size: Int64 = 0
+                    if let url = try? DownloadStorage.absoluteURL(forRelativePath: row.localPath),
+                       let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) {
+                        size = (attrs[.size] as? Int64) ?? 0
+                    }
+                    if size > 0 {
+                        row.status = DownloadStatus.completed.rawValue
+                        row.totalBytes = Int(size)
+                        row.downloadedBytes = Int(size)
+                        row.completedAt = Date()
+                        row.errorMessage = nil
+                    } else {
+                        row.status = DownloadStatus.failed.rawValue
+                        row.errorMessage = L("record.interrupted")
+                        DownloadStorage.removeFile(relativePath: row.localPath)
+                    }
+                    try row.update(db)
+                }
+            }
+            dbVersion &+= 1
+        }
+        let downloadingRows = allDownloadingRows.filter { $0.type != "recording" }
 
         var matchedIds: Set<String> = []
         if !downloadingRows.isEmpty {
@@ -206,7 +295,57 @@ final class DownloadManager: NSObject, ObservableObject {
         }
 
         await sweepOrphanedDownloadFiles()
+        await verifyCompletedDownloads()
         await pumpQueue()
+    }
+
+    /// B2 (build 61, Q16): integrity verification of completed
+    /// downloads, run once per launch. A completed row is checked
+    /// against its file: the file must exist, be non-empty, not be
+    /// an HTML error page, and not be SHORTER than the size recorded
+    /// at completion (truncated). A file that fails is removed and
+    /// its row is marked failed with a plain "damaged — removed"
+    /// message, so the cleanup is USER-VISIBLE in DownloadsView and
+    /// the item can be re-downloaded — never a silent deletion.
+    /// A file LARGER than recorded is never deleted: the recorded
+    /// size is healed to the real one (the file may be perfectly
+    /// playable; only provably-broken files are removed).
+    private func verifyCompletedDownloads() async {
+        let rows: [DBDownloadedItem] = (try? await AppDatabase.shared.read { db in
+            try DBDownloadedItem
+                .filter(Column("status") == DownloadStatus.completed.rawValue)
+                .fetchAll(db)
+        }) ?? []
+        guard !rows.isEmpty else { return }
+        let fm = FileManager.default
+        for row in rows {
+            guard let url = try? DownloadStorage.absoluteURL(forRelativePath: row.localPath) else { continue }
+            let exists = fm.fileExists(atPath: url.path)
+            let size: Int64 = exists
+                ? ((try? fm.attributesOfItem(atPath: url.path))?[.size] as? Int64 ?? 0)
+                : 0
+            let isCorrupt = !exists
+                || size == 0
+                || Self.fileLooksLikeHTMLPage(url)
+                || (row.totalBytes > 0 && size < Int64(row.totalBytes))
+            if isCorrupt {
+                if exists { DownloadStorage.removeFile(relativePath: row.localPath) }
+                downloadLog.error("integrity id=\(row.id, privacy: .public) — completed file corrupt/missing (exists=\(exists) size=\(size) expected=\(row.totalBytes)); removed, row marked failed")
+                await markFailed(
+                    id: row.id,
+                    error: NSError(domain: "Download", code: -6,
+                                   userInfo: [NSLocalizedDescriptionKey: L("download.error.corrupt_removed")])
+                )
+            } else if size > Int64(row.totalBytes) {
+                _ = try? await AppDatabase.shared.write { db in
+                    if var r = try DBDownloadedItem.filter(Column("id") == row.id).fetchOne(db) {
+                        r.totalBytes = Int(size)
+                        r.downloadedBytes = Int(size)
+                        try r.update(db)
+                    }
+                }
+            }
+        }
     }
 
     /// C2 (Round 15) launch sweep: deletes media files under the
@@ -277,6 +416,23 @@ final class DownloadManager: NSObject, ObservableObject {
                 containerExtension: containerExtension, seriesId: seriesId,
                 seasonNumber: seasonNumber, episodeNumber: episodeNumber,
                 errorMessage: error.localizedDescription
+            )
+            return
+        }
+
+        // B2 (build 61, T4): storage-cap gate. When the downloads
+        // already on disk reach the user's cap, the new download is
+        // BLOCKED with a visible failed row carrying the cap notice
+        // — never a silent no-op.
+        if DownloadStorage.totalUsedBytes() >= Self.storageCapBytes {
+            downloadLog.error("enqueue id=\(id, privacy: .public) — BLOCKED by storage cap (\(Self.storageCapBytes) bytes)")
+            await persistFailed(
+                id: id, playlistId: playlistId, streamId: streamId, type: type,
+                title: title, secondaryTitle: secondaryTitle, imageURL: imageURL,
+                remoteURL: remoteURL.absoluteString, relPath: relPath,
+                containerExtension: containerExtension, seriesId: seriesId,
+                seasonNumber: seasonNumber, episodeNumber: episodeNumber,
+                errorMessage: L("downloadcap.blocked")
             )
             return
         }
@@ -364,6 +520,10 @@ final class DownloadManager: NSObject, ObservableObject {
 
     /// Called when a playlist is deleted: cancels the related tasks and deletes the folder.
     func cleanupPlaylist(playlistId: UUID) {
+        // B2 (build 61, item 2): stop + discard any active recording
+        // of this playlist first — its file lives in the folder
+        // removed below.
+        LiveRecordingService.shared.cancelRecordings(playlistId: playlistId)
         // Active tasks: find them by playlist match from idToPlaylistId. While iterating `idToTask.keys`
         // the playlist map is more reliable than filtering by string parsing.
         let idsToCancel = idToPlaylistId.filter { $0.value == playlistId }.map(\.key)
@@ -403,6 +563,8 @@ final class DownloadManager: NSObject, ObservableObject {
     /// Deletes all downloads belonging to one specific playlist only (in every status).
     /// Cancels the active tasks, removes the files from disk, deletes the DB rows.
     func deleteAll(playlistId: UUID) async {
+        // B2 (build 61, item 2): cancel this playlist's active recordings first.
+        LiveRecordingService.shared.cancelRecordings(playlistId: playlistId)
         // Aktif task'ler
         let activeIds = idToPlaylistId.filter { $0.value == playlistId }.map(\.key)
         var hadAny = false
@@ -436,6 +598,9 @@ final class DownloadManager: NSObject, ObservableObject {
 
     /// Deletes the downloads of all playlists (in every status).
     func deleteAll() async {
+        // B2 (build 61, item 2): active recordings write into the
+        // folders removed below — cancel them first.
+        LiveRecordingService.shared.cancelAllRecordings()
         for (id, task) in idToTask {
             task.cancel()
             taskToId.removeValue(forKey: task.taskIdentifier)
@@ -555,6 +720,21 @@ final class DownloadManager: NSObject, ObservableObject {
                     activeDownloadCount(for: row.playlistId) < concurrencyLimit(for: row.playlistId)
                 }) else { break }
                 let next = remaining.remove(at: idx)
+
+                // B2 (build 61, item 2): recording rows are owned by
+                // LiveRecordingService and are never URLSession
+                // downloads. One reaching the queue is an interrupted
+                // leftover — fail it visibly instead of downloading
+                // the live URL as a file.
+                if next.type == "recording" {
+                    await markFailed(
+                        id: next.id,
+                        error: NSError(domain: "Download", code: -7,
+                                       userInfo: [NSLocalizedDescriptionKey: L("record.interrupted")])
+                    )
+                    continue
+                }
+
                 probeProviderMaxConnectionsIfNeeded(playlistId: next.playlistId)
 
                 guard let url = URL(string: next.remoteURL) else {
@@ -570,6 +750,17 @@ final class DownloadManager: NSObject, ObservableObject {
                 // If the size is known from a previous attempt, verify it will fit before starting.
                 if next.totalBytes > 0 {
                     let remainingBytes = Int64(max(next.totalBytes - next.downloadedBytes, 0))
+                    // B2 (build 61, T4): the same known size is also
+                    // checked against the user's storage cap.
+                    if DownloadStorage.totalUsedBytes() + remainingBytes > Self.storageCapBytes {
+                        downloadLog.error("pumpQueue cap-block id=\(next.id, privacy: .public) needed=\(remainingBytes) cap=\(Self.storageCapBytes)")
+                        await markFailed(
+                            id: next.id,
+                            error: NSError(domain: "Download", code: -8,
+                                           userInfo: [NSLocalizedDescriptionKey: L("downloadcap.blocked")])
+                        )
+                        continue
+                    }
                     if let available = DownloadStorage.availableCapacityBytes(),
                        available < remainingBytes + Self.minFreeDiskMargin {
                         downloadLog.error("pumpQueue no-space id=\(next.id, privacy: .public) needed=\(remainingBytes) available=\(available)")
@@ -592,6 +783,7 @@ final class DownloadManager: NSObject, ObservableObject {
                 dbVersion &+= 1
             }
         } while pumpPending
+        await refreshWifiWaitingState()
     }
 
     /// C10 (Round 15): per-playlist concurrency from the provider's
@@ -629,30 +821,33 @@ final class DownloadManager: NSObject, ObservableObject {
     /// If there is resume data from a previous attempt, it resumes where it left off; otherwise it starts from scratch.
     private func startTask(id: String, playlistId: UUID, remoteURL: URL, relPath: String) {
         downloadLog.info("start id=\(id, privacy: .public) playlist=\(playlistId.uuidString, privacy: .public) url=\(remoteURL.absoluteString, privacy: .public)")
+        // B2 (build 61, T4): the Wi-Fi-only gate now covers EVERY
+        // start, not only resumes (the C2 resume gate below remains
+        // the reason it must happen BEFORE task creation:
+        // `downloadTask(withResumeData:)` cannot carry
+        // `allowsCellularAccess`). On a cellular-only path with
+        // Wi-Fi-only ON, the download PAUSES: the row goes back to
+        // `.queued`, any resume blob is kept, `isWaitingForWifi`
+        // surfaces the state in DownloadsView, and the path
+        // monitor's Wi-Fi callback re-pumps the queue.
+        if Self.wifiOnly && isCellularOnlyPath {
+            wifiDeferredIds.insert(id)
+            downloadLog.info("start id=\(id, privacy: .public) — DEFERRED (Wi-Fi-only, cellular path)")
+            Task {
+                _ = try? await AppDatabase.shared.write { db in
+                    if var row = try DBDownloadedItem.filter(Column("id") == id).fetchOne(db),
+                       row.status == DownloadStatus.downloading.rawValue {
+                        row.status = DownloadStatus.queued.rawValue
+                        try row.update(db)
+                    }
+                }
+                dbVersion &+= 1
+                await self.refreshWifiWaitingState()
+            }
+            return
+        }
         let task: URLSessionDownloadTask
         if let resumeData = DownloadStorage.loadResumeData(forId: id) {
-            // C2-wifi-resume: `downloadTask(withResumeData:)` cannot
-            // carry `allowsCellularAccess` — a resumed task would use
-            // cellular even with Wi-Fi-only ON. Gate BEFORE creating
-            // it: on a cellular-only path, keep the resume blob, put
-            // the row back to `.queued`, and let the path monitor's
-            // Wi-Fi callback re-pump. Fresh downloads are unaffected
-            // (their request sets allowsCellularAccess directly).
-            if Self.wifiOnly && isCellularOnlyPath {
-                wifiDeferredIds.insert(id)
-                downloadLog.info("start id=\(id, privacy: .public) — resume DEFERRED (Wi-Fi-only, cellular path)")
-                Task {
-                    _ = try? await AppDatabase.shared.write { db in
-                        if var row = try DBDownloadedItem.filter(Column("id") == id).fetchOne(db),
-                           row.status == DownloadStatus.downloading.rawValue {
-                            row.status = DownloadStatus.queued.rawValue
-                            try row.update(db)
-                        }
-                    }
-                    dbVersion &+= 1
-                }
-                return
-            }
             // Consume the blob up front: if this attempt fails again we either get
             // fresh resume data (persisted anew in didCompleteWithError) or the next
             // retry falls back to a clean full download.
@@ -782,6 +977,15 @@ extension DownloadManager: URLSessionDownloadDelegate {
             // used to end hours later with a disk-full error (and 3 retries).
             if totalJustBecameKnown {
                 let remaining = totalBytesExpectedToWrite - totalBytesWritten
+                // B2 (build 61, T4): same early cut for the user's
+                // storage cap — a fresh download whose real size is
+                // only known now must not run past the cap.
+                if DownloadStorage.totalUsedBytes() + remaining > Self.storageCapBytes {
+                    downloadLog.error("cap-block id=\(id, privacy: .public) needed=\(remaining) cap=\(Self.storageCapBytes)")
+                    self.capFailedIds.insert(id)
+                    downloadTask.cancel()
+                    return
+                }
                 if let available = DownloadStorage.availableCapacityBytes(),
                    available < remaining + Self.minFreeDiskMargin {
                     downloadLog.error("no-space id=\(id, privacy: .public) needed=\(remaining) available=\(available)")
@@ -915,6 +1119,20 @@ extension DownloadManager: URLSessionDownloadDelegate {
                         self.autoRetryCountById.removeValue(forKey: id)
                         Task {
                             await self.markFailed(id: id, error: Self.serverRefusedError())
+                            await self.pumpQueue()
+                        }
+                        return
+                    }
+                    // B2 (build 61, T4): a task we cut because it
+                    // would exceed the storage cap: do not requeue.
+                    if self.capFailedIds.remove(id) != nil {
+                        DownloadStorage.removeResumeData(forId: id)
+                        self.autoRetryCountById.removeValue(forKey: id)
+                        Task {
+                            await self.markFailed(id: id, error: NSError(
+                                domain: "Download", code: -8,
+                                userInfo: [NSLocalizedDescriptionKey: L("downloadcap.blocked")]
+                            ))
                             await self.pumpQueue()
                         }
                         return

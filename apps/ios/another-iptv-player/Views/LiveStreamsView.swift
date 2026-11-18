@@ -17,6 +17,8 @@ struct LiveStreamsView: View {
     @ObservedObject private var contentStore = PlaylistContentStore.shared
     @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
     @ObservedObject private var orderStore = CategoryOrderStore.shared
+    // B2 (build 61, item 12): per-category channel order store.
+    @ObservedObject private var channelOrderStore = ChannelOrderStore.shared
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
     @Environment(\.epgSnapshot) private var epgSnapshot
     @Environment(\.scenePhase) private var scenePhase
@@ -202,6 +204,8 @@ struct LiveStreamsView: View {
         .task(id: LiveRecomputeToken(loaded: contentStore.streamsLoaded, liveCount: contentStore.liveStreams.count)) { await recomputeFilter() }
         .task(id: hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")) { await recomputeFilter() }
         .task(id: orderStore.orderedIds(playlistId: playlist.id, type: "live")) { await recomputeFilter() }
+        // B2 (build 61, item 12): a channel reorder bumps the store's version → recompute.
+        .task(id: channelOrderStore.version) { await recomputeFilter() }
         .task(id: favoritesOnly) { await recomputeFilter() }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -508,6 +512,17 @@ struct LiveStreamsView: View {
             playlistId: playlist.id, type: "live"
         ) { $0.id }
         displayItemsByCategory = contentStore.liveStreamsByCategoryId
+        // B2 (build 61, item 12): apply the user's persisted
+        // per-category channel order (tier 3 of the O7 in-category
+        // order). With no saved order this is the identity, so the
+        // provider order stands; explicit name sorts in the category
+        // screens still override it there, as they do the provider
+        // order today.
+        displayItemsByCategory = Dictionary(uniqueKeysWithValues: displayItemsByCategory.map { categoryId, items in
+            (categoryId, channelOrderStore.applyOrder(items, playlistId: playlist.id, categoryId: categoryId) {
+                String($0.stream.streamId)
+            })
+        })
         if favoritesOnly {
             // B3: keep only favorite channels (and categories that
             // still hold one) — hero, trending and the play queue all

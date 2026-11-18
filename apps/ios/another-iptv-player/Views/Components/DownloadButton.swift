@@ -241,6 +241,10 @@ struct DownloadButton: View {
                 Label(L("download.delete"), systemImage: "trash")
             }
         }
+        // B2 (build 61, item 10): open this title in an external
+        // player — offered in every state; the URL is the stream's
+        // remote URL regardless of download state.
+        ExternalPlayerMenuItems(streamURL: remoteURL)
     }
 
     private func primaryAction() {

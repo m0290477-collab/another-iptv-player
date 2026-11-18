@@ -8,6 +8,13 @@ struct DownloadsView: View {
 
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
     @ObservedObject private var manager = DownloadManager.shared
+    /// B2 (build 61, item 2): live recordings live in this list as
+    /// `type == "recording"` rows; the service drives their elapsed
+    /// time / size and stop+cancel.
+    @ObservedObject private var recorder = LiveRecordingService.shared
+    /// B2 (build 61, T4): the downloads storage cap (GB) enforced by
+    /// `DownloadManager.storageCapBytes`.
+    @AppStorage("download.storage_cap_gb") private var storageCapGB: Int = 20
     @Query<AllDownloadsRequest> private var items: [DBDownloadedItem]
     @State private var searchText: String = ""
     @State private var debouncedQuery: String = ""
@@ -58,6 +65,11 @@ struct DownloadsView: View {
         completed.filter { $0.type == "vod" }
     }
 
+    /// B2 (build 61, item 2): finished live recordings.
+    private var completedRecordings: [DBDownloadedItem] {
+        completed.filter { $0.type == "recording" }
+    }
+
     /// Round 14 (B3): total size of everything in this playlist's
     /// downloads — completed items at their full size, in-progress
     /// ones at the bytes actually on disk so far.
@@ -106,6 +118,32 @@ struct DownloadsView: View {
                 ContentUnavailableView.search(text: searchText)
             } else {
                 List {
+                    // B2 (build 61, T4): Wi-Fi-only pause state +
+                    // storage cap. The Wi-Fi-only TOGGLE itself
+                    // stays in Settings (O6 single-instance) — this
+                    // is the visible STATE of the pause, plus the
+                    // cap picker whose only home is here.
+                    if manager.isWaitingForWifi {
+                        Section {
+                            Label(L("download.wifi_waiting"), systemImage: "wifi.slash")
+                                .font(.subheadline)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    Section {
+                        Picker(L("downloadcap.title"), selection: $storageCapGB) {
+                            ForEach([2, 5, 10, 20], id: \.self) { gb in
+                                Text("\(gb) GB").tag(gb)
+                            }
+                        }
+                        HStack {
+                            Text(L("downloadcap.used"))
+                            Spacer()
+                            Text(ByteCountFormatter.string(fromByteCount: StorageService.downloadsSizeBytes(), countStyle: .file))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     // Round 14 (B3): total size + delete-watched.
                     Section {
                         HStack {
@@ -126,7 +164,11 @@ struct DownloadsView: View {
                     if !inProgress.isEmpty {
                         Section(L("download.status.downloading")) {
                             ForEach(inProgress) { item in
-                                actionableRow(item)
+                                if item.type == "recording" {
+                                    recordingRow(item)
+                                } else {
+                                    actionableRow(item)
+                                }
                             }
                         }
                     }
@@ -147,6 +189,13 @@ struct DownloadsView: View {
                     if !completedMovies.isEmpty {
                         Section(L("dashboard.movies")) {
                             ForEach(completedMovies) { item in
+                                actionableRow(item)
+                            }
+                        }
+                    }
+                    if !completedRecordings.isEmpty {
+                        Section(L("record.title")) {
+                            ForEach(completedRecordings) { item in
                                 actionableRow(item)
                             }
                         }
@@ -258,8 +307,32 @@ struct DownloadsView: View {
         await MainActor.run { finishedHistoryKeys = keys }
     }
 
+    /// B2: retry for a recording row — deletes the failed row and
+    /// starts a fresh recording of the same channel (looked up in
+    /// the live catalog; if the channel is gone, nothing happens).
+    private func restartRecording(_ item: DBDownloadedItem) {
+        guard let streamId = Int(item.streamId) else { return }
+        let pid = playlist.id
+        Task {
+            let stream: DBLiveStream? = try? await AppDatabase.shared.read { db in
+                try DBLiveStream
+                    .filter(Column("streamId") == streamId && Column("playlistId") == pid)
+                    .fetchOne(db)
+            }
+            guard let stream else { return }
+            await manager.delete(id: item.id)
+            await recorder.start(playlist: playlist, stream: stream)
+        }
+    }
+
     /// Re-queues a record whose file is lost, with the same id (the same path as a failed retry).
     private func redownload(_ item: DBDownloadedItem) {
+        // B2: a recording has no file to re-download — retry means
+        // recording the channel again.
+        if item.type == "recording" {
+            restartRecording(item)
+            return
+        }
         guard let url = URL(string: item.remoteURL) else { return }
         Task {
             await manager.enqueue(
@@ -305,6 +378,85 @@ struct DownloadsView: View {
                 }
             }
         }
+        // B2 (build 61, item 10): open the stream in an external
+        // player from a completed row (the remote URL — external
+        // players cannot read the app sandbox).
+        .contextMenu {
+            if item.downloadStatus == .completed, let url = URL(string: item.remoteURL) {
+                ExternalPlayerMenuItems(streamURL: url)
+            }
+        }
+    }
+
+    /// B2 (build 61, item 2): an in-progress recording row — elapsed
+    /// time + size so far (driven by `LiveRecordingService.now`,
+    /// which ticks once a second while recording) and the two real
+    /// controls: Stop (keep the file) and Cancel (discard it). Not
+    /// wrapped in the row Button — the controls are the actions.
+    @ViewBuilder
+    private func recordingRow(_ item: DBDownloadedItem) -> some View {
+        HStack(spacing: 12) {
+            CachedImage(
+                url: item.imageURL.flatMap { URL(string: $0) },
+                width: 56, height: 56,
+                iconName: "record.circle",
+                loadProfile: .grid
+            )
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                if let active = recorder.active[item.id] {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 8, height: 8)
+                        Text(L("record.status_format",
+                               Self.elapsedText(since: active.startedAt, now: recorder.now),
+                               ByteCountFormatter.string(fromByteCount: active.bytesWritten, countStyle: .file)))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                } else {
+                    Text(L("record.recording"))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Button {
+                recorder.stop(id: item.id)
+            } label: {
+                Label(L("record.stop"), systemImage: "stop.circle.fill")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            Button(role: .destructive) {
+                recorder.cancel(id: item.id)
+            } label: {
+                Label(L("common.cancel"), systemImage: "xmark.circle")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// mm:ss (or h:mm:ss) elapsed formatting for a recording.
+    private static func elapsedText(since start: Date, now: Date) -> String {
+        let total = max(0, Int(now.timeIntervalSince(start)))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%02d:%02d", minutes, seconds)
     }
 
     private func performPrimaryAction(_ item: DBDownloadedItem) {
@@ -316,6 +468,13 @@ struct DownloadsView: View {
             // swipe action and context menu already used).
             cancelCandidate = item
         case .failed:
+            // B2: a failed RECORDING retries by starting a fresh
+            // recording of the channel — never by enqueueing the
+            // live URL as a file download.
+            if item.type == "recording" {
+                restartRecording(item)
+                return
+            }
             // Retry: just re-enqueue with the same id. The manager already overwrites the failed row.
             guard let url = URL(string: item.remoteURL) else { return }
             Task {
@@ -345,7 +504,7 @@ struct DownloadsView: View {
             CachedImage(
                 url: item.imageURL.flatMap { URL(string: $0) },
                 width: 56, height: 56,
-                iconName: item.type == "episode" ? "play.tv" : "film",
+                iconName: item.type == "episode" ? "play.tv" : (item.type == "recording" ? "record.circle" : "film"),
                 loadProfile: .grid
             )
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius))
@@ -438,6 +597,7 @@ struct DownloadsView: View {
             }
 
             // If it is an episode it is stored in the DB as history.type "series"; if a movie, as "vod".
+            // A recording plays through the same file-playback path as a movie (type "vod").
             let historyType = item.type == "episode" ? "series" : "vod"
             let existingHistory: DBWatchHistory? = try? await AppDatabase.shared.read { db in
                 try DBWatchHistory
@@ -490,7 +650,7 @@ struct DownloadsView: View {
                             seriesId: item.seriesId,
                             resumeTimeMs: existingHistory?.lastTimeMs,
                             containerExtension: item.containerExtension,
-                            onNavigateToDetail: navigateToMovieDetail
+                            onNavigateToDetail: item.type == "recording" ? nil : navigateToMovieDetail
                         )
                     }
                 }

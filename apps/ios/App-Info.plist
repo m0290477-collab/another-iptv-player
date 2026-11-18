@@ -19,6 +19,11 @@
 	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Used to scan your provider's sign-in QR code.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>vlc</string>
+		<string>infuse</string>
+	</array>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_googlecast._tcp</string>
