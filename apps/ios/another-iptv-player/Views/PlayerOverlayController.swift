@@ -60,7 +60,14 @@ final class PlayerOverlayController: ObservableObject {
             expiredNotice = ExpiredPlaybackNotice(playlistId: playlistId, expiryDate: expired)
             return
         }
-        let pkg = PlayerOverlayPresentation(root: AnyView(content()), onDismiss: onDismiss)
+        // Build 60: build 33 had no forced appearance anywhere — the
+        // player followed the system color scheme. The app root now
+        // forces dark for the rest of the app (AppRootView), so this
+        // presentation resets the preference to nil (system) for the
+        // player subtree only, restoring the build-33 player appearance
+        // — including the sheets PlayerView presents (track settings,
+        // subtitle appearance), which inherit this environment.
+        let pkg = PlayerOverlayPresentation(root: AnyView(content().preferredColorScheme(nil)), onDismiss: onDismiss)
         let shouldWarn: Bool = {
             if skipDownloadCheck { return false }
             guard let playlistId else { return false }
