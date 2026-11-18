@@ -237,6 +237,36 @@ struct ShimmerSweepModifier: ViewModifier {
     }
 }
 
+// MARK: - X8 ambient hero glow
+
+/// X8: a very slow breathing red-orange glow behind the Home hero.
+/// Presentation only, behind the hero card; it renders NOTHING when
+/// the effects gate is closed (Reduce Motion / Q21 light mode /
+/// motion-off) — the hero then sits on the plain charcoal
+/// background. The breathing is opacity-only on a single blurred
+/// shape (no per-cell work), and the owning screen only mounts it
+/// while Home is visible, so it pauses off-screen by construction.
+struct AmbientHeroGlow: View {
+    @State private var breathing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        if EffectsGate.allowsHeavyEffects(reduceMotion: reduceMotion) {
+            Ellipse()
+                .fill(AppTheme.accent.opacity(breathing ? 0.20 : 0.10))
+                .frame(width: 340, height: 200)
+                .blur(radius: 60)
+                .allowsHitTesting(false)
+                .onAppear {
+                    guard !breathing else { return }
+                    withAnimation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true)) {
+                        breathing = true
+                    }
+                }
+        }
+    }
+}
+
 // MARK: - J3 Home row order
 
 /// J3: the user-reorderable Home CONTENT rows. The hero and every

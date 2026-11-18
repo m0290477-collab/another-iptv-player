@@ -179,13 +179,17 @@ final class HeroPreviewController: ObservableObject {
             .store(in: &cancellables)
     }
 
-    func start(url: URL) {
+    func start(url: URL, userAgent: String? = nil) {
         if startedURL == url, !isFailed, isLive || isLoading { return }
         startedURL = url
         isFailed = false
         isLive = false
         isLoading = true
-        engine.load(url, play: true, startSeconds: nil, liveLowLatency: true, userAgent: nil)
+        // Build 61 (B7, G2 honesty): the preview load carries the
+        // ACTIVE playlist's custom User-Agent like every other load
+        // path — it used to pass nil, silently dropping the user's
+        // per-playlist UA on this one surface.
+        engine.load(url, play: true, startSeconds: nil, liveLowLatency: true, userAgent: userAgent)
         applyMute()
         timeoutTask?.cancel()
         timeoutTask = Task { [weak self] in
@@ -295,6 +299,9 @@ struct LiveHeroCard: View {
     var nowProgramTitle: String? = nil
     var previewURL: URL? = nil
     var previewActive: Bool = false
+    /// Build 61 (B7, G2): the active playlist's custom User-Agent,
+    /// forwarded to the preview load (was hard-coded nil).
+    var userAgent: String? = nil
     let onPlay: () -> Void
 
     @StateObject private var preview = HeroPreviewController()
@@ -433,7 +440,7 @@ struct LiveHeroCard: View {
 
     private func syncPreview() {
         if previewActive, let url = previewURL {
-            preview.start(url: url)
+            preview.start(url: url, userAgent: userAgent)
         } else {
             preview.stop()
         }
@@ -889,6 +896,10 @@ struct SkeletonShelf: View {
         }
         .padding(.horizontal, AppTheme.spacingScreenMargin)
         .opacity(dimmed ? 0.45 : 0.85)
+        // D4 (B7): one shared shimmer sweep over the whole skeleton
+        // shelf (single overlay, not per-card), gated by the shared
+        // effects gate — Reduce Motion / Q21 render it static.
+        .shimmerSweep(active: true)
         .onAppear {
             guard !reduceMotion, Motion.animate(.easeInOut(duration: 1.1)) != nil else { return }
             withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
