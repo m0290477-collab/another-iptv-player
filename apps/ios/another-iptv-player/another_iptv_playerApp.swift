@@ -185,6 +185,20 @@ private struct AppRootView: View {
                 // pending-playback path; a no-op when off).
                 await LaunchResumeService.scheduleIfEnabled()
             }
+            // === Build 61 (B9): deferred launch work. P4 keeps
+            // every item here OFF the cold-start critical path —
+            // this task starts only after the first frame and
+            // settles ~2.5 s before doing anything: the P6
+            // data-saver path monitor, the Q22 launch cache trim
+            // (+ its periodic trimmer), and the Q19 forced
+            // provider-expiry refresh of the active playlist. ===
+            .task {
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                DataSaverService.shared.start()
+                CacheTrimService.trimIfNeeded()
+                CacheTrimService.startPeriodicTrimming()
+                await AppOpenRefreshService.refreshActivePlaylistOnAppOpen()
+            }
             // Build 61 (B3, item 7a): the stored appearance choice
             // replaces the hard-forced dark scheme (default stays
             // dark). The player subtree keeps its own nil reset in

@@ -16,6 +16,8 @@ nonisolated enum LiveSortOption: String, CaseIterable, Identifiable {
     case defaultOrder
     case nameAsc
     case nameDesc
+    /// Build 61 (B9, Q12): channels that actually play come first.
+    case workingFirst
 
     var id: String { rawValue }
 
@@ -26,6 +28,7 @@ nonisolated enum LiveSortOption: String, CaseIterable, Identifiable {
         case .defaultOrder: return "sort.default"
         case .nameAsc: return "sort.name_asc"
         case .nameDesc: return "sort.name_desc"
+        case .workingFirst: return "sort.working_first"
         }
     }
 
@@ -34,6 +37,7 @@ nonisolated enum LiveSortOption: String, CaseIterable, Identifiable {
         case .defaultOrder: return "list.number"
         case .nameAsc: return "arrow.up"
         case .nameDesc: return "arrow.down"
+        case .workingFirst: return "checkmark.circle"
         }
     }
 
@@ -48,6 +52,28 @@ nonisolated enum LiveSortOption: String, CaseIterable, Identifiable {
         case .nameDesc:
             return items.sorted {
                 $0.stream.name.localizedCaseInsensitiveCompare($1.stream.name) == .orderedDescending
+            }
+        case .workingFirst:
+            // Q12 composition (SPEC §4.5-O7): this sort replaces
+            // ONLY tier 3 (custom order) — tiers 1–2 (pinned,
+            // favorites) are applied by the list assembly before
+            // this runs, and Swift's sort is STABLE, so items of
+            // equal health keep their incoming (tiered) order.
+            // Ranks are precomputed once per item (a sort must
+            // never build content keys per comparison at 10k+
+            // channels).
+            let store = ChannelHealthStore.shared
+            let ranks: [Int: Int] = Dictionary(uniqueKeysWithValues: items.map { item in
+                (item.stream.streamId, store.healthRank(
+                    ImportedSubtitleStore.contentKey(
+                        playlistId: item.stream.playlistId,
+                        type: "live",
+                        streamId: String(item.stream.streamId)
+                    )
+                ))
+            })
+            return items.sorted {
+                (ranks[$0.stream.streamId] ?? 0) < (ranks[$1.stream.streamId] ?? 0)
             }
         }
     }

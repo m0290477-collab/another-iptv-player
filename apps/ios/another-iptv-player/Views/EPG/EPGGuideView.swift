@@ -56,7 +56,27 @@ struct EPGGuideView: View {
             .searchable(text: $model.searchQuery)
             .task {
                 guard model.state == .loading else { return }
+                // Build 61 (B9, Z7): the guide renders FIRST from
+                // the cached guide data — `model.load()` reads
+                // only the local stores/DB, never the network —
+                // then a background refresh runs, and when it
+                // lands the guide is rebuilt from the same cache.
+                // Row identities are the channels themselves and
+                // both scroll positions live in this view (not in
+                // the model), so the swap does not move the
+                // user's place in the guide.
                 await model.load()
+                await epgStore.refreshIfStale(playlist: model.playlist)
+                if model.state == .ready {
+                    await model.load()
+                }
+            }
+            // Build 61 (B9, Z7): a refresh that lands while the
+            // guide is open (background task, another screen)
+            // swaps in the same way — same identities, same
+            // scroll anchor.
+            .onChange(of: epgStore.lastSuccess[model.playlist.id]) { _, _ in
+                Task { await model.load() }
             }
             .onDisappear {
                 selectionTask?.cancel()

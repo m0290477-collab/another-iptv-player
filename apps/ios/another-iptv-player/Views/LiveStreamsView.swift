@@ -17,6 +17,8 @@ struct LiveStreamsView: View {
     @ObservedObject private var contentStore = PlaylistContentStore.shared
     @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
     @ObservedObject private var orderStore = CategoryOrderStore.shared
+    // Build 61 (B9, Q10): dead-channel markings (hide-dead filter).
+    @ObservedObject private var channelHealth = ChannelHealthStore.shared
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
     @Environment(\.epgSnapshot) private var epgSnapshot
     @Environment(\.scenePhase) private var scenePhase
@@ -200,6 +202,7 @@ struct LiveStreamsView: View {
         // shelf filtering went with it; AllLiveView and the category
         // detail screens keep their own search fields.
         .task(id: LiveRecomputeToken(loaded: contentStore.streamsLoaded, liveCount: contentStore.liveStreams.count)) { await recomputeFilter() }
+        .task(id: channelHealth.revision) { await recomputeFilter() }
         .task(id: hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")) { await recomputeFilter() }
         .task(id: orderStore.orderedIds(playlistId: playlist.id, type: "live")) { await recomputeFilter() }
         .task(id: favoritesOnly) { await recomputeFilter() }
@@ -517,6 +520,22 @@ struct LiveStreamsView: View {
                 items.filter { favoriteIds.contains($0.stream.streamId) }
             }
             displayCategories = displayCategories.filter { !(displayItemsByCategory[$0.id]?.isEmpty ?? true) }
+        }
+        if ChannelHealthStore.hideDeadEnabled {
+            // Build 61 (B9, Q10): hide channels marked dead
+            // (≥3 consecutive playback failures) from the shelves,
+            // the hero/trending derivation and the play queue.
+            let dead = channelHealth.deadKeys()
+            if !dead.isEmpty {
+                displayItemsByCategory = displayItemsByCategory.mapValues { items in
+                    items.filter {
+                        !dead.contains(ImportedSubtitleStore.contentKey(
+                            playlistId: playlist.id, type: "live", streamId: String($0.stream.streamId)
+                        ))
+                    }
+                }
+                displayCategories = displayCategories.filter { !(displayItemsByCategory[$0.id]?.isEmpty ?? true) }
+            }
         }
         // Round 8 (audit A3): cache the sections here — the old computed
         // property's mapping, verbatim — so body, hero, trending and the
@@ -875,6 +894,8 @@ struct LiveCategoryContent: View, Equatable {
     @Environment(\.posterMetrics) private var posterMetrics
 
     @AppStorage(LiveSortOption.storageKey) private var sortOption: LiveSortOption = .defaultOrder
+    // Build 61 (B9, Q10): dead-channel markings (hide-dead filter).
+    @ObservedObject private var channelHealth = ChannelHealthStore.shared
     @State private var showSortSheet = false
     /// Screen-local toggle filters (catch-up / EPG).
     @State private var filter: LiveStreamFilter = []
@@ -903,8 +924,21 @@ struct LiveCategoryContent: View, Equatable {
         let source = items
         let sort = sortOption
         let activeFilter = filter
+        // Build 61 (B9, Q10): the dead set is computed once here
+        // (not per row) and applied inside the same detached pass.
+        let dead: Set<String> = ChannelHealthStore.hideDeadEnabled
+            ? ChannelHealthStore.shared.deadKeys() : []
+        let playlistId = playlist.id
         let result = await Task.detached(priority: .userInitiated) {
-            sort.apply(to: LiveStreamFilter.apply(source, activeFilter))
+            var base = LiveStreamFilter.apply(source, activeFilter)
+            if !dead.isEmpty {
+                base = base.filter {
+                    !dead.contains(ImportedSubtitleStore.contentKey(
+                        playlistId: playlistId, type: "live", streamId: String($0.stream.streamId)
+                    ))
+                }
+            }
+            return sort.apply(to: base)
         }.value
         displayItems = result
         visibleCount = min(Self.pageSize, result.count)
@@ -975,6 +1009,7 @@ struct LiveCategoryContent: View, Equatable {
         }
         .task(id: itemsToken) { await recompute() }
         .task(id: sortOption) { await recompute() }
+        .task(id: channelHealth.revision) { await recompute() }
         .task(id: filter.rawValue) { await recompute() }
     }
 
@@ -1226,6 +1261,20 @@ struct LivePlayerShell: View {
             }
             .task(id: "\(playlist.id.uuidString)-\(session.stream.streamId)") {
                 await refreshFavorite()
+            }
+            // Build 61 (B9, P1): warm the PREVIOUS + NEXT channel
+            // connections on every zap (connection level only —
+            // see PlaybackPrewarmService for the exact level and
+            // its bounds).
+            .task(id: session.stream.streamId) {
+                let builder = PlaybackURLBuilder(playlist: playlist)
+                PlaybackPrewarmService.shared.updateNeighbors(
+                    previous: currentIndex.flatMap { $0 > 0 ? builder.liveURL(streamId: queue[$0 - 1].streamId) : nil },
+                    next: currentIndex.flatMap { $0 < queue.count - 1 ? builder.liveURL(streamId: queue[$0 + 1].streamId) : nil }
+                )
+            }
+            .onDisappear {
+                PlaybackPrewarmService.shared.cancelNeighbors()
             }
             .onChange(of: overlayPresentationID) { _, _ in
                 applyInitialSelectionIfNeeded()
