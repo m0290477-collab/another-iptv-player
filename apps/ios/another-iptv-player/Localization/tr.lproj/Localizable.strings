@@ -165,7 +165,7 @@
 "settings.back_to_list" = "Playlist Listesine Dön";
 "settings.refresh_all" = "Tüm İçerikleri Yeniden İndir";
 "settings.player.title" = "Player Ayarları";
-"settings.player.pip.title" = "Picture in Picture";
+"settings.player.pip.title" = "Resim İçinde Resim";
 "settings.player.pip.desc" = "Oynatıcıyı PiP modunda küçültmeye izin verir";
 "settings.player.background.title" = "Arkaplanda Çalmaya Devam Et";
 "settings.player.background.desc" = "Kapalıysa uygulama arka plana geçince duraklatılır";
@@ -488,7 +488,7 @@
 "detail.show_more" = "Daha fazla";
 "detail.show_less" = "Daha az";
 "player.a11y.playback_position" = "Oynatma konumu";
-"download.error.no_space" = "Cihazda yeterli boş alan yok";
+"download.error.no_space" = "Cihazda yeterli boş alan yok. Yer açmak için eski indirmeleri silin ve tekrar deneyin.";
 "download.missing_file.title" = "Dosya Cihazda Yok";
 "download.missing_file.message" = "İndirilen dosya bulunamıyor (cihaz geri yükleme veya taşıma sonrası olabilir). Yeniden indirilsin mi?";
 "content.uncategorized" = "Kategorisiz";
@@ -1086,7 +1086,7 @@
 
 /* MARK: Build 61 (b12) */
 "matches.empty" = "Bugün maç yok";
-"matches.error" = "Maçlar yüklenemedi";
+"matches.error" = "Maçlar yüklenemedi. Bağlantınızı kontrol edip Tekrar Dene'ye dokunun.";
 "matches.final" = "Bitti";
 "matches.live" = "CANLI";
 "matches.retry" = "Tekrar dene";

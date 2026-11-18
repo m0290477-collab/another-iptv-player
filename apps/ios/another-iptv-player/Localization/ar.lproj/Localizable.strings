@@ -413,7 +413,7 @@
 "detail.show_more" = "عرض المزيد";
 "detail.show_less" = "عرض أقل";
 "player.a11y.playback_position" = "موضع التشغيل";
-"download.error.no_space" = "لا توجد مساحة تخزين كافية على هذا الجهاز";
+"download.error.no_space" = "لا توجد مساحة تخزين كافية على هذا الجهاز. احذف التنزيلات القديمة لتوفير مساحة، ثم حاول مرة أخرى.";
 "download.missing_file.title" = "الملف لم يعد موجودًا على الجهاز";
 "download.missing_file.message" = "ملف التنزيل مفقود (يحدث هذا بعد استعادة الجهاز أو نقله). هل تريد تنزيله مرة أخرى؟";
 "content.uncategorized" = "غير مصنّف";
@@ -1068,7 +1068,7 @@
 
 /* MARK: Build 61 (b12) */
 "matches.empty" = "لا مباريات اليوم";
-"matches.error" = "تعذّر تحميل المباريات";
+"matches.error" = "تعذّر تحميل المباريات. تحقق من اتصالك واضغط «إعادة المحاولة».";
 "matches.final" = "انتهت";
 "matches.live" = "مباشر";
 "matches.retry" = "إعادة المحاولة";

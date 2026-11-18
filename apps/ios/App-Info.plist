@@ -17,6 +17,11 @@
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>IBMPlexSansArabic-Regular.ttf</string>
+		<string>IBMPlexSansArabic-SemiBold.ttf</string>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Used to scan your provider's sign-in QR code.</string>
 	<key>LSApplicationQueriesSchemes</key>

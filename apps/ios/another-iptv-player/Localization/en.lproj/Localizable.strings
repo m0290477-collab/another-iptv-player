@@ -488,7 +488,7 @@
 "detail.show_more" = "Show more";
 "detail.show_less" = "Show less";
 "player.a11y.playback_position" = "Playback position";
-"download.error.no_space" = "Not enough free storage on this device";
+"download.error.no_space" = "Not enough free storage on this device. Delete old downloads to free up space, then try again.";
 "download.missing_file.title" = "File No Longer on Device";
 "download.missing_file.message" = "The downloaded file is missing (this happens after restoring or migrating your device). Download it again?";
 "content.uncategorized" = "Uncategorized";
@@ -1086,7 +1086,7 @@
 
 /* MARK: Build 61 (b12) */
 "matches.empty" = "No matches today";
-"matches.error" = "Couldn't load the matches";
+"matches.error" = "Couldn't load the matches. Check your connection and tap Retry.";
 "matches.final" = "FT";
 "matches.live" = "LIVE";
 "matches.retry" = "Retry";

@@ -413,7 +413,7 @@
 "detail.show_more" = "Mehr anzeigen";
 "detail.show_less" = "Weniger anzeigen";
 "player.a11y.playback_position" = "Wiedergabeposition";
-"download.error.no_space" = "Nicht genügend freier Speicherplatz auf diesem Gerät";
+"download.error.no_space" = "Nicht genügend freier Speicherplatz auf diesem Gerät. Lösche alte Downloads, um Platz zu schaffen, und versuche es dann erneut.";
 "download.missing_file.title" = "Datei nicht mehr auf dem Gerät";
 "download.missing_file.message" = "Die heruntergeladene Datei fehlt (z. B. nach Wiederherstellung oder Gerätewechsel). Erneut herunterladen?";
 "content.uncategorized" = "Ohne Kategorie";
@@ -596,7 +596,7 @@
 "notifications.expiry.message_today" = "Dein Anbieter-Abonnement läuft heute ab (%@).";
 "notifications.expired.title" = "Dein Anbieter-Abonnement";
 "notifications.expired.message" = "Dein Anbieter-Abonnement ist am %@ abgelaufen.";
-"player.sleep_timer.short" = "Sleep";
+"player.sleep_timer.short" = "Schlaf";
 "player.tracks.more" = "Mehr Optionen";
 "detail.story" = "Handlung";
 "detail.more_like_this" = "Ähnliche Titel";
@@ -1068,7 +1068,7 @@
 
 /* MARK: Build 61 (b12) */
 "matches.empty" = "Heute keine Spiele";
-"matches.error" = "Spiele konnten nicht geladen werden";
+"matches.error" = "Die Spiele konnten nicht geladen werden. Prüfe deine Verbindung und tippe auf „Wiederholen“.";
 "matches.final" = "Ende";
 "matches.live" = "LIVE";
 "matches.retry" = "Erneut versuchen";

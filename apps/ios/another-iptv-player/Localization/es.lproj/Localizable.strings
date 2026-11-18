@@ -413,7 +413,7 @@
 "detail.show_more" = "Mostrar más";
 "detail.show_less" = "Mostrar menos";
 "player.a11y.playback_position" = "Posición de reproducción";
-"download.error.no_space" = "No hay suficiente espacio libre en este dispositivo";
+"download.error.no_space" = "No hay suficiente espacio libre en este dispositivo. Elimina descargas antiguas para liberar espacio e inténtalo de nuevo.";
 "download.missing_file.title" = "El archivo ya no está en el dispositivo";
 "download.missing_file.message" = "Falta el archivo descargado (ocurre tras restaurar o migrar el dispositivo). ¿Descargarlo de nuevo?";
 "content.uncategorized" = "Sin categoría";
@@ -1068,7 +1068,7 @@
 
 /* MARK: Build 61 (b12) */
 "matches.empty" = "Hoy no hay partidos";
-"matches.error" = "No se pudieron cargar los partidos";
+"matches.error" = "No se pudieron cargar los partidos. Comprueba tu conexión y toca Reintentar.";
 "matches.final" = "Final";
 "matches.live" = "EN VIVO";
 "matches.retry" = "Reintentar";
