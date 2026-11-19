@@ -550,34 +550,131 @@ struct MatchDetailView: View {
         .tint(AppTheme.accent)
     }
 
-    // MARK: Leaders (item 8c)
+    // MARK: Leaders (item 8c; build 67 F8/S9 Glass Cards)
+    //
+    // Owner pick (performers styles v1, panel 1): TWO frosted
+    // glass cards side by side — one per team — each with the
+    // team's top performer's big photo, name, and that athlete's
+    // REAL leader stats stacked vertically inside the card
+    // (category + value, exactly as the payload labels them).
+    // Further athletes of the same team follow as compact rows
+    // inside the same card. Nothing scrolls horizontally and
+    // nothing can run off the screen edge (the build-66 overflow
+    // the owner screenshotted): every text element is width-bound
+    // by the card, stats stack, and names truncate at the tail
+    // only after layout priority is exhausted.
 
     private func leadersRow(_ leaders: [MatchLeaderEntry]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 14) {
-                ForEach(leaders) { entry in
-                    VStack(spacing: 5) {
-                        PlayerPhotoView(url: entry.headshotURL, name: entry.athleteName, size: 46)
-                        Text(entry.athleteName)
-                            .font(AppTheme.fontBadge)
-                            .lineLimit(1)
-                            .frame(width: 84)
+        // Group by team, preserving payload order (home group
+        // first as the feed emits it). Entries without a team
+        // name form their own trailing group rather than being
+        // dropped.
+        var groups: [(team: String?, entries: [MatchLeaderEntry])] = []
+        for entry in leaders {
+            if let index = groups.firstIndex(where: { $0.team == entry.teamName }) {
+                groups[index].entries.append(entry)
+            } else {
+                groups.append((team: entry.teamName, entries: [entry]))
+            }
+        }
+        return HStack(alignment: .top, spacing: 10) {
+            ForEach(Array(groups.prefix(2).enumerated()), id: \.offset) { _, group in
+                performerCard(team: group.team, entries: group.entries)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.vertical, 4)
+        .listRowInsets(EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8))
+    }
+
+    private func performerCard(team: String?, entries: [MatchLeaderEntry]) -> some View {
+        // The card's headline athlete is the team's first leader
+        // entry; their stat lines are every leader entry FOR THAT
+        // ATHLETE (real categories only). Other athletes of the
+        // team keep their own primary entry as a compact row.
+        let headline = entries.first
+        let headlineStats = entries.filter { $0.athleteName == headline?.athleteName }
+        var seen = Set<String>()
+        let others = entries.filter { entry in
+            guard entry.athleteName != headline?.athleteName else { return false }
+            return seen.insert(entry.athleteName).inserted
+        }
+        return VStack(spacing: 8) {
+            if let team, !team.isEmpty {
+                Text(team)
+                    .font(AppTheme.fontBadge)
+                    .foregroundStyle(AppTheme.accent)
+                    .lineLimit(1)
+                    .multilineTextAlignment(.center)
+            }
+            if let headline {
+                PlayerPhotoView(url: headline.headshotURL, name: headline.athleteName, size: 72)
+                Text(headline.athleteName)
+                    .font(AppTheme.fontCardTitle.weight(.bold))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .layoutPriority(1)
+                VStack(spacing: 5) {
+                    ForEach(headlineStats) { stat in
+                        HStack(spacing: 6) {
+                            Text(stat.category)
+                                .font(AppTheme.fontMetadata)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 4)
+                            if let value = stat.valueText {
+                                Text(value)
+                                    .font(AppTheme.fontCardTitle)
+                                    .foregroundStyle(AppTheme.accent)
+                                    .monospacedDigit()
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+            if !others.isEmpty {
+                Divider().overlay(AppTheme.cardBorderColor)
+                ForEach(others.prefix(2)) { entry in
+                    HStack(spacing: 7) {
+                        PlayerPhotoView(url: entry.headshotURL, name: entry.athleteName, size: 28)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(entry.athleteName)
+                                .font(AppTheme.fontBadge)
+                                .lineLimit(1)
+                            Text(entry.category)
+                                .font(AppTheme.fontMetadata)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 2)
                         if let value = entry.valueText {
                             Text(value)
-                                .font(AppTheme.fontCardTitle)
+                                .font(AppTheme.fontMetadata.weight(.bold))
                                 .foregroundStyle(AppTheme.accent)
                                 .monospacedDigit()
+                                .lineLimit(1)
                         }
-                        Text(entry.category)
-                            .font(AppTheme.fontMetadata)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .frame(width: 84)
                     }
                 }
             }
-            .padding(.vertical, 4)
         }
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .background {
+            ZStack {
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .fill(AppTheme.elevated.opacity(0.55))
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+        )
     }
 
     // MARK: Timeline (item 8b/8c)

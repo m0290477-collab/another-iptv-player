@@ -121,12 +121,17 @@ enum SportsExplainerFlag {
 
 struct SportsExplainerView: View {
     let sport: MatchSport
-    /// Called exactly once when the user taps either button; the
-    /// presenter marks the sport seen and dismisses. A swipe
-    /// dismissal never reaches this closure — the sheet's
-    /// `onDismiss` in MatchesView marks the sport seen instead, so
-    /// every dismissal path counts as seen.
-    let onFinish: () -> Void
+    /// Build 67 (F6): Start and Skip are DISTINCT outcomes, not
+    /// one finish. Start lands the user in this sport's Matches
+    /// section AND continues to the follow-your-teams step the
+    /// copy above promises (the presenter presents the existing
+    /// team-follow picker once this sheet has dismissed). Skip
+    /// lands in the section WITHOUT the picker. A swipe dismissal
+    /// reaches neither closure — the sheet's `onDismiss` in
+    /// MatchesView marks the sport seen instead, so every
+    /// dismissal path counts as seen, exactly as in build 66.
+    let onStart: () -> Void
+    let onSkip: () -> Void
 
     @ObservedObject private var accentStore = AccentThemeStore.shared
 
@@ -164,7 +169,7 @@ struct SportsExplainerView: View {
             Spacer(minLength: 24)
 
             Button {
-                onFinish()
+                onStart()
             } label: {
                 Text(L("matches.explainer.start"))
                     .font(AppTheme.fontCardTitle.weight(.bold))
@@ -180,7 +185,7 @@ struct SportsExplainerView: View {
             .padding(.horizontal, AppTheme.spacingScreenMargin)
 
             Button {
-                onFinish()
+                onSkip()
             } label: {
                 Text(L("matches.explainer.skip"))
                     .font(AppTheme.fontMetadata.weight(.semibold))

@@ -143,6 +143,13 @@ struct MatchesView: View {
     @AppStorage("explainer.seen.nba") private var explainerSeenNBA = false
     /// The sport whose explainer sheet is currently presented.
     @State private var explainerSport: MatchSport?
+    /// Build 67 (F6): set by the explainer's Start button — after
+    /// the explainer sheet has fully dismissed, the follow picker
+    /// for this sport is presented (the continuation the
+    /// explainer's own follow row promises). Skip never sets it.
+    @State private var pendingFollowSport: MatchSport?
+    /// The sport whose follow picker sheet is currently presented.
+    @State private var followPickerSport: MatchSport?
     /// The last sport the explainer was presented for — by the
     /// time a sheet's `onDismiss` runs the item binding is already
     /// nil, so a swipe dismissal recovers its sport from here.
@@ -168,6 +175,7 @@ struct MatchesView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .tint(AppTheme.accent)
             .padding(.horizontal, AppTheme.spacingScreenMargin)
             .padding(.vertical, 10)
 
@@ -198,13 +206,41 @@ struct MatchesView: View {
             if let sport = lastExplainerSport {
                 markExplainerSeen(sport)
             }
-        }) { sport in
-            SportsExplainerView(sport: sport) {
-                markExplainerSeen(sport)
-                explainerSport = nil
+            // Build 67 (F6): Start's continuation — present the
+            // follow picker only AFTER the explainer sheet is
+            // gone, and never while a player presentation is
+            // active (the same gate the explainer itself uses).
+            if let pending = pendingFollowSport {
+                pendingFollowSport = nil
+                if PlayerOverlayController.presentationActiveCount == 0 {
+                    followPickerSport = pending
+                }
             }
+        }) { sport in
+            SportsExplainerView(sport: sport, onStart: {
+                markExplainerSeen(sport)
+                // Land visibly inside THIS sport's section…
+                selectedSport = sport
+                // …then continue to the follow step once the
+                // sheet's onDismiss runs.
+                pendingFollowSport = sport
+                explainerSport = nil
+            }, onSkip: {
+                markExplainerSeen(sport)
+                selectedSport = sport
+                explainerSport = nil
+            })
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
+        }
+        // Build 67 (F6): the follow-your-teams step — the existing
+        // follow system (TeamService team lists + FollowedTeamsStore,
+        // the same store/service the team pages write through),
+        // scoped to the explainer's sport.
+        .sheet(item: $followPickerSport) { sport in
+            NavigationStack { FollowTeamsPickerView(sport: sport) }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .onAppear { presentExplainerIfNeeded(for: selectedSport) }
         .onChange(of: selectedSport) { _, newSport in
@@ -507,6 +543,16 @@ struct MatchesView: View {
                             MatchRowView(match: match, isStale: sportState.isStale)
                         }
                         .buttonStyle(.plain)
+                        // Build 67 (S6): each match is its own
+                        // glass card — the List row itself is
+                        // transparent and separator-free so the
+                        // card floats on the cinematic background.
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(
+                            top: 5, leading: AppTheme.spacingScreenMargin,
+                            bottom: 5, trailing: AppTheme.spacingScreenMargin
+                        ))
                     }
                 }
             } else if section.failed {
@@ -632,61 +678,101 @@ struct MatchesView: View {
     }
 }
 
-// MARK: - Match row (M3: logo + name + score + state, nothing else)
+// MARK: - Match row (M3 data; build 67 S6 Cinematic Glass card)
+//
+// Owner pick (matches styles v2, panel 1): each match is its OWN
+// frosted glass card — team logos in glass circles, team names,
+// and in the center a state chip: LIVE + the real score when
+// live, the kickoff time when upcoming, FT + score when finished.
+// Same payload data as the old two-line row, nothing added.
 
 private struct MatchRowView: View {
     let match: MatchEvent
     let isStale: Bool
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(spacing: 9) {
                 teamRow(match.home)
                 teamRow(match.away)
             }
-            stateColumn
-                .frame(width: 92, alignment: .trailing)
+            stateChip
+                .frame(width: 106)
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background {
+            ZStack {
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .fill(AppTheme.elevated.opacity(0.55))
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+        )
     }
 
     private func teamRow(_ side: MatchTeamSide) -> some View {
         HStack(spacing: 10) {
             CachedImage(
                 url: side.logoURL,
-                width: 26,
-                height: 26,
-                cornerRadius: 13,
+                width: 28,
+                height: 28,
+                cornerRadius: 14,
                 iconName: "shield"
             )
+            .background(Circle().fill(Color.white.opacity(0.08)))
+            .overlay(Circle().stroke(AppTheme.cardBorderColor, lineWidth: 1))
             // Team name EXACTLY as the payload provides it (M6).
             Text(side.name ?? "")
                 .font(AppTheme.fontCardTitle)
                 .lineLimit(1)
-            Spacer()
-            if match.state != .upcoming, let score = side.score {
-                // Item 11(2): a live score change flashes once
-                // (goal moment) — see FlashScoreText.
-                FlashScoreText(text: score, isLive: match.state == .live)
-            }
+            Spacer(minLength: 0)
         }
     }
 
+    /// "102 — 98" from the payload scores; nil when either score
+    /// is absent (never an invented score).
+    private var scoreText: String? {
+        guard match.state != .upcoming,
+              let home = match.home.score, let away = match.away.score
+        else { return nil }
+        return "\(home) — \(away)"
+    }
+
     @ViewBuilder
-    private var stateColumn: some View {
+    private var stateChip: some View {
         switch match.state {
         case .live:
-            VStack(alignment: .trailing, spacing: 3) {
-                if !isStale {
-                    HStack(spacing: 4) {
+            VStack(spacing: 4) {
+                HStack(spacing: 5) {
+                    if !isStale {
                         // Item 11(1): the LIVE dot gently pulses
-                        // (static under Reduce Motion).
-                        LivePulseDot()
-                        Text(L("matches.live"))
-                            .font(AppTheme.fontBadge)
-                            .foregroundStyle(AppTheme.accent)
+                        // (static under Reduce Motion). White here
+                        // because it sits ON the live-red chip.
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 6, height: 6)
+                    }
+                    Text(L("matches.live"))
+                        .font(AppTheme.fontBadge)
+                    if let scoreText {
+                        // Item 11(2): a live score change flashes
+                        // once (goal moment) — see FlashScoreText.
+                        FlashScoreText(text: scoreText, isLive: !isStale)
                     }
                 }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule().fill(isStale ? Color.secondary.opacity(0.35) : AppTheme.live)
+                )
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
                 if let clock = liveClockText {
                     Text(clock)
                         .font(AppTheme.fontMetadata.weight(.semibold))
@@ -697,20 +783,39 @@ private struct MatchRowView: View {
         case .upcoming:
             if let start = match.startDate {
                 // Build 63: with the multi-day window an upcoming
-                // row can be days away — show the day alongside the
-                // kickoff time (formatter output only, no copy).
-                // Today's fixtures keep the time-only form.
+                // match can be days away — show the day alongside
+                // the kickoff time (formatter output only, no
+                // copy). Today's fixtures keep the time-only form.
                 Text(MatchesView.kickoffText(start))
                     .font(AppTheme.fontMetadata.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                     .lineLimit(2)
-                    .multilineTextAlignment(.trailing)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule().fill(Color.white.opacity(0.07))
+                    )
             }
         case .finished:
-            Text(L("matches.final"))
-                .font(AppTheme.fontMetadata.weight(.semibold))
-                .foregroundStyle(.secondary)
+            HStack(spacing: 5) {
+                Text(L("matches.final"))
+                    .font(AppTheme.fontBadge)
+                if let scoreText {
+                    Text(scoreText)
+                        .font(AppTheme.fontBadge)
+                        .monospacedDigit()
+                }
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                Capsule().fill(Color.secondary.opacity(0.16))
+            )
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
         }
     }
 

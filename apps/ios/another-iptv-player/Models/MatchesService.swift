@@ -630,9 +630,41 @@ extension MatchesService {
     /// (soccer summaries omit the URL; the id → CDN pattern was
     /// verified live). A wrong/absent image degrades to the
     /// initials disc in the UI — never a broken-image box.
+    ///
+    /// Build 67 (F7) — why soccer showed monograms while NFL
+    /// didn't, verified live 2026-11-19 against the real payloads
+    /// and CDN (NOT a code-path or User-Agent difference):
+    ///  • NFL/NBA summary athletes routinely carry
+    ///    `headshot.href`, and the pattern URL exists for
+    ///    essentially every NFL/NBA athlete id.
+    ///  • Soccer summary athletes carry `headshot.href` only
+    ///    occasionally, and the pattern URL returns HTTP 404 for
+    ///    exactly the athletes without an href (checked for
+    ///    multiple ids under a browser UA, an iOS CFNetwork UA
+    ///    and a plain UA — 404 in every case; 200 precisely for
+    ///    the ids whose payload carries the href). ESPN simply
+    ///    has no photo on its CDN for most soccer players.
+    ///  • The app's image pipeline (Nuke `DataLoader` over
+    ///    `URLSessionConfiguration.default`) sets no custom
+    ///    User-Agent, so no "(+https://…)"-style UA is ever sent
+    ///    to the CDN from any sport's path — all sports share
+    ///    the one CachedImage pipeline.
+    /// Resolution therefore stays: payload href FIRST (normalized
+    /// below), pattern by id second, initials disc only when
+    /// neither resolves — consistently for every sport.
     static func headshotURL(sport: MatchSport, athlete: ESPNAthlete?) -> URL? {
-        if let href = athlete?.headshot?.href, let url = URL(string: href) {
-            return url
+        if let href = athlete?.headshot?.href {
+            let trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                // ESPN occasionally emits an http:// CDN href;
+                // upgrade it so ATS never blocks the photo.
+                let normalized = trimmed.hasPrefix("http://a.espncdn.com")
+                    ? "https://" + String(trimmed.dropFirst("http://".count))
+                    : trimmed
+                if let url = URL(string: normalized) {
+                    return url
+                }
+            }
         }
         guard let id = athlete?.id, !id.isEmpty else { return nil }
         let segment: String

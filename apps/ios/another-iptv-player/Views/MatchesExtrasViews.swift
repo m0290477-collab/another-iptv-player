@@ -310,12 +310,14 @@ struct LineupsView: View {
     }
 
     private func playerRow(_ player: MatchLineupPlayer) -> some View {
-        HStack(spacing: 10) {
-            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 32)
+        // Build 67 (S9): lineup list rows take the same glass
+        // language as the squad cards.
+        HStack(spacing: 12) {
+            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 40)
             Text(player.name)
                 .font(AppTheme.fontCardTitle)
                 .lineLimit(1)
-            Spacer()
+            Spacer(minLength: 0)
             if let position = player.positionName {
                 Text(position)
                     .font(AppTheme.fontMetadata)
@@ -323,6 +325,19 @@ struct LineupsView: View {
                     .lineLimit(1)
             }
         }
+        .padding(10)
+        .background {
+            ZStack {
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .fill(AppTheme.elevated.opacity(0.55))
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+        )
     }
 }
 
@@ -484,19 +499,39 @@ struct TeamPageView: View {
             if !squad.isEmpty {
                 Section {
                     ForEach(squad) { player in
-                        HStack(spacing: 10) {
-                            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 32)
-                            Text(player.name)
-                                .font(AppTheme.fontCardTitle)
-                                .lineLimit(1)
-                            Spacer()
-                            if let position = player.positionName {
-                                Text(position)
-                                    .font(AppTheme.fontMetadata)
-                                    .foregroundStyle(.secondary)
+                        // Build 67 (S9): squad rows take the
+                        // performers' glass-card language — a
+                        // frosted card with a bigger photo.
+                        HStack(spacing: 12) {
+                            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 44)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(player.name)
+                                    .font(AppTheme.fontCardTitle)
                                     .lineLimit(1)
+                                if let position = player.positionName {
+                                    Text(position)
+                                        .font(AppTheme.fontMetadata)
+                                        .foregroundStyle(AppTheme.accent)
+                                        .lineLimit(1)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(10)
+                        .background {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                                    .fill(.ultraThinMaterial)
+                                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                                    .fill(AppTheme.elevated.opacity(0.55))
                             }
                         }
+                        .overlay(
+                            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                                .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+                        )
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                     }
                 } header: { extrasSectionHeader(L("matches.team.squad")) }
                 .listRowBackground(AppTheme.surface)
@@ -574,6 +609,88 @@ private struct TeamFixtureRow: View {
                 EmptyView()
             }
         }
+    }
+}
+
+// MARK: - Build 67 (F6) Follow-your-teams picker
+//
+// The continuation of the sports explainer's Start button: the
+// explainer's own copy promises a follow step, and this is it —
+// the EXISTING follow system scoped to one sport. Team lists
+// come from TeamService (the same feed call team search uses);
+// every follow/unfollow writes through FollowedTeamsStore, the
+// same store and contract the team pages and match detail use.
+// Nothing about the store, its persistence or the goal-push
+// registration changes here.
+
+struct FollowTeamsPickerView: View {
+    let sport: MatchSport
+    @State private var teams: [TeamRef] = []
+    @State private var loaded = false
+    @ObservedObject private var followStore = FollowedTeamsStore.shared
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List {
+            Section {
+                Text(L("b67w7.follow.hint"))
+                    .font(AppTheme.fontMetadata)
+                    .foregroundStyle(.secondary)
+            }
+            .listRowBackground(AppTheme.surface)
+
+            if loaded && teams.isEmpty {
+                Text(L("matches.empty"))
+                    .font(AppTheme.fontMetadata)
+                    .foregroundStyle(.secondary)
+                    .listRowBackground(AppTheme.surface)
+            }
+            ForEach(teams) { team in
+                HStack(spacing: 10) {
+                    CachedImage(url: team.logoURL, width: 30, height: 30, cornerRadius: 15, iconName: "shield")
+                    Text(team.name)
+                        .font(AppTheme.fontCardTitle)
+                        .lineLimit(1)
+                    Spacer()
+                    followButton(for: team)
+                }
+                .listRowBackground(AppTheme.surface)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .cinematicBackground()
+        .navigationTitle(L("matches.explainer.\(sport.rawValue).follow.title"))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(L("common.done")) { dismiss() }
+            }
+        }
+        .overlay { if !loaded { BrandedLoader() } }
+        .task {
+            teams = await TeamService.allTeams(sport: sport)
+            loaded = true
+        }
+    }
+
+    private func followButton(for team: TeamRef) -> some View {
+        let followed = followStore.team(sport: team.sport, leaguePath: team.leaguePath, teamId: team.id) != nil
+        return Button {
+            if followed {
+                followStore.unfollow(sport: team.sport, leaguePath: team.leaguePath, teamId: team.id)
+            } else {
+                followStore.follow(sport: team.sport, leaguePath: team.leaguePath, teamId: team.id, teamName: team.name)
+            }
+        } label: {
+            Text(followed ? L("matches.following") : L("matches.follow"))
+                .font(AppTheme.fontBadge)
+                .foregroundStyle(followed ? .secondary : AppTheme.accent)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Capsule().stroke(followed ? Color.secondary.opacity(0.4) : AppTheme.accent, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 }
 
