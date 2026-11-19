@@ -17,9 +17,12 @@ import SwiftUI
 /// - Home density → `HomeDensityPreference`, consumed by
 ///   HomeView's row stack.
 ///
-/// The remaining appearance toggles (reduce effects, empty
-/// categories, section visibility) stay in the full settings
-/// form, one tap away via Settings → All Settings.
+/// Build 66 (W1): this page is now the ONLY appearance/accent
+/// UI in Settings (the legacy forms and their duplicate pickers
+/// are deleted). It also carries the migrated appearance
+/// leftovers — language, reduce effects, empty categories,
+/// section visibility, motion intensity and UI sounds — via the
+/// shared sections below, each reachable exactly once.
 struct DisplaySettingsView: View {
     @AppStorage("app.appearance") private var appearance = "dark"
     @AppStorage(PosterSizePreference.defaultsKey) private var posterSizeRaw = PosterSizePreference.medium.rawValue
@@ -159,6 +162,24 @@ struct DisplaySettingsView: View {
             } header: {
                 Text(L("display.density"))
             }
+
+            // Build 66 (W1): language picker, migrated from the
+            // legacy forms' App & Appearance group.
+            Section {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "globe", tint: AppTheme.accent)
+                    LanguagePickerRow()
+                }
+            } header: {
+                Text(L("settings.language.title"))
+            }
+
+            // Build 66 (W1): appearance leftovers (reduce
+            // effects, show empty categories, section visibility).
+            AppearanceSettingsSection()
+
+            // Build 66 (W1): motion intensity + UI sounds.
+            MotionSoundSettingsSection()
         }
         .cinematicScrollBackground()
         .navigationTitle(L("display.title"))

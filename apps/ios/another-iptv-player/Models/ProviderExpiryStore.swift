@@ -37,7 +37,7 @@ enum ProviderExpiryStore {
 
     /// The panel's `exp_date` as a real date; nil for the no-expiry
     /// cases (absent, timestamp 0, unparseable) — identical rule to
-    /// `PlaylistSettingsView.providerExpiryDate`.
+    /// the account card's `providerExpiryDate` rule.
     static func parseExpiryDate(_ expDate: String?) -> Date? {
         guard let expDate, let timestamp = TimeInterval(expDate), timestamp > 0 else { return nil }
         return Date(timeIntervalSince1970: timestamp)
