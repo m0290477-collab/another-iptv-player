@@ -128,6 +128,8 @@
 "home.play" = "Oynat";
 "home.details" = "Detaylar";
 "home.top_rated_movies" = "En Yüksek Puanlı Filmler";
+"home.sports_dashboard" = "Spor Paneli";
+"home.top10_today" = "Günün En İyi 10'u";
 "home.top_rated_series" = "En Yüksek Puanlı Diziler";
 "home.new_movies" = "Yeni Filmler";
 "home.new_series" = "Yeni Diziler";
@@ -399,6 +401,7 @@
 
 // MARK: - Search results
 "search.all" = "Tümü";
+"search.trending" = "Şu An Trend";
 "search.more_results_format" = "%d sonuç daha";
 
 // MARK: - Player gestures / accessibility
@@ -708,6 +711,7 @@
 "player.pip_short" = "PiP";
 "player.favorite" = "Favori";
 "player.connecting" = "Bağlanıyor…";
+"player.reconnecting" = "Yeniden bağlanılıyor…";
 "player.autonext.play_next" = "Sonraki bölüm";
 "player.autonext.season_episode" = "Sezon %d • Bölüm %d";
 "player.stats.title" = "Oynatma İstatistikleri";

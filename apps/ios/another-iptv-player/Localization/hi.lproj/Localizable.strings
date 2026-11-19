@@ -394,6 +394,7 @@
 "phase.preparing_list" = "सूची तैयार हो रही है...";
 "phase.save_db" = "डेटाबेस में सहेजा जा रहा है...";
 "search.all" = "सभी";
+"search.trending" = "अभी ट्रेंडिंग";
 "search.min_chars" = "कम से कम 2 अक्षर लिखें";
 "search.more_results_format" = "%d और परिणाम";
 "search.placeholder" = "खोजें...";
@@ -530,6 +531,8 @@
 "home.play" = "चलाएँ";
 "home.details" = "विवरण";
 "home.top_rated_movies" = "सर्वोच्च रेटिंग वाली फ़िल्में";
+"home.sports_dashboard" = "स्पोर्ट्स डैशबोर्ड";
+"home.top10_today" = "आज के टॉप 10";
 "home.top_rated_series" = "सर्वोच्च रेटिंग वाली सीरीज़";
 "home.new_movies" = "नई फ़िल्में";
 "home.new_series" = "नई सीरीज़";
@@ -690,6 +693,7 @@
 "player.pip_short" = "PiP";
 "player.favorite" = "पसंदीदा";
 "player.connecting" = "कनेक्ट हो रहा है…";
+"player.reconnecting" = "पुनः कनेक्ट हो रहा है…";
 "player.autonext.play_next" = "अगला एपिसोड";
 "player.autonext.season_episode" = "सीज़न %d • एपिसोड %d";
 "player.stats.title" = "प्लेबैक आंकड़े";

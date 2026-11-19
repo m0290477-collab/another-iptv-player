@@ -259,7 +259,11 @@ struct VODView: View {
             NavigationStack {
                 // Round 10: SearchView owns its big title — the
                 // wrapper's inline title was removed.
-                SearchView(playlist: playlist, searchText: $homeSearchText)
+                // Build 64 (A4): pass .movies — build 63's item-15
+                // wiring missed this call site, so the Movies tab's
+                // search bar opened on the default filter while its
+                // placeholder promised the section's own content.
+                SearchView(playlist: playlist, searchText: $homeSearchText, initialFilter: .movies)
             }
         }
         // Round 8 (audit A2): ONE recompute trigger — the same combined

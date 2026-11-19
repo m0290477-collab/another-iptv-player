@@ -125,6 +125,16 @@ struct HomeView: View {
     @State private var heroLiveMatch: MatchEvent?
     @State private var heroLiveMatchLeague: String?
 
+    /// Build 64 (B1): per-sport highlight for the dashboard tiles —
+    /// the sport's first LIVE match today, else its next upcoming
+    /// match today. Real MatchesService data only; a sport with
+    /// neither simply shows no score line on its tile.
+    @State private var sportHighlights: [MatchSport: MatchEvent] = [:]
+
+    /// Build 64 (B1): the Top 10 rail's selected genre chip (nil =
+    /// All). Filters the rail's own top-rated list — no new data.
+    @State private var top10Genre: String?
+
     private var liveHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "live") }
     private var vodHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod") }
     private var seriesHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "series") }
@@ -174,6 +184,71 @@ struct HomeView: View {
         }
         heroLiveMatch = nil
         heroLiveMatchLeague = nil
+    }
+
+    /// Build 64 (B1): one MatchesService pass per sport for the
+    /// dashboard tiles — first LIVE match across the sport's
+    /// leagues, else the earliest upcoming match today. Same
+    /// event-driven cadence as the hero probe (appearance +
+    /// foreground), no polling. Hidden Matches section (F6) →
+    /// no probe, no score lines.
+    private func loadSportHighlights() async {
+        guard !UserDefaults.standard.bool(forKey: "sections.hidden.matches") else {
+            sportHighlights = [:]
+            return
+        }
+        let dateParameter = MatchesService.todayParameter()
+        var highlights: [MatchSport: MatchEvent] = [:]
+        for sport in MatchSport.allCases {
+            let outcomes = await MatchesService.fetchSport(sport, dateParameter: dateParameter)
+            var firstLive: MatchEvent?
+            var firstUpcoming: MatchEvent?
+            for outcome in outcomes {
+                guard case .loaded(let result) = outcome else { continue }
+                if firstLive == nil {
+                    firstLive = result.matches.first(where: { $0.state == .live })
+                }
+                if firstUpcoming == nil {
+                    firstUpcoming = result.matches
+                        .filter { $0.state == .upcoming }
+                        .min(by: { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) })
+                }
+            }
+            if let highlight = firstLive ?? firstUpcoming {
+                highlights[sport] = highlight
+            }
+        }
+        sportHighlights = highlights
+    }
+
+    /// The tile score line for a sport's highlight: live →
+    /// "Cavaliers 103 – 102 Grizzlies" (team nicknames = the last
+    /// word of ESPN's full names; full names do not fit a tile),
+    /// upcoming → "Arsenal – Chelsea • 20:00". Nil when the sport
+    /// has no highlight.
+    private func sportHighlightLine(for sport: MatchSport) -> (line: String, isLive: Bool)? {
+        guard let match = sportHighlights[sport] else { return nil }
+        let home = Self.teamShortName(match.home.name)
+        let away = Self.teamShortName(match.away.name)
+        switch match.state {
+        case .live:
+            return ("\(home) \(match.home.score ?? "0") – \(match.away.score ?? "0") \(away)", true)
+        case .upcoming:
+            if let date = match.startDate {
+                let formatter = DateFormatter()
+                formatter.timeStyle = .short
+                formatter.dateStyle = .none
+                return ("\(home) – \(away) • \(formatter.string(from: date))", false)
+            }
+            return ("\(home) – \(away)", false)
+        case .finished:
+            return nil
+        }
+    }
+
+    private static func teamShortName(_ name: String?) -> String {
+        guard let name, !name.isEmpty else { return "—" }
+        return name.split(separator: " ").last.map(String.init) ?? name
     }
 
     // MARK: - Build 61 fixer (F-3): O1 cross-row dedupe
@@ -443,15 +518,15 @@ struct HomeView: View {
         switch entry.kind {
         case .live:
             guard let streamId = rawId,
-                  let stream = contentStore.liveStreams.first(where: { $0.stream.streamId == streamId })?.stream
+                  let stream = contentStore.liveStreamById[streamId]
             else { return }
             presentLiveSelectionFromHome(stream)
         case .vod:
             guard let streamId = rawId else { return }
-            pendingMovieDetail = contentStore.vodStreams.first(where: { $0.stream.streamId == streamId })?.stream
+            pendingMovieDetail = contentStore.vodStreamById[streamId]
         case .series:
             guard let seriesId = rawId else { return }
-            pendingSeriesDetail = contentStore.seriesItems.first(where: { $0.series.seriesId == seriesId })?.series
+            pendingSeriesDetail = contentStore.seriesById[seriesId]
         }
     }
 
@@ -519,6 +594,25 @@ struct HomeView: View {
                         // stays above the content rows.
                         WhatsNewBanner(playlist: playlist)
                             .padding(.horizontal, 16)
+
+                        // Build 64 (B1, Home style 2 'Dashboard
+                        // Pro'): the sports dashboard leads the
+                        // content — a section header + the three
+                        // sport tiles carrying real live scores.
+                        // Build 63 kept the tiles inside the
+                        // discovery row's category tiles; style 2
+                        // moves them up here as their own block
+                        // (the category tiles row itself stays in
+                        // the discovery row, unchanged). Same F6
+                        // gate as before.
+                        if !UserDefaults.standard.bool(forKey: "sections.hidden.matches") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                CinematicSectionHeader(title: L("home.sports_dashboard")) {
+                                    MatchesView()
+                                }
+                                sportTileRow
+                            }
+                        }
 
                         // Build 61 (B7, Z12): the hero leads with
                         // LIVE content — the featured live channel
@@ -629,7 +723,9 @@ struct HomeView: View {
         .cinematicBackground()
         .sheet(isPresented: $showSearchSheet) {
             NavigationStack {
-                SearchView(playlist: playlist, searchText: $homeSearchText)
+                // Build 64 (B2): Home opens the unified search on
+                // the All tab.
+                SearchView(playlist: playlist, searchText: $homeSearchText, initialFilter: .all)
             }
         }
         .sheet(isPresented: $showDownloadsSheet) {
@@ -762,13 +858,20 @@ struct HomeView: View {
         )) { await recompute() }
         // Build 61 fixer (Z12): the live-match hero probe, once per
         // Home appearance for this playlist.
-        .task(id: playlist.id) { await loadHeroLiveMatch() }
+        // Build 64 (B1): the sport-tile highlights load alongside.
+        .task(id: playlist.id) {
+            await loadHeroLiveMatch()
+            await loadSportHighlights()
+        }
         // Z12: re-probe when the app returns to the foreground, so a
         // match that kicked off while the app was backgrounded can
         // take the hero (and a finished one releases it).
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                Task { await loadHeroLiveMatch() }
+                Task {
+                    await loadHeroLiveMatch()
+                    await loadSportHighlights()
+                }
             }
         }
         // C6 Tonight row: rebuild when the EPG snapshot changes.
@@ -1218,22 +1321,15 @@ struct HomeView: View {
     // MARK: - Category tiles
 
     private var categoryTiles: some View {
-        VStack(spacing: 12) {
-            categoryTileRow
-            // Build 63 (owner, item 7): the three sports live HERE,
-            // at the top with the big category cards — one shortcut
-            // tile per sport in the same visual language (tinted
-            // icon disc + label + sublabel), each landing on its
-            // own Matches tab. The old bottom-of-Home Matches entry
-            // row is gone (HomeRowKind.matches no longer renders).
-            // Same F6 gate the bottom entry had: hidden when the
-            // user hid the Matches section.
-            if !UserDefaults.standard.bool(forKey: "sections.hidden.matches") {
-                sportTileRow
-            }
-        }
+        // Build 64 (B1): the sport tiles moved OUT of this row to
+        // the top sports-dashboard block (see body); only the three
+        // big category tiles remain here.
+        categoryTileRow
     }
 
+    /// Build 63 (item 7) created these tiles; build 64 (B1) moves
+    /// the row to the top dashboard block and gives each tile its
+    /// real live-score / next-fixture line from `sportHighlights`.
     private var sportTileRow: some View {
         HStack(alignment: .top, spacing: 12) {
             HomeSportTile(
@@ -1241,21 +1337,27 @@ struct HomeView: View {
                 subtitle: L("matches.subtitle"),
                 tint: AppTheme.accent,
                 iconName: "soccerball",
-                sport: .soccer
+                sport: .soccer,
+                liveLine: sportHighlightLine(for: .soccer)?.line,
+                isLive: sportHighlightLine(for: .soccer)?.isLive ?? false
             )
             HomeSportTile(
                 title: L("matches.tab.nfl"),
                 subtitle: L("matches.subtitle"),
                 tint: AppTheme.live,
                 iconName: "football.fill",
-                sport: .nfl
+                sport: .nfl,
+                liveLine: sportHighlightLine(for: .nfl)?.line,
+                isLive: sportHighlightLine(for: .nfl)?.isLive ?? false
             )
             HomeSportTile(
                 title: L("matches.tab.nba"),
                 subtitle: L("matches.subtitle"),
                 tint: SectionTheme.series,
                 iconName: "basketball.fill",
-                sport: .nba
+                sport: .nba,
+                liveLine: sportHighlightLine(for: .nba)?.line,
+                isLive: sportHighlightLine(for: .nba)?.isLive ?? false
             )
         }
         .padding(.horizontal, 16)
@@ -1320,23 +1422,65 @@ struct HomeView: View {
 
     // MARK: - Shelves
 
+    /// Build 64 (B1): the Top 10 rail's genre chips — the distinct
+    /// genres of the rail's own top-rated list (capped for the
+    /// chip row), in the records' own wording.
+    private var top10Genres: [String] {
+        var seen = Set<String>()
+        var genres: [String] = []
+        for movie in topRatedMovies {
+            for genre in DetailFormatting.genreList(movie.genre) where seen.insert(genre).inserted {
+                genres.append(genre)
+            }
+        }
+        return Array(genres.prefix(6))
+    }
+
+    /// The Top 10 rail's displayed list: the full top-rated list,
+    /// or its members carrying the selected genre (rank = position
+    /// in the displayed rail).
+    private var top10Displayed: [DBVODStream] {
+        guard let genre = top10Genre else { return topRatedMovies }
+        return topRatedMovies.filter { DetailFormatting.genreList($0.genre).contains(genre) }
+    }
+
     private var topRatedMoviesShelf: some View {
         VStack(alignment: .leading, spacing: 12) {
-            CinematicSectionHeader(title: L("home.top_rated_movies")) {
+            // Build 64 (B1, Home style 2): this shelf IS the
+            // dashboard's Top 10 rail (the list is capped at 10 by
+            // the recompute) — retitled, with the mockup's genre
+            // chips filtering it.
+            CinematicSectionHeader(title: L("home.top10_today")) {
                 AllVODView(playlist: playlist)
+            }
+            if top10Genres.count > 1 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        PillChipButton(title: L("search.all"), isSelected: top10Genre == nil) {
+                            top10Genre = nil
+                        }
+                        ForEach(top10Genres, id: \.self) { genre in
+                            PillChipButton(title: genre, isSelected: top10Genre == genre) {
+                                top10Genre = genre
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .scrollClipDisabled()
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(topRatedMovies.indices, id: \.self) { index in
+                    ForEach(top10Displayed.indices, id: \.self) { index in
                         NavigationLink {
-                            MovieDetailView(playlist: playlist, movie: topRatedMovies[index], queue: topRatedMovies)
+                            MovieDetailView(playlist: playlist, movie: top10Displayed[index], queue: top10Displayed)
                         } label: {
                             RankedPosterCard(
                                 rank: index + 1,
-                                imageURL: moviePosterURL(topRatedMovies[index]),
-                                title: topRatedMovies[index].name,
-                                ratingText: ContentRating.normalizedDisplayText(rating: topRatedMovies[index].rating, rating5Based: topRatedMovies[index].rating5Based),
-                                metaText: cardMetaLine(year: DetailFormatting.year(from: topRatedMovies[index].releaseDate), genre: topRatedMovies[index].genre),
+                                imageURL: moviePosterURL(top10Displayed[index]),
+                                title: top10Displayed[index].name,
+                                ratingText: ContentRating.normalizedDisplayText(rating: top10Displayed[index].rating, rating5Based: top10Displayed[index].rating5Based),
+                                metaText: cardMetaLine(year: DetailFormatting.year(from: top10Displayed[index].releaseDate), genre: top10Displayed[index].genre),
                                 posterWidth: posterMetrics.shelfPosterWidth,
                                 posterHeight: posterMetrics.shelfPosterHeight,
                                 iconName: "film"
@@ -1346,12 +1490,12 @@ struct HomeView: View {
                         .shelfEntrance(index: index)
                         .contextMenu {
                             Button {
-                                toggleFavorite(streamId: topRatedMovies[index].streamId, type: "vod",
-                                               currentlyFavorite: isFavoriteMovie(topRatedMovies[index]))
+                                toggleFavorite(streamId: top10Displayed[index].streamId, type: "vod",
+                                               currentlyFavorite: isFavoriteMovie(top10Displayed[index]))
                             } label: {
-                                Label(isFavoriteMovie(topRatedMovies[index]) ? L("favorites.remove") : L("favorites.add"), systemImage: "star")
+                                Label(isFavoriteMovie(top10Displayed[index]) ? L("favorites.remove") : L("favorites.add"), systemImage: "star")
                             }
-                            if let categoryId = topRatedMovies[index].categoryId {
+                            if let categoryId = top10Displayed[index].categoryId {
                                 Button {
                                     hiddenStore.setHidden(true, playlistId: playlist.id, type: "vod", categoryId: categoryId)
                                 } label: {
@@ -1364,6 +1508,13 @@ struct HomeView: View {
                 .padding(.horizontal, 16)
             }
             .scrollClipDisabled()
+        }
+        .onChange(of: top10Genres) { _, genres in
+            // A recompute can retire the selected genre — fall
+            // back to All instead of an empty rail.
+            if let genre = top10Genre, !genres.contains(genre) {
+                top10Genre = nil
+            }
         }
     }
 
@@ -2658,6 +2809,11 @@ private struct HomeSportTile: View {
     let tint: Color
     let iconName: String
     let sport: MatchSport
+    /// Build 64 (B1): the sport's live score / next fixture line
+    /// (real MatchesService data), nil when the sport has neither
+    /// today — the tile then shows only its subtitle, as in 63.
+    var liveLine: String? = nil
+    var isLive: Bool = false
 
     var body: some View {
         NavigationLink {
@@ -2681,6 +2837,19 @@ private struct HomeSportTile: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if let liveLine {
+                    HStack(spacing: 4) {
+                        if isLive {
+                            Circle()
+                                .fill(AppTheme.live)
+                                .frame(width: 6, height: 6)
+                        }
+                        Text(liveLine)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(isLive ? AppTheme.live : .secondary)
+                            .lineLimit(1)
+                    }
+                }
             }
             .padding(.vertical, 14)
             .padding(.horizontal, 8)

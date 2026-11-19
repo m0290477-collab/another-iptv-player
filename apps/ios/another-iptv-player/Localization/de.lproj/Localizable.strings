@@ -394,6 +394,7 @@
 "phase.preparing_list" = "Liste wird vorbereitet...";
 "phase.save_db" = "Wird in der Datenbank gespeichert...";
 "search.all" = "Alle";
+"search.trending" = "Gerade angesagt";
 "search.min_chars" = "Gib mindestens 2 Zeichen ein";
 "search.more_results_format" = "%d weitere Ergebnisse";
 "search.placeholder" = "Suchen...";
@@ -530,6 +531,8 @@
 "home.play" = "Abspielen";
 "home.details" = "Details";
 "home.top_rated_movies" = "Bestbewertete Filme";
+"home.sports_dashboard" = "Sport-Dashboard";
+"home.top10_today" = "Top 10 heute";
 "home.top_rated_series" = "Bestbewertete Serien";
 "home.new_movies" = "Neue Filme";
 "home.new_series" = "Neue Serien";
@@ -690,6 +693,7 @@
 "player.pip_short" = "PiP";
 "player.favorite" = "Favorit";
 "player.connecting" = "Verbinde…";
+"player.reconnecting" = "Verbindung wird wiederhergestellt…";
 "player.autonext.play_next" = "Nächste Episode";
 "player.autonext.season_episode" = "Staffel %d • Episode %d";
 "player.stats.title" = "Wiedergabestatistik";

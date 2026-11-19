@@ -1018,6 +1018,15 @@ private struct PlayerViewImpl: View {
         if let tags = historySaveTags {
             saveWatchHistory(tags: tags)
         }
+        // Build 64 (A3-iii): the FIRST load of this presentation
+        // (no identity applied yet) is a fresh user-initiated load
+        // — mark it so a ladder wait shows the visible reconnecting
+        // state instead of a silent spinner. Later transitions on
+        // the preserved controller (zaps, episode switches) are
+        // the replacement loads the ladder was built for.
+        if appliedPlaybackIdentity == nil {
+            player.markNextLoadAsFreshPresentation()
+        }
         appliedPlaybackIdentity = playbackIdentity
         historySaveTags = WatchHistoryTags(
             playlistId: playlistId,
@@ -1845,6 +1854,31 @@ private struct PlayerViewImpl: View {
                         .allowsHitTesting(false)
                         .opacity(fullChromeOpacity)
                         .zIndex(25)
+                }
+
+                // Build 64 (A3-iii): a fresh load spending the
+                // reconnect ladder shows WHAT it is doing — the
+                // build-63 silent ~12 s absorption read as a dead
+                // tap. Status only (no controls, no hit testing);
+                // raised solely before establishment, so nothing
+                // ever appears over established playback (item 12d).
+                if player.isRetryingConnection {
+                    VStack {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .accessibilityHidden(true)
+                            Text(L("player.reconnecting"))
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.55), in: Capsule())
+                        Spacer()
+                    }
+                    .padding(.top, 60)
+                    .allowsHitTesting(false)
+                    .zIndex(26)
                 }
 
                 if showControls && showDebugOverlay {

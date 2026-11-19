@@ -190,6 +190,15 @@ final class VideoPlayerController: ObservableObject {
   /// Network / loading error (a reflection of `KSPlayerEngine.playbackFailureMessage`).
   @Published var playbackFailureMessage: String?
 
+  /// Build 64 (A3-iii): true while a FRESH presentation's load is
+  /// spending the reconnect ladder. PlayerView shows a visible
+  /// "Reconnecting…" state for it instead of a silent spinner.
+  /// Only fresh presentations raise it — same-item reconnects of
+  /// an established session keep the build 61/63 invisible
+  /// behavior, and it is never raised during established playback
+  /// (the owner's silence-during-playback rule).
+  @Published private(set) var isRetryingConnection = false
+
   @Published var videoTracks: [TrackMenuOption] = []
   @Published var audioTracks: [TrackMenuOption] = []
   @Published var subtitleTracks: [TrackMenuOption] = [TrackMenuOption(id: -1, title: L("player.subtitle_off"))]
@@ -281,6 +290,26 @@ final class VideoPlayerController: ObservableObject {
   /// message), but a replacement load gets the same bounded
   /// reconnect ladder as a transient failure.
   private var currentLoadMayRetryRefusal = false
+  /// Build 64 (A3-iii): whether the CURRENT load is the first load
+  /// of a fresh presentation (marked by PlayerView via
+  /// `markNextLoadAsFreshPresentation`). On the preserved
+  /// controller, `currentLoadMayRetryRefusal` arms from a mere
+  /// prior request or a teardown < 20 s ago — in build 63 that
+  /// made a FIRST user-initiated load of a new item silently
+  /// absorb a refusal for ~12 s of ladder before the honest
+  /// banner. The ladder still runs for fresh loads (the
+  /// slot-release race is real there too), but the fresh flag
+  /// drives the visible `isRetryingConnection` state while it
+  /// does, so the wait is never silent.
+  private var currentLoadIsFreshPresentation = false
+  private var nextLoadIsFreshPresentation = false
+
+  /// Marks the next `play()` call as the first load of a fresh
+  /// presentation. One-shot: consumed by that load.
+  func markNextLoadAsFreshPresentation() {
+    nextLoadIsFreshPresentation = true
+  }
+
   /// When any controller last tore down (stamped in `teardown()`).
   private static var lastTeardownAt: Date?
   private var pendingReconnectWorkItem: DispatchWorkItem?
@@ -437,6 +466,7 @@ final class VideoPlayerController: ObservableObject {
         // clears the channel's consecutive-failure streak). ===
         autoReconnectAttempts = 0
         currentLoadMayRetryRefusal = false
+        if isRetryingConnection { isRetryingConnection = false }
         cancelPendingReconnect()
         cancelStallWatchdog()
         if let key = importedSubtitleContentKey {
@@ -504,17 +534,26 @@ final class VideoPlayerController: ObservableObject {
         }
         pendingReconnectWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+        // Build 64 (A3-iii): on a fresh presentation the ladder
+        // wait is VISIBLE, not a silent spinner.
+        if currentLoadIsFreshPresentation, !isRetryingConnection {
+          isRetryingConnection = true
+        }
         return
       }
       if pendingReconnectWorkItem != nil {
         // A reconnect is already scheduled: keep the failure
         // unpublished until it has had its chance.
+        if currentLoadIsFreshPresentation, !isRetryingConnection {
+          isRetryingConnection = true
+        }
         return
       }
       // The failure is final for this load (never recoverable, or
       // the reconnect budget is exhausted): record it once for
       // Q10 dead-channel marking, then let the message flow to
       // the pristine banner below — unchanged.
+      if isRetryingConnection { isRetryingConnection = false }
       recordHealthFailureIfNeeded()
     }
     // === Build 61 (B9, P2): stall watchdog arming. ===
@@ -524,6 +563,7 @@ final class VideoPlayerController: ObservableObject {
       cancelStallWatchdog()
     }
     let failure = castPresenting ? nil : engine.playbackFailureMessage
+    if failure == nil, isRetryingConnection { isRetryingConnection = false }
     if playbackFailureMessage != failure { playbackFailureMessage = failure }
     let ks = engine
     if isPiPActive != ks.isPiPActive { isPiPActive = ks.isPiPActive }
@@ -911,6 +951,10 @@ final class VideoPlayerController: ObservableObject {
     autoReconnectAttempts = 0
     cancelPendingReconnect()
     cancelStallWatchdog()
+    // Build 64 (A3-iii): consume the fresh-presentation mark.
+    currentLoadIsFreshPresentation = nextLoadIsFreshPresentation
+    nextLoadIsFreshPresentation = false
+    if isRetryingConnection { isRetryingConnection = false }
     healthFailureRecordedForCurrentLoad = false
     loadRequestedAt = Date()
     ttffRecordedForCurrentLoad = false

@@ -1736,13 +1736,43 @@ struct SeriesDetailView: View {
             // Build 63 (item 6): bounded lookup, same rule as the
             // movie Play path — the tap can never die silently
             // inside this await again.
-            let localURL = await DownloadManager.shared.localURL(
+            async let localURLTask = DownloadManager.shared.localURL(
                 forId: DownloadManager.idFor(episode: playlist.id, episodeId: ep.episodeId ?? ep.id),
                 timeout: 1.5
             )
+            // Build 64 (A3-ii): the navigation context is resolved
+            // BEFORE presenting, in parallel with the download
+            // lookup — the presented player's prev/next flags are
+            // correct from the first frame and an episode tap
+            // produces exactly ONE presentation / ONE engine load.
+            // (Build 63 loaded neighbors in the presented player's
+            // `.task` and RE-PRESENTED the same episode when they
+            // landed — always, on first tap — paying the bounded
+            // race twice and arming the retry ladder on a fresh
+            // load; with churn teardown the second load could
+            // no-op silently.)
+            async let neighborsTask = fetchEpisodeNavigationContext(for: ep)
+            let localURL = await localURLTask
+            let ctx = await neighborsTask
             await MainActor.run {
+                episodeNavPrevious = ctx?.previous
+                episodeNavNext = ctx?.next
                 presentEpisodeOverlay(ep: ep, history: history, localOverrideURL: localURL)
             }
+        }
+    }
+
+    /// The DB navigation-context fetch, shared by the
+    /// pre-presentation resolution and the state-only refresh.
+    private func fetchEpisodeNavigationContext(for ep: DBEpisode) async -> SeriesPlaybackOrdering.NavigationContext? {
+        let playId = ep.episodeId ?? ep.id
+        return try? await AppDatabase.shared.read { db in
+            try SeriesPlaybackOrdering.navigationContext(
+                playlistId: playlist.id,
+                playbackStreamId: playId,
+                seriesIdHint: String(currentSeries.seriesId),
+                db: db
+            )
         }
     }
 
@@ -2290,32 +2320,19 @@ struct SeriesDetailView: View {
         return seasons.first?.id
     }
 
+    /// Build 64 (A3-ii): STATE-ONLY neighbor refresh for the
+    /// already-presented player. Build 63 re-presented the same
+    /// episode whenever the neighbors changed (always on first
+    /// tap) — a second presentation and a second engine load for
+    /// one tap. Neighbors are now resolved BEFORE presentation
+    /// (see `presentEpisodeOverlay`); this refresh only keeps the
+    /// state the prev/next closures read (`selectAdjacentEpisode`)
+    /// current, and never presents.
     private func loadEpisodeNeighbors(for ep: DBEpisode) async {
-        // Clear first, for the same reason as in
-        // `presentEpisodeOverlay`: until this episode's neighbors
-        // land, no numbers are better than a previous episode's.
-        let playId = ep.episodeId ?? ep.id
-        let ctx = try? await AppDatabase.shared.read { db in
-            try SeriesPlaybackOrdering.navigationContext(
-                playlistId: playlist.id,
-                playbackStreamId: playId,
-                seriesIdHint: String(currentSeries.seriesId),
-                db: db
-            )
-        }
+        let ctx = await fetchEpisodeNavigationContext(for: ep)
         await MainActor.run {
-            let oldPrev = episodeNavPrevious
-            let oldNext = episodeNavNext
             episodeNavPrevious = ctx?.previous
             episodeNavNext = ctx?.next
-            let neighborsChanged =
-                oldPrev?.id != episodeNavPrevious?.id || oldNext?.id != episodeNavNext?.id
-            if neighborsChanged,
-               let sel = selectedEpisode,
-               (sel.0.episodeId ?? sel.0.id) == playId
-            {
-                presentEpisodeOverlay(ep: sel.0, history: sel.1)
-            }
         }
     }
 

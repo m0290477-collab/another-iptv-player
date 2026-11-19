@@ -71,6 +71,16 @@ final class PlaylistContentStore: ObservableObject {
     @Published private(set) var vodStreamsByCategoryId: [String: [VODWithCategory]] = [:]
     @Published private(set) var seriesItemsByCategoryId: [String: [SeriesWithCategory]] = [:]
 
+    /// Build 64 (A1): per-type id → record indexes, built ONCE per
+    /// catalog publish inside the off-main fetch closures (alongside
+    /// `byCategory`) and published with the arrays. Consumers that
+    /// resolve individual items by id (the Recently Added resolver
+    /// above all) do O(1) lookups here instead of linear scans over
+    /// the full catalog on the main actor.
+    @Published private(set) var liveStreamById: [Int: DBLiveStream] = [:]
+    @Published private(set) var vodStreamById: [Int: DBVODStream] = [:]
+    @Published private(set) var seriesById: [Int: DBSeries] = [:]
+
     // MARK: - Round 14 (B10) shared rankings + (B8) series counts
     //
     // Computed ONCE here whenever the in-memory catalog changes (load,
@@ -113,6 +123,9 @@ final class PlaylistContentStore: ObservableObject {
         liveStreamsByCategoryId = [:]
         vodStreamsByCategoryId = [:]
         seriesItemsByCategoryId = [:]
+        liveStreamById = [:]
+        vodStreamById = [:]
+        seriesById = [:]
         streamsLoaded = false
         // Round 14 (B10/B8): derived data dies with the catalog it was
         // computed from; the generation bump voids any in-flight pass.
@@ -290,6 +303,10 @@ final class PlaylistContentStore: ObservableObject {
         loadToken = token
         loadError = nil
         loadingMessage = nil
+        // Build 64 (A2): start the first-seen state's one-time
+        // plist load on a background task NOW, so it never lands
+        // on the main actor when the first badge read arrives.
+        FirstSeenStore.shared.warmUp(playlistId: playlist.id)
 
         if activePlaylistId != playlist.id {
             clearLists()
@@ -341,21 +358,24 @@ final class PlaylistContentStore: ObservableObject {
             guard loadToken == token else { return }
             liveStreams = ls.streams
             liveStreamsByCategoryId = ls.byCategory
+            liveStreamById = ls.byId
             let vs = try await vodTask
             guard loadToken == token else { return }
             vodStreams = vs.streams
             vodStreamsByCategoryId = vs.byCategory
+            vodStreamById = vs.byId
             let si = try await seriesTask
             guard loadToken == token else { return }
             seriesItems = si.items
             seriesItemsByCategoryId = si.byCategory
+            seriesById = si.byId
             streamsLoaded = true
             // Build 61 (B8, R1): first-seen recording — ONLY on the
             // network-bootstrap path; plain DB loads never stamp.
             // The store's baseline rule keeps the first-ever batch
             // silent.
             if needsSync {
-                FirstSeenStore.shared.recordCatalog(
+                await FirstSeenStore.shared.recordCatalog(
                     playlistId: playlist.id,
                     liveIds: liveStreams.map(\.stream.streamId),
                     vodIds: vodStreams.map(\.stream.streamId),
@@ -378,9 +398,9 @@ final class PlaylistContentStore: ObservableObject {
     /// catalog after a network refresh reloaded it. No-op when this
     /// playlist is not the active one (the arrays would be another
     /// playlist's).
-    private func recordFirstSeenIfActive(playlistId: UUID) {
+    private func recordFirstSeenIfActive(playlistId: UUID) async {
         guard activePlaylistId == playlistId, streamsLoaded else { return }
-        FirstSeenStore.shared.recordCatalog(
+        await FirstSeenStore.shared.recordCatalog(
             playlistId: playlistId,
             liveIds: liveStreams.map(\.stream.streamId),
             vodIds: vodStreams.map(\.stream.streamId),
@@ -395,6 +415,10 @@ final class PlaylistContentStore: ObservableObject {
         guard activePlaylistId == updated.playlistId else { return }
         if let i = vodStreams.firstIndex(where: { $0.stream.streamId == updated.streamId }) {
             vodStreams[i] = VODWithCategory(stream: updated, categoryName: vodStreams[i].categoryName)
+        }
+        // Build 64 (A1): keep the id index in step with the array.
+        if vodStreamById[updated.streamId] != nil {
+            vodStreamById[updated.streamId] = updated
         }
         // Because of the Uncategorized remap, the bucket key may differ from categoryId.
         for key in [updated.categoryId ?? "", Self.uncategorizedCategoryId] {
@@ -460,7 +484,7 @@ final class PlaylistContentStore: ObservableObject {
             // Build 61 (B8, R1): every caller of this funnel is a
             // post-sync reload — stamp first-seen for the refreshed
             // catalog here so no sync path can skip it.
-            recordFirstSeenIfActive(playlistId: playlistId)
+            await recordFirstSeenIfActive(playlistId: playlistId)
         } catch {
             loadError = error.localizedDescription
         }
@@ -490,6 +514,7 @@ final class PlaylistContentStore: ObservableObject {
                 liveCategories = merged.0
                 liveStreams = ls.streams
                 liveStreamsByCategoryId = merged.1
+                liveStreamById = ls.byId
             case .vod:
                 async let catsTask = AppDatabase.shared.read { db in
                     try Self.fetchCategories(playlistId: playlistId, type: "vod", db: db)
@@ -507,6 +532,7 @@ final class PlaylistContentStore: ObservableObject {
                 vodCategories = merged.0
                 vodStreams = vs.streams
                 vodStreamsByCategoryId = merged.1
+                vodStreamById = vs.byId
             case .series:
                 async let catsTask = AppDatabase.shared.read { db in
                     try Self.fetchCategories(playlistId: playlistId, type: "series", db: db)
@@ -524,11 +550,12 @@ final class PlaylistContentStore: ObservableObject {
                 seriesCategories = merged.0
                 seriesItems = si.items
                 seriesItemsByCategoryId = merged.1
+                seriesById = si.byId
             }
             // Round 14 (B10): one of the catalog arrays changed.
             scheduleSharedRankingsRecompute()
             // Build 61 (B8, R1): scoped post-sync reload — stamp too.
-            recordFirstSeenIfActive(playlistId: playlistId)
+            await recordFirstSeenIfActive(playlistId: playlistId)
         } catch {
             loadError = error.localizedDescription
         }
@@ -573,6 +600,7 @@ final class PlaylistContentStore: ObservableObject {
         liveCategories = liveMerged.0
         liveStreams = ls.streams
         liveStreamsByCategoryId = liveMerged.1
+        liveStreamById = ls.byId
         let vs = try await vodTask
         let vodMerged = await Task.detached(priority: .userInitiated) {
             let by = Self.mergeUncategorized(vs.byCategory, validIds: Set(cats.vod.map(\.id)))
@@ -582,6 +610,7 @@ final class PlaylistContentStore: ObservableObject {
         vodCategories = vodMerged.0
         vodStreams = vs.streams
         vodStreamsByCategoryId = vodMerged.1
+        vodStreamById = vs.byId
         let si = try await seriesTask
         let seriesMerged = await Task.detached(priority: .userInitiated) {
             let by = Self.mergeUncategorized(si.byCategory, validIds: Set(cats.series.map(\.id)))
@@ -591,6 +620,7 @@ final class PlaylistContentStore: ObservableObject {
         seriesCategories = seriesMerged.0
         seriesItems = si.items
         seriesItemsByCategoryId = seriesMerged.1
+        seriesById = si.byId
         streamsLoaded = true
         // Round 14 (B10/B8): same derivation as the initial load.
         scheduleSharedRankingsRecompute()
@@ -608,16 +638,22 @@ final class PlaylistContentStore: ObservableObject {
     private struct LiveStreamsData {
         let streams: [LiveStreamWithCategory]
         let byCategory: [String: [LiveStreamWithCategory]]
+        /// Build 64 (A1): id index, built in the fetch closure.
+        let byId: [Int: DBLiveStream]
     }
 
     private struct VODStreamsData {
         let streams: [VODWithCategory]
         let byCategory: [String: [VODWithCategory]]
+        /// Build 64 (A1): id index, built in the fetch closure.
+        let byId: [Int: DBVODStream]
     }
 
     private struct SeriesData {
         let items: [SeriesWithCategory]
         let byCategory: [String: [SeriesWithCategory]]
+        /// Build 64 (A1): id index, built in the fetch closure.
+        let byId: [Int: DBSeries]
     }
 
     // Runs inside GRDB read closures (async let) off the main actor.
@@ -660,7 +696,11 @@ final class PlaylistContentStore: ObservableObject {
         ORDER BY liveStream.sortIndex
         """
         let streams = try LiveStreamWithCategory.fetchAll(db, sql: sql, arguments: [L("content.uncategorized"), playlistId])
-        return LiveStreamsData(streams: streams, byCategory: Dictionary(grouping: streams) { $0.stream.categoryId ?? "" })
+        return LiveStreamsData(
+            streams: streams,
+            byCategory: Dictionary(grouping: streams) { $0.stream.categoryId ?? "" },
+            byId: Dictionary(streams.map { ($0.stream.streamId, $0.stream) }, uniquingKeysWith: { first, _ in first })
+        )
     }
 
     nonisolated private static func fetchVODStreamsData(playlistId: UUID, db: Database) throws -> VODStreamsData {
@@ -688,7 +728,11 @@ final class PlaylistContentStore: ObservableObject {
         ORDER BY vodStream.sortIndex
         """
         let streams = try VODWithCategory.fetchAll(db, sql: sql, arguments: [L("content.uncategorized"), playlistId])
-        return VODStreamsData(streams: streams, byCategory: Dictionary(grouping: streams) { $0.stream.categoryId ?? "" })
+        return VODStreamsData(
+            streams: streams,
+            byCategory: Dictionary(grouping: streams) { $0.stream.categoryId ?? "" },
+            byId: Dictionary(streams.map { ($0.stream.streamId, $0.stream) }, uniquingKeysWith: { first, _ in first })
+        )
     }
 
     nonisolated private static func fetchSeriesData(playlistId: UUID, db: Database) throws -> SeriesData {
@@ -714,7 +758,11 @@ final class PlaylistContentStore: ObservableObject {
         ORDER BY series.sortIndex
         """
         let items = try SeriesWithCategory.fetchAll(db, sql: sql, arguments: [L("content.uncategorized"), playlistId])
-        return SeriesData(items: items, byCategory: Dictionary(grouping: items) { $0.series.categoryId ?? "" })
+        return SeriesData(
+            items: items,
+            byCategory: Dictionary(grouping: items) { $0.series.categoryId ?? "" },
+            byId: Dictionary(items.map { ($0.series.seriesId, $0.series) }, uniquingKeysWith: { first, _ in first })
+        )
     }
 
     /// Merges buckets that are not among the known category ids (nil or orphaned) under the synthetic
@@ -831,7 +879,11 @@ final class PlaylistContentStore: ObservableObject {
     /// Remote fingerprint: applies the SAME adult filtering (and the
     /// same category-name filtering) as the `replace*Catalog` rewrite,
     /// so the comparison is against what the rewrite would store.
-    private static func remoteCatalogFingerprint(
+    /// Build 64 (A2): `nonisolated` like its `localCatalogFingerprint`
+    /// sibling — it walks the full remote catalog (tens of thousands
+    /// of items) and is called from the sync's detached context; it
+    /// must never inherit the store's main-actor isolation.
+    nonisolated private static func remoteCatalogFingerprint(
         liveCats: [XtreamCategory], vodCats: [XtreamCategory], seriesCats: [XtreamCategory],
         liveStreams: [XtreamLiveStream], vods: [XtreamVODStream], series: [XtreamSeries],
         filterAdult: Bool

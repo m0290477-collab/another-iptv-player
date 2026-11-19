@@ -100,25 +100,88 @@ final class FirstSeenStore: ObservableObject {
 
     private var states: [UUID: PlaylistState] = [:]
     private var persistTasks: [UUID: Task<Void, Never>] = [:]
+    /// Playlists whose background warm-up load is in flight.
+    private var warmUpsInFlight: Set<UUID> = []
 
     /// Serial queue that performs the actual UserDefaults writes
     /// (plist serialization of a ~37k-entry map is exactly the
     /// work that must never run on the main thread again).
     private static let persistenceQueue = DispatchQueue(label: "superx.firstseen.persistence")
 
-    private func state(for playlistId: UUID) -> PlaylistState {
-        if let cached = states[playlistId] { return cached }
+    /// Build 64 (A1/A2): the UserDefaults load, extracted so it can
+    /// run OFF the main actor (see `warmUp`). Includes the build-64
+    /// baseline-anomaly cleanup: a state whose positive stamps are
+    /// dominated by ONE identical timestamp (≥ 1000 entries sharing
+    /// it, ≥ 90% of all positive stamps) is the signature of the
+    /// build-63 empty-map fallback — the baseline flag survived
+    /// while the map read back empty, so ONE record batch stamped
+    /// the entire catalog "new" at a single instant. A genuinely
+    /// accumulated map has many distinct stamps; a single-batch
+    /// mass stamp is a baseline event, so those stamps convert to
+    /// the sentinel (never badge) and the pending counts built
+    /// from them are cleared. The stored format is unchanged.
+    nonisolated private static func loadStateFromDefaults(playlistId: UUID) -> (state: PlaylistState, cleaned: Bool) {
         let defaults = UserDefaults.standard
-        let seenMap = defaults.dictionary(forKey: Self.seenKey(playlistId: playlistId)) as? [String: Double] ?? [:]
+        var seenMap = defaults.dictionary(forKey: Self.seenKey(playlistId: playlistId)) as? [String: Double] ?? [:]
+        var pending = defaults.dictionary(forKey: Self.pendingKey(playlistId: playlistId)) as? [String: Int] ?? [:]
+        let hasBaseline = defaults.bool(forKey: Self.baselineKey(playlistId: playlistId))
+        var cleaned = false
+        if hasBaseline {
+            var stampCounts: [Double: Int] = [:]
+            var positive = 0
+            for stamp in seenMap.values where stamp > 0 {
+                stampCounts[stamp, default: 0] += 1
+                positive += 1
+            }
+            if let dominant = stampCounts.values.max(), dominant >= 1000, positive > 0,
+               Double(dominant) >= 0.9 * Double(positive),
+               let dominantStamp = stampCounts.first(where: { $0.value == dominant })?.key {
+                for key in seenMap.keys where seenMap[key] == dominantStamp {
+                    seenMap[key] = 0
+                }
+                pending = [:]
+                cleaned = true
+            }
+        }
         let loaded = PlaylistState(
             seen: seenMap,
             opened: Set(defaults.stringArray(forKey: Self.openedKey(playlistId: playlistId)) ?? []),
-            pending: defaults.dictionary(forKey: Self.pendingKey(playlistId: playlistId)) as? [String: Int] ?? [:],
-            hasBaseline: defaults.bool(forKey: Self.baselineKey(playlistId: playlistId)),
+            pending: pending,
+            hasBaseline: hasBaseline,
             episodeKeysBySeries: Self.buildEpisodeIndex(seen: seenMap)
         )
+        return (loaded, cleaned)
+    }
+
+    private func state(for playlistId: UUID) -> PlaylistState {
+        if let cached = states[playlistId] { return cached }
+        // Synchronous fallback (correctness first): callers that
+        // arrive before the warm-up lands pay the one-time load
+        // here, exactly as before build 64.
+        let (loaded, cleaned) = Self.loadStateFromDefaults(playlistId: playlistId)
         states[playlistId] = loaded
+        if cleaned { schedulePersist(playlistId: playlistId) }
         return loaded
+    }
+
+    /// Build 64 (A2): pre-loads a playlist's state on a background
+    /// task so the one-time plist deserialization of a ~37k-entry
+    /// map never lands on the main actor in the normal flow (the
+    /// first badge read happens long after playlist load starts).
+    /// No-op when the state is already loaded or loading.
+    func warmUp(playlistId: UUID) {
+        guard states[playlistId] == nil, !warmUpsInFlight.contains(playlistId) else { return }
+        warmUpsInFlight.insert(playlistId)
+        Task.detached(priority: .utility) { [weak self] in
+            let (loaded, cleaned) = Self.loadStateFromDefaults(playlistId: playlistId)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.warmUpsInFlight.remove(playlistId)
+                guard self.states[playlistId] == nil else { return }
+                self.states[playlistId] = loaded
+                if cleaned { self.schedulePersist(playlistId: playlistId) }
+            }
+        }
     }
 
     private func updateState(for playlistId: UUID, _ mutate: (inout PlaylistState) -> Void) {
@@ -169,55 +232,111 @@ final class FirstSeenStore: ObservableObject {
     /// counts here keep episodes under "episode" and the banner copy
     /// presents live/vod/series counts; episode-only batches surface
     /// through the series badge (R5) and the Recently Added screen.
+    /// Build 64 (A2): the batch diff runs in a DETACHED task
+    /// against a copy-on-write snapshot of the seen map — the
+    /// ~37k-iteration scan no longer runs on the main actor; only
+    /// applying the (normally tiny) set of genuinely-new keys hops
+    /// back. Callers `await` at the same points the synchronous
+    /// version ran, so ordering with the publish that follows is
+    /// unchanged.
+    ///
+    /// Build 64 (A1): mass-first-sight guard — on an established
+    /// baseline, a batch in which ≥ 90% of ≥ 1000 keys are all
+    /// first-sight is a baseline event (state loss / panel re-id),
+    /// not new content: those keys take the sentinel instead of
+    /// badging the entire catalog.
     @discardableResult
-    func record(playlistId: UUID, itemKeys: [String], now: Date = Date()) -> [String: Int] {
+    func record(playlistId: UUID, itemKeys: [String], now: Date = Date()) async -> [String: Int] {
+        let snapshot = state(for: playlistId)
+        let outcome = await Task.detached(priority: .utility) { () -> RecordOutcome in
+            Self.computeRecord(seen: snapshot.seen, hasBaseline: snapshot.hasBaseline, itemKeys: itemKeys, now: now)
+        }.value
+        return applyRecordOutcome(playlistId: playlistId, outcome: outcome)
+    }
+
+    /// Convenience for the content-store hook: builds the key list
+    /// from the loaded Xtream catalog arrays. Build 64 (A2): the
+    /// ~37k key STRINGS are built inside the detached task, not on
+    /// the caller's (main) actor.
+    @discardableResult
+    func recordCatalog(playlistId: UUID, liveIds: [Int], vodIds: [Int], seriesIds: [Int], now: Date = Date()) async -> [String: Int] {
+        let snapshot = state(for: playlistId)
+        let outcome = await Task.detached(priority: .utility) { () -> RecordOutcome in
+            var keys: [String] = []
+            keys.reserveCapacity(liveIds.count + vodIds.count + seriesIds.count)
+            keys += liveIds.map { "live:\($0)" }
+            keys += vodIds.map { "vod:\($0)" }
+            keys += seriesIds.map { "series:\($0)" }
+            return Self.computeRecord(seen: snapshot.seen, hasBaseline: snapshot.hasBaseline, itemKeys: keys, now: now)
+        }.value
+        return applyRecordOutcome(playlistId: playlistId, outcome: outcome)
+    }
+
+    /// The pure diff behind `record`/`recordCatalog` — runs off
+    /// the main actor against a state snapshot.
+    private struct RecordOutcome {
+        /// Keys to insert, with the stamp each takes (0 = baseline
+        /// sentinel, otherwise the batch's `now`).
+        var inserts: [(key: String, stamp: Double)] = []
+        /// True when this batch established the baseline.
+        var establishesBaseline = false
+    }
+
+    nonisolated private static func computeRecord(seen: [String: Double], hasBaseline: Bool, itemKeys: [String], now: Date) -> RecordOutcome {
+        var outcome = RecordOutcome()
+        var fresh: [String] = []
+        fresh.reserveCapacity(64)
+        for key in itemKeys where seen[key] == nil {
+            fresh.append(key)
+        }
+        if !hasBaseline {
+            outcome.establishesBaseline = true
+            outcome.inserts = fresh.map { (key: $0, stamp: 0) }
+            return outcome
+        }
+        // A1 mass-first-sight guard (see `record`).
+        if fresh.count >= 1000, !itemKeys.isEmpty,
+           Double(fresh.count) >= 0.9 * Double(itemKeys.count) {
+            outcome.establishesBaseline = true
+            outcome.inserts = fresh.map { (key: $0, stamp: 0) }
+            return outcome
+        }
+        let stamp = now.timeIntervalSince1970
+        outcome.inserts = fresh.map { (key: $0, stamp: stamp) }
+        return outcome
+    }
+
+    /// Applies a detached diff on the main actor: inserts only the
+    /// batch's genuinely-new keys (re-checked against the LIVE
+    /// state — another batch may have landed while the diff ran),
+    /// updates pending counts, persists, and bumps `version`,
+    /// exactly as the synchronous implementation did.
+    private func applyRecordOutcome(playlistId: UUID, outcome: RecordOutcome) -> [String: Int] {
         var result: [String: Int] = [:]
         var didChange = false
         updateState(for: playlistId) { state in
-            guard state.hasBaseline else {
-                // Baseline: stamp everything with the backdated sentinel.
-                for key in itemKeys where state.seen[key] == nil {
-                    state.seen[key] = 0
-                    if let seriesId = Self.episodeSeriesId(fromKey: key) {
-                        state.episodeKeysBySeries[seriesId, default: []].append(key)
-                    }
-                }
-                state.hasBaseline = true
-                didChange = true
-                return
-            }
-            var counts: [String: Int] = [:]
-            for key in itemKeys where state.seen[key] == nil {
-                state.seen[key] = now.timeIntervalSince1970
-                if let seriesId = Self.episodeSeriesId(fromKey: key) {
-                    state.episodeKeysBySeries[seriesId, default: []].append(key)
+            if outcome.establishesBaseline { state.hasBaseline = true }
+            for insert in outcome.inserts where state.seen[insert.key] == nil {
+                state.seen[insert.key] = insert.stamp
+                if let seriesId = Self.episodeSeriesId(fromKey: insert.key) {
+                    state.episodeKeysBySeries[seriesId, default: []].append(insert.key)
                 }
                 didChange = true
-                let type = key.split(separator: ":").first.map(String.init) ?? "live"
-                counts[type, default: 0] += 1
+                if insert.stamp > 0 {
+                    let type = insert.key.split(separator: ":").first.map(String.init) ?? "live"
+                    result[type, default: 0] += 1
+                }
             }
+            if outcome.establishesBaseline { didChange = true }
             if didChange {
-                for (type, count) in counts { state.pending[type, default: 0] += count }
+                for (type, count) in result { state.pending[type, default: 0] += count }
             }
-            result = counts
         }
         if didChange {
             schedulePersist(playlistId: playlistId)
             version &+= 1
         }
         return result
-    }
-
-    /// Convenience for the content-store hook: builds the key list
-    /// from the loaded Xtream catalog arrays.
-    @discardableResult
-    func recordCatalog(playlistId: UUID, liveIds: [Int], vodIds: [Int], seriesIds: [Int], now: Date = Date()) -> [String: Int] {
-        var keys: [String] = []
-        keys.reserveCapacity(liveIds.count + vodIds.count + seriesIds.count)
-        keys += liveIds.map { "live:\($0)" }
-        keys += vodIds.map { "vod:\($0)" }
-        keys += seriesIds.map { "series:\($0)" }
-        return record(playlistId: playlistId, itemKeys: keys, now: now)
     }
 
     // MARK: - R2 badge state

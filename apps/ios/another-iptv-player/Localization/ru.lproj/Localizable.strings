@@ -394,6 +394,7 @@
 "phase.preparing_list" = "Подготовка списка...";
 "phase.save_db" = "Сохранение в базу данных...";
 "search.all" = "Все";
+"search.trending" = "Сейчас в тренде";
 "search.min_chars" = "Введите минимум 2 символа";
 "search.more_results_format" = "Ещё %d результатов";
 "search.placeholder" = "Поиск...";
@@ -530,6 +531,8 @@
 "home.play" = "Воспроизвести";
 "home.details" = "Подробнее";
 "home.top_rated_movies" = "Фильмы с высоким рейтингом";
+"home.sports_dashboard" = "Спортивная панель";
+"home.top10_today" = "Топ-10 сегодня";
 "home.top_rated_series" = "Сериалы с высоким рейтингом";
 "home.new_movies" = "Новые фильмы";
 "home.new_series" = "Новые сериалы";
@@ -690,6 +693,7 @@
 "player.pip_short" = "PiP";
 "player.favorite" = "Избранное";
 "player.connecting" = "Подключение…";
+"player.reconnecting" = "Переподключение…";
 "player.autonext.play_next" = "Следующий эпизод";
 "player.autonext.season_episode" = "Сезон %d • Эпизод %d";
 "player.stats.title" = "Статистика воспроизведения";

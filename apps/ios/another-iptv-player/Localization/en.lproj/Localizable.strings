@@ -128,6 +128,8 @@
 "home.play" = "Play";
 "home.details" = "Details";
 "home.top_rated_movies" = "Top Rated Movies";
+"home.sports_dashboard" = "Sports Dashboard";
+"home.top10_today" = "Top 10 Today";
 "home.top_rated_series" = "Top Rated Series";
 "home.new_movies" = "New Movies";
 "home.new_series" = "New Series";
@@ -399,6 +401,7 @@
 
 // MARK: - Search results
 "search.all" = "All";
+"search.trending" = "Trending Now";
 "search.more_results_format" = "%d more results";
 
 // MARK: - Player gestures / accessibility
@@ -708,6 +711,7 @@
 "player.pip_short" = "PiP";
 "player.favorite" = "Favorite";
 "player.connecting" = "Connecting…";
+"player.reconnecting" = "Reconnecting…";
 "player.autonext.play_next" = "Next episode";
 "player.autonext.season_episode" = "Season %d • Episode %d";
 "player.stats.title" = "Playback Stats";

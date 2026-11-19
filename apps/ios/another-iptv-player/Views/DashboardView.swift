@@ -259,22 +259,17 @@ struct DashboardView: View {
         } message: {
             Text(contentStore.loadError ?? "")
         }
-        .alert(L("download.player_warning.title"), isPresented: Binding(
-            get: { playerOverlay.pendingPresentation != nil },
-            set: { if !$0 { playerOverlay.cancelPending() } }
-        )) {
-            Button(L("common.cancel"), role: .cancel) {
-                playerOverlay.cancelPending()
+        // Build 64 (A3-i): the parked-presentation warning is NO
+        // LONGER a SwiftUI alert on this view — a sheet (Search,
+        // detail) covers the dashboard and hid it, which is
+        // exactly how episode taps died silently in build 63. The
+        // UIKit presenter shows it on the topmost controller.
+        .onChange(of: playerOverlay.pendingPresentation != nil) { _, isParked in
+            if isParked {
+                DownloadWarningPresenter.presentIfNeeded(controller: playerOverlay) {
+                    showDownloadsSheet = true
+                }
             }
-            Button(L("download.player_warning.go_to_downloads")) {
-                playerOverlay.cancelPending()
-                showDownloadsSheet = true
-            }
-            Button(L("download.player_warning.continue")) {
-                playerOverlay.confirmPending()
-            }
-        } message: {
-            Text(L("download.player_warning.message"))
         }
         .sheet(isPresented: $showDownloadsSheet) {
             NavigationStack {

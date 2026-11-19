@@ -44,6 +44,9 @@ final class M3UContentStore: ObservableObject {
         let token = UUID()
         loadToken = token
         loadError = nil
+        // Build 64 (A2): background first-seen state warm-up, same
+        // as the Xtream store.
+        FirstSeenStore.shared.warmUp(playlistId: playlist.id)
 
         if activePlaylistId != playlist.id {
             clearLists()
@@ -115,11 +118,16 @@ final class M3UContentStore: ObservableObject {
         // `apply` is the single funnel for loads and post-reimport
         // reloads; the store's baseline rule keeps the first-ever
         // batch silent, and unchanged reloads record nothing new.
+        // Build 64 (A2): `record` is async now (its diff runs
+        // detached); `apply` stays synchronous, so the recording
+        // is handed to a task — the store's own apply step still
+        // lands on the main actor in call order for practical
+        // purposes (single funnel, one apply per load/reload).
         if let playlistId = activePlaylistId {
-            FirstSeenStore.shared.record(
-                playlistId: playlistId,
-                itemKeys: channels.map { "m3u:\($0.id)" }
-            )
+            let keys = channels.map { "m3u:\($0.id)" }
+            Task {
+                await FirstSeenStore.shared.record(playlistId: playlistId, itemKeys: keys)
+            }
         }
     }
 

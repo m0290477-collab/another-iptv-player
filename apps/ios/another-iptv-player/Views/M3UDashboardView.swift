@@ -145,25 +145,14 @@ struct M3UDashboardView: View {
         } message: {
             Text(store.loadError ?? "")
         }
-        // Build 63 (item 6): the pending-download confirmation —
-        // DashboardView has had this alert all along, this
-        // dashboard NEVER did. On an M3U playlist with an active
-        // download, `PlayerOverlayController.present` parks the
-        // player in `pendingPresentation` and, with no alert to
-        // confirm it, a Play tap did literally nothing. Same
-        // existing copy as the Xtream dashboard.
-        .alert(L("download.player_warning.title"), isPresented: Binding(
-            get: { playerOverlay.pendingPresentation != nil },
-            set: { if !$0 { playerOverlay.cancelPending() } }
-        )) {
-            Button(L("common.cancel"), role: .cancel) {
-                playerOverlay.cancelPending()
+        // Build 63 (item 6) added the pending-download confirmation
+        // here; build 64 (A3-i) moves it to the UIKit topmost
+        // presenter (same as DashboardView) so a covering sheet can
+        // never hide it again.
+        .onChange(of: playerOverlay.pendingPresentation != nil) { _, isParked in
+            if isParked {
+                DownloadWarningPresenter.presentIfNeeded(controller: playerOverlay)
             }
-            Button(L("download.player_warning.continue")) {
-                playerOverlay.confirmPending()
-            }
-        } message: {
-            Text(L("download.player_warning.message"))
         }
         // Build 63 (item 12d): goal celebration host (browsing
         // only — the presenter suppresses all alerts while any

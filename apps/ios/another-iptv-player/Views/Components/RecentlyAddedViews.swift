@@ -34,6 +34,16 @@ enum RecentlyAddedResolver {
     /// loaded catalog, grouped-ready (newest first overall; the
     /// screen re-groups by kind). A series with new episodes appears
     /// once, keyed by the series.
+    ///
+    /// Build 64 (A1): resolution is O(badged) — every key resolves
+    /// through the content store's per-type id INDEXES (built once
+    /// per catalog publish, off the main actor). Build 63 resolved
+    /// each key with a linear `first(where:)` scan over the full
+    /// catalog ON the main actor, re-run on every store publish:
+    /// with the owner's whole ~37k catalog badged that was ~10⁸
+    /// comparisons per pass in a Home row body — the pull-to-
+    /// refresh freeze / watchdog kill. The row body now does no
+    /// catalog-proportional work.
     static func entries(playlist: Playlist, contentStore: PlaylistContentStore) -> [RecentlyAddedEntry] {
         let badged = FirstSeenStore.shared.newItemKeys(playlistId: playlist.id)
         var result: [RecentlyAddedEntry] = []
@@ -44,14 +54,14 @@ enum RecentlyAddedResolver {
             switch type {
             case "live":
                 guard parts.count > 1, let streamId = Int(parts[1]),
-                      let stream = contentStore.liveStreams.first(where: { $0.stream.streamId == streamId })?.stream
+                      let stream = contentStore.liveStreamById[streamId]
                 else { continue }
                 result.append(RecentlyAddedEntry(
                     kind: .live, key: key, title: stream.name,
                     imageURL: stream.streamIcon.flatMap { URL(string: $0) }, firstSeen: date))
             case "vod":
                 guard parts.count > 1, let streamId = Int(parts[1]),
-                      let movie = contentStore.vodStreams.first(where: { $0.stream.streamId == streamId })?.stream
+                      let movie = contentStore.vodStreamById[streamId]
                 else { continue }
                 result.append(RecentlyAddedEntry(
                     kind: .vod, key: key, title: movie.name,
@@ -60,7 +70,7 @@ enum RecentlyAddedResolver {
                 // "episode:<seriesId>:<episodeId>" rolls up to the series (R5).
                 guard parts.count > 1, let seriesId = Int(parts[1]),
                       seenSeries.insert(seriesId).inserted,
-                      let series = contentStore.seriesItems.first(where: { $0.series.seriesId == seriesId })?.series
+                      let series = contentStore.seriesById[seriesId]
                 else { continue }
                 result.append(RecentlyAddedEntry(
                     kind: .series, key: "series:\(seriesId)", title: series.name,
@@ -219,7 +229,7 @@ struct RecentlyAddedView: View {
         switch entry.kind {
         case .live:
             guard let streamId = Int(entry.key.split(separator: ":").last ?? ""),
-                  let stream = contentStore.liveStreams.first(where: { $0.stream.streamId == streamId })?.stream
+                  let stream = contentStore.liveStreamById[streamId]
             else { return }
             let live = LiveChannelCategorySection.xtreamLiveQueue()
             playerOverlay.present(playlistId: playlist.id) {
@@ -228,10 +238,10 @@ struct RecentlyAddedView: View {
             }
         case .vod:
             guard let streamId = Int(entry.key.split(separator: ":").last ?? "") else { return }
-            pendingMovie = contentStore.vodStreams.first(where: { $0.stream.streamId == streamId })?.stream
+            pendingMovie = contentStore.vodStreamById[streamId]
         case .series:
             guard let seriesId = Int(entry.key.split(separator: ":").last ?? "") else { return }
-            pendingSeries = contentStore.seriesItems.first(where: { $0.series.seriesId == seriesId })?.series
+            pendingSeries = contentStore.seriesById[seriesId]
         }
     }
 }

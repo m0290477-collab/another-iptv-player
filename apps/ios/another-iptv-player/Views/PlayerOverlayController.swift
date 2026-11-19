@@ -1,5 +1,6 @@
 import Combine
 import SwiftUI
+import UIKit
 
 /// It is kept on the Dashboard `ZStack`; while dismissing by dragging, the tab content underneath is visible.
 struct PlayerOverlayPresentation: Identifiable {
@@ -134,6 +135,76 @@ final class PlayerOverlayController: ObservableObject {
     func expand() {
         guard presentation != nil else { return }
         mode = .fullscreen
+    }
+}
+
+/// Build 64 (A3-i): presents the download-warning choice for a
+/// PARKED presentation (`pendingPresentation`) on the TOPMOST
+/// view controller, whatever currently covers the dashboard.
+///
+/// Why UIKit: the SwiftUI `.alert` that used to release a parked
+/// presentation was hosted in DashboardView — UNDER any sheet.
+/// The owner's route to the build-63 episode failure was Home →
+/// Search SHEET → episode tap: the presentation parked, the
+/// alert existed but was invisible beneath the sheet, and the
+/// tap did literally nothing. A UIKit alert presented from the
+/// topmost controller always lands in the visible hierarchy —
+/// episodes, movies and live alike.
+@MainActor
+enum DownloadWarningPresenter {
+    private static weak var presentedAlert: UIAlertController?
+
+    /// Shows the warning when a presentation is parked. Safe to
+    /// call repeatedly (e.g. from `onChange`): it no-ops while an
+    /// alert is already up or nothing is parked.
+    static func presentIfNeeded(
+        controller: PlayerOverlayController,
+        onGoToDownloads: (() -> Void)? = nil
+    ) {
+        guard controller.pendingPresentation != nil else { return }
+        guard presentedAlert == nil else { return }
+        guard let host = topmostViewController() else { return }
+
+        let alert = UIAlertController(
+            title: L("download.player_warning.title"),
+            message: L("download.player_warning.message"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: L("common.cancel"), style: .cancel) { _ in
+            controller.cancelPending()
+        })
+        if let onGoToDownloads {
+            alert.addAction(UIAlertAction(title: L("download.player_warning.go_to_downloads"), style: .default) { _ in
+                controller.cancelPending()
+                // Let the alert finish dismissing, then close the
+                // covering sheet (if the host was itself presented)
+                // so the dashboard's downloads sheet can present.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    if host.presentingViewController != nil {
+                        host.dismiss(animated: true) { onGoToDownloads() }
+                    } else {
+                        onGoToDownloads()
+                    }
+                }
+            })
+        }
+        alert.addAction(UIAlertAction(title: L("download.player_warning.continue"), style: .default) { _ in
+            controller.confirmPending()
+        })
+        presentedAlert = alert
+        host.present(alert, animated: true)
+    }
+
+    private static func topmostViewController() -> UIViewController? {
+        let window = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }
+        var top = window?.rootViewController
+        while let presented = top?.presentedViewController {
+            top = presented
+        }
+        return top
     }
 }
 

@@ -394,6 +394,7 @@
 "phase.preparing_list" = "جارٍ تجهيز القائمة...";
 "phase.save_db" = "جارٍ الحفظ في قاعدة البيانات...";
 "search.all" = "الكل";
+"search.trending" = "الأكثر رواجًا الآن";
 "search.min_chars" = "اكتب حرفين على الأقل";
 "search.more_results_format" = "%d نتائج إضافية";
 "search.placeholder" = "بحث...";
@@ -530,6 +531,8 @@
 "home.play" = "تشغيل";
 "home.details" = "التفاصيل";
 "home.top_rated_movies" = "الأفلام الأعلى تقييمًا";
+"home.sports_dashboard" = "لوحة الرياضة";
+"home.top10_today" = "أفضل 10 اليوم";
 "home.top_rated_series" = "المسلسلات الأعلى تقييمًا";
 "home.new_movies" = "أفلام جديدة";
 "home.new_series" = "مسلسلات جديدة";
@@ -690,6 +693,7 @@
 "player.pip_short" = "PiP";
 "player.favorite" = "المفضلة";
 "player.connecting" = "جارٍ الاتصال…";
+"player.reconnecting" = "جارٍ إعادة الاتصال…";
 "player.autonext.play_next" = "الحلقة التالية";
 "player.autonext.season_episode" = "الموسم %d • الحلقة %d";
 "player.stats.title" = "إحصائيات التشغيل";

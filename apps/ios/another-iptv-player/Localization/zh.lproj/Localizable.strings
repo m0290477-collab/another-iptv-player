@@ -394,6 +394,7 @@
 "phase.preparing_list" = "正在准备列表...";
 "phase.save_db" = "正在保存到数据库...";
 "search.all" = "全部";
+"search.trending" = "当前热门";
 "search.min_chars" = "请至少输入 2 个字符";
 "search.more_results_format" = "还有 %d 条结果";
 "search.placeholder" = "搜索...";
@@ -530,6 +531,8 @@
 "home.play" = "播放";
 "home.details" = "详情";
 "home.top_rated_movies" = "高分电影";
+"home.sports_dashboard" = "体育面板";
+"home.top10_today" = "今日 Top 10";
 "home.top_rated_series" = "高分剧集";
 "home.new_movies" = "最新电影";
 "home.new_series" = "最新剧集";
@@ -690,6 +693,7 @@
 "player.pip_short" = "PiP";
 "player.favorite" = "收藏";
 "player.connecting" = "连接中…";
+"player.reconnecting" = "正在重新连接…";
 "player.autonext.play_next" = "下一集";
 "player.autonext.season_episode" = "第 %d 季 • 第 %d 集";
 "player.stats.title" = "播放统计";
