@@ -143,13 +143,6 @@ struct MatchesView: View {
     @AppStorage("explainer.seen.nba") private var explainerSeenNBA = false
     /// The sport whose explainer sheet is currently presented.
     @State private var explainerSport: MatchSport?
-    /// Build 67 (F6): set by the explainer's Start button — after
-    /// the explainer sheet has fully dismissed, the follow picker
-    /// for this sport is presented (the continuation the
-    /// explainer's own follow row promises). Skip never sets it.
-    @State private var pendingFollowSport: MatchSport?
-    /// The sport whose follow picker sheet is currently presented.
-    @State private var followPickerSport: MatchSport?
     /// The last sport the explainer was presented for — by the
     /// time a sheet's `onDismiss` runs the item binding is already
     /// nil, so a swipe dismissal recovers its sport from here.
@@ -206,41 +199,13 @@ struct MatchesView: View {
             if let sport = lastExplainerSport {
                 markExplainerSeen(sport)
             }
-            // Build 67 (F6): Start's continuation — present the
-            // follow picker only AFTER the explainer sheet is
-            // gone, and never while a player presentation is
-            // active (the same gate the explainer itself uses).
-            if let pending = pendingFollowSport {
-                pendingFollowSport = nil
-                if PlayerOverlayController.presentationActiveCount == 0 {
-                    followPickerSport = pending
-                }
-            }
         }) { sport in
-            SportsExplainerView(sport: sport, onStart: {
+            SportsExplainerView(sport: sport) {
                 markExplainerSeen(sport)
-                // Land visibly inside THIS sport's section…
-                selectedSport = sport
-                // …then continue to the follow step once the
-                // sheet's onDismiss runs.
-                pendingFollowSport = sport
                 explainerSport = nil
-            }, onSkip: {
-                markExplainerSeen(sport)
-                selectedSport = sport
-                explainerSport = nil
-            })
+            }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
-        }
-        // Build 67 (F6): the follow-your-teams step — the existing
-        // follow system (TeamService team lists + FollowedTeamsStore,
-        // the same store/service the team pages write through),
-        // scoped to the explainer's sport.
-        .sheet(item: $followPickerSport) { sport in
-            NavigationStack { FollowTeamsPickerView(sport: sport) }
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
         }
         .onAppear { presentExplainerIfNeeded(for: selectedSport) }
         .onChange(of: selectedSport) { _, newSport in
