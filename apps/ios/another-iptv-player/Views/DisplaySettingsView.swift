@@ -38,15 +38,20 @@ struct DisplaySettingsView: View {
     }
 
     var body: some View {
-        Form {
+        // Build 66 (W10): List, not Form — identical sections,
+        // bindings and tiles, on the hub pages' card treatment
+        // (insetGrouped + card rows + shared headers). The live
+        // preview panel stays the first section.
+        List {
             // The live preview panel (the mockup's "Preview
             // updates in real time" promise, kept literally).
             Section {
                 previewPanel
                     .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
             } header: {
-                Text(L("display.preview"))
+                SettingsSectionHeader(title: L("display.preview"))
             }
+            .settingsCardRows()
 
             // Automatic: orientation adaptation is not a setting
             // — it is how the app is built; theme follows the
@@ -62,8 +67,9 @@ struct DisplaySettingsView: View {
                     }
                 }
             } header: {
-                Text(L("display.automatic"))
+                SettingsSectionHeader(title: L("display.automatic"))
             }
+            .settingsCardRows()
 
             Section {
                 HStack(spacing: 10) {
@@ -73,8 +79,9 @@ struct DisplaySettingsView: View {
                 }
                 .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
             } header: {
-                Text(L("display.theme"))
+                SettingsSectionHeader(title: L("display.theme"))
             }
+            .settingsCardRows()
 
             Section {
                 VStack(alignment: .leading, spacing: 12) {
@@ -110,8 +117,9 @@ struct DisplaySettingsView: View {
                 }
                 .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
             } header: {
-                Text(L("display.accent"))
+                SettingsSectionHeader(title: L("display.accent"))
             }
+            .settingsCardRows()
 
             Section {
                 HStack(spacing: 10) {
@@ -135,8 +143,9 @@ struct DisplaySettingsView: View {
                 }
                 .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
             } header: {
-                Text(L("display.poster_size"))
+                SettingsSectionHeader(title: L("display.poster_size"))
             }
+            .settingsCardRows()
 
             Section {
                 HStack(spacing: 10) {
@@ -160,8 +169,9 @@ struct DisplaySettingsView: View {
                 }
                 .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
             } header: {
-                Text(L("display.density"))
+                SettingsSectionHeader(title: L("display.density"))
             }
+            .settingsCardRows()
 
             // Build 66 (W1): language picker, migrated from the
             // legacy forms' App & Appearance group.
@@ -171,8 +181,9 @@ struct DisplaySettingsView: View {
                     LanguagePickerRow()
                 }
             } header: {
-                Text(L("settings.language.title"))
+                SettingsSectionHeader(title: L("settings.language.title"))
             }
+            .settingsCardRows()
 
             // Build 66 (W1): appearance leftovers (reduce
             // effects, show empty categories, section visibility).
@@ -181,6 +192,8 @@ struct DisplaySettingsView: View {
             // Build 66 (W1): motion intensity + UI sounds.
             MotionSoundSettingsSection()
         }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
         .cinematicScrollBackground()
         .navigationTitle(L("display.title"))
         .navigationBarTitleDisplayMode(.inline)
