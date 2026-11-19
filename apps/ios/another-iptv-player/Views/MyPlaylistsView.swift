@@ -87,7 +87,7 @@ struct MyPlaylistsView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             } else {
-                ProgressView()
+                BrandedLoader()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }

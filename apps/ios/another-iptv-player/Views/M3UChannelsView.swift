@@ -38,7 +38,7 @@ struct M3UChannelsView: View {
         Group {
             if store.isLoading && store.channels.isEmpty {
                 VStack(spacing: 16) {
-                    ProgressView().scaleEffect(1.2)
+                    BrandedLoader()
                     Text(L("m3u.loading"))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)

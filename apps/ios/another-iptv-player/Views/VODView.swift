@@ -116,8 +116,7 @@ struct VODView: View {
                 if contentStore.isLoading || playlist.id != contentStore.activePlaylistId
                     || (!contentStore.streamsLoaded && contentStore.loadError == nil) {
                     VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.2)
+                        BrandedLoader()
                         Text(contentStore.loadingMessage ?? L("vod.empty.preparing"))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -396,7 +395,7 @@ struct VODView: View {
                 .padding(.top, 8)
 
                 if newestVisibleCount < newestAll.count {
-                    ProgressView()
+                    BrandedLoader(size: 28)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 24)
                 }
@@ -446,7 +445,7 @@ struct VODView: View {
                 .padding(.top, 8)
 
                 if categoryVisibleCount < items.count {
-                    ProgressView()
+                    BrandedLoader(size: 28)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 24)
                 }
@@ -1261,7 +1260,7 @@ struct VODCategoryContent: View, Equatable {
                         .id(Self.gridTopID)
 
                         if visibleCount < displayItems.count {
-                            ProgressView()
+                            BrandedLoader(size: 28)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 24)
                         }
@@ -2099,7 +2098,7 @@ struct MovieGenreGridView: View {
                     .padding()
 
                     if visibleCount < displayItems.count {
-                        ProgressView()
+                        BrandedLoader(size: 28)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 24)
                     }

@@ -204,8 +204,7 @@ struct LiveStreamsView: View {
                 if contentStore.isLoading || playlist.id != contentStore.activePlaylistId
                     || (!contentStore.streamsLoaded && contentStore.loadError == nil) {
                     VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.2)
+                        BrandedLoader()
                         Text(contentStore.loadingMessage ?? L("live.empty.preparing"))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -1243,7 +1242,7 @@ struct LiveCategoryContent: View, Equatable {
                     .padding()
 
                     if visibleCount < displayItems.count {
-                        ProgressView()
+                        BrandedLoader(size: 28)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 24)
                     }

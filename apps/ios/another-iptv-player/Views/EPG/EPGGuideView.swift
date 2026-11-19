@@ -130,7 +130,7 @@ struct EPGGuideView: View {
     private var content: some View {
         switch model.state {
         case .loading:
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            BrandedLoader().frame(maxWidth: .infinity, maxHeight: .infinity)
         case .notConfigured:
             ContentUnavailableView {
                 Label(L("epg.not_configured.title"), systemImage: "calendar.badge.exclamationmark")
@@ -359,7 +359,7 @@ struct EPGGuideView: View {
                     // A search for the current query is still running:
                     // show the guide's neutral loading style, never a
                     // premature "no match".
-                    ProgressView()
+                    BrandedLoader(size: 28)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 10)
                 }
