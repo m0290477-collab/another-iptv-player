@@ -525,14 +525,7 @@ struct M3UChannelCard: View {
         Button {
             onChannelSelected?(channel)
         } label: {
-            // Build 67 (W6, S2 — Cinematic Glass, owner pick): the
-            // M3U channel tile gets the same frosted glass card as
-            // the Xtream Live tile. Logo + name, the provider number
-            // when present, and under the name the REAL EPG now/next
-            // block — rendered only when the loaded guide actually
-            // has a programme for this channel (no placeholder, no
-            // reserved empty row).
-            VStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .center, spacing: 10) {
                 CachedImage(
                     url: channel.tvgLogo.flatMap { URL(string: $0) },
                     width: iconSize,
@@ -561,15 +554,10 @@ struct M3UChannelCard: View {
                 }
 
                 if let snapshot = epgSnapshot {
-                    ChannelEPGNowNextBlock(
-                        nowNext: snapshot[EPGChannelKey.forM3U(channel)],
-                        width: width
-                    )
+                    EPGNowNextLine(nowNext: snapshot[EPGChannelKey.forM3U(channel)],
+                                   width: width, reserveSpace: true)
                 }
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 10)
-            .sectionGlassTile()
         }
         .buttonStyle(.plain)
         .contextMenu {
