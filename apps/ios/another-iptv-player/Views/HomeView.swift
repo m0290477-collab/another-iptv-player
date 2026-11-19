@@ -123,9 +123,10 @@ struct HomeView: View {
     // picked a FIXED rail order (hero → sports → Continue
     // Watching → Live Channels → Movies → Series, nothing else),
     // so there is no Edit/Customize mode on this screen anymore.
-    // `HomeSectionOrderStore` itself is untouched (it lives in
-    // DesignSystemB7.swift, outside this worker's scope); Home
-    // simply no longer renders from it.
+    // Build 68 (W-G): the Customize Home store itself is now
+    // deleted too (owner order: it "doesn't work properly,
+    // pointless") — no live code anywhere reads a stored Home
+    // row order.
 
     // Build 61 fixer (Z12, M-pack variant): the first LIVE
     // match found in the real MatchesService data for today, plus

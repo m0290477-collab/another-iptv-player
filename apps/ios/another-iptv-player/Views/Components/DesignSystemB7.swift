@@ -7,9 +7,11 @@ import UIKit
 // The wave-3 visual pass's shared pieces: the effects gate every
 // D/X-pack effect reads, the ONE empty-state component (O10), the
 // branded loader (X6), the animated success check (X7), the poster
-// shine (X4), the shimmer overlay (D4) and the persisted Home row
-// order (J3). Everything here is presentation only — no store, no
-// playback, no navigation logic lives in this file.
+// shine (X4) and the shimmer overlay (D4). (The persisted Home row
+// order (J3) that also lived here is removed in build 68 — see the
+// fossil note at the end of this file.) Everything here is
+// presentation only — no store, no playback, no navigation logic
+// lives in this file.
 
 // MARK: - Effects gate (X-pack mandatory guards + Q21)
 
@@ -359,64 +361,15 @@ extension View {
     }
 }
 
-// MARK: - J3 Home row order
-
-/// J3: the user-reorderable Home CONTENT rows. The hero and every
-/// banner (S4 expiry, R4 what's-new, F7 update, offline) are NOT
-/// rows and never enter this list. O1 is the default order until
-/// the user changes it in Home Edit mode; the order persists in
-/// UserDefaults (`home.sectionOrder.v1`, row raw values).
-enum HomeRowKind: String, CaseIterable {
-    case continueWatching
-    case continueSeries
-    case recentChannels
-    case live
-    case discovery
-    case recentlyAdded
-    case matches
-
-    /// O1 default: Continue Watching → Continue Series → Recent
-    /// Channels → Live → Movies/Series (discovery) → Recently
-    /// Added. Build 63 (item 7): `.matches` is no longer a Home
-    /// row — the sports moved to top shortcut tiles — so it is
-    /// out of the default order and filtered from restored ones.
-    static let defaultOrder: [HomeRowKind] = [
-        .continueWatching, .continueSeries, .recentChannels, .live,
-        .discovery, .recentlyAdded
-    ]
-}
-
-final class HomeSectionOrderStore: ObservableObject {
-    static let shared = HomeSectionOrderStore()
-    private static let storageKey = "home.sectionOrder.v1"
-
-    @Published private(set) var order: [HomeRowKind]
-
-    private init() {
-        let stored = UserDefaults.standard.stringArray(forKey: Self.storageKey) ?? []
-        // Build 63 (item 7): `.matches` rows from earlier builds'
-        // stored orders are dropped — the row no longer exists.
-        var restored = stored.compactMap(HomeRowKind.init(rawValue:)).filter { $0 != .matches }
-        // Sanitize: drop duplicates, append any row the stored order
-        // predates (new rows land at their O1 position's end-state —
-        // appended in default order), so the list is always complete.
-        var seen = Set<HomeRowKind>()
-        restored = restored.filter { seen.insert($0).inserted }
-        for kind in HomeRowKind.defaultOrder where !seen.contains(kind) {
-            restored.append(kind)
-        }
-        order = restored
-    }
-
-    /// Moves one row one step (-1 = up, +1 = down) and persists.
-    func move(_ kind: HomeRowKind, by delta: Int) {
-        guard let index = order.firstIndex(of: kind) else { return }
-        let target = index + delta
-        guard target >= 0, target < order.count else { return }
-        var next = order
-        next.swapAt(index, target)
-        order = next
-        UserDefaults.standard.set(next.map(\.rawValue), forKey: Self.storageKey)
-        Haptics.selection()
-    }
-}
+// MARK: - J3 Home row order — REMOVED in build 68 (W-G)
+//
+// The J3 Customize Home machinery that lived here (the
+// `HomeRowKind` row-kind enum and the `HomeSectionOrderStore`
+// persisting a user-reorderable Home row order in UserDefaults
+// under `home.sectionOrder.v1`) is DELETED in build 68 at the
+// owner's order: Customize Home "doesn't work properly,
+// pointless." Home (build 68, W-E) renders a FIXED rail order
+// and no screen reads the store anymore, so nothing remains
+// that could consume a stored order. A stale
+// `home.sectionOrder.v1` value on a device is inert — nothing
+// reads it — and is simply never carried again.

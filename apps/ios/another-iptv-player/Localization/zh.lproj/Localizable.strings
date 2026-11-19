@@ -965,9 +965,6 @@
 "update.dismiss" = "关闭";
 
 /* MARK: Build 61 (b7) */
-"b7.home.customize" = "自定义首页";
-"b7.home.move_down" = "下移";
-"b7.home.move_up" = "上移";
 "b7.loader.loading" = "加载中";
 
 /* MARK: Build 61 (b14) */

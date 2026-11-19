@@ -965,9 +965,6 @@
 "update.dismiss" = "Ignorer";
 
 /* MARK: Build 61 (b7) */
-"b7.home.customize" = "Personnaliser l'accueil";
-"b7.home.move_down" = "Descendre";
-"b7.home.move_up" = "Monter";
 "b7.loader.loading" = "Chargement";
 
 /* MARK: Build 61 (b14) */
