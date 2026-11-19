@@ -16,6 +16,11 @@ struct M3UChannelsView: View {
     @State private var debouncedQuery = ""
     @State private var debounceTask: Task<Void, Never>?
     @State private var isSearchActive = false
+    /// Build 67 (W6, S8): the Categories-First group tile selection —
+    /// nil shows every group shelf; a group name narrows the shelves
+    /// to that group only (the M3U analog of the Xtream sections'
+    /// category filter). Ignored while a search query is active.
+    @State private var selectedGroup: String? = nil
 
     /// The groups filtered after a search.
     @State private var displayGroups: [String] = []
@@ -28,10 +33,34 @@ struct M3UChannelsView: View {
     /// The groups to show in the shelf list (hidden ones removed). The picker sees all groups.
     private var visibleShelfGroups: [String] {
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: Self.hiddenCategoryType)
-        return orderStore.applyOrder(
+        let ordered = orderStore.applyOrder(
             displayGroups.filter { !hidden.contains($0) },
             playlistId: playlist.id, type: Self.hiddenCategoryType
         ) { $0 }
+        // Build 67 (W6, S8): a selected group tile narrows the
+        // shelves to that group (only outside search, where the
+        // query already defines the visible set).
+        if debouncedQuery.isEmpty, let selectedGroup, ordered.contains(selectedGroup) {
+            return [selectedGroup]
+        }
+        return ordered
+    }
+
+    /// Build 67 (W6, S8): the group tiles' data — every group the
+    /// shelves can show (hidden ones removed, saved order applied)
+    /// with its REAL channel count.
+    private var groupTileItems: [SectionCategoryTileItem] {
+        let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: Self.hiddenCategoryType)
+        return orderStore.applyOrder(
+            displayGroups.filter { !hidden.contains($0) },
+            playlistId: playlist.id, type: Self.hiddenCategoryType
+        ) { $0 }.map { group in
+            SectionCategoryTileItem(
+                id: group,
+                name: M3UContentStore.displayName(forGroup: group),
+                count: displayChannelsByGroup[group]?.count ?? 0
+            )
+        }
     }
 
     var body: some View {
@@ -182,6 +211,19 @@ struct M3UChannelsView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
+                    // Build 67 (W6, S8 — Categories First): group
+                    // TILES first when browsing (hidden during
+                    // search) — the REAL groups with their REAL
+                    // channel counts; tapping one narrows the
+                    // shelves to that group, "All" restores them.
+                    if debouncedQuery.isEmpty && groupTileItems.count > 1 {
+                        SectionCategoryTilesRow(
+                            items: groupTileItems,
+                            selectedCategoryId: $selectedGroup
+                        )
+                        .padding(.vertical, 8)
+                    }
+
                     // Continue watching: at the top when there is no search.
                     if debouncedQuery.isEmpty {
                         ContinueWatchingRow(
@@ -483,7 +525,14 @@ struct M3UChannelCard: View {
         Button {
             onChannelSelected?(channel)
         } label: {
-            VStack(alignment: .center, spacing: 10) {
+            // Build 67 (W6, S2 — Cinematic Glass, owner pick): the
+            // M3U channel tile gets the same frosted glass card as
+            // the Xtream Live tile. Logo + name, the provider number
+            // when present, and under the name the REAL EPG now/next
+            // block — rendered only when the loaded guide actually
+            // has a programme for this channel (no placeholder, no
+            // reserved empty row).
+            VStack(alignment: .center, spacing: 8) {
                 CachedImage(
                     url: channel.tvgLogo.flatMap { URL(string: $0) },
                     width: iconSize,
@@ -512,10 +561,15 @@ struct M3UChannelCard: View {
                 }
 
                 if let snapshot = epgSnapshot {
-                    EPGNowNextLine(nowNext: snapshot[EPGChannelKey.forM3U(channel)],
-                                   width: width, reserveSpace: true)
+                    ChannelEPGNowNextBlock(
+                        nowNext: snapshot[EPGChannelKey.forM3U(channel)],
+                        width: width
+                    )
                 }
             }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 10)
+            .sectionGlassTile()
         }
         .buttonStyle(.plain)
         .contextMenu {

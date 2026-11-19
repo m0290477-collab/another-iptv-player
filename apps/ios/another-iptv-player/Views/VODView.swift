@@ -66,7 +66,41 @@ struct VODView: View {
     // went with it; All Movies and the category screens keep their own
     // search fields.
     @State private var homeSearchText = ""
-    @State private var showSearchSheet = false
+    // Build 67 (W6, F3): the tab's sheets are presented through ONE
+    // `.sheet(item:)` — the old stack of several `.sheet(isPresented:)`
+    // modifiers on this same view left only one binding reliably
+    // honored, which is why tapping the header search bar did nothing
+    // on the owner's phone (the category-picker sheet, attached first,
+    // won; the search sheet never presented). One item-driven sheet
+    // presents whichever case is set.
+    @State private var activeSheet: LandingSheet? = nil
+
+    /// Build 67 (W6, F3): the Movies tab's three sheets, presented
+    /// through the single `.sheet(item:)` on the body.
+    enum LandingSheet: Identifiable {
+        case categoryPicker
+        case search
+        case sort
+
+        var id: Int {
+            switch self {
+            case .categoryPicker: return 0
+            case .search: return 1
+            case .sort: return 2
+            }
+        }
+    }
+
+    /// Build 67 (W6, S8): the landing sort — the SAME persisted C1
+    /// option (`VODSortOption.storageKey`) the category screens use,
+    /// so a sort chosen here and there is one choice. `.defaultOrder`
+    /// keeps the O7 bucket order; an explicit sort reorders the
+    /// category grid below.
+    @AppStorage(VODSortOption.storageKey) private var sortOption: VODSortOption = .defaultOrder
+    /// Build 67 (W6, S8): By Year rails — the visible catalog grouped
+    /// by REAL release year (records without a parseable year are
+    /// excluded, never guessed), computed in `recomputeFilter()`.
+    @State private var yearGroups: [(year: Int, items: [DBVODStream])] = []
 
     // Round 5: unified content pattern — filter chips.
     // Round 8 (D-4/D-5): the Favorites and History chips were removed —
@@ -92,7 +126,6 @@ struct VODView: View {
         self.playlist = playlist
     }
 
-    @State private var showingCategoryPicker = false
     @State private var pendingScrollTarget: String? = nil
     // Build 61 fixer (O9): scroll restoration for the Movies shelf
     // list — the category shelf at the top anchor, persisted per
@@ -145,9 +178,34 @@ struct VODView: View {
                         // the shelves; Newest renders its grid.
                         switch selectedChip {
                         case .all:
+                            // Build 67 (W6, S8 — Categories First,
+                            // owner pick): category TILES come FIRST
+                            // on the landing — the REAL categories of
+                            // the synced catalog with their REAL item
+                            // counts. Tapping a tile filters the tab
+                            // to that category (the sort header + poster
+                            // grid below); "All" restores the landing.
+                            // This replaces the build-65 chips row as
+                            // the tab's ONE category selector (O6).
+                            if displayCategories.count > 1 {
+                                SectionCategoryTilesGrid(
+                                    items: categoryTileItems,
+                                    totalCount: totalMovieCount,
+                                    systemImage: "film",
+                                    selectedCategoryId: $selectedCategoryId
+                                )
+                                .padding(.top, 2)
+                                .padding(.bottom, 6)
+                            }
+
+                            if let selectedCategoryId,
+                               let category = displayCategories.first(where: { $0.id == selectedCategoryId }) {
+                                categorySortHeader(for: category)
+                                categoryGrid(for: category)
+                            } else {
                             // Round 14 (B7): the Movies identity —
-                            // a featured movie hero at the very top
-                            // of the tab.
+                            // the featured movie hero, now under the
+                            // category tiles (build 67 order).
                             if let featured = featuredMovie {
                                 MovieFeaturedHero(playlist: playlist, movie: featured) {
                                     pendingMovieDetail = featured
@@ -156,24 +214,24 @@ struct VODView: View {
                                 }
                             }
 
-                            // Build 65 (inside-sections design):
-                            // category chips under the hero — the
-                            // REAL provider categories. A selection
-                            // swaps the shelves for that category's
-                            // poster grid (see below); All restores
-                            // them.
-                            if displayCategories.count > 1 {
-                                SectionCategoryChips(
-                                    categories: displayCategories,
-                                    selectedCategoryId: $selectedCategoryId
-                                )
-                                .padding(.bottom, 4)
+                            // Build 67 (W6, S8): the catalog rails,
+                            // built ONLY from real provider data, in
+                            // the owner's order — New, Top Rated,
+                            // By Year. A rail whose data is absent is
+                            // omitted entirely; nothing is curated,
+                            // recommended or invented.
+                            if !recentlyAddedVODs.isEmpty {
+                                RecentlyAddedVODShelf(playlist: playlist, items: recentlyAddedVODs)
                             }
 
-                            if let selectedCategoryId,
-                               let category = displayCategories.first(where: { $0.id == selectedCategoryId }) {
-                                categoryGrid(for: category)
-                            } else {
+                            if topRatedVODs.count >= 3 {
+                                TopMoviesShelf(playlist: playlist, items: topRatedVODs, replayToken: shelfReplayToken)
+                            }
+
+                            ForEach(yearGroups, id: \.year) { group in
+                                yearShelf(year: group.year, items: group.items)
+                            }
+
                             ContinueWatchingRow(
                                 playlist: playlist,
                                 typeFilter: "vod",
@@ -186,14 +244,6 @@ struct VODView: View {
                                     presentHistoryPlayer(item)
                                 }
                             )
-
-                            if topRatedVODs.count >= 3 {
-                                TopMoviesShelf(playlist: playlist, items: topRatedVODs, replayToken: shelfReplayToken)
-                            }
-
-                            if !recentlyAddedVODs.isEmpty {
-                                RecentlyAddedVODShelf(playlist: playlist, items: recentlyAddedVODs)
-                            }
 
                             if !watchlistMovies.isEmpty {
                                 WatchlistShelf(playlist: playlist, items: watchlistMovies)
@@ -258,7 +308,7 @@ struct VODView: View {
             // shelf's "See all"). The shelf entry stays as the ONE path.
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
-                    showingCategoryPicker = true
+                    activeSheet = .categoryPicker
                 } label: {
                     Image(systemName: "list.bullet.indent")
                         .font(.body.weight(.semibold))
@@ -267,26 +317,46 @@ struct VODView: View {
                 .accessibilityLabel(L("list.jump_to_category"))
             }
         }
-        .sheet(isPresented: $showingCategoryPicker) {
-            CategoryPickerSheet(
-                title: L("category_picker.title"),
-                entries: pickerEntries,
-                playlistId: playlist.id,
-                type: "vod"
-            ) { id in
-                showingCategoryPicker = false
-                pendingScrollTarget = id
-            }
-        }
-        .sheet(isPresented: $showSearchSheet) {
-            NavigationStack {
-                // Round 10: SearchView owns its big title — the
-                // wrapper's inline title was removed.
-                // Build 64 (A4): pass .movies — build 63's item-15
-                // wiring missed this call site, so the Movies tab's
-                // search bar opened on the default filter while its
-                // placeholder promised the section's own content.
-                SearchView(playlist: playlist, searchText: $homeSearchText, initialFilter: .movies)
+        // Build 67 (W6, F3): ONE item-driven sheet for the whole tab
+        // (see the `activeSheet` note at the state declarations).
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .categoryPicker:
+                CategoryPickerSheet(
+                    title: L("category_picker.title"),
+                    entries: pickerEntries,
+                    playlistId: playlist.id,
+                    type: "vod"
+                ) { id in
+                    activeSheet = nil
+                    pendingScrollTarget = id
+                }
+            case .search:
+                NavigationStack {
+                    // Round 10: SearchView owns its big title — the
+                    // wrapper's inline title was removed.
+                    // Build 64 (A4): pass .movies — build 63's item-15
+                    // wiring missed this call site, so the Movies tab's
+                    // search bar opened on the default filter while its
+                    // placeholder promised the section's own content.
+                    SearchView(playlist: playlist, searchText: $homeSearchText, initialFilter: .movies)
+                }
+            case .sort:
+                // Build 67 (W6, S8): the landing sort — the C1 option
+                // set, applied to the category grid below.
+                SortFilterSheet(
+                    sortRows: VODSortOption.allCases.map { option in
+                        SortFilterSheet.Row(
+                            id: option.rawValue,
+                            title: L(option.titleKey),
+                            systemImage: option.systemImage,
+                            isSelected: sortOption == option
+                        ) { sortOption = option }
+                    },
+                    onClearFilters: sortOption == .defaultOrder ? nil : {
+                        sortOption = .defaultOrder
+                    }
+                )
             }
         }
         // Round 8 (audit A2): ONE recompute trigger — the same combined
@@ -307,6 +377,7 @@ struct VODView: View {
         )) { await recomputeFilter() }
         .onAppear { shelfReplayToken += 1 }
         .onChange(of: selectedCategoryId) { _, _ in categoryVisibleCount = 90 }
+        .onChange(of: sortOption) { _, _ in categoryVisibleCount = 90 }
         .transaction { $0.animation = nil }
         .navigationDestination(item: $pendingMovieDetail) { movie in
             MovieDetailView(playlist: playlist, movie: movie)
@@ -334,7 +405,7 @@ struct VODView: View {
     private var tabHeader: some View {
         VStack(alignment: .leading, spacing: 12) {
             HomeSearchBar(placeholder: L("home.search_placeholder")) {
-                showSearchSheet = true
+                activeSheet = .search
             }
             .padding(.horizontal, 16)
             .padding(.top, 4)
@@ -409,8 +480,93 @@ struct VODView: View {
     /// in the tab's grid language, paginated like the Newest grid.
     /// In-section search behavior is untouched (the tab's search
     /// sheet still searches the full catalog, build 63/64).
+    /// Build 67 (W6, S8): the landing tiles' data — the REAL display
+    /// categories with their REAL bucket counts.
+    private var categoryTileItems: [SectionCategoryTileItem] {
+        displayCategories.map { category in
+            SectionCategoryTileItem(
+                id: category.id,
+                name: category.name,
+                count: displayItemsByCategory[category.id]?.count ?? 0
+            )
+        }
+    }
+
+    /// The REAL visible movie total (the same sum the header count
+    /// line renders).
+    private var totalMovieCount: Int {
+        displayCategories.reduce(0) { $0 + (displayItemsByCategory[$1.id]?.count ?? 0) }
+    }
+
+    /// Build 67 (W6, S8): the header shown above a selected
+    /// category's grid — the category's name + real count and the
+    /// sort button (the C1 sort sheet, via the tab's one sheet).
+    private func categorySortHeader(for category: DBCategory) -> some View {
+        HStack(spacing: 8) {
+            Text(category.name)
+                .font(.headline)
+                .lineLimit(1)
+            Text(CatalogCountFormatter.string(displayItemsByCategory[category.id]?.count ?? 0))
+                .font(AppTheme.fontBadge)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(AppTheme.accent))
+            Spacer()
+            Button {
+                activeSheet = .sort
+            } label: {
+                Image(systemName: sortOption == .defaultOrder
+                    ? "line.3.horizontal.decrease.circle"
+                    : "line.3.horizontal.decrease.circle.fill")
+                    .font(.body.weight(.semibold))
+            }
+            .accessibilityLabel(L("sort.title"))
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+    }
+
+    /// Build 67 (W6, S8): one By Year rail — a year's REAL movies
+    /// (records carrying a parseable release year only), in the
+    /// shelf language of the Recently Added rail.
+    private func yearShelf(year: Int, items: [DBVODStream]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionYearHeader(year: year)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 14) {
+                    ForEach(items) { stream in
+                        NavigationLink {
+                            MovieDetailView(playlist: playlist, movie: stream, queue: items)
+                        } label: {
+                            VODStreamCard(
+                                playlistId: playlist.id,
+                                stream: stream,
+                                posterWidth: posterMetrics.shelfPosterWidth,
+                                posterHeight: posterMetrics.shelfPosterHeight,
+                                imageLoadProfile: .shelf
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .frame(height: posterMetrics.shelfRowTotalHeight)
+            .shelfEdgeFade()
+        }
+        .padding(.vertical, 6)
+    }
+
     private func categoryGrid(for category: DBCategory) -> some View {
-        let items = displayItemsByCategory[category.id] ?? []
+        // Build 67 (W6, S8): an explicitly chosen sort (the C1
+        // `VODSortOption`, shared with the category screens) reorders
+        // the grid; `.defaultOrder` is the identity, so the O7 bucket
+        // order stands until the user picks a sort. Rating sort ranks
+        // only real ratings — unrated items sink (CatalogRatingValue),
+        // never a faked rating.
+        let items = sortOption.apply(to: displayItemsByCategory[category.id] ?? [])
         let queue = items.map(\.stream)
         return Group {
             if items.isEmpty {
@@ -495,7 +651,7 @@ struct VODView: View {
     /// (the same simplification Live got in round 3).
     private func recomputeFilter() async {
         guard playlist.id == contentStore.activePlaylistId else {
-            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedVODs = []; newestVODs = []; topRatedVODs = []; newestAll = []; franchiseGroups = []; return
+            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedVODs = []; newestVODs = []; topRatedVODs = []; newestAll = []; franchiseGroups = []; yearGroups = []; return
         }
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod")
         let allCats = orderStore.applyOrder(
@@ -537,6 +693,27 @@ struct VODView: View {
         guard !Task.isCancelled else { return }
         newestAll = byAddedDesc
         newestVisibleCount = min(Self.newestPageSize, byAddedDesc.count)
+
+        // Build 67 (W6, S8): By Year groups — visible movies grouped
+        // by their REAL release year. Years with fewer than 3 titles
+        // don't earn a rail; the three most recent years win; each
+        // rail caps at 20 posters (the full year stays reachable
+        // through its category grids and search).
+        let years = await Task.detached(priority: .utility) { () -> [(year: Int, items: [DBVODStream])] in
+            var byYear: [Int: [DBVODStream]] = [:]
+            for vod in allVODs where visibleCatIds.contains(vod.stream.categoryId ?? "") {
+                if let year = DetailFormatting.releaseYear(from: vod.stream.releaseDate) {
+                    byYear[year, default: []].append(vod.stream)
+                }
+            }
+            return byYear
+                .filter { $0.value.count >= 3 }
+                .sorted { $0.key > $1.key }
+                .prefix(3)
+                .map { (year: $0.key, items: Array($0.value.prefix(20))) }
+        }.value
+        guard !Task.isCancelled else { return }
+        yearGroups = years
 
         // Round 15 (C7): franchise groups. Two cheap passes — first
         // the bases that a marked title (number/roman/"part"/colon)
