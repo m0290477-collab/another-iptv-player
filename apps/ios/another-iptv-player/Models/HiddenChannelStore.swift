@@ -68,6 +68,35 @@ final class HiddenChannelStore: ObservableObject {
         version &+= 1
     }
 
+    // MARK: - Backup import (Build 68, W-C)
+
+    /// Union-merges imported hidden ids into this playlist's sets
+    /// (backup restore). Hiding is set membership, so an import
+    /// can only ADD hides, never un-hide what the user hid on
+    /// this device — the same union rule `BackupService` applies
+    /// to watch-later lists. Bumps `version` once if anything
+    /// actually changed, so observing lists refresh.
+    func mergeImported(hiddenXtream: Set<Int>, hiddenM3U: Set<String>, playlistId: UUID) {
+        var changed = false
+        if !hiddenXtream.isEmpty {
+            let current = hiddenIds(playlistId: playlistId)
+            let merged = current.union(hiddenXtream)
+            if merged != current {
+                UserDefaults.standard.set(Array(merged), forKey: Self.xtreamKey(playlistId: playlistId))
+                changed = true
+            }
+        }
+        if !hiddenM3U.isEmpty {
+            let current = hiddenM3UIds(playlistId: playlistId)
+            let merged = current.union(hiddenM3U)
+            if merged != current {
+                UserDefaults.standard.set(Array(merged), forKey: Self.m3uKey(playlistId: playlistId))
+                changed = true
+            }
+        }
+        if changed { version &+= 1 }
+    }
+
     // MARK: - Cleanup
 
     func removeAll(playlistId: UUID) {

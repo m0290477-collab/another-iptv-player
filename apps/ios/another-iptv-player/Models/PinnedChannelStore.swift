@@ -79,6 +79,35 @@ final class PinnedChannelStore: ObservableObject {
         setPinnedM3U(!isPinnedM3U(playlistId: playlistId, channelId: channelId), playlistId: playlistId, channelId: channelId)
     }
 
+    // MARK: - Backup import (Build 68, W-C)
+
+    /// Union-merges imported pinned ids into this playlist's sets
+    /// (backup restore) — the same union rule as
+    /// `HiddenChannelStore.mergeImported`: pinning is set
+    /// membership, so an import can only add pins, never unpin
+    /// what the user pinned on this device. Bumps `version` once
+    /// if anything actually changed.
+    func mergeImported(pinnedXtream: Set<Int>, pinnedM3U: Set<String>, playlistId: UUID) {
+        var changed = false
+        if !pinnedXtream.isEmpty {
+            let current = pinnedIds(playlistId: playlistId)
+            let merged = current.union(pinnedXtream)
+            if merged != current {
+                UserDefaults.standard.set(Array(merged), forKey: Self.xtreamKey(playlistId: playlistId))
+                changed = true
+            }
+        }
+        if !pinnedM3U.isEmpty {
+            let current = pinnedM3UIds(playlistId: playlistId)
+            let merged = current.union(pinnedM3U)
+            if merged != current {
+                UserDefaults.standard.set(Array(merged), forKey: Self.m3uKey(playlistId: playlistId))
+                changed = true
+            }
+        }
+        if changed { version &+= 1 }
+    }
+
     // MARK: - Cleanup
 
     func removeAll(playlistId: UUID) {
