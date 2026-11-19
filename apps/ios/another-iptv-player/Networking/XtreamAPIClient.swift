@@ -26,7 +26,12 @@ nonisolated enum PanelURLSession {
     static let shared: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 20
-        config.timeoutIntervalForResource = 300
+        // Build 66 (W4, item 8c): 300 → 90 — a hung panel must not
+        // hold a sync/refresh open for five minutes. This session is
+        // SHARED by XtreamAPIClient, M3UService and EPGDownloader
+        // (guide downloads ride it too; there is no separate EPG
+        // session), so the bound applies to all three.
+        config.timeoutIntervalForResource = 90
         return URLSession(configuration: config)
     }()
 }

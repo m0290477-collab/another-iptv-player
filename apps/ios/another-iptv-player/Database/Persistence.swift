@@ -24,8 +24,21 @@ private nonisolated final class NormalizedQueryCache: @unchecked Sendable {
     }
 }
 
+/// Build 66 (W4, item 15a): typed storage-open failure. Thrown by
+/// the throwing open path (`openInMemoryFallback()`) when no usable
+/// store could be opened at all — replacing the old `fatalError`
+/// that crash-looped the app on a device whose storage was broken.
+enum PersistenceError: Error {
+    case storageUnavailable(underlying: String)
+}
+
 nonisolated extension AppDatabase {
-    static let shared = makeShared()
+    /// Build 66 (W4, item 15a): a `var`, not a `let` — when the
+    /// storage-unavailable recovery's "Try again" re-attempts the
+    /// open and succeeds, the recovered instance replaces this one
+    /// (see `retryStorageOpen()`). All existing read sites compile
+    /// and behave exactly as before.
+    nonisolated(unsafe) static var shared = makeShared()
 
     /// True: the disk DB could not be opened, the session runs in-memory — nothing written in this session
     /// persists. The root view warns the user once.
@@ -51,6 +64,12 @@ nonisolated extension AppDatabase {
     /// recovered it with data preserved. No user data was lost, so
     /// no warning is shown; the flag exists for diagnostics.
     nonisolated(unsafe) private(set) static var didRecoverStoreViaRepair = false
+    /// Build 66 (W4, item 15a): True when even the in-memory
+    /// fallback failed to open (as a migrated store). The session
+    /// then runs on a no-migration placeholder instance that must
+    /// never be queried — the root view replaces the whole UI with
+    /// StorageUnavailableView while this is set.
+    nonisolated(unsafe) private(set) static var isStorageUnavailable = false
 
     private static func databaseFileURL() throws -> URL {
         let fileManager = FileManager.default
@@ -232,22 +251,83 @@ nonisolated extension AppDatabase {
     /// Disk full, a sandbox problem, or the S2 protection → instead of killing the app, an
     /// in-memory fallback. This session's data does not persist, but the app
     /// stays open; the root view warns the user once.
-    private static func makeInMemoryFallback() -> AppDatabase {
+    /// Build 66 (W4, item 15a): the throwing in-memory open. A
+    /// failure here means NO usable store exists — surfaced as the
+    /// typed `PersistenceError.storageUnavailable` instead of the
+    /// old fatalError crash loop.
+    private static func openInMemoryFallback() throws -> AppDatabase {
         do {
             let queue = try DatabaseQueue(configuration: databaseConfiguration())
+            let db = try AppDatabase(queue)
             Log.error("Persistence", "in-memory DB fallback aktif — kullanıcı verisi bu oturumda kaybolacak")
             isEphemeral = true
-            return try AppDatabase(queue)
+            return db
         } catch {
-            // If the DB cannot be opened even in memory, the device is in a critical state; a last resort with a clear message.
             Log.error("Persistence", "in-memory DB fallback başarısız: \(error.localizedDescription)")
-            fatalError("DB tamamen başarısız: \(error.localizedDescription)")
+            throw PersistenceError.storageUnavailable(underlying: error.localizedDescription)
         }
     }
-    
+
+    private static func makeInMemoryFallback() -> AppDatabase {
+        do {
+            return try openInMemoryFallback()
+        } catch {
+            // Storage is genuinely unavailable: flag it so the root
+            // view presents StorageUnavailableView (with a Try again
+            // that re-runs the whole open chain via
+            // `retryStorageOpen()`), and return a no-migration
+            // placeholder instance. The placeholder has NO schema
+            // and must never be queried — the root view's guard
+            // replaces the UI before any query can reach it, and the
+            // app root's deferred DB work is skipped while the flag
+            // is set. `AppDatabase.init` with migrations disabled
+            // cannot throw, so this construction only fails if
+            // SQLite cannot create an in-memory store at all.
+            isStorageUnavailable = true
+            if let queue = try? DatabaseQueue(),
+               let placeholder = try? AppDatabase(queue, runMigrations: false) {
+                return placeholder
+            }
+            // Documented last resort (kept from the pre-66 code): if
+            // even a bare in-memory SQLite store cannot be created,
+            // there is no AppDatabase value the app could run on and
+            // no recovery UI could be backed by one. This path is
+            // unreachable in any state where SQLite itself works.
+            fatalError("DB tamamen başarısız: in-memory store could not be created")
+        }
+    }
+
+    /// Build 66 (W4, item 15a): the StorageUnavailableView "Try
+    /// again" action — re-runs the FULL open chain once (disk open
+    /// → G1 backup-restore → no-migration open → in-memory
+    /// fallback, in the original order). On success the recovered
+    /// instance replaces `shared`, the flag clears, and the caller
+    /// dismisses the recovery screen. Returns whether storage is
+    /// usable now.
+    static func retryStorageOpen() -> Bool {
+        isStorageUnavailable = false
+        isEphemeral = false
+        let reopened = makeShared()
+        guard !isStorageUnavailable else { return false }
+        shared = reopened
+        return true
+    }
+
     static func empty() -> AppDatabase {
-        let dbQueue = try! DatabaseQueue(configuration: databaseConfiguration())
-        return try! AppDatabase(dbQueue)
+        // Preview-only. Build 66 (W4, item 15a): the `try!` pair is
+        // replaced with tiered attempts — a migrated in-memory
+        // store, then a no-migration one (whose init cannot throw).
+        if let dbQueue = try? DatabaseQueue(configuration: databaseConfiguration()),
+           let db = try? AppDatabase(dbQueue) {
+            return db
+        }
+        if let dbQueue = try? DatabaseQueue(),
+           let db = try? AppDatabase(dbQueue, runMigrations: false) {
+            return db
+        }
+        // Same documented last resort as makeInMemoryFallback():
+        // unreachable while SQLite itself works.
+        fatalError("DB tamamen başarısız: preview store could not be created")
     }
     
     private static func databaseConfiguration() -> Configuration {
@@ -267,10 +347,19 @@ nonisolated extension AppDatabase {
             // Must stay in sync with CatalogTextSearch.normalize (see rationale there):
             // locale-invariant case fold + "ı"→"i" so lowercase queries match ALL-CAPS
             // names in both English ("HISTORY") and Turkish ("IŞIK") catalogs.
+            // Build 66 (W4, syncing W8's unified fold): the SAME
+            // Arabic equivalence pass as CatalogTextSearch.baseFold —
+            // ة→ه, ى→ي, ک→ك, ی→ي and tatweel (U+0640) stripped — so
+            // the SQL-side fold and the in-memory fold never diverge.
             let normalize: @Sendable (String) -> String = { s in
                 let folded = s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: foldLocale)
                 return folded
                     .replacingOccurrences(of: "ı", with: "i")
+                    .replacingOccurrences(of: "\u{0629}", with: "\u{0647}")
+                    .replacingOccurrences(of: "\u{0649}", with: "\u{064A}")
+                    .replacingOccurrences(of: "\u{06A9}", with: "\u{0643}")
+                    .replacingOccurrences(of: "\u{06CC}", with: "\u{064A}")
+                    .replacingOccurrences(of: "\u{0640}", with: "")
                     .components(separatedBy: alphanumericSet.inverted)
                     .joined()
             }
