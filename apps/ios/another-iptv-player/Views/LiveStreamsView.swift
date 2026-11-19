@@ -29,32 +29,7 @@ struct LiveStreamsView: View {
     @State private var heroScrollVisible = false
     @Query<RecentWatchHistoryRequest> private var recentLiveHistory: [DBWatchHistory]
 
-    // Build 67 (W6, F3): the tab's sheets are presented through ONE
-    // `.sheet(item:)` — the old stack of three `.sheet(isPresented:)`
-    // modifiers on this same view left only one binding reliably
-    // honored, which is why tapping the header search bar did nothing
-    // on the owner's phone (the category-picker sheet, attached
-    // first, won; the search sheet never presented). One item-driven
-    // sheet presents whichever case is set. The Multiview
-    // fullScreenCover is a different presentation type and stays.
-    @State private var activeSheet: LandingSheet? = nil
-
-    /// Build 67 (W6, F3): the Live tab's three sheets, presented
-    /// through the single `.sheet(item:)` on the body.
-    enum LandingSheet: Identifiable {
-        case categoryPicker
-        case parentalPIN
-        case search
-
-        var id: Int {
-            switch self {
-            case .categoryPicker: return 0
-            case .parentalPIN: return 1
-            case .search: return 2
-            }
-        }
-    }
-
+    @State private var showSearchSheet = false
     @State private var homeSearchText = ""
     // Build 61 (B8, Z13): the Live tab's browsing mode — "grid"
     // (large logo grid) is the DEFAULT; "list" is the shelf layout.
@@ -126,6 +101,7 @@ struct LiveStreamsView: View {
     @State private var liveChannelSections: [LiveChannelCategorySection] = []
 
     private var liveHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "live") }
+    @State private var showingCategoryPicker = false
     @State private var pendingScrollTarget: String? = nil
     // Build 61 fixer (O9): scroll restoration for the shelves list —
     // the category shelf at the top anchor, persisted per playlist
@@ -137,6 +113,7 @@ struct LiveStreamsView: View {
     // here until the PIN sheet verifies. (B8: preserve this guard
     // when editing this file; the store/API is ParentalControlStore.)
     @State private var parentalPendingSelection: LivePlayerSelection?
+    @State private var showParentalPIN = false
 
     private var livePlaybackQueue: [DBLiveStream] {
         // Round 8 (audit A3): flattened from the cached sections. The
@@ -204,7 +181,8 @@ struct LiveStreamsView: View {
             && scenePhase == .active
             && playerOverlay.presentation == nil
             && playerOverlay.pendingPresentation == nil
-            && activeSheet == nil
+            && !showSearchSheet
+            && !showingCategoryPicker
     }
 
     /// Trending rule (round 3): the FIRST channel of each visible category,
@@ -317,7 +295,7 @@ struct LiveStreamsView: View {
             // path, matching the Movies/Series treatment.
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
-                    activeSheet = .categoryPicker
+                    showingCategoryPicker = true
                 } label: {
                     Image(systemName: "list.bullet.indent")
                         .font(.body.weight(.semibold))
@@ -326,42 +304,38 @@ struct LiveStreamsView: View {
                 .accessibilityLabel(L("list.jump_to_category"))
             }
         }
-        // Build 67 (W6, F3): ONE item-driven sheet for the whole tab
-        // (see the `activeSheet` note at the state declarations).
-        .sheet(item: $activeSheet) { sheet in
-            switch sheet {
-            case .categoryPicker:
-                CategoryPickerSheet(
-                    title: L("category_picker.title"),
-                    entries: pickerEntries,
-                    playlistId: playlist.id,
-                    type: "live"
-                ) { id in
-                    activeSheet = nil
-                    pendingScrollTarget = id
-                }
-            case .parentalPIN:
-                // Build 61 (B3, item 5): PIN sheet for the playback
-                // guard in presentLiveSelection — success
-                // session-unlocks the category and plays the pending
-                // selection.
-                PINEntrySheet(message: L("parental.locked.enter_pin")) {
-                    if let pending = parentalPendingSelection {
-                        if let categoryId = pending.stream.categoryId {
-                            ParentalControlStore.shared.unlockForSession(
-                                playlistId: playlist.id, type: "live", categoryId: categoryId
-                            )
-                        }
-                        parentalPendingSelection = nil
-                        presentLiveSelection(pending)
+        .sheet(isPresented: $showingCategoryPicker) {
+            CategoryPickerSheet(
+                title: L("category_picker.title"),
+                entries: pickerEntries,
+                playlistId: playlist.id,
+                type: "live"
+            ) { id in
+                showingCategoryPicker = false
+                pendingScrollTarget = id
+            }
+        }
+        // Build 61 (B3, item 5): PIN sheet for the playback guard
+        // in presentLiveSelection — success session-unlocks the
+        // category and plays the pending selection.
+        .sheet(isPresented: $showParentalPIN) {
+            PINEntrySheet(message: L("parental.locked.enter_pin")) {
+                if let pending = parentalPendingSelection {
+                    if let categoryId = pending.stream.categoryId {
+                        ParentalControlStore.shared.unlockForSession(
+                            playlistId: playlist.id, type: "live", categoryId: categoryId
+                        )
                     }
+                    parentalPendingSelection = nil
+                    presentLiveSelection(pending)
                 }
-            case .search:
-                NavigationStack {
-                    // Round 10: SearchView owns its big title — the
-                    // wrapper's inline title was removed.
-                    SearchView(playlist: playlist, searchText: $homeSearchText, initialFilter: .live)
-                }
+            }
+        }
+        .sheet(isPresented: $showSearchSheet) {
+            NavigationStack {
+                // Round 10: SearchView owns its big title — the
+                // wrapper's inline title was removed.
+                SearchView(playlist: playlist, searchText: $homeSearchText, initialFilter: .live)
             }
         }
         // === B5 (build 61) Item 11: Multiview sheet — wave-2 (B8) preserve ===
@@ -381,7 +355,7 @@ struct LiveStreamsView: View {
             playlistId: playlist.id, type: "live", categoryId: selection.stream.categoryId
         ) {
             parentalPendingSelection = selection
-            activeSheet = .parentalPIN
+            showParentalPIN = true
             return
         }
         // Build 61 (B8, R2): opening the channel clears its NEW badge.
@@ -450,7 +424,7 @@ struct LiveStreamsView: View {
     @ViewBuilder
     private var homeHeader: some View {
         HomeSearchBar(placeholder: L("home.search_placeholder")) {
-            activeSheet = .search
+            showSearchSheet = true
         }
         .padding(.horizontal, 16)
         .padding(.top, 4)
@@ -923,14 +897,7 @@ struct LiveStreamCard: View {
         Button(action: {
             onStreamSelected?(stream, nil)
         }) {
-            // Build 67 (W6, S2 — Cinematic Glass, owner pick): the
-            // channel tile is a frosted glass card (ultraThinMaterial
-            // over the AppTheme surface tint). Logo + name, the
-            // provider number when present, and under the name the
-            // REAL EPG now/next block — rendered only when the
-            // loaded guide actually has a programme for this channel
-            // (no placeholder, no reserved empty row).
-            VStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .center, spacing: 10) {
                 CachedImage(
                     url: stream.streamIcon.flatMap { URL(string: $0) },
                     width: iconSize,
@@ -986,15 +953,10 @@ struct LiveStreamCard: View {
                 }
 
                 if let snapshot = epgSnapshot {
-                    ChannelEPGNowNextBlock(
-                        nowNext: snapshot[EPGChannelKey.forXtream(stream)],
-                        width: width
-                    )
+                    EPGNowNextLine(nowNext: snapshot[EPGChannelKey.forXtream(stream)],
+                                   width: width, reserveSpace: true)
                 }
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 10)
-            .sectionGlassTile()
         }
         .buttonStyle(.plain)
     }

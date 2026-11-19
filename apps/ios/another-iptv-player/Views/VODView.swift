@@ -66,30 +66,14 @@ struct VODView: View {
     // went with it; All Movies and the category screens keep their own
     // search fields.
     @State private var homeSearchText = ""
-    // Build 67 (W6, F3): the tab's sheets are presented through ONE
-    // `.sheet(item:)` — the old stack of several `.sheet(isPresented:)`
-    // modifiers on this same view left only one binding reliably
-    // honored, which is why tapping the header search bar did nothing
-    // on the owner's phone (the category-picker sheet, attached first,
-    // won; the search sheet never presented). One item-driven sheet
-    // presents whichever case is set.
-    @State private var activeSheet: LandingSheet? = nil
-
-    /// Build 67 (W6, F3): the Movies tab's three sheets, presented
-    /// through the single `.sheet(item:)` on the body.
-    enum LandingSheet: Identifiable {
-        case categoryPicker
-        case search
-        case sort
-
-        var id: Int {
-            switch self {
-            case .categoryPicker: return 0
-            case .search: return 1
-            case .sort: return 2
-            }
-        }
-    }
+    @State private var showSearchSheet = false
+    /// Build 68: the landing sort sheet's presentation state — the
+    /// sheet is attached to the category sort header itself (see
+    /// `categorySortHeader`), not stacked on the tab root. Build
+    /// 67's single item-driven root sheet was its F3 search fix;
+    /// that fix is NOT ported, so the tab root keeps build 66's
+    /// two `.sheet(isPresented:)` attachments exactly.
+    @State private var showSortSheet = false
 
     /// Build 67 (W6, S8): the landing sort — the SAME persisted C1
     /// option (`VODSortOption.storageKey`) the category screens use,
@@ -126,6 +110,7 @@ struct VODView: View {
         self.playlist = playlist
     }
 
+    @State private var showingCategoryPicker = false
     @State private var pendingScrollTarget: String? = nil
     // Build 61 fixer (O9): scroll restoration for the Movies shelf
     // list — the category shelf at the top anchor, persisted per
@@ -308,7 +293,7 @@ struct VODView: View {
             // shelf's "See all"). The shelf entry stays as the ONE path.
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
-                    activeSheet = .categoryPicker
+                    showingCategoryPicker = true
                 } label: {
                     Image(systemName: "list.bullet.indent")
                         .font(.body.weight(.semibold))
@@ -317,46 +302,26 @@ struct VODView: View {
                 .accessibilityLabel(L("list.jump_to_category"))
             }
         }
-        // Build 67 (W6, F3): ONE item-driven sheet for the whole tab
-        // (see the `activeSheet` note at the state declarations).
-        .sheet(item: $activeSheet) { sheet in
-            switch sheet {
-            case .categoryPicker:
-                CategoryPickerSheet(
-                    title: L("category_picker.title"),
-                    entries: pickerEntries,
-                    playlistId: playlist.id,
-                    type: "vod"
-                ) { id in
-                    activeSheet = nil
-                    pendingScrollTarget = id
-                }
-            case .search:
-                NavigationStack {
-                    // Round 10: SearchView owns its big title — the
-                    // wrapper's inline title was removed.
-                    // Build 64 (A4): pass .movies — build 63's item-15
-                    // wiring missed this call site, so the Movies tab's
-                    // search bar opened on the default filter while its
-                    // placeholder promised the section's own content.
-                    SearchView(playlist: playlist, searchText: $homeSearchText, initialFilter: .movies)
-                }
-            case .sort:
-                // Build 67 (W6, S8): the landing sort — the C1 option
-                // set, applied to the category grid below.
-                SortFilterSheet(
-                    sortRows: VODSortOption.allCases.map { option in
-                        SortFilterSheet.Row(
-                            id: option.rawValue,
-                            title: L(option.titleKey),
-                            systemImage: option.systemImage,
-                            isSelected: sortOption == option
-                        ) { sortOption = option }
-                    },
-                    onClearFilters: sortOption == .defaultOrder ? nil : {
-                        sortOption = .defaultOrder
-                    }
-                )
+        .sheet(isPresented: $showingCategoryPicker) {
+            CategoryPickerSheet(
+                title: L("category_picker.title"),
+                entries: pickerEntries,
+                playlistId: playlist.id,
+                type: "vod"
+            ) { id in
+                showingCategoryPicker = false
+                pendingScrollTarget = id
+            }
+        }
+        .sheet(isPresented: $showSearchSheet) {
+            NavigationStack {
+                // Round 10: SearchView owns its big title — the
+                // wrapper's inline title was removed.
+                // Build 64 (A4): pass .movies — build 63's item-15
+                // wiring missed this call site, so the Movies tab's
+                // search bar opened on the default filter while its
+                // placeholder promised the section's own content.
+                SearchView(playlist: playlist, searchText: $homeSearchText, initialFilter: .movies)
             }
         }
         // Round 8 (audit A2): ONE recompute trigger — the same combined
@@ -405,7 +370,7 @@ struct VODView: View {
     private var tabHeader: some View {
         VStack(alignment: .leading, spacing: 12) {
             HomeSearchBar(placeholder: L("home.search_placeholder")) {
-                activeSheet = .search
+                showSearchSheet = true
             }
             .padding(.horizontal, 16)
             .padding(.top, 4)
@@ -500,7 +465,9 @@ struct VODView: View {
 
     /// Build 67 (W6, S8): the header shown above a selected
     /// category's grid — the category's name + real count and the
-    /// sort button (the C1 sort sheet, via the tab's one sheet).
+    /// sort button (the C1 sort sheet; build 68 presents it from
+    /// the header itself — see the `showSortSheet` note at the
+    /// state declarations).
     private func categorySortHeader(for category: DBCategory) -> some View {
         HStack(spacing: 8) {
             Text(category.name)
@@ -514,7 +481,7 @@ struct VODView: View {
                 .background(Capsule().fill(AppTheme.accent))
             Spacer()
             Button {
-                activeSheet = .sort
+                showSortSheet = true
             } label: {
                 Image(systemName: sortOption == .defaultOrder
                     ? "line.3.horizontal.decrease.circle"
@@ -525,6 +492,23 @@ struct VODView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 4)
+        .sheet(isPresented: $showSortSheet) {
+            // Build 67 (W6, S8): the landing sort — the C1 option
+            // set, applied to the category grid below.
+            SortFilterSheet(
+                sortRows: VODSortOption.allCases.map { option in
+                    SortFilterSheet.Row(
+                        id: option.rawValue,
+                        title: L(option.titleKey),
+                        systemImage: option.systemImage,
+                        isSelected: sortOption == option
+                    ) { sortOption = option }
+                },
+                onClearFilters: sortOption == .defaultOrder ? nil : {
+                    sortOption = .defaultOrder
+                }
+            )
+        }
     }
 
     /// Build 67 (W6, S8): one By Year rail — a year's REAL movies
