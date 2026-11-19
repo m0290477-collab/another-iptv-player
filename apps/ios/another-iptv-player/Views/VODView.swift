@@ -718,7 +718,7 @@ struct RecentlyAddedVODDetailView: View {
     private var displayItems: [VODWithCategory] {
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         if q.isEmpty { return wrapped }
-        return wrapped.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name) }
+        return wrapped.filter { CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.stream.name) }
     }
 
     var body: some View {
@@ -986,6 +986,7 @@ struct VODCategoryDetailView: View {
     let category: DBCategory
 
     @ObservedObject private var contentStore = PlaylistContentStore.shared
+    @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
     @State private var searchText = ""
     @State private var debouncedQuery = ""
     @State private var debounceTask: Task<Void, Never>?
@@ -1016,8 +1017,14 @@ struct VODCategoryDetailView: View {
         let base = contentStore.vodStreamsByCategoryId[category.id] ?? []
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         if q.isEmpty { displayItems = base; return }
+        // Build 63 (item 15): a non-empty query searches the FULL
+        // movies catalog (hidden categories excluded); the empty
+        // query above keeps the category bucket untouched.
+        let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod")
+        let source = contentStore.vodStreams
         let result = await Task.detached(priority: .userInitiated) {
-            let filtered = base.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name) }
+            let visible = source.filter { !hidden.contains($0.stream.categoryId ?? "") }
+            let filtered = visible.filter { CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.stream.name) }
             return CatalogTextSearch.sortVODByRelevance(filtered, search: q)
         }.value
         guard !Task.isCancelled else { return }
@@ -1362,7 +1369,7 @@ struct AllVODView: View {
         let result = await Task.detached(priority: .userInitiated) {
             let base = source.filter { !hidden.contains($0.stream.categoryId ?? "") }
             if q.isEmpty { return base }
-            let filtered = base.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name) }
+            let filtered = base.filter { CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.stream.name) }
             return CatalogTextSearch.sortVODByRelevance(filtered, search: q)
         }.value
         guard !Task.isCancelled else { return }

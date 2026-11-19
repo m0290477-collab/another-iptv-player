@@ -239,7 +239,7 @@ final class PlaylistContentStore: ObservableObject {
         let base = liveStreamsByCategoryId[categoryId] ?? []
         let q = searchText.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return base }
-        let filtered = base.filter { CatalogTextSearch.matches(search: q, text: $0.stream.name) }
+        let filtered = base.filter { CatalogTextSearch.matchesSection(search: q, text: $0.stream.name) }
         return CatalogTextSearch.sortLiveByRelevance(filtered, search: q)
     }
 
@@ -247,7 +247,7 @@ final class PlaylistContentStore: ObservableObject {
         let base = vodStreamsByCategoryId[categoryId] ?? []
         let q = searchText.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return base }
-        let filtered = base.filter { CatalogTextSearch.matches(search: q, text: $0.stream.name) }
+        let filtered = base.filter { CatalogTextSearch.matchesSection(search: q, text: $0.stream.name) }
         return CatalogTextSearch.sortVODByRelevance(filtered, search: q)
     }
 
@@ -255,7 +255,7 @@ final class PlaylistContentStore: ObservableObject {
         let base = seriesItemsByCategoryId[categoryId] ?? []
         let q = searchText.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return base }
-        let filtered = base.filter { CatalogTextSearch.matches(search: q, text: $0.series.name) }
+        let filtered = base.filter { CatalogTextSearch.matchesSection(search: q, text: $0.series.name) }
         return CatalogTextSearch.sortSeriesByRelevance(filtered, search: q)
     }
 

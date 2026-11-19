@@ -29,6 +29,82 @@ nonisolated enum CatalogTextSearch {
         }
     }
 
+    // MARK: - Build 63 (item 15): in-section search matching
+    //
+    // The strict `matches` above is mirrored by the GRDB SQL layer
+    // and must not change. Section search (the Series / Movies /
+    // Live category + grid searches) gets its own matcher with the
+    // same fold PLUS the Arabic typing equivalences the strict
+    // fold cannot express: ة (U+0629) has no canonical
+    // decomposition to ه (U+0647), and ى (U+0649) none to ي
+    // (U+064A) — yet users type ه for ة and ي for ى constantly, so
+    // strict contains silently missed those titles. Persian
+    // keyboard variants ک (U+06A9) / ی (U+06CC) map to their
+    // Arabic counterparts, and the tatweel (U+0640, category Lm —
+    // it survives the alphanumeric split) is stripped. Applied to
+    // BOTH the query and the title, exactly like `normalize`.
+    /// The shared section fold (case/diacritic fold + the Arabic
+    /// equivalences above), before token splitting.
+    private static func sectionFold(_ s: String) -> String {
+        s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: foldLocale)
+            .replacingOccurrences(of: "ı", with: "i")
+            .replacingOccurrences(of: "\u{0629}", with: "\u{0647}")
+            .replacingOccurrences(of: "\u{0649}", with: "\u{064A}")
+            .replacingOccurrences(of: "\u{06A9}", with: "\u{0643}")
+            .replacingOccurrences(of: "\u{06CC}", with: "\u{064A}")
+            .replacingOccurrences(of: "\u{0640}", with: "")
+    }
+
+    private static func normalizeSection(_ s: String) -> String {
+        sectionFold(s)
+            .components(separatedBy: alphanumericSet.inverted)
+            .joined()
+    }
+
+    /// Token-tolerant contains over the section-normalized text:
+    /// every query word's normalized form must appear in the
+    /// joined normalized title (same all-words rule as `matches`).
+    static func matchesSection(search: String, text: String) -> Bool {
+        let normalizedText = normalizeSection(text)
+        let queryWords = search
+            .components(separatedBy: .whitespaces)
+            .filter { !$0.isEmpty }
+        if queryWords.isEmpty { return true }
+        return queryWords.allSatisfy { word in
+            normalizedText.contains(normalizeSection(word))
+        }
+    }
+
+    /// Section fold that KEEPS word boundaries (the fuzzy layer's
+    /// token shape, with the section equivalences applied).
+    private static func normalizeSectionTokens(_ s: String) -> [String] {
+        sectionFold(s)
+            .components(separatedBy: alphanumericSet.inverted)
+            .filter { !$0.isEmpty }
+    }
+
+    /// The Q13 fuzzy score computed over section-normalized
+    /// tokens: identical tiers to `fuzzyScore` (exact token <
+    /// prefix < substring < bounded-typo), so section search keeps
+    /// the typo tolerance it already had AND gains the Arabic
+    /// equivalences.
+    static func sectionFuzzyScore(search: String, text: String) -> Int? {
+        let queryWords = normalizeSectionTokens(search)
+        if queryWords.isEmpty { return 0 }
+        let tokens = normalizeSectionTokens(text)
+        let joined = tokens.joined()
+        var total = 0
+        for word in queryWords {
+            guard let score = wordScore(word, tokens: tokens, joined: joined) else { return nil }
+            total += score
+        }
+        return total
+    }
+
+    static func matchesSectionFuzzy(search: String, text: String) -> Bool {
+        sectionFuzzyScore(search: search, text: text) != nil
+    }
+
     // MARK: - Build 61 (B10, Q13): fuzzy / typo-tolerant matching
     //
     // `matches` above stays the strict core (its `normalize` is

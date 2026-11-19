@@ -685,7 +685,7 @@ struct LiveStreamsView: View {
         let flat = displayCategories.flatMap { displayItemsByCategory[$0.id] ?? [] }
         let q = gridDebouncedQuery.trimmingCharacters(in: .whitespaces)
         gridItems = q.isEmpty ? flat : flat.filter {
-            CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name)
+            CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.stream.name)
                 || ($0.stream.channelNumber.map { String($0) == q } ?? false)
         }
         // Round 8 (audit A3): cache the sections here — the old computed
@@ -1017,6 +1017,7 @@ struct LiveCategoryDetailView: View {
     @State private var displayItems: [LiveStreamWithCategory] = []
 
     @ObservedObject private var contentStore = PlaylistContentStore.shared
+    @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
 
     private var currentStreams: [DBLiveStream] { displayItems.map(\.stream) }
@@ -1062,11 +1063,17 @@ struct LiveCategoryDetailView: View {
         let base = contentStore.liveStreamsByCategoryId[category.id] ?? []
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         if q.isEmpty { displayItems = base; return }
+        // Build 63 (item 15): a non-empty query searches the FULL
+        // live catalog (hidden categories excluded); the empty
+        // query above keeps the category bucket untouched.
+        let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")
+        let source = contentStore.liveStreams
         let result = await Task.detached(priority: .userInitiated) {
+            let visible = source.filter { !hidden.contains($0.stream.categoryId ?? "") }
             // Build 61 (B8, C11 + H5): the in-list field matches the
             // provider channel number as well as the name.
-            let filtered = base.filter {
-                CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name)
+            let filtered = visible.filter {
+                CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.stream.name)
                     || ($0.stream.channelNumber.map { String($0) == q } ?? false)
             }
             return CatalogTextSearch.sortLiveByRelevance(filtered, search: q)
@@ -1351,7 +1358,7 @@ struct AllLiveView: View {
             if q.isEmpty { return base }
             // Build 61 (B8, C11 + H5): name OR provider channel number.
             let filtered = base.filter {
-                CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name)
+                CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.stream.name)
                     || ($0.stream.channelNumber.map { String($0) == q } ?? false)
             }
             return CatalogTextSearch.sortLiveByRelevance(filtered, search: q)

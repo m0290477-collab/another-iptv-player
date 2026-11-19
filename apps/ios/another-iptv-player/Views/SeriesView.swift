@@ -725,7 +725,7 @@ struct RecentlyAddedSeriesDetailView: View {
     private var displayItems: [SeriesWithCategory] {
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         if q.isEmpty { return wrapped }
-        return wrapped.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.series.name) }
+        return wrapped.filter { CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.series.name) }
     }
 
     var body: some View {
@@ -1022,6 +1022,7 @@ struct SeriesCategoryDetailView: View {
     let category: DBCategory
 
     @ObservedObject private var contentStore = PlaylistContentStore.shared
+    @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
     @State private var searchText = ""
     @State private var debouncedQuery = ""
     @State private var debounceTask: Task<Void, Never>?
@@ -1052,8 +1053,16 @@ struct SeriesCategoryDetailView: View {
         let base = contentStore.seriesItemsByCategoryId[category.id] ?? []
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         if q.isEmpty { displayItems = base; return }
+        // Build 63 (item 15): a non-empty query searches the FULL
+        // series catalog (hidden categories excluded, exactly as
+        // AllSeriesView) — a title filed under another category
+        // can now surface from this category's search; the empty
+        // query above keeps the category bucket untouched.
+        let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")
+        let source = contentStore.seriesItems
         let result = await Task.detached(priority: .userInitiated) {
-            let filtered = base.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.series.name) }
+            let visible = source.filter { !hidden.contains($0.series.categoryId ?? "") }
+            let filtered = visible.filter { CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.series.name) }
             return CatalogTextSearch.sortSeriesByRelevance(filtered, search: q)
         }.value
         guard !Task.isCancelled else { return }
@@ -1349,7 +1358,7 @@ struct AllSeriesView: View {
         let result = await Task.detached(priority: .userInitiated) {
             let base = source.filter { !hidden.contains($0.series.categoryId ?? "") }
             if q.isEmpty { return base }
-            let filtered = base.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.series.name) }
+            let filtered = base.filter { CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.series.name) }
             return CatalogTextSearch.sortSeriesByRelevance(filtered, search: q)
         }.value
         guard !Task.isCancelled else { return }
@@ -1744,7 +1753,16 @@ struct SeriesDetailView: View {
         let remoteURL = PlaybackURLBuilder(playlist: playlist).seriesURL(
             streamId: ep.episodeId ?? ep.id, containerExtension: ep.containerExtension
         )
-        guard let url = localOverrideURL ?? remoteURL else { return }
+        // Build 63 (item 16): this guard was the episode path's
+        // last silent death — a switch tap (episode list, next /
+        // previous) whose URL failed to build vanished with no
+        // feedback at all, the exact failure shape B1 outlawed on
+        // the neighbouring paths. It now surfaces the same
+        // play-failure alert they use.
+        guard let url = localOverrideURL ?? remoteURL else {
+            showPlayFailure = true
+            return
+        }
         let cover = ep.cover.flatMap { URL(string: $0) } ?? currentSeries.cover.flatMap { URL(string: $0) }
         playerOverlay.present(onDismiss: { selectedEpisode = nil }, skipDownloadCheck: localOverrideURL != nil, playlistId: playlist.id) {
             PlayerView(
