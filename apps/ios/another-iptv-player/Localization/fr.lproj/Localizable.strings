@@ -368,8 +368,6 @@
 "player.tracks.fallback_title" = "Piste %d";
 
 /* EPG (Electronic Programme Guide) */
-"epg.guide.title" = "Guide TV";
-
 // MARK: - VOD sort & filter
 "sort.title" = "Trier";
 "sort.default" = "Par défaut";
@@ -384,9 +382,6 @@
 "browse.all_series" = "Toutes les séries";
 "browse.all_live" = "Toutes les chaînes";
 "filter.title" = "Filtre";
-"filter.catchup" = "Rattrapage disponible";
-"filter.has_epg" = "Avec EPG";
-
 // MARK: - Entry gate (round 4)
 "gate.sign_in" = "Se connecter";
 "gate.load_playlist" = "Charger la playlist";
@@ -736,8 +731,6 @@
 "channels.hide" = "Masquer la chaîne";
 "channels.number_format" = "Chaîne %@";
 "channels.pin" = "Épingler la chaîne";
-"channels.preview.next" = "Ensuite";
-"channels.preview.now" = "Maintenant";
 "channels.preview.play" = "Lire";
 "channels.preview.title" = "Aperçu de la chaîne";
 "channels.recent.title" = "Chaînes récentes";
@@ -1047,3 +1040,13 @@
 "b67w8.progress.percent" = "%d%%";
 "b67w8.progress.guide_background" = "Le guide continue de se charger en arrière-plan.";
 "b67w6.categories" = "Catégories";
+"b68wa.hub.playlists_count_format" = "%d listes de lecture";
+"organize.title" = "Organiser";
+"organize.hidden_channels" = "Chaînes masquées";
+"organize.hidden_categories" = "Catégories masquées";
+"organize.pinned_channels" = "Chaînes épinglées";
+"organize.category_order" = "Ordre des catégories";
+"organize.reorder_channels" = "Réordonner les chaînes";
+"organize.choose_category" = "Choisir une catégorie";
+"organize.unhide" = "Afficher";
+"organize.none" = "Aucun";

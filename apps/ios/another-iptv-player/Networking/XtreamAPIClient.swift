@@ -239,23 +239,7 @@ class XtreamAPIClient {
         return try await fetch(action: "get_vod_info", queryItems: queryItems)
     }
 
-    // MARK: - EPG
-
-    /// Short now/next EPG for one channel — used as the player overlay fallback
-    /// when the XMLTV guide is missing/broken. Never call this per shelf card.
-    func getShortEPG(streamId: Int, limit: Int = EPGConstants.shortEPGLimit) async throws -> XtreamEPGListingsResponse {
-        let queryItems = [
-            URLQueryItem(name: "stream_id", value: String(streamId)),
-            URLQueryItem(name: "limit", value: String(limit))
-        ]
-        return try await fetch(action: "get_short_epg", queryItems: queryItems)
-    }
-
-    /// Full per-channel EPG table (past + future, includes archive flags) — used
-    /// for the channel detail list and catch-up when XMLTV lacks past programmes.
-    func getSimpleDataTable(streamId: Int) async throws -> XtreamEPGListingsResponse {
-        let queryItems = [URLQueryItem(name: "stream_id", value: String(streamId))]
-        return try await fetch(action: "get_simple_data_table", queryItems: queryItems)
-    }
+    // Build 68: the EPG endpoints (get_short_epg / get_simple_data_table)
+    // were removed with the TV Guide — the app is a player, it has no guide.
 
 }

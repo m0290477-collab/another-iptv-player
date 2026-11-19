@@ -368,8 +368,6 @@
 "player.tracks.fallback_title" = "ट्रैक %d";
 
 /* EPG (Electronic Programme Guide) */
-"epg.guide.title" = "TV गाइड";
-
 // MARK: - VOD sort & filter
 "sort.title" = "क्रमबद्ध करें";
 "sort.default" = "डिफ़ॉल्ट";
@@ -384,9 +382,6 @@
 "browse.all_series" = "सभी सीरीज़";
 "browse.all_live" = "सभी चैनल";
 "filter.title" = "फ़िल्टर";
-"filter.catchup" = "कैच-अप उपलब्ध";
-"filter.has_epg" = "EPG उपलब्ध";
-
 // MARK: - Entry gate (round 4)
 "gate.sign_in" = "साइन इन करें";
 "gate.load_playlist" = "प्लेलिस्ट लोड करें";
@@ -736,8 +731,6 @@
 "channels.hide" = "चैनल छिपाएँ";
 "channels.number_format" = "चैनल %@";
 "channels.pin" = "चैनल पिन करें";
-"channels.preview.next" = "अगला";
-"channels.preview.now" = "अभी";
 "channels.preview.play" = "चलाएँ";
 "channels.preview.title" = "चैनल पूर्वावलोकन";
 "channels.recent.title" = "हाल के चैनल";
@@ -1047,3 +1040,13 @@
 "b67w8.progress.percent" = "%d%%";
 "b67w8.progress.guide_background" = "गाइड पृष्ठभूमि में अभी भी लोड हो रही है।";
 "b67w6.categories" = "श्रेणियाँ";
+"b68wa.hub.playlists_count_format" = "%d प्लेलिस्ट";
+"organize.title" = "व्यवस्थित करें";
+"organize.hidden_channels" = "छिपे हुए चैनल";
+"organize.hidden_categories" = "छिपी हुई श्रेणियाँ";
+"organize.pinned_channels" = "पिन किए गए चैनल";
+"organize.category_order" = "श्रेणी क्रम";
+"organize.reorder_channels" = "चैनल पुनः क्रमित करें";
+"organize.choose_category" = "श्रेणी चुनें";
+"organize.unhide" = "दिखाएँ";
+"organize.none" = "कोई नहीं";

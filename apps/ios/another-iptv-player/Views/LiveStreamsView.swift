@@ -23,7 +23,6 @@ struct LiveStreamsView: View {
     // Build 61 (B9, Q10): dead-channel markings (hide-dead filter).
     @ObservedObject private var channelHealth = ChannelHealthStore.shared
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
-    @Environment(\.epgSnapshot) private var epgSnapshot
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.posterMetrics) private var posterMetrics
     @State private var heroScrollVisible = false
@@ -41,8 +40,7 @@ struct LiveStreamsView: View {
     @State private var gridItems: [LiveStreamWithCategory] = []
     /// Build 65 (inside-sections): the grid mode's category chip
     /// selection — nil = every visible channel; a category id
-    /// filters the SAME grid (cards already carry their real EPG
-    /// now/next lines via `EPGNowNextLine`).
+    /// filters the SAME grid.
     @State private var selectedCategoryId: String? = nil
 
     private var filteredGridItems: [LiveStreamWithCategory] {
@@ -162,13 +160,6 @@ struct LiveStreamsView: View {
     private func heroHistory(for stream: DBLiveStream) -> DBWatchHistory? {
         guard let item = recentLiveHistory.first, Int(item.streamId) == stream.streamId else { return nil }
         return item
-    }
-
-    /// The hero subtitle is the channel's REAL current EPG programme title;
-    /// nil when the guide has nothing for the channel (subtitle omitted).
-    private func heroNowTitle(for stream: DBLiveStream) -> String? {
-        guard let snapshot = epgSnapshot else { return nil }
-        return snapshot[EPGChannelKey.forXtream(stream)]?.now?.title
     }
 
     /// The hero's live preview may run only while the hero is actually on
@@ -442,7 +433,6 @@ struct LiveStreamsView: View {
             if let hero = heroStream {
                 LiveHeroCard(
                     stream: hero,
-                    nowProgramTitle: heroNowTitle(for: hero),
                     previewURL: PlaybackURLBuilder(playlist: playlist).liveURL(streamId: hero.streamId),
                     previewActive: heroPreviewActive,
                     userAgent: playlist.trimmedUserAgent
@@ -877,7 +867,6 @@ struct LiveStreamCard: View {
     var imageLoadProfile: ImageLoadProfile = .standard
     var onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil
 
-    @Environment(\.epgSnapshot) private var epgSnapshot
     // Build 61 (B8): R2 NEW badge + C10 pin indicator, read from the
     // stores at render (cards are cheap; the stores bump `version`).
     @ObservedObject private var firstSeenStore = FirstSeenStore.shared
@@ -945,10 +934,6 @@ struct LiveStreamCard: View {
                         .lineLimit(1)
                 }
 
-                if let snapshot = epgSnapshot {
-                    EPGNowNextLine(nowNext: snapshot[EPGChannelKey.forXtream(stream)],
-                                   width: width, reserveSpace: true)
-                }
             }
         }
         .buttonStyle(.plain)
@@ -1301,18 +1286,10 @@ struct LiveCategoryContent: View, Equatable {
                     ) { sortOption = option }
                 },
                 filterTitle: L("filter.title"),
-                filterRows: [
-                    SortFilterSheet.Row(
-                        id: "catchup",
-                        title: L("filter.catchup"),
-                        isSelected: filter.contains(.catchup)
-                    ) { filter.formSymmetricDifference(.catchup) },
-                    SortFilterSheet.Row(
-                        id: "hasEPG",
-                        title: L("filter.has_epg"),
-                        isSelected: filter.contains(.hasEPG)
-                    ) { filter.formSymmetricDifference(.hasEPG) }
-                ],
+                // Build 68: the catch-up and has-guide filter rows are
+                // gone with the TV Guide / catch-up removal — the sheet
+                // hides its filter section when no rows remain.
+                filterRows: [],
                 // B1 (Round 14): Clear resets the FILTERS and the
                 // SORT together — the old clear left a non-default
                 // sort silently in force.
@@ -1499,7 +1476,6 @@ struct LivePlayerShell: View {
                     // Build 61 (FA, F-2/G2): the playlist's custom
                     // headers reach playback alongside the UA.
                     customHeaders: playlist.customHeaders,
-                    epgChannelKey: EPGChannelKey.forXtream(session.stream),
                     canGoToPreviousChannel: (currentIndex ?? 0) > 0,
                     canGoToNextChannel: {
                         guard let index = currentIndex else { return false }

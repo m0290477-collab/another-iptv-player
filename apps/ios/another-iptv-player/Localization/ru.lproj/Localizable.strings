@@ -368,8 +368,6 @@
 "player.tracks.fallback_title" = "Дорожка %d";
 
 /* EPG (Electronic Programme Guide) */
-"epg.guide.title" = "Телепрограмма";
-
 // MARK: - VOD sort & filter
 "sort.title" = "Сортировка";
 "sort.default" = "По умолчанию";
@@ -384,9 +382,6 @@
 "browse.all_series" = "Все сериалы";
 "browse.all_live" = "Все каналы";
 "filter.title" = "Фильтр";
-"filter.catchup" = "Есть архив";
-"filter.has_epg" = "Есть EPG";
-
 // MARK: - Entry gate (round 4)
 "gate.sign_in" = "Войти";
 "gate.load_playlist" = "Загрузить плейлист";
@@ -736,8 +731,6 @@
 "channels.hide" = "Скрыть канал";
 "channels.number_format" = "Канал %@";
 "channels.pin" = "Закрепить канал";
-"channels.preview.next" = "Далее";
-"channels.preview.now" = "Сейчас";
 "channels.preview.play" = "Смотреть";
 "channels.preview.title" = "Предпросмотр канала";
 "channels.recent.title" = "Недавние каналы";
@@ -1047,3 +1040,13 @@
 "b67w8.progress.percent" = "%d%%";
 "b67w8.progress.guide_background" = "Гид продолжает загружаться в фоновом режиме.";
 "b67w6.categories" = "Категории";
+"b68wa.hub.playlists_count_format" = "%d плейлистов";
+"organize.title" = "Организация";
+"organize.hidden_channels" = "Скрытые каналы";
+"organize.hidden_categories" = "Скрытые категории";
+"organize.pinned_channels" = "Закреплённые каналы";
+"organize.category_order" = "Порядок категорий";
+"organize.reorder_channels" = "Изменить порядок каналов";
+"organize.choose_category" = "Выберите категорию";
+"organize.unhide" = "Показать";
+"organize.none" = "Нет";

@@ -441,8 +441,6 @@
 "player.tracks.fallback_title" = "Track %d";
 
 /* EPG (Electronic Programme Guide) */
-"epg.guide.title" = "TV Guide";
-
 // MARK: - VOD sort & filter
 "sort.title" = "Sort";
 "sort.default" = "Default";
@@ -457,9 +455,6 @@
 "browse.all_series" = "All Series";
 "browse.all_live" = "All Channels";
 "filter.title" = "Filter";
-"filter.catchup" = "Catch-up available";
-"filter.has_epg" = "Has EPG";
-
 // MARK: - Round 10
 "common.done" = "Done";
 "settings.sign_out" = "Sign Out";
@@ -754,8 +749,6 @@
 "channels.hide" = "Hide Channel";
 "channels.number_format" = "Channel %@";
 "channels.pin" = "Pin Channel";
-"channels.preview.next" = "Next";
-"channels.preview.now" = "Now";
 "channels.preview.play" = "Play";
 "channels.preview.title" = "Channel Preview";
 "channels.recent.title" = "Recent Channels";
@@ -1065,3 +1058,13 @@
 "b67w8.progress.percent" = "%d%%";
 "b67w8.progress.guide_background" = "The guide is still loading in the background.";
 "b67w6.categories" = "Categories";
+"b68wa.hub.playlists_count_format" = "%d playlists";
+"organize.title" = "Organize";
+"organize.hidden_channels" = "Hidden Channels";
+"organize.hidden_categories" = "Hidden Categories";
+"organize.pinned_channels" = "Pinned Channels";
+"organize.category_order" = "Category Order";
+"organize.reorder_channels" = "Reorder Channels";
+"organize.choose_category" = "Choose a Category";
+"organize.unhide" = "Unhide";
+"organize.none" = "None";

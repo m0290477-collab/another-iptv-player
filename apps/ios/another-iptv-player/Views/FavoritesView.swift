@@ -22,7 +22,6 @@ struct FavoritesView: View {
     @State private var selectedType: String
     @State private var searchText = ""
     @Environment(\.posterMetrics) private var posterMetrics
-    @Environment(\.epgSnapshot) private var epgSnapshot
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
 
     @Query<FavoriteLiveRequest> private var favoriteLive: [LiveStreamWithCategory]
@@ -263,9 +262,9 @@ struct FavoritesView: View {
         .padding(.horizontal, 16)
     }
 
-    /// Favorite Channels shelf: logo ROWS with the real EPG
-    /// now/next line (the same `EPGNowNextLine` the channel
-    /// cards render, LIVE badge included).
+    /// Favorite Channels shelf: logo ROWS (channel name only —
+    /// the guide's now/next line went with the TV Guide removal
+    /// in build 68).
     private var liveShelf: some View {
         VStack(alignment: .leading, spacing: 12) {
             shelfHeader(L("favorites.shelf.channels"), count: displayedLive.count)
@@ -287,13 +286,6 @@ struct FavoritesView: View {
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
-                                if let snapshot = epgSnapshot {
-                                    EPGNowNextLine(
-                                        nowNext: snapshot[EPGChannelKey.forXtream(item.stream)],
-                                        width: 230,
-                                        reserveSpace: true
-                                    )
-                                }
                             }
                             Spacer(minLength: 4)
                             Image(systemName: "play.circle.fill")

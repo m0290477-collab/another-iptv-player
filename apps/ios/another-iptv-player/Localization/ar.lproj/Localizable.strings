@@ -368,8 +368,6 @@
 "player.tracks.fallback_title" = "المسار %d";
 
 /* EPG (Electronic Programme Guide) */
-"epg.guide.title" = "دليل التلفزيون";
-
 // MARK: - VOD sort & filter
 "sort.title" = "فرز";
 "sort.default" = "افتراضي";
@@ -384,9 +382,6 @@
 "browse.all_series" = "كل المسلسلات";
 "browse.all_live" = "كل القنوات";
 "filter.title" = "تصفية";
-"filter.catchup" = "الإعادة متاحة";
-"filter.has_epg" = "يحتوي EPG";
-
 // MARK: - Entry gate (round 4)
 "gate.sign_in" = "تسجيل الدخول";
 "gate.load_playlist" = "تحميل قائمة التشغيل";
@@ -736,8 +731,6 @@
 "channels.hide" = "إخفاء القناة";
 "channels.number_format" = "القناة %@";
 "channels.pin" = "تثبيت القناة";
-"channels.preview.next" = "التالي";
-"channels.preview.now" = "الآن";
 "channels.preview.play" = "تشغيل";
 "channels.preview.title" = "معاينة القناة";
 "channels.recent.title" = "القنوات الأخيرة";
@@ -1047,3 +1040,13 @@
 "b67w8.progress.percent" = "%d%%";
 "b67w8.progress.guide_background" = "الدليل ما زال يُحمَّل في الخلفية.";
 "b67w6.categories" = "الفئات";
+"b68wa.hub.playlists_count_format" = "%d قائمة تشغيل";
+"organize.title" = "تنظيم";
+"organize.hidden_channels" = "القنوات المخفية";
+"organize.hidden_categories" = "الفئات المخفية";
+"organize.pinned_channels" = "القنوات المثبتة";
+"organize.category_order" = "ترتيب الفئات";
+"organize.reorder_channels" = "إعادة ترتيب القنوات";
+"organize.choose_category" = "اختر فئة";
+"organize.unhide" = "إظهار";
+"organize.none" = "لا شيء";

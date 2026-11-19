@@ -368,8 +368,6 @@
 "player.tracks.fallback_title" = "轨道 %d";
 
 /* EPG (Electronic Programme Guide) */
-"epg.guide.title" = "电视指南";
-
 // MARK: - VOD sort & filter
 "sort.title" = "排序";
 "sort.default" = "默认";
@@ -384,9 +382,6 @@
 "browse.all_series" = "全部剧集";
 "browse.all_live" = "全部频道";
 "filter.title" = "筛选";
-"filter.catchup" = "支持回看";
-"filter.has_epg" = "含EPG";
-
 // MARK: - Entry gate (round 4)
 "gate.sign_in" = "登录";
 "gate.load_playlist" = "加载播放列表";
@@ -736,8 +731,6 @@
 "channels.hide" = "隐藏频道";
 "channels.number_format" = "频道 %@";
 "channels.pin" = "置顶频道";
-"channels.preview.next" = "接下来";
-"channels.preview.now" = "正在播出";
 "channels.preview.play" = "播放";
 "channels.preview.title" = "频道预览";
 "channels.recent.title" = "最近观看的频道";
@@ -1047,3 +1040,13 @@
 "b67w8.progress.percent" = "%d%%";
 "b67w8.progress.guide_background" = "节目指南仍在后台加载。";
 "b67w6.categories" = "分类";
+"b68wa.hub.playlists_count_format" = "%d 个播放列表";
+"organize.title" = "整理";
+"organize.hidden_channels" = "隐藏的频道";
+"organize.hidden_categories" = "隐藏的分类";
+"organize.pinned_channels" = "置顶频道";
+"organize.category_order" = "分类顺序";
+"organize.reorder_channels" = "重新排序频道";
+"organize.choose_category" = "选择分类";
+"organize.unhide" = "取消隐藏";
+"organize.none" = "无";

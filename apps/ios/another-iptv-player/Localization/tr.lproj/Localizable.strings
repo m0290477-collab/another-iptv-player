@@ -441,8 +441,6 @@
 "player.tracks.fallback_title" = "Parça %d";
 
 /* EPG (Electronic Programme Guide) */
-"epg.guide.title" = "TV Rehberi";
-
 // MARK: - VOD sort & filter
 "sort.title" = "Sırala";
 "sort.default" = "Varsayılan";
@@ -457,9 +455,6 @@
 "browse.all_series" = "Tüm Diziler";
 "browse.all_live" = "Tüm Kanallar";
 "filter.title" = "Filtre";
-"filter.catchup" = "Geri sarma var";
-"filter.has_epg" = "EPG var";
-
 // MARK: - Round 10
 "common.done" = "Bitti";
 "settings.sign_out" = "Çıkış Yap";
@@ -754,8 +749,6 @@
 "channels.hide" = "Kanalı Gizle";
 "channels.number_format" = "Kanal %@";
 "channels.pin" = "Kanalı Sabitle";
-"channels.preview.next" = "Sonraki";
-"channels.preview.now" = "Şimdi";
 "channels.preview.play" = "Oynat";
 "channels.preview.title" = "Kanal Önizleme";
 "channels.recent.title" = "Son Kanallar";
@@ -1065,3 +1058,13 @@
 "b67w8.progress.percent" = "%d%%";
 "b67w8.progress.guide_background" = "Rehber arka planda yüklenmeye devam ediyor.";
 "b67w6.categories" = "Kategoriler";
+"b68wa.hub.playlists_count_format" = "%d playlist";
+"organize.title" = "Düzenle";
+"organize.hidden_channels" = "Gizli Kanallar";
+"organize.hidden_categories" = "Gizli Kategoriler";
+"organize.pinned_channels" = "Sabitlenmiş Kanallar";
+"organize.category_order" = "Kategori Sırası";
+"organize.reorder_channels" = "Kanalları Yeniden Sırala";
+"organize.choose_category" = "Kategori Seç";
+"organize.unhide" = "Göster";
+"organize.none" = "Yok";

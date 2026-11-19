@@ -512,7 +512,6 @@ struct M3UChannelCard: View {
     var imageLoadProfile: ImageLoadProfile = .standard
     var onChannelSelected: ((DBM3UChannel) -> Void)? = nil
 
-    @Environment(\.epgSnapshot) private var epgSnapshot
 
     var body: some View {
         Button {
@@ -546,10 +545,6 @@ struct M3UChannelCard: View {
                         .lineLimit(1)
                 }
 
-                if let snapshot = epgSnapshot {
-                    EPGNowNextLine(nowNext: snapshot[EPGChannelKey.forM3U(channel)],
-                                   width: width, reserveSpace: true)
-                }
             }
         }
         .buttonStyle(.plain)
@@ -833,7 +828,6 @@ struct M3UPlayerShell: View {
                     userAgent: playlist.playbackUserAgent(channelUserAgent: activeChannel.userAgent),
                     // Build 61 (FA, F-2/G2): custom headers alongside the UA.
                     customHeaders: playlist.customHeaders,
-                    epgChannelKey: classification.isLive ? EPGChannelKey.forM3U(activeChannel) : nil,
                     canGoToPreviousChannel: hasQueueNav && currentIndex > 0,
                     canGoToNextChannel: hasQueueNav && currentIndex < queue.count - 1,
                     onPreviousChannel: hasQueueNav ? { jump(offset: -1) } : nil,
