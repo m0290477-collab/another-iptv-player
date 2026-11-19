@@ -179,8 +179,9 @@ struct WatchChannelHit: Identifiable {
     let playlistName: String
     let channelName: String
     let channelLogoURL: URL?
-    /// The matched EPG programme title, when the hit came from
-    /// the guide; nil for a pure channel-name match.
+    /// Formerly the matched guide programme title; always nil
+    /// since build 68 removed the guide (kept for the hit UI's
+    /// optional programme line, which now simply never renders).
     let programmeTitle: String?
     /// Everything the player needs, resolved at tap time.
     let streamRef: WatchStreamRef
@@ -192,11 +193,12 @@ enum WatchStreamRef {
 }
 
 /// Searches the USER'S OWN playlists for a channel airing the
-/// match: EPG now/next programme titles and channel names
-/// against the two team names (and channel names against the
+/// match: channel names against the two team names (and the
 /// league name). Local database only — no network, and no
 /// broadcast claim is ever invented: a row appears only when
-/// text in the user's own data literally matches.
+/// text in the user's own data literally matches. (Build 68:
+/// the guide-programme half of this search was removed with
+/// the TV Guide.)
 enum WatchChannelSearch {
     static func search(homeName: String?, awayName: String?, leagueName: String?) async -> [WatchChannelHit] {
         let needles = [homeName, awayName]
@@ -233,39 +235,10 @@ enum WatchChannelSearch {
                 )
             }
 
-            // (1) EPG now/next: programmes airing within
-            // [now-3h, now+36h] whose title names a team. The
-            // join to a channel uses the EPG store's own key
-            // rule (channelKey = lowercased epgChannelId / tvgId
-            // / channel name — see EPGConstants).
-            let now = Date()
-            let windowStart = Int64(now.addingTimeInterval(-3 * 3600).timeIntervalSince1970)
-            let windowEnd = Int64(now.addingTimeInterval(36 * 3600).timeIntervalSince1970)
-            for needle in needles {
-                let programmes = try DBEPGProgramme
-                    .filter(Column("title").like(like(needle)))
-                    .filter(Column("startTs") >= windowStart && Column("startTs") <= windowEnd)
-                    .order(Column("startTs"))
-                    .limit(10)
-                    .fetchAll(db)
-                for programme in programmes {
-                    let key = programme.channelKey
-                    if let stream = try DBLiveStream
-                        .filter(sql: "playlistId = ? AND (lower(epgChannelId) = ? OR lower(name) = ?)",
-                                arguments: [programme.playlistId, key, key])
-                        .fetchOne(db),
-                       seen.insert("x|\(stream.playlistId)|\(stream.streamId)").inserted {
-                        hits.append(xtreamHit(stream, programme: programme.title))
-                    } else if let channel = try DBM3UChannel
-                        .filter(sql: "playlistId = ? AND (lower(tvgId) = ? OR lower(tvgName) = ? OR lower(name) = ?)",
-                                arguments: [programme.playlistId, key, key, key])
-                        .fetchOne(db),
-                       seen.insert("m|\(channel.id)").inserted,
-                       let hit = m3uHit(channel, programme: programme.title) {
-                        hits.append(hit)
-                    }
-                }
-            }
+            // Build 68: the guide-programme search that used to
+            // run here went with the TV Guide removal — the EPG
+            // programme table is no longer populated, so hits come
+            // from channel names only (below).
 
             // (2) Channel names themselves (teams, then league).
             var nameNeedles = needles
