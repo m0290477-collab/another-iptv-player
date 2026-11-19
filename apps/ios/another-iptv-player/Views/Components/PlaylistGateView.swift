@@ -1253,15 +1253,17 @@ struct PlaylistGateView: View {
             setStage(.loadingMoviesSeries, .done)
 
             let compatibility = await PlaylistValidationService.probeCompatibility(playlist: newPlaylist)
-            // Build 63: the guide no longer blocks the add here
-            // either — background handoff, stage completes at once
-            // (see PlaylistValidationService.importXtream).
-            self.setStage(.loadingGuide, .active)
-            if newPlaylist.epgEnabled {
-                GuideBackgroundLoader.start(playlist: newPlaylist)
+            // Build 67 (coordinator, F5): the same bounded guide
+            // stage as the service path (runAddFlowGuideStage) —
+            // build 63's instant handoff marked the stage done
+            // before a byte was fetched and hard-wired
+            // guideFailed = false, so a stalled/failed guide could
+            // never reach this summary. Now a timeout/failure is
+            // the truthful L3 partial success and the load
+            // continues in the background inside the helper.
+            let guideFailed = await PlaylistValidationService.runAddFlowGuideStage(playlist: newPlaylist) { stage, state in
+                self.setStage(stage, state)
             }
-            self.setStage(.loadingGuide, .done)
-            let guideFailed = false
             let counts = await PlaylistValidationService.importedCounts(playlistId: newPlaylist.id, kind: .xtream)
             let expiry = ProviderExpiryStore.expiryDate(playlistId: newPlaylist.id)
 
@@ -1274,7 +1276,8 @@ struct PlaylistGateView: View {
                     expiryDate: expiry,
                     liveCount: counts.live, movieCount: counts.movies, seriesCount: counts.series,
                     failedStage: guideFailed ? .loadingGuide : nil,
-                    compatibility: compatibility
+                    compatibility: compatibility,
+                    guideLoadingInBackground: guideFailed
                 )
             }
         } catch {
