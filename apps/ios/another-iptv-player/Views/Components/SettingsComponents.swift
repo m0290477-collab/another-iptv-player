@@ -571,6 +571,13 @@ struct SuperXBackupFile: Codable {
     /// (`BackupService`). Optional: files written before build 61
     /// have no library and import exactly as before.
     var library: BackupService.LibraryDTO?
+    /// Build 68 (W-C): per-playlist organization data (hidden
+    /// channels/categories, category + channel order, pinned
+    /// channels — `BackupService.OrganizationDTO`). Optional,
+    /// same additive pattern as `library`: files written before
+    /// build 68 have none and import exactly as before; older
+    /// readers ignore it.
+    var organization: BackupService.OrganizationDTO?
 
     static func make(playlists: [Playlist], includeCredentials: Bool) -> SuperXBackupFile {
         var settings: [String: BackupValue] = [:]
@@ -1266,12 +1273,17 @@ struct BackupSettingsSection: View {
         // Build 61 (B3, S5): the export also carries the library —
         // favorites (both stores) + watch-later lists.
         file.library = await BackupService.collectLibrary(playlistIds: playlists.map(\.id))
+        // Build 68 (W-C): …and the organization data (hidden /
+        // order / pinned, per playlist).
+        file.organization = await BackupService.collectOrganization(playlistIds: playlists.map(\.id))
         settingsExportURL = writeTempFile(file, name: "superx-settings.json")
     }
 
     private func prepareFullExport() async {
         var file = SuperXBackupFile.make(playlists: playlists, includeCredentials: true)
         file.library = await BackupService.collectLibrary(playlistIds: playlists.map(\.id))
+        // Build 68 (W-C): organization data, as on the C5 export.
+        file.organization = await BackupService.collectOrganization(playlistIds: playlists.map(\.id))
         fullExportURL = writeTempFile(file, name: "superx-full-backup.json")
     }
 
@@ -1336,6 +1348,7 @@ struct BackupSettingsSection: View {
         }
         if needsPassword.isEmpty {
             let libraryResult = await applyPendingLibrary(file)
+            await applyPendingOrganization(file)
             importMessage = libraryResult != nil
                 ? L("backup.import.done_library_format", importedCount,
                     libraryResult!.favoritesImported, libraryResult!.watchlistImported)
@@ -1375,6 +1388,15 @@ struct BackupSettingsSection: View {
     private func applyPendingLibrary(_ file: SuperXBackupFile) async -> BackupService.ApplyResult? {
         guard let library = file.library else { return nil }
         return await BackupService.applyLibrary(library, playlistIdMap: libraryIdMap)
+    }
+
+    /// Build 68 (W-C): applies the file's organization data
+    /// (hidden / order / pinned) through the same id map as the
+    /// library, at the same two import completion points; a file
+    /// without organization data is a no-op.
+    private func applyPendingOrganization(_ file: SuperXBackupFile) async {
+        guard let organization = file.organization else { return }
+        _ = await BackupService.applyOrganization(organization, playlistIdMap: libraryIdMap)
     }
 
     /// Saves one imported playlist unless an identical record
@@ -1458,6 +1480,7 @@ struct BackupSettingsSection: View {
                             var libraryResult: BackupService.ApplyResult?
                             if let file = pendingLibraryFile {
                                 libraryResult = await applyPendingLibrary(file)
+                                await applyPendingOrganization(file)
                                 pendingLibraryFile = nil
                             }
                             showPasswordPrompt = false

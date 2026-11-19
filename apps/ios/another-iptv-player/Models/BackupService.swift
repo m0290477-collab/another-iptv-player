@@ -84,6 +84,54 @@ enum BackupService {
         var seriesWatchlist: [SeriesWatchlistDTO] = []
     }
 
+    // MARK: - Organization DTOs (Build 68, W-C)
+
+    /// One playlist's organization data, mirroring EXACTLY what
+    /// the five organization stores persist in UserDefaults —
+    /// nothing new is stored anywhere:
+    /// - `HiddenChannelStore`: `hidden_channels.<id>` ([Int]) and
+    ///   `hidden_m3u_channels.<id>` ([String]);
+    /// - `HiddenCategoryStore`: `hidden_categories.<id>.<type>`
+    ///   ([String]) for type in live/vod/series/m3u;
+    /// - `CategoryOrderStore`: `category_order.<id>.<type>`
+    ///   ([String], ordered);
+    /// - `ChannelOrderStore`: `channel_order.<id>.<categoryId>`
+    ///   ([String], ordered channel ids as strings);
+    /// - `PinnedChannelStore`: `pinned.live.<id>` ([Int]) and
+    ///   `pinned.m3u.<id>` ([String]).
+    /// Set-valued fields are exported sorted so backup files are
+    /// deterministic; order-valued fields keep their exact order.
+    /// Empty playlists are omitted from the payload entirely.
+    struct PlaylistOrganizationDTO: Codable, Equatable {
+        var playlistId: String
+        var hiddenChannelsXtream: [Int] = []
+        var hiddenChannelsM3U: [String] = []
+        /// Content type ("live"/"vod"/"series"/"m3u") → hidden ids.
+        var hiddenCategories: [String: [String]] = [:]
+        /// Content type → category ids in the user's order.
+        var categoryOrder: [String: [String]] = [:]
+        /// Category id → channel ids (strings) in the user's order.
+        var channelOrder: [String: [String]] = [:]
+        var pinnedChannelsXtream: [Int] = []
+        var pinnedChannelsM3U: [String] = []
+
+        var isEmpty: Bool {
+            hiddenChannelsXtream.isEmpty && hiddenChannelsM3U.isEmpty
+                && hiddenCategories.isEmpty && categoryOrder.isEmpty
+                && channelOrder.isEmpty
+                && pinnedChannelsXtream.isEmpty && pinnedChannelsM3U.isEmpty
+        }
+    }
+
+    /// The organization half of a backup file. Carried as a new
+    /// OPTIONAL field on `SuperXBackupFile` (same additive pattern
+    /// as `library`): files written before build 68 have no
+    /// organization and import exactly as before; readers that
+    /// predate build 68 ignore it.
+    struct OrganizationDTO: Codable, Equatable {
+        var playlists: [PlaylistOrganizationDTO] = []
+    }
+
     // MARK: - Export
 
     /// Reads the current library for the given playlists from the
@@ -130,6 +178,48 @@ enum BackupService {
             }
         }
         return library
+    }
+
+    // MARK: - Organization export (Build 68, W-C)
+
+    /// The content types the per-type stores key on (their
+    /// `removeAll` lists are the authority).
+    private static let organizationTypes = ["live", "vod", "series", "m3u"]
+
+    /// Reads the current organization data for the given playlists
+    /// from the five organization stores, in their own persisted
+    /// representation. Playlists with no organization data are
+    /// omitted from the result.
+    static func collectOrganization(playlistIds: [UUID]) async -> OrganizationDTO {
+        var dto = OrganizationDTO()
+        for id in playlistIds {
+            var entry = PlaylistOrganizationDTO(playlistId: id.uuidString)
+            entry.hiddenChannelsXtream = await HiddenChannelStore.shared
+                .hiddenIds(playlistId: id).sorted()
+            entry.hiddenChannelsM3U = HiddenChannelStore
+                .hiddenM3UIds(playlistId: id).sorted()
+            entry.pinnedChannelsXtream = await PinnedChannelStore.shared
+                .pinnedIds(playlistId: id).sorted()
+            entry.pinnedChannelsM3U = PinnedChannelStore
+                .pinnedM3UIds(playlistId: id).sorted()
+            for type in organizationTypes {
+                let hidden = await HiddenCategoryStore.shared
+                    .hiddenIds(playlistId: id, type: type)
+                if !hidden.isEmpty {
+                    entry.hiddenCategories[type] = hidden.sorted()
+                }
+                let order = await CategoryOrderStore.shared
+                    .orderedIds(playlistId: id, type: type)
+                if !order.isEmpty {
+                    entry.categoryOrder[type] = order
+                }
+            }
+            entry.channelOrder = await ChannelOrderStore.shared.allOrders(playlistId: id)
+            if !entry.isEmpty {
+                dto.playlists.append(entry)
+            }
+        }
+        return dto
     }
 
     // MARK: - Import
@@ -248,6 +338,63 @@ enum BackupService {
             }
             await FavoriteGroupStore.shared.mergeImported(storeGroups, playlistId: target)
             result.groupsImported += storeGroups.count
+        }
+        return result
+    }
+
+    // MARK: - Organization import (Build 68, W-C)
+
+    struct OrganizationApplyResult: Equatable {
+        /// Playlists whose organization data was applied.
+        var playlistsApplied: Int = 0
+        /// Playlists skipped because their source id could not be
+        /// mapped to a local playlist (same rule as the library).
+        var skippedUnmapped: Int = 0
+    }
+
+    /// Applies a backup's organization data through the SAME
+    /// source→target playlist id map as the library, into the
+    /// five organization stores. Per-store semantics (documented
+    /// on each store's import method, chosen to match how the
+    /// store treats its own data):
+    /// - hidden channels / hidden categories / pinned channels:
+    ///   UNION merge — set membership; an import only adds, never
+    ///   un-hides or unpins what this device has set;
+    /// - category order / channel order: REPLACE per key present
+    ///   in the backup — an order is one authoritative list, and
+    ///   the stores' own `setOrder` replaces; keys absent from
+    ///   the backup are untouched.
+    /// Every store write bumps its `@Published version`, so the
+    /// lists refresh as soon as the import lands.
+    static func applyOrganization(_ organization: OrganizationDTO,
+                                  playlistIdMap: [String: UUID]) async -> OrganizationApplyResult {
+        var result = OrganizationApplyResult()
+        for entry in organization.playlists {
+            guard let target = playlistIdMap[entry.playlistId] else {
+                result.skippedUnmapped += 1
+                continue
+            }
+            await HiddenChannelStore.shared.mergeImported(
+                hiddenXtream: Set(entry.hiddenChannelsXtream),
+                hiddenM3U: Set(entry.hiddenChannelsM3U),
+                playlistId: target
+            )
+            await HiddenCategoryStore.shared.mergeImported(
+                hiddenByType: entry.hiddenCategories.mapValues(Set.init),
+                playlistId: target
+            )
+            await PinnedChannelStore.shared.mergeImported(
+                pinnedXtream: Set(entry.pinnedChannelsXtream),
+                pinnedM3U: Set(entry.pinnedChannelsM3U),
+                playlistId: target
+            )
+            await CategoryOrderStore.shared.applyImportedOrders(
+                entry.categoryOrder, playlistId: target
+            )
+            await ChannelOrderStore.shared.applyImportedOrders(
+                entry.channelOrder, playlistId: target
+            )
+            result.playlistsApplied += 1
         }
         return result
     }
