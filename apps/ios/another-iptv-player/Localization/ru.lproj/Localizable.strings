@@ -368,52 +368,7 @@
 "player.tracks.fallback_title" = "Дорожка %d";
 
 /* EPG (Electronic Programme Guide) */
-"epg.a11y.now_playing_format" = "Сейчас в эфире: %@";
-"epg.catchup.available" = "Доступно в архиве";
-"epg.catchup.error.unavailable" = "Эта передача может быть больше недоступна у вашего провайдера.";
-"epg.day.today" = "Сегодня";
-"epg.day.tomorrow" = "Завтра";
-"epg.day.yesterday" = "Вчера";
-"epg.detail.live_badge" = "ЭФИР";
-"epg.detail.minutes_format" = "%d мин";
-"epg.detail.play_catchup" = "Смотреть";
-"epg.detail.play_channel" = "Смотреть канал";
-"epg.detail.watch_from_start" = "Смотреть с начала";
-"epg.empty.message" = "Данные о передачах пока недоступны. Попробуйте обновить.";
-"epg.empty.title" = "Нет данных телепрограммы";
-"epg.error.cancelled" = "Обновление телепрограммы отменено.";
-"epg.error.decompress" = "Не удалось распаковать файл телепрограммы.";
-"epg.error.empty_guide" = "В телепрограмме нет передач для ваших каналов.";
-"epg.error.invalid_url" = "Неверный URL EPG: %@";
-"epg.error.network" = "Ошибка сети: %@";
-"epg.error.no_source" = "Источник EPG не настроен.";
-"epg.error.parse" = "Не удалось прочитать телепрограмму: %@";
-"epg.error.server" = "Ошибка сервера (HTTP %d).";
-"epg.error.too_large" = "Файл телепрограммы слишком большой.";
 "epg.guide.title" = "Телепрограмма";
-"epg.categories.expand_all" = "Развернуть все";
-"epg.categories.collapse_all" = "Свернуть все";
-"epg.categories.menu_a11y" = "Категории";
-"epg.categories.collapsed_a11y" = "Свёрнуто";
-"epg.categories.expanded_a11y" = "Развёрнуто";
-"epg.jump_to_now" = "Сейчас";
-"epg.last_updated" = "Обновлено";
-"epg.never_updated" = "Никогда";
-"epg.no_data.channel" = "Нет информации о передачах";
-"epg.no_data.programme_cell" = "Нет информации";
-"epg.not_configured.m3u_message" = "Добавьте URL EPG (XMLTV) в настройках плейлиста, чтобы увидеть телепрограмму.";
-"epg.not_configured.title" = "Телепрограмма не настроена";
-"epg.not_configured.xtream_message" = "Обновите, чтобы загрузить телепрограмму от вашего провайдера.";
-"epg.now" = "Сейчас";
-"epg.programme_detail.title" = "Передача";
-"epg.refresh" = "Обновить телепрограмму";
-"epg.settings.enable" = "Показывать телепрограмму";
-"epg.settings.matched_channels" = "Совпавшие каналы";
-"epg.settings.matched_channels_format" = "%d";
-"epg.settings.save_url" = "Сохранить URL EPG";
-"epg.settings.section_title" = "Телепрограмма (EPG)";
-"epg.settings.url_footer" = "URL XMLTV для телепрограммы. Определяется из плейлиста автоматически, если доступно.";
-"epg.settings.url_placeholder" = "URL EPG (XMLTV)";
 
 // MARK: - VOD sort & filter
 "sort.title" = "Сортировка";
@@ -641,8 +596,6 @@
 "home.tonight" = "Сегодня вечером";
 "home.new_since_visit" = "Новое с вашего последнего визита";
 "home.browse_categories" = "Обзор категорий";
-"epg.reminder.action" = "Напомнить мне";
-"epg.reminder.set" = "Напоминание установлено";
 "continue_watching.remove" = "Убрать из «Продолжить просмотр»";
 "series.specials" = "Спецвыпуски";
 "series.seasons_count_format" = "Сезонов: %d";
@@ -667,12 +620,8 @@
 "settings.about.licenses.title" = "Лицензии и кредиты";
 "settings.legal.license.body" = "Super X построен на Another IPTV Player, который используется по лицензии MIT:\n\nMIT License\n\nCopyright 2025 Another IPTV Player\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER  DEALINGS IN THE SOFTWARE.";
 "live.card.hide_category" = "Скрыть \"%@\"";
-"epg.search.programmes" = "Программы";
-"epg.search.no_results" = "Нет программ, соответствующих вашему поиску";
 
 // MARK: - Build 61 (b1)
-"epgsearch.programmes" = "Программы";
-"epgsearch.scope" = "Программы · Сегодня и завтра";
 
 // MARK: - Build 61 (b3)
 "settings.playback.title" = "Воспроизведение";
@@ -927,9 +876,6 @@
 "matches.title" = "Матчи сегодня";
 
 /* MARK: Build 61 (b13) */
-"epgoffset.desc" = "Сдвиньте время гида, если время программ вашего провайдера не совпадает.";
-"epgoffset.title" = "Сдвиг времени гида";
-"epgoffset.value_format" = "%@ ч";
 "metrickit.cpu_format" = "исключений CPU: %d";
 "metrickit.crashes_format" = "сбоев: %d";
 "metrickit.disk_format" = "исключений записи: %d";
@@ -1058,9 +1004,6 @@
 "download.dashboard.items" = "Загрузки";
 "download.dashboard.limit" = "Лимит";
 "download.dashboard.percent" = "Использовано %d%% лимита";
-"epg.next" = "Далее";
-"epg.view.cards" = "Вид карточками";
-"epg.view.grid" = "Вид шкалы времени";
 "favorites.empty.all" = "Пока нет избранного. Нажмите звезду на канале, фильме или сериале, чтобы добавить сюда.";
 "favorites.shelf.channels" = "Избранные каналы";
 "favorites.shelf.movies" = "Избранные фильмы";

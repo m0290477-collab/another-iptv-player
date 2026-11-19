@@ -368,52 +368,7 @@
 "player.tracks.fallback_title" = "Spur %d";
 
 /* EPG (Electronic Programme Guide) */
-"epg.a11y.now_playing_format" = "Wird abgespielt: %@";
-"epg.catchup.available" = "Als Aufzeichnung verfügbar";
-"epg.catchup.error.unavailable" = "Diese Sendung ist bei Ihrem Anbieter möglicherweise nicht mehr verfügbar.";
-"epg.day.today" = "Heute";
-"epg.day.tomorrow" = "Morgen";
-"epg.day.yesterday" = "Gestern";
-"epg.detail.live_badge" = "LIVE";
-"epg.detail.minutes_format" = "%d Min.";
-"epg.detail.play_catchup" = "Abspielen";
-"epg.detail.play_channel" = "Sender abspielen";
-"epg.detail.watch_from_start" = "Von Anfang an ansehen";
-"epg.empty.message" = "Noch keine Programmdaten verfügbar. Bitte aktualisieren.";
-"epg.empty.title" = "Keine Programmdaten";
-"epg.error.cancelled" = "Die Programmaktualisierung wurde abgebrochen.";
-"epg.error.decompress" = "Die Programmdatei konnte nicht entpackt werden.";
-"epg.error.empty_guide" = "Der Programmführer enthielt keine Sendungen für Ihre Sender.";
-"epg.error.invalid_url" = "Ungültige EPG-URL: %@";
-"epg.error.network" = "Netzwerkfehler: %@";
-"epg.error.no_source" = "Keine EPG-Quelle konfiguriert.";
-"epg.error.parse" = "Programmführer konnte nicht gelesen werden: %@";
-"epg.error.server" = "Serverfehler (HTTP %d).";
-"epg.error.too_large" = "Die Programmdatei ist zu groß.";
 "epg.guide.title" = "TV-Programm";
-"epg.categories.expand_all" = "Alle ausklappen";
-"epg.categories.collapse_all" = "Alle einklappen";
-"epg.categories.menu_a11y" = "Kategorien";
-"epg.categories.collapsed_a11y" = "Eingeklappt";
-"epg.categories.expanded_a11y" = "Ausgeklappt";
-"epg.jump_to_now" = "Jetzt";
-"epg.last_updated" = "Zuletzt aktualisiert";
-"epg.never_updated" = "Nie";
-"epg.no_data.channel" = "Keine Programminformationen";
-"epg.no_data.programme_cell" = "Keine Informationen";
-"epg.not_configured.m3u_message" = "Fügen Sie in den Playlist-Einstellungen eine EPG-URL (XMLTV) hinzu, um das Programm anzuzeigen.";
-"epg.not_configured.title" = "TV-Programm nicht eingerichtet";
-"epg.not_configured.xtream_message" = "Aktualisieren, um das Programm von Ihrem Anbieter herunterzuladen.";
-"epg.now" = "Jetzt";
-"epg.programme_detail.title" = "Sendung";
-"epg.refresh" = "Programm aktualisieren";
-"epg.settings.enable" = "TV-Programm anzeigen";
-"epg.settings.matched_channels" = "Zugeordnete Sender";
-"epg.settings.matched_channels_format" = "%d";
-"epg.settings.save_url" = "EPG-URL speichern";
-"epg.settings.section_title" = "TV-Programm (EPG)";
-"epg.settings.url_footer" = "XMLTV-URL für das TV-Programm. Wird, sofern verfügbar, automatisch aus der Playlist erkannt.";
-"epg.settings.url_placeholder" = "EPG-URL (XMLTV)";
 
 // MARK: - VOD sort & filter
 "sort.title" = "Sortieren";
@@ -641,8 +596,6 @@
 "home.tonight" = "Heute Abend";
 "home.new_since_visit" = "Neu seit deinem letzten Besuch";
 "home.browse_categories" = "Kategorien durchsuchen";
-"epg.reminder.action" = "Erinnere mich";
-"epg.reminder.set" = "Erinnerung gesetzt";
 "continue_watching.remove" = "Aus „Weiter ansehen“ entfernen";
 "series.specials" = "Specials";
 "series.seasons_count_format" = "%d Staffeln";
@@ -667,12 +620,8 @@
 "settings.about.licenses.title" = "Lizenzen & Credits";
 "settings.legal.license.body" = "Super X basiert auf Another IPTV Player, der unter der MIT-Lizenz verwendet wird:\n\nMIT License\n\nCopyright 2025 Another IPTV Player\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER  DEALINGS IN THE SOFTWARE.";
 "live.card.hide_category" = "\"%@\" ausblenden";
-"epg.search.programmes" = "Sendungen";
-"epg.search.no_results" = "Keine Sendungen entsprechen Ihrer Suche";
 
 // MARK: - Build 61 (b1)
-"epgsearch.programmes" = "Sendungen";
-"epgsearch.scope" = "Sendungen · Heute & morgen";
 
 // MARK: - Build 61 (b3)
 "settings.playback.title" = "Wiedergabe";
@@ -927,9 +876,6 @@
 "matches.title" = "Spiele von heute";
 
 /* MARK: Build 61 (b13) */
-"epgoffset.desc" = "Guide-Zeiten verschieben, wenn die Programmzeiten deines Anbieters nicht stimmen.";
-"epgoffset.title" = "EPG-Zeitversatz";
-"epgoffset.value_format" = "%@ Std.";
 "metrickit.cpu_format" = "%d CPU-Ausnahmen";
 "metrickit.crashes_format" = "%d Abstürze";
 "metrickit.disk_format" = "%d Schreib-Ausnahmen";
@@ -1058,9 +1004,6 @@
 "download.dashboard.items" = "Downloads";
 "download.dashboard.limit" = "Limit";
 "download.dashboard.percent" = "%d%% des Limits genutzt";
-"epg.next" = "Danach";
-"epg.view.cards" = "Kartenansicht";
-"epg.view.grid" = "Zeitleistenansicht";
 "favorites.empty.all" = "Noch keine Favoriten. Tippe auf den Stern bei einem Sender, Film oder einer Serie, um sie hier hinzuzufügen.";
 "favorites.shelf.channels" = "Lieblingssender";
 "favorites.shelf.movies" = "Lieblingsfilme";

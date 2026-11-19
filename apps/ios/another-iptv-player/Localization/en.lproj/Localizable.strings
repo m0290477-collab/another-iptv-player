@@ -441,52 +441,7 @@
 "player.tracks.fallback_title" = "Track %d";
 
 /* EPG (Electronic Programme Guide) */
-"epg.a11y.now_playing_format" = "Now playing: %@";
-"epg.catchup.available" = "Available on catch-up";
-"epg.catchup.error.unavailable" = "This programme may no longer be available from your provider.";
-"epg.day.today" = "Today";
-"epg.day.tomorrow" = "Tomorrow";
-"epg.day.yesterday" = "Yesterday";
-"epg.detail.live_badge" = "LIVE";
-"epg.detail.minutes_format" = "%d min";
-"epg.detail.play_catchup" = "Play";
-"epg.detail.play_channel" = "Play channel";
-"epg.detail.watch_from_start" = "Watch from start";
-"epg.empty.message" = "No programme data is available yet. Try refreshing.";
-"epg.empty.title" = "No guide data";
-"epg.error.cancelled" = "The guide update was cancelled.";
-"epg.error.decompress" = "Couldn't decompress the guide file.";
-"epg.error.empty_guide" = "The guide contained no programmes for your channels.";
-"epg.error.invalid_url" = "Invalid EPG URL: %@";
-"epg.error.network" = "Network error: %@";
-"epg.error.no_source" = "No EPG source is configured.";
-"epg.error.parse" = "Couldn't read the guide: %@";
-"epg.error.server" = "Server error (HTTP %d).";
-"epg.error.too_large" = "The guide file is too large.";
 "epg.guide.title" = "TV Guide";
-"epg.categories.expand_all" = "Expand all";
-"epg.categories.collapse_all" = "Collapse all";
-"epg.categories.menu_a11y" = "Categories";
-"epg.categories.collapsed_a11y" = "Collapsed";
-"epg.categories.expanded_a11y" = "Expanded";
-"epg.jump_to_now" = "Now";
-"epg.last_updated" = "Last updated";
-"epg.never_updated" = "Never";
-"epg.no_data.channel" = "No programme information";
-"epg.no_data.programme_cell" = "No information";
-"epg.not_configured.m3u_message" = "Add an EPG (XMLTV) URL in playlist settings to see the guide.";
-"epg.not_configured.title" = "TV Guide not set up";
-"epg.not_configured.xtream_message" = "Refresh to download the programme guide from your provider.";
-"epg.now" = "Now";
-"epg.programme_detail.title" = "Programme";
-"epg.refresh" = "Refresh guide";
-"epg.settings.enable" = "Show TV guide";
-"epg.settings.matched_channels" = "Matched channels";
-"epg.settings.matched_channels_format" = "%d";
-"epg.settings.save_url" = "Save EPG URL";
-"epg.settings.section_title" = "TV Guide (EPG)";
-"epg.settings.url_footer" = "XMLTV URL used for the programme guide. Detected from the playlist automatically when available.";
-"epg.settings.url_placeholder" = "EPG (XMLTV) URL";
 
 // MARK: - VOD sort & filter
 "sort.title" = "Sort";
@@ -659,8 +614,6 @@
 "home.tonight" = "Tonight";
 "home.new_since_visit" = "New since your last visit";
 "home.browse_categories" = "Browse categories";
-"epg.reminder.action" = "Remind me";
-"epg.reminder.set" = "Reminder set";
 "continue_watching.remove" = "Remove from Continue Watching";
 "series.specials" = "Specials";
 "series.seasons_count_format" = "%d seasons";
@@ -685,12 +638,8 @@
 "settings.about.licenses.title" = "Licenses & credits";
 "settings.legal.license.body" = "Super X is built on Another IPTV Player, which is used under the MIT License:\n\nMIT License\n\nCopyright 2025 Another IPTV Player\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER  DEALINGS IN THE SOFTWARE.";
 "live.card.hide_category" = "Hide \"%@\"";
-"epg.search.programmes" = "Programmes";
-"epg.search.no_results" = "No programmes match your search";
 
 // MARK: - Build 61 (b1)
-"epgsearch.programmes" = "Programmes";
-"epgsearch.scope" = "Programmes · Today & tomorrow";
 
 // MARK: - Build 61 (b3)
 "settings.playback.title" = "Playback";
@@ -945,9 +894,6 @@
 "matches.title" = "Today's Matches";
 
 /* MARK: Build 61 (b13) */
-"epgoffset.desc" = "Shift guide times if your provider's programme times are off.";
-"epgoffset.title" = "EPG time offset";
-"epgoffset.value_format" = "%@ h";
 "metrickit.cpu_format" = "%d CPU exceptions";
 "metrickit.crashes_format" = "%d crashes";
 "metrickit.disk_format" = "%d disk-write exceptions";
@@ -1076,9 +1022,6 @@
 "download.dashboard.items" = "Downloads";
 "download.dashboard.limit" = "Limit";
 "download.dashboard.percent" = "%d%% of the limit used";
-"epg.next" = "Next";
-"epg.view.cards" = "Cards view";
-"epg.view.grid" = "Timeline view";
 "favorites.empty.all" = "No favorites yet. Tap the star on any channel, movie or series to add it here.";
 "favorites.shelf.channels" = "Favorite Channels";
 "favorites.shelf.movies" = "Favorite Movies";

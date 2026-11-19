@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Build 66 (W1): the Settings end state — the hub IS the whole
 /// of Settings. Exactly 12 cards (Playlists, Account, Playback,
-/// Display, Guide, Downloads, Notifications, Parental & Locks,
+/// Display, Downloads, Notifications, Parental & Locks,
 /// Storage, Backup & Data, Support, About), every setting that
 /// existed in the retired legacy forms reachable exactly once
 /// through them, and ONE PIN gate at this root. The legacy
@@ -18,11 +18,15 @@ import SwiftUI
 /// top (circular monogram avatar from the ACTIVE playlist's
 /// real name, its real account/playlist/expiry state as the
 /// subtitle — never any premium/subscription-for-Super-X copy,
-/// the app is free), then the SAME 12 destinations in the SAME
+/// the app is free), then the SAME destinations in the SAME
 /// order as ONE grouped list of rows (icon chip, title,
 /// right-aligned live value, chevron), each row navigating to
 /// exactly the build-66 destination. The settings search field
 /// is REMOVED at the owner's order (no search bar in the hub).
+/// Build 68 (W-F): the Guide destination is REMOVED with the TV
+/// Guide itself (11 destinations remain), and the programme-
+/// reminders section leaves the Notifications page with the
+/// programme-reminder scheduler it gated.
 struct SettingsHubView: View {
     let playlist: Playlist
     let onDismiss: () -> Void
@@ -163,35 +167,6 @@ struct SettingsHubView: View {
                     rowDivider
 
                     hubRow(
-                        icon: "calendar.badge.clock",
-                        tint: AppTheme.accent,
-                        title: L("epg.settings.section_title"),
-                        value: nil
-                    ) {
-                        List {
-                            Section {
-                                if isM3U {
-                                    M3UEPGSettingsRows(playlist: playlist)
-                                    Text(L("epg.settings.url_footer"))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    XtreamEPGSettingsRows(playlist: playlist)
-                                }
-                            }
-                            .settingsCardRows()
-                            EPGOffsetSettingsSection()
-                        }
-                        .listStyle(.insetGrouped)
-                        .listSectionSpacing(16)
-                        .cinematicScrollBackground()
-                        .navigationTitle(L("epg.settings.section_title"))
-                        .navigationBarTitleDisplayMode(.inline)
-                    }
-
-                    rowDivider
-
-                    hubRow(
                         icon: "arrow.down.circle.fill",
                         tint: AppTheme.accent,
                         title: L("download.title"),
@@ -228,7 +203,6 @@ struct SettingsHubView: View {
                     ) {
                         List {
                             ExpiryAlertsSettingsSection()
-                            RemindersSettingsSection()
                             Section {
                                 NavigationLink {
                                     NotificationsView(playlist: playlist)

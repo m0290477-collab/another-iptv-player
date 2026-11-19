@@ -24,20 +24,18 @@ import SwiftUI
 /// it) and the step rows below. HONESTY RULES, unchanged in
 /// spirit from build 63 and tightened here:
 /// - the ring % derives ONLY from completed content steps
-///   (Live TV / Movies / Series / TV Guide): 3 of 4 resolved =
-///   75%. A step counts when it is done OR failed (the flow has
-///   finished with it); an active step contributes NOTHING —
-///   the % never animates on a timer and never interpolates
-///   inside a stage.
+///   (Live TV / Movies / Series): resolved steps ÷ total steps.
+///   Build 68: the TV Guide step is REMOVED with the guide
+///   itself, so the ring now measures the three remaining
+///   content rows. A step counts when it is done OR failed (the
+///   flow has finished with it); an active step contributes
+///   NOTHING — the % never animates on a timer and never
+///   interpolates inside a stage.
 /// - step counters land at COMPLETION with real imported
 ///   counts: a row shows a count only when its stage is done
 ///   AND the caller supplied the real count (the importer
 ///   publishes counts only at completion; the full real counts
 ///   live on the summary card the moment the add lands).
-/// - the failed-guide end state (F5) shows the ring at its
-///   truthful value with the guide row in warning state, and
-///   the card hands over to the L3 partial-success summary —
-///   it never sits on "Loading the guide" indefinitely.
 struct AddPlaylistProgressView: View {
     let stages: [PlaylistValidationService.Stage: PlaylistValidationService.StageState]
     /// The playlist's name heads the card, as the mockup shows.
@@ -57,16 +55,16 @@ struct AddPlaylistProgressView: View {
         stages[stage] ?? .pending
     }
 
-    /// The four content steps the ring measures, in card order.
+    /// The content steps the ring measures, in card order.
     /// Movies and Series are separate ROWS bound to the one real
     /// importer stage that loads them together, so the ring
     /// counts that stage twice — once per row it completes.
     private var ringSteps: [PlaylistValidationService.Stage] {
-        [.loadingChannels, .loadingMoviesSeries, .loadingMoviesSeries, .loadingGuide]
+        [.loadingChannels, .loadingMoviesSeries, .loadingMoviesSeries]
     }
 
     /// Ring fraction: resolved steps (done or failed) over the
-    /// four content steps. Nothing else moves the ring.
+    /// content steps. Nothing else moves the ring.
     private var progressFraction: Double {
         let resolved = ringSteps.filter {
             state(of: $0) == .done || state(of: $0) == .failed
@@ -166,7 +164,6 @@ struct AddPlaylistProgressView: View {
                          countText: movieCount.map { L("addplaylist.summary.movies", $0) })
                 stageRow(label: L("dashboard.series"), stage: .loadingMoviesSeries,
                          countText: seriesCount.map { L("addplaylist.summary.series", $0) })
-                stageRow(label: L("epg.guide.title"), stage: .loadingGuide, countText: nil)
             }
 
             Button {
@@ -261,15 +258,11 @@ struct AddPlaylistProgressView: View {
 /// L2/L3 summary card (see the type note above).
 struct AddPlaylistSummaryView: View {
     let summary: PlaylistValidationService.AddSummary
-    /// L3: re-runs ONLY the failed stage; the card stays up and
-    /// the caller refreshes the summary when the retry lands.
-    let onRetryFailedStage: (() -> Void)?
     let onStartWatching: () -> Void
 
     /// Build 67 (W8, S7 continuity): the summary is the Glass
-    /// Ring card at its end state. Only the guide can land in
-    /// `failedStage` (see `AddSummary`), so a partial summary's
-    /// ring stands at 3 of 4 content steps — its truthful value.
+    /// Ring card at its end state. A partial summary's ring
+    /// stands at its truthful fraction of the content steps.
     private var summaryRingFraction: Double {
         summary.failedStage == nil ? 1 : 0.75
     }
@@ -349,33 +342,6 @@ struct AddPlaylistSummaryView: View {
                         .foregroundStyle(.secondary)
                 }
                 .accessibilityElement(children: .combine)
-            }
-
-            if summary.failedStage != nil {
-                Text(L("addplaylist.summary.guide_failed"))
-                    .font(.subheadline)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                // Build 67 (W8, F5): when the failed guide is
-                // still loading in the background, the summary
-                // says so; after a failed RETRY nothing is
-                // loading, and this line stays out.
-                if summary.guideLoadingInBackground {
-                    Text(L("b67w8.progress.guide_background"))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if let onRetryFailedStage {
-                    Button {
-                        onRetryFailedStage()
-                    } label: {
-                        Text(L("addplaylist.summary.retry_guide"))
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(AppTheme.accent)
-                    }
-                    .buttonStyle(.plain)
-                }
             }
 
             // Free-forever discipline (§3.5): the subscription is

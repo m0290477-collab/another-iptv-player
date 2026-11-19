@@ -368,52 +368,7 @@
 "player.tracks.fallback_title" = "المسار %d";
 
 /* EPG (Electronic Programme Guide) */
-"epg.a11y.now_playing_format" = "يُعرض الآن: %@";
-"epg.catchup.available" = "متاح في إعادة المشاهدة";
-"epg.catchup.error.unavailable" = "قد لا يكون هذا البرنامج متاحًا لدى مزوّدك بعد الآن.";
-"epg.day.today" = "اليوم";
-"epg.day.tomorrow" = "غدًا";
-"epg.day.yesterday" = "أمس";
-"epg.detail.live_badge" = "مباشر";
-"epg.detail.minutes_format" = "%d دقيقة";
-"epg.detail.play_catchup" = "تشغيل";
-"epg.detail.play_channel" = "تشغيل القناة";
-"epg.detail.watch_from_start" = "المشاهدة من البداية";
-"epg.empty.message" = "لا تتوفر بيانات البرامج بعد. حاول التحديث.";
-"epg.empty.title" = "لا توجد بيانات دليل";
-"epg.error.cancelled" = "تم إلغاء تحديث الدليل.";
-"epg.error.decompress" = "تعذّر فك ضغط ملف الدليل.";
-"epg.error.empty_guide" = "لم يحتوِ الدليل على أي برامج لقنواتك.";
-"epg.error.invalid_url" = "رابط EPG غير صالح: %@";
-"epg.error.network" = "خطأ في الشبكة: %@";
-"epg.error.no_source" = "لم يتم إعداد أي مصدر EPG.";
-"epg.error.parse" = "تعذّرت قراءة الدليل: %@";
-"epg.error.server" = "خطأ في الخادم (HTTP %d).";
-"epg.error.too_large" = "ملف الدليل كبير جدًا.";
 "epg.guide.title" = "دليل التلفزيون";
-"epg.categories.expand_all" = "توسيع الكل";
-"epg.categories.collapse_all" = "طي الكل";
-"epg.categories.menu_a11y" = "الفئات";
-"epg.categories.collapsed_a11y" = "مطوي";
-"epg.categories.expanded_a11y" = "موسّع";
-"epg.jump_to_now" = "الآن";
-"epg.last_updated" = "آخر تحديث";
-"epg.never_updated" = "أبدًا";
-"epg.no_data.channel" = "لا توجد معلومات عن البرامج";
-"epg.no_data.programme_cell" = "لا توجد معلومات";
-"epg.not_configured.m3u_message" = "أضف رابط EPG (XMLTV) في إعدادات قائمة التشغيل لعرض الدليل.";
-"epg.not_configured.title" = "لم يتم إعداد دليل التلفزيون";
-"epg.not_configured.xtream_message" = "حدّث لتنزيل دليل البرامج من مزوّدك.";
-"epg.now" = "الآن";
-"epg.programme_detail.title" = "البرنامج";
-"epg.refresh" = "تحديث الدليل";
-"epg.settings.enable" = "إظهار دليل التلفزيون";
-"epg.settings.matched_channels" = "القنوات المطابقة";
-"epg.settings.matched_channels_format" = "%d";
-"epg.settings.save_url" = "حفظ رابط EPG";
-"epg.settings.section_title" = "دليل التلفزيون (EPG)";
-"epg.settings.url_footer" = "رابط XMLTV المستخدم لدليل البرامج. يُكتشف من قائمة التشغيل تلقائيًا عند توفره.";
-"epg.settings.url_placeholder" = "رابط EPG (XMLTV)";
 
 // MARK: - VOD sort & filter
 "sort.title" = "فرز";
@@ -641,8 +596,6 @@
 "home.tonight" = "الليلة";
 "home.new_since_visit" = "جديد منذ زيارتك الأخيرة";
 "home.browse_categories" = "تصفح الفئات";
-"epg.reminder.action" = "ذكّرني";
-"epg.reminder.set" = "تم تعيين التذكير";
 "continue_watching.remove" = "الإزالة من متابعة المشاهدة";
 "series.specials" = "الحلقات الخاصة";
 "series.seasons_count_format" = "%d موسم";
@@ -667,12 +620,8 @@
 "settings.about.licenses.title" = "التراخيص والاعتمادات";
 "settings.legal.license.body" = "بُني Super X على Another IPTV Player، المستخدم بموجب ترخيص MIT:\n\nMIT License\n\nCopyright 2025 Another IPTV Player\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER  DEALINGS IN THE SOFTWARE.";
 "live.card.hide_category" = "إخفاء \"%@\"";
-"epg.search.programmes" = "البرامج";
-"epg.search.no_results" = "لا توجد برامج مطابقة لبحثك";
 
 // MARK: - Build 61 (b1)
-"epgsearch.programmes" = "البرامج";
-"epgsearch.scope" = "البرامج · اليوم وغداً";
 
 // MARK: - Build 61 (b3)
 "settings.playback.title" = "التشغيل";
@@ -927,9 +876,6 @@
 "matches.title" = "مباريات اليوم";
 
 /* MARK: Build 61 (b13) */
-"epgoffset.desc" = "حرّك أوقات الدليل إذا كانت أوقات برامج مزودك غير مضبوطة.";
-"epgoffset.title" = "إزاحة وقت الدليل";
-"epgoffset.value_format" = "%@ ساعة";
 "metrickit.cpu_format" = "%d استثناءات معالج";
 "metrickit.crashes_format" = "%d أعطال";
 "metrickit.disk_format" = "%d استثناءات كتابة قرص";
@@ -1058,9 +1004,6 @@
 "download.dashboard.items" = "التنزيلات";
 "download.dashboard.limit" = "الحد";
 "download.dashboard.percent" = "تم استخدام %d%% من الحد";
-"epg.next" = "التالي";
-"epg.view.cards" = "عرض البطاقات";
-"epg.view.grid" = "عرض الخط الزمني";
 "favorites.empty.all" = "لا مفضلات بعد. اضغط النجمة على أي قناة أو فيلم أو مسلسل لإضافته هنا.";
 "favorites.shelf.channels" = "القنوات المفضلة";
 "favorites.shelf.movies" = "الأفلام المفضلة";

@@ -1090,8 +1090,7 @@ final class PlaylistContentStore: ObservableObject {
     }
 
     /// nil → SQL NULL for the flat argument arrays (DatabaseValue
-    /// is itself DatabaseValueConvertible — the same pattern
-    /// EPGStore uses to build dynamic arguments).
+    /// is itself DatabaseValueConvertible).
     private static func opt(_ value: String?) -> DatabaseValueConvertible {
         value.map { $0 as DatabaseValueConvertible } ?? DatabaseValue.null
     }

@@ -368,52 +368,7 @@
 "player.tracks.fallback_title" = "Pista %d";
 
 /* EPG (Electronic Programme Guide) */
-"epg.a11y.now_playing_format" = "Reproduciendo ahora: %@";
-"epg.catchup.available" = "Disponible en catch-up";
-"epg.catchup.error.unavailable" = "Es posible que este programa ya no esté disponible en tu proveedor.";
-"epg.day.today" = "Hoy";
-"epg.day.tomorrow" = "Mañana";
-"epg.day.yesterday" = "Ayer";
-"epg.detail.live_badge" = "EN VIVO";
-"epg.detail.minutes_format" = "%d min";
-"epg.detail.play_catchup" = "Reproducir";
-"epg.detail.play_channel" = "Reproducir canal";
-"epg.detail.watch_from_start" = "Ver desde el inicio";
-"epg.empty.message" = "Aún no hay datos de programación disponibles. Prueba a actualizar.";
-"epg.empty.title" = "Sin datos de guía";
-"epg.error.cancelled" = "Se canceló la actualización de la guía.";
-"epg.error.decompress" = "No se pudo descomprimir el archivo de la guía.";
-"epg.error.empty_guide" = "La guía no contenía programas para tus canales.";
-"epg.error.invalid_url" = "URL de EPG no válida: %@";
-"epg.error.network" = "Error de red: %@";
-"epg.error.no_source" = "No hay ninguna fuente de EPG configurada.";
-"epg.error.parse" = "No se pudo leer la guía: %@";
-"epg.error.server" = "Error del servidor (HTTP %d).";
-"epg.error.too_large" = "El archivo de la guía es demasiado grande.";
 "epg.guide.title" = "Guía de TV";
-"epg.categories.expand_all" = "Expandir todo";
-"epg.categories.collapse_all" = "Contraer todo";
-"epg.categories.menu_a11y" = "Categorías";
-"epg.categories.collapsed_a11y" = "Contraído";
-"epg.categories.expanded_a11y" = "Expandido";
-"epg.jump_to_now" = "Ahora";
-"epg.last_updated" = "Última actualización";
-"epg.never_updated" = "Nunca";
-"epg.no_data.channel" = "Sin información de programación";
-"epg.no_data.programme_cell" = "Sin información";
-"epg.not_configured.m3u_message" = "Añade una URL de EPG (XMLTV) en los ajustes de la lista para ver la guía.";
-"epg.not_configured.title" = "Guía de TV no configurada";
-"epg.not_configured.xtream_message" = "Actualiza para descargar la guía de programación de tu proveedor.";
-"epg.now" = "Ahora";
-"epg.programme_detail.title" = "Programa";
-"epg.refresh" = "Actualizar guía";
-"epg.settings.enable" = "Mostrar guía de TV";
-"epg.settings.matched_channels" = "Canales coincidentes";
-"epg.settings.matched_channels_format" = "%d";
-"epg.settings.save_url" = "Guardar URL de EPG";
-"epg.settings.section_title" = "Guía de TV (EPG)";
-"epg.settings.url_footer" = "URL de XMLTV usada para la guía de programación. Se detecta automáticamente de la lista cuando está disponible.";
-"epg.settings.url_placeholder" = "URL de EPG (XMLTV)";
 
 // MARK: - VOD sort & filter
 "sort.title" = "Ordenar";
@@ -641,8 +596,6 @@
 "home.tonight" = "Esta noche";
 "home.new_since_visit" = "Nuevo desde tu última visita";
 "home.browse_categories" = "Explorar categorías";
-"epg.reminder.action" = "Recordarme";
-"epg.reminder.set" = "Recordatorio establecido";
 "continue_watching.remove" = "Quitar de Seguir viendo";
 "series.specials" = "Especiales";
 "series.seasons_count_format" = "%d temporadas";
@@ -667,12 +620,8 @@
 "settings.about.licenses.title" = "Licencias y créditos";
 "settings.legal.license.body" = "Super X está construido sobre Another IPTV Player, utilizado bajo la Licencia MIT:\n\nMIT License\n\nCopyright 2025 Another IPTV Player\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER  DEALINGS IN THE SOFTWARE.";
 "live.card.hide_category" = "Ocultar \"%@\"";
-"epg.search.programmes" = "Programas";
-"epg.search.no_results" = "Ningún programa coincide con tu búsqueda";
 
 // MARK: - Build 61 (b1)
-"epgsearch.programmes" = "Programas";
-"epgsearch.scope" = "Programas · Hoy y mañana";
 
 // MARK: - Build 61 (b3)
 "settings.playback.title" = "Reproducción";
@@ -927,9 +876,6 @@
 "matches.title" = "Partidos de hoy";
 
 /* MARK: Build 61 (b13) */
-"epgoffset.desc" = "Ajusta los horarios de la guía si los horarios de tu proveedor no coinciden.";
-"epgoffset.title" = "Desfase de hora de la guía";
-"epgoffset.value_format" = "%@ h";
 "metrickit.cpu_format" = "%d excepciones de CPU";
 "metrickit.crashes_format" = "%d cierres inesperados";
 "metrickit.disk_format" = "%d excepciones de escritura";
@@ -1058,9 +1004,6 @@
 "download.dashboard.items" = "Descargas";
 "download.dashboard.limit" = "Límite";
 "download.dashboard.percent" = "%d%% del límite usado";
-"epg.next" = "Siguiente";
-"epg.view.cards" = "Vista de tarjetas";
-"epg.view.grid" = "Vista de línea de tiempo";
 "favorites.empty.all" = "Aún no hay favoritos. Toca la estrella en cualquier canal, película o serie para añadirlo aquí.";
 "favorites.shelf.channels" = "Canales favoritos";
 "favorites.shelf.movies" = "Películas favoritas";
