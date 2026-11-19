@@ -5,19 +5,15 @@
 "common.delete" = "Sil";
 "common.close" = "Kapat";
 "common.error" = "Hata";
-"common.yes" = "Evet";
-"common.back" = "Geri";
 "common.search" = "Ara";
 "common.try_again" = "Tekrar Dene";
 "common.unknown_error" = "Bilinmeyen hata.";
-"common.days_format" = "%d Gün";
 "common.loading" = "Yükleniyor...";
 "common.confirm_delete_yes" = "Evet, Sil";
 "common.edit" = "Düzenle";
 
 // MARK: - Playlist list (ContentView)
 "playlists.title" = "Playlist'ler";
-"playlists.empty.title" = "Playlist Bulunamadı";
 "playlists.empty.message" = "Canlı TV, film ve dizi izlemek için ilk IPTV playlist'ini ekle.";
 "playlists.empty.add_button" = "Yeni Playlist Ekle";
 "playlists.local_file" = "Yerel dosya";
@@ -25,21 +21,16 @@
 "playlists.delete.message" = "Bu playlist'i ve içindeki tüm içerikleri silmek istediğine emin misin?";
 
 // MARK: - Playlist type picker
-"playlist_type.title" = "Playlist Ekle";
 "playlist_type.section" = "Playlist Türü";
 "playlist_type.xtream.title" = "Xtream Code";
-"playlist_type.xtream.subtitle" = "Sunucu URL, kullanıcı adı ve şifre ile.";
 "playlist_type.m3u.title" = "M3U / M3U8";
-"playlist_type.m3u.subtitle" = "Uzak URL veya yerel .m3u / .m3u8 dosyası.";
 
 // MARK: - Entry gate (round 4)
-"gate.welcome" = "Hoş geldiniz — devam etmek için giriş yapın";
 "gate.sign_in" = "Giriş Yap";
 "gate.load_playlist" = "Playlist'i Yükle";
 "gate.toggle_password_visibility" = "Şifreyi göster veya gizle";
 
 // MARK: - Add playlist (Xtream)
-"add_playlist.xtream.title_new" = "Playlist Ekle";
 "add_playlist.xtream.title_edit" = "Playlist Düzenle";
 "add_playlist.section.info" = "Playlist Bilgileri";
 "add_playlist.section.credentials" = "Kimlik Bilgileri";
@@ -53,14 +44,10 @@
 "add_playlist.verifying" = "Doğrulanıyor...";
 "add_playlist.auth_failed" = "Kimlik doğrulama başarısız. Bilgileri kontrol et.";
 "add_playlist.fetching_categories" = "Kategoriler indiriliyor...";
-"add_playlist.fetching_live" = "Canlı yayınlar indiriliyor...";
-"add_playlist.fetching_movies" = "Filmler indiriliyor...";
-"add_playlist.fetching_series" = "Diziler indiriliyor...";
 "add_playlist.saving_db" = "Veritabanına kaydediliyor... Lütfen bekle.";
 "add_playlist.download_save_error" = "İçerikler indirilirken veya kaydedilirken hata oluştu: %@";
 
 // MARK: - Add playlist (M3U)
-"add_m3u.title_new" = "M3U Ekle";
 "add_m3u.title_edit" = "M3U Düzenle";
 "add_m3u.name_placeholder" = "Playlist Adı (örn. Benim M3U'm)";
 "add_m3u.section.source" = "Kaynak";
@@ -120,14 +107,12 @@
 // MARK: - Continue watching
 "continue_watching.title" = "İzlemeye Devam Et";
 "recently_added.title" = "Son Eklenenler";
-"home.trending_channels" = "Trend Kanallar";
 "home.top_movies" = "En İyi Filmler";
 "home.popular_series" = "Popüler Diziler";
 "home.search_placeholder" = "Film, dizi, kanal ara...";
 "home.featured" = "Öne Çıkan";
 "home.play" = "Oynat";
 "home.details" = "Detaylar";
-"home.top_rated_movies" = "En Yüksek Puanlı Filmler";
 "home.sports_dashboard" = "Spor Paneli";
 "home.top10_today" = "Günün En İyi 10'u";
 "home.top_rated_series" = "En Yüksek Puanlı Diziler";
@@ -135,7 +120,6 @@
 "home.new_series" = "Yeni Diziler";
 "home.chip_all" = "Tümü";
 "home.chip_newest" = "En Yeniler";
-"home.chip_history" = "Geçmiş";
 "home.count_channels" = "%@ kanal";
 "home.count_movies" = "%@ film";
 "home.count_series" = "%@ dizi";
@@ -164,9 +148,7 @@
 "favorites.remove" = "Favorilerden Çıkar";
 
 // MARK: - Settings (common)
-"settings.back_to_list" = "Playlist Listesine Dön";
 "settings.refresh_all" = "Tüm İçerikleri Yeniden İndir";
-"settings.player.title" = "Player Ayarları";
 "settings.player.pip.title" = "Resim İçinde Resim";
 "settings.player.pip.desc" = "Oynatıcıyı PiP modunda küçültmeye izin verir";
 "settings.player.background.title" = "Arkaplanda Çalmaya Devam Et";
@@ -177,9 +159,6 @@
 "settings.player.autonext.desc" = "Bölüm bitince sonraki bölüm otomatik başlar";
 "player.autonext.countdown" = "Sonraki bölüm: %d";
 "settings.playlist.info.title" = "Playlist Bilgileri";
-"settings.playlist.name" = "İsim";
-"settings.playlist.type" = "Tür";
-"settings.playlist.server_url" = "Sunucu URL";
 "settings.playlist.username" = "Kullanıcı Adı";
 "settings.playlist.password" = "Şifre";
 "settings.playlist.subscription" = "Kalan Süre";
@@ -187,26 +166,16 @@
 "settings.playlist.max_connection" = "Maksimum Bağlantı";
 "settings.playlist.unlimited" = "Sınırsız";
 "settings.playlist.unknown" = "Bilinmiyor";
-"settings.playlist.unlimited_or_unknown" = "Sınırsız / Bilinmiyor";
 "settings.playlist.expired" = "Süresi Dolmuş";
 "settings.playlist.fetching_info" = "Abonelik Bilgileri Yükleniyor...";
 "settings.playlist.info_error" = "Bilgiler alınamadı: %@";
 
-"settings.stats.title" = "İçerik İstatistikleri";
-"settings.stats.live_count" = "Canlı Yayın Sayısı";
-"settings.stats.movie_count" = "Film Sayısı";
-"settings.stats.series_count" = "Dizi Sayısı";
-"settings.stats.channel_count" = "Kanal Sayısı";
 "settings.stats.group_count" = "Grup Sayısı";
 "settings.stats.history_count" = "İzleme Geçmişi";
-"settings.stats.history_items_format" = "%d öğe";
 
-"settings.server.title" = "Sunucu Bilgileri";
 "settings.server.timezone" = "Saat Dilimi";
 "settings.server.message" = "Sunucu Mesajı";
 
-"settings.content_management.title" = "İçerik Yönetimi";
-"settings.filter_adult.title" = "Yetişkin İçerikleri Filtrele";
 "settings.filter_adult.xtream_desc" = "Değişiklik sonrası içeriklerin yeniden indirilmesi gerekir";
 "settings.filter_adult.m3u_desc" = "Kanal adı veya grupta XXX, 18+, adult gibi kelimeler içerenler gizlenir";
 
@@ -214,12 +183,8 @@
 "settings.about.version" = "Super X Pro Max · Sürüm";
 
 // MARK: - M3U settings
-"settings.m3u.type_label" = "M3U / M3U8";
 "settings.m3u.refresh_url" = "URL'den Yeniden İndir";
 "settings.m3u.refresh_file" = "Dosyadan Yeniden Yükle";
-"settings.m3u.source_url" = "Kaynak URL";
-"settings.m3u.source" = "Kaynak";
-"settings.m3u.epg_url" = "EPG URL (bilgi)";
 "settings.m3u.parsing" = "Ayrıştırılıyor...";
 "settings.m3u.saving" = "Veritabanına kaydediliyor...";
 "settings.m3u.reading_file" = "Dosya okunuyor...";
@@ -227,16 +192,12 @@
 
 // MARK: - Language
 "settings.language.title" = "Uygulama Dili";
-"settings.language.section" = "Dil";
 "settings.language.system" = "Sistem Dili";
 "settings.group.player" = "Oynatıcı";
-"settings.group.app" = "Uygulama";
 "settings.group.content_data" = "İçerik ve Veriler";
-"settings.group.about_legal" = "Hakkında ve Yasal";
 "settings.playlist.connected" = "Bağlı";
 "settings.playlist.checking" = "Kontrol ediliyor…";
 "settings.playlist.connection_failed" = "Bağlantı başarısız";
-"settings.accent_color" = "Vurgu Rengi";
 "settings.accent.blue" = "Mavi";
 "settings.accent.violet" = "Menekşe";
 "settings.accent.pink" = "Pembe";
@@ -246,9 +207,6 @@
 "settings.accent.teal" = "Turkuaz";
 
 // MARK: - Playback URL / Stream
-"stream.live" = "Canlı";
-"stream.vod" = "Film";
-"stream.series" = "Dizi";
 "stream.m3u" = "M3U";
 
 // MARK: - Playlist load errors
@@ -275,27 +233,19 @@
 "series.no_episodes_in_season" = "Bu sezonda bölüm bulunamadı.";
 "series.seasons" = "Sezonlar";
 "series.season_format" = "Sezon %d";
-"series.episode_format" = "Bölüm %d";
 "series.episode_count_format" = "%d bölüm";
 
 // MARK: - Search
-"search.title" = "Arama";
 "search.min_chars" = "En az 2 karakter girin";
 "search.placeholder" = "Ara...";
 
 // MARK: - Player
-"player.all_channels" = "Tüm Kanallar";
 "player.tracks.empty.video" = "Görüntü parçası yok";
 "player.tracks.empty.audio" = "Ses parçası yok";
 "player.tracks.empty.subtitle" = "Altyazı yok";
 "player.tracks.title" = "Oynatım Parçaları";
 "player.tracks.video" = "Görüntü";
 "player.tracks.audio" = "Ses";
-"player.tracks.audio_track" = "Ses Parçası";
-"player.guide" = "Rehber";
-"player.controls_lock" = "Kontrolleri kilitle";
-"player.controls_unlock" = "Kontrollerin kilidini aç";
-"player.dock_to_mini" = "Tam ekrandan çık";
 "player.tracks.subtitle" = "Altyazı";
 "player.subtitle_off" = "Kapalı";
 "player.subtitle_import.section" = "İçe Aktarılan Altyazılar";
@@ -305,8 +255,6 @@
 "player.audio_delay.section" = "Ses Senkronu";
 "player.audio_delay.label" = "Ses gecikmesi";
 "player.audio_delay.footer" = "Pozitif değerler sesi geciktirir; negatif değerler daha erken çalar. Bluetooth kulaklık ve soundbar'larda işe yarar.";
-"player.buffering" = "Tampon";
-"player.ended" = "Bitti";
 
 // MARK: - Playback errors (user-facing)
 "playback.error.timeout" = "Sunucu yanıt vermiyor.";
@@ -317,32 +265,23 @@
 "playback.error.cannot_reach" = "Sunucuya veya akışa ulaşılamıyor.";
 "playback.error.unsupported" = "Bu içerik cihazda desteklenmiyor.";
 "playback.error.no_playable_stream" = "Oynatılabilir ses veya görüntü bulunamadı.";
-"playback.error.output_init_failed" = "Ses veya görüntü çıkışı başlatılamadı.";
 "playback.error.failed_check_network" = "Oynatma başlatılamadı. Ağ bağlantınızı kontrol et.";
 "player.live_badge" = "CANLI";
-"player.pip_enter" = "PiP'e Geç";
-"player.pip_exit" = "PiP'ten Çık";
 "player.aspect_fit" = "Sığdır";
 "player.aspect_fill" = "Doldur";
-"player.aspect_native" = "Orijinal";
 
 // MARK: - Subtitle Appearance
 "subtitle.settings_title" = "Altyazı Ayarları";
-"subtitle.sample_text" = "Örnek altyazı metni\nBu şekilde görünür";
-"subtitle.font_settings" = "Yazı Tipi";
 "subtitle.font_size" = "Yazı Boyutu";
 "subtitle.font_height" = "Satır Yüksekliği";
 "subtitle.letter_spacing" = "Harf aralığı";
 "subtitle.word_spacing" = "Kelime aralığı";
 "subtitle.padding" = "Dolgu";
-"subtitle.colors" = "Renkler";
 "subtitle.text_color" = "Metin Rengi";
 "subtitle.background_color" = "Arka Plan Rengi";
 "subtitle.style" = "Stil";
 "subtitle.font_weight" = "Font Kalınlığı";
-"subtitle.text_align" = "Hizalama";
 "subtitle.reset" = "Sıfırla";
-"subtitle.delay" = "Gecikme";
 "subtitle.no_delay" = "Gecikme yok";
 "subtitle.preview" = "Önizleme";
 "subtitle.apply" = "Uygula";
@@ -381,38 +320,29 @@
 "style.align.justify" = "İki Yana";
 
 // MARK: - Loading
-"loading.takes_time_hint" = "Bu işlem internet hızınıza bağlı olarak bir süre alabilir.";
 
 // MARK: - Movie detail
 "movie.plot" = "Özet";
 "movie.cast" = "Oyuncular";
 "movie.director" = "Yönetmen";
 "movie.genre" = "Tür";
-"movie.release_date" = "Çıkış Tarihi";
 "movie.duration" = "Süre";
 "movie.rating" = "Puan";
 "movie.play" = "Oynat";
-"movie.resume" = "Devam Et";
-"movie.trailer" = "Fragman";
 
 // MARK: - Category detail
 "category.see_all" = "Tümünü Gör";
-"category.no_result_in_category" = "Bu kategoride sonuç yok.";
 
 // MARK: - Search results
 "search.all" = "Tümü";
 "search.trending" = "Şu An Trend";
-"search.more_results_format" = "%d sonuç daha";
 
 // MARK: - Player gestures / accessibility
 "player.brightness" = "Parlaklık";
 "player.volume" = "Ses";
 "player.playback_error" = "Oynatma hatası";
-"player.live_on_air" = "Yayında";
-"player.preparing" = "Oynatıcı hazırlanıyor…";
 
 // MARK: - Detail views (movie/series)
-"detail.loading_movie" = "Film bilgileri yükleniyor...";
 "detail.loading_series" = "Dizi bilgileri yükleniyor...";
 "detail.resume" = "Kaldığın Yerden Devam Et";
 "detail.watch_now" = "Hemen İzle";
@@ -428,10 +358,6 @@
 "detail.runtime_m" = "%d dk";
 
 // MARK: - Favorites (Xtream multi-type)
-"favorites.type" = "Tür";
-"favorites.empty.live" = "Henüz favori kanal eklemediniz.";
-"favorites.empty.movie" = "Henüz favori film eklemediniz.";
-"favorites.empty.series" = "Henüz favori dizi eklemediniz.";
 
 // MARK: - Unknown/fallback names
 "content.unnamed" = "İsimsiz";
@@ -449,11 +375,7 @@
 // MARK: - Load phases
 "phase.preparing" = "Hazırlanıyor...";
 "phase.preparing_list" = "Liste hazırlanıyor...";
-"phase.clearing_content" = "Mevcut içerikler siliniyor...";
 "phase.fetch_categories" = "Kategoriler indiriliyor...";
-"phase.fetch_live" = "Canlı yayınlar indiriliyor...";
-"phase.fetch_movies" = "Filmler indiriliyor...";
-"phase.fetch_series" = "Diziler indiriliyor...";
 "phase.save_db" = "Veritabanına kaydediliyor...";
 
 // MARK: - Downloads
@@ -476,8 +398,6 @@
 "download.status.queued" = "Sırada";
 "download.status.failed" = "Başarısız";
 "download.play" = "Oynat";
-"download.size_format" = "%@ / %@";
-"download.settings" = "İndirmeler";
 "download.wifi_only.title" = "Sadece Wi-Fi'da İndir";
 "download.wifi_only.desc" = "Açıkken mobil veriyle indirme yapılmaz.";
 "download.storage_used" = "Depolama Kullanımı";
@@ -503,12 +423,8 @@
 "player.airplay_active" = "AirPlay ile oynatılıyor";
 "player.a11y.subtitle_appearance" = "Altyazı görünümü";
 "player.a11y.track_settings" = "Ses ve altyazı parçaları";
-"player.a11y.skip_back_15" = "15 saniye geri";
-"player.a11y.skip_forward_15" = "15 saniye ileri";
-"player.skip_intro" = "İntroyu Atla";
 "player.speed" = "Hız";
 "player.sleep_timer" = "Uyku Zamanlayıcı";
-"player.sleep_timer.off" = "Kapalı";
 "player.sleep_timer.minutes" = "%d dk";
 "player.a11y.play" = "Oynat";
 "player.a11y.pause" = "Duraklat";
@@ -523,10 +439,6 @@
 "settings.show_password" = "Şifreyi göster";
 "settings.hide_password" = "Şifreyi gizle";
 "player.tracks.fallback_title" = "Parça %d";
-"player.tracks.channels" = "%d kanal";
-"player.tracks.cover_image" = "Kapak / resim";
-"player.tracks.default" = "Varsayılan";
-"player.tracks.forced" = "Zorunlu";
 
 /* EPG (Electronic Programme Guide) */
 "epg.a11y.now_playing_format" = "Şimdi oynatılıyor: %@";
@@ -583,14 +495,12 @@
 "sort.name_desc" = "İsim (Z–A)";
 "sort.rating_desc" = "Puan";
 "sort.recently_added" = "Son Eklenenler";
-"filter.file_type" = "Dosya tipi";
 "filter.clear" = "Filtreyi temizle";
 
 // MARK: - Browse all & filters
 "browse.all_movies" = "Tüm Filmler";
 "browse.all_series" = "Tüm Diziler";
 "browse.all_live" = "Tüm Kanallar";
-"filter.genre" = "Tür";
 "filter.title" = "Filtre";
 "filter.catchup" = "Geri sarma var";
 "filter.has_epg" = "EPG var";
@@ -613,19 +523,15 @@
 "notifications.expiry.title" = "Sağlayıcı aboneliğiniz";
 "notifications.expiry.message" = "Sağlayıcı aboneliğiniz %d gün içinde (%@) sona eriyor.";
 "notifications.expiry.message_one" = "Sağlayıcı aboneliğiniz 1 gün içinde (%@) sona eriyor.";
-"notifications.expiry.message_today" = "Sağlayıcı aboneliğiniz bugün (%@) sona eriyor.";
 "notifications.expired.title" = "Sağlayıcı aboneliğiniz";
 "notifications.expired.message" = "Sağlayıcı aboneliğiniz %@ tarihinde sona erdi.";
 "player.sleep_timer.short" = "Uyku";
-"player.tracks.more" = "Diğer Seçenekler";
-"detail.story" = "Özet";
 "detail.more_like_this" = "Benzer İçerikler";
 "detail.episodes" = "Bölümler";
 "detail.about" = "Hakkında";
 "detail.continue_episode" = "Devam Et • %d. Bölüm";
 "detail.play_episode_1" = "1. Bölümü Oynat";
 "common.off" = "Kapalı";
-"common.seconds_format" = "%d sn";
 "playlists.remote_playlist" = "Uzak oynatma listesi";
 "settings.account.provider_subscription" = "Sağlayıcı aboneliğiniz";
 "settings.account.until_format" = "%@ tarihine kadar";
@@ -633,46 +539,22 @@
 "settings.account.day_left" = "1 gün kaldı";
 "settings.account.days_left" = "%d gün kaldı";
 "settings.account.no_expiry" = "Süresiz";
-"settings.player.next_episode_timer.title" = "Sonraki bölüm zamanlayıcısı";
-"settings.player.show_skip_intro.title" = "\"İntroyu Atla\"yı göster";
-"settings.player.show_skip_intro.desc" = "Bölüm introsunu atlama düğmesi";
-"settings.player.skip_intro_length.title" = "İntro atlama süresi";
 "settings.player.sleep_default.title" = "Varsayılan uyku zamanlayıcısı";
-"settings.player.engine.title" = "Oynatma motoru";
-"settings.player.engine.automatic" = "Otomatik";
-"settings.player.engine.avplayer" = "AVPlayer";
-"settings.player.engine.ffmpeg" = "FFmpeg";
-"settings.app.notifications.title" = "Bildirimler";
 "settings.app.notifications.desc" = "Sağlayıcı aboneliği bitiş uyarıları";
 "settings.parental_controls.title" = "Ebeveyn Denetimleri";
 
-"settings.group.activation" = "Aktivasyon";
-"settings.activation.activated" = "Aktif Edildi";
-"settings.activation.device_id" = "Cihaz Kimliği";
-"settings.activation.pin" = "PIN";
-"settings.activation.lifetime" = "Ömür Boyu Abonelik";
-"settings.activation.lifetime_desc" = "Sonsuza kadar geçerli — bitiş tarihi yok";
-"settings.activation.copy" = "Kopyala";
 "settings.group.privacy_legal" = "Gizlilik ve Yasal";
 "settings.legal.contact_support" = "Desteğe Başvur";
 "settings.legal.privacy_policy" = "Gizlilik Politikası";
 "settings.legal.terms" = "Kullanım Şartları";
 "settings.legal.report_content" = "Uygunsuz içeriği bildir";
 "settings.legal.delete_account" = "Hesabı Sil";
-"settings.legal.delete_account_desc" = "Bu işlem geri alınamaz";
-"settings.legal.delete_account.title" = "Hesap Silinsin mi?";
-"settings.legal.delete_account.message" = "Bu işlem tüm oynatma listelerinizi ve uygulamanın bu cihazda sakladığı her şeyi siler — kataloglar, favoriler, izleme geçmişi ve indirmeler. Bu işlem geri alınamaz.";
 "settings.legal.support.body" = "Super X ücretsiz bir uygulamadır. Bir destek masası ve destek e-posta adresi yoktur. Sorunların çoğu, eklediğiniz oynatma listesinden veya sağlayıcı aboneliğinizden kaynaklanır: giriş bilgilerinizin sağlayıcınızın size verdiği şekilde girildiğini ve aboneliğinizin hâlâ aktif olduğunu kontrol edin. Aboneliğiniz, içeriği veya yenilenmesi hakkındaki soruları yalnızca sağlayıcınız yanıtlayabilir.";
 "settings.legal.report.body" = "Super X hiçbir kanal, film veya dizi sunmaz. İzlediğiniz her şey, kendiniz eklediğiniz oynatma listesinden ve sağlayıcı aboneliğinizden gelir; bu içerik o sağlayıcı tarafından barındırılır ve sunulur. Bu içeriğin bir kısmı uygunsuzsa veya haklarınızı ihlal ediyorsa, bildirimin etkili olacağı yer sağlayıcınızdır. Bu cihazda ayrıca Ayarlar'daki Ebeveyn Denetimleri ile yetişkin içeriğini gizleyebilir ve oynatma listesini kaldırmak, o içeriği bu cihazdan kaldırır.";
 "settings.legal.privacy.body" = "Veri toplama\n\nBu uygulama hiçbir kişisel veriyi veya kullanıcı bilgisini toplamaz, saklamaz ve iletmez.\n\nİçeriğiniz\n\n• IPTV oynatma listeleri ve kanal listeleri yalnızca cihazınızda yerel olarak saklanır.\n• Uygulamanın kendisi harici sunuculara veri göndermez. Bir yayın oynattığınızda cihazınız, eklediğiniz sağlayıcıya doğrudan bağlanır.\n• Hiçbir analiz veya takip hizmeti kullanılmaz.\n\nÜçüncü taraf hizmetler\n\nBu uygulama hiçbir üçüncü taraf analiz, reklam veya veri toplama hizmetiyle entegre değildir.\n\nDeğişiklikler\n\nBu politika değişirse, güncellenmiş metin burada, uygulamada görünür.";
 "settings.legal.terms.body" = "1. Uygulama\n\nSuper X ücretsiz bir medya oynatıcısıdır. Kendi kanalları, filmleri, dizileri veya başka bir içeriği yoktur ve hiçbir şey satmaz.\n\n2. Oynatma listeleriniz ve abonelikleriniz\n\nKendi oynatma listelerinizi ve sağlayıcı aboneliklerinizi siz eklersiniz. Bir sağlayıcıyla olan anlaşmanız — fiyatı, bitiş tarihi ve içeriği dahil — sizinle o sağlayıcı arasındadır. Bir sağlayıcı aboneliğinin süresi dolduğunda, yenileyene veya başka bir oynatma listesine geçene kadar o sağlayıcının içeriğinin oynatılması durur.\n\n3. Sorumluluğunuz\n\nUygulamaya eklediğiniz içeriğe erişme ve onu izleme hakkına sahip olduğunuzdan emin olmak sizin sorumluluğunuzdur.\n\n4. Garanti yok\n\nUygulama \"olduğu gibi\" sunulur, hiçbir garanti verilmez. Super X, üçüncü taraf sağlayıcılar tarafından sunulan içeriğin kullanılabilirliğinden, kalitesinden veya yasallığından sorumlu değildir.";
-"expiry.blocked.title" = "Sağlayıcı Aboneliğinin Süresi Doldu";
-"expiry.blocked.message" = "Sağlayıcı aboneliğiniz %@ tarihinde sona erdi. İzlemeye devam etmek için sağlayıcınızdan yenileyin veya Ayarlar'dan başka bir oynatma listesine geçin.";
-"expiry.blocked.open_settings" = "Ayarlar'ı Aç";
 
 // MARK: - Round 14/15 finisher completion (R14-NEW-KEYS + code-referenced keys)
-"settings.group.app_appearance" = "Uygulama ve Görünüm";
-"settings.activation.purpose" = "Bu cihazın Super X için ücretsiz, ömür boyu etkinleştirmesi.";
 "settings.app.expiry_alerts.title" = "Abonelik bitiş uyarıları";
 "settings.player.video_fit.title" = "Varsayılan video sığdırma";
 "settings.player.subtitle_appearance" = "Altyazı Görünümü";
@@ -708,18 +590,7 @@
 "download.error.server_refused" = "Sunucu bu indirmeyi reddetti — aboneliğiniz sona ermiş veya bağlantı limitine ulaşılmış olabilir. Daha sonra tekrar deneyin.";
 "playback.error.http_status" = "Sunucu bu akışı reddetti (HTTP %d).";
 "player.airplay" = "AirPlay";
-"player.pip_short" = "PiP";
-"player.favorite" = "Favori";
-"player.connecting" = "Bağlanıyor…";
 "player.reconnecting" = "Yeniden bağlanılıyor…";
-"player.autonext.play_next" = "Sonraki bölüm";
-"player.autonext.season_episode" = "Sezon %d • Bölüm %d";
-"player.stats.title" = "Oynatma İstatistikleri";
-"player.stats.resolution" = "Çözünürlük";
-"player.stats.bitrate" = "Bit Hızı";
-"player.stats.buffer" = "Arabellek";
-"player.series_finished.title" = "Bu diziyi bitirdiniz";
-"player.series_finished.watch_again" = "Tekrar izle";
 "settings.scope.this_playlist" = "Bu oynatma listesi";
 "settings.scope.whole_app" = "Tüm uygulama";
 "settings.reset.title" = "Varsayılanlara Sıfırla";
@@ -738,8 +609,6 @@
 "settings.backup.import.passwords.message" = "Bu oynatma listeleri şifresiz içe aktarıldı. Bitirmek için her birinin şifresini girin.";
 "settings.backup.import.done_format" = "%d oynatma listesi içe aktarıldı.";
 "settings.backup.import.failed" = "Bu dosya içe aktarılamadı.";
-"settings.image_cache.title" = "Görüntü önbelleği";
-"settings.image_cache.clear" = "Temizle";
 "settings.group.advanced" = "Gelişmiş";
 "pin.title" = "Ebeveyn PIN'i";
 "pin.set" = "PIN belirle";
@@ -759,30 +628,17 @@
 "reminders.enabled.title" = "Program hatırlatıcıları";
 "reminders.enabled.desc" = "Abonelik bitiş uyarılarından ayrıdır";
 "reminders.lead_time" = "Hatırlatma ön süresi";
-"player.zapping.enabled" = "Kanal değiştirmek için kaydır";
-"player.zapping.direction" = "Zap yönü";
-"player.zapping.direction.up_next" = "Yukarı kaydır = sonraki";
-"player.zapping.direction.down_next" = "Aşağı kaydır = sonraki";
 "motion.intensity.title" = "Hareket yoğunluğu";
 "motion.intensity.full" = "Tam";
 "motion.intensity.reduced" = "Azaltılmış";
-"player.next_episode_card.title" = "Sonraki bölüm kartı";
-"player.next_episode_card.auto" = "Otomatik oynat";
-"player.next_episode_card.ask" = "Yalnızca sor";
 "settings.ui_sounds.title" = "Arayüz sesleri";
 "settings.ui_sounds.desc" = "İndirme, yenileme ve favoriler için kısa sesler";
-"gate.qr.scan" = "QR kodu tara";
-"gate.qr.unavailable.title" = "Kamera kullanılamıyor";
-"gate.qr.unavailable.message" = "Bu cihazda QR tarama kullanılamıyor. Bunun yerine giriş bilgilerinizi yapıştırabilirsiniz.";
 "gate.continue_with_format" = "%@ ile devam et";
 "gate.all_expired.title" = "Tüm aboneliklerin süresi dolmuş";
 "gate.all_expired.message" = "Kayıtlı tüm aboneliklerin süresi dolmuş. Aşağıdan yenisini ekleyin veya mevcut birini yenileyin.";
 "playlists.make_default" = "Varsayılan yap";
 "playlists.default_badge" = "Varsayılan";
 "playlists.change_server" = "Sunucu adresini değiştir";
-"playlists.qr.show" = "QR kodu göster";
-"playlists.qr.title" = "Oynatma listesi QR kodu";
-"playlists.qr.warning" = "Bu kod, oynatma listesi şifrenizi düz metin olarak içerir. Tarayan herkes aboneliğinizi kullanabilir.";
 "playlists.health.responds" = "Yanıt veriyor";
 "playlists.health.refused" = "Yanıt vermiyor";
 "playlists.health.expired" = "Süresi dolmuş";
@@ -801,9 +657,6 @@
 "home.switch_playlist" = "Oynatma listesini değiştir";
 "home.on_now" = "Kanallarınızda şu an yayında";
 "home.tonight" = "Bu akşam";
-"home.because_you_watched" = "İzlediklerinize göre";
-"home.new_episodes" = "Yeni bölümler";
-"home.new_episodes_badge" = "Yeni bölüm";
 "home.new_since_visit" = "Son ziyaretinizden beri yeni";
 "home.browse_categories" = "Kategorilere göz at";
 "epg.reminder.action" = "Bana hatırlat";
@@ -824,15 +677,8 @@
 "movie.format" = "Biçim";
 "download.file_size_format" = "Dosya boyutu %@";
 "sort.release_year" = "Çıkış yılı";
-"widget.continue_watching" = "İzlemeye Devam Et";
-"widget.favorite_channels" = "Favori Kanallar";
-"widget.on_now" = "Şu An Yayında";
-"widget.open_superx" = "Super X'i Aç";
 "settings.title" = "Ayarlar";
 "episode_count" = "%d bölüm";
-"gate.qr.hint" = "Kamerayı sağlayıcınızın QR koduna doğrultun.";
-"gate.qr.denied.title" = "Kamera erişimi kapalı";
-"gate.qr.denied.message" = "Super X'in bir QR kodu taramak için kamera erişimine ihtiyacı var. Ayarlar'dan Super X için açabilir veya bunun yerine giriş bilgilerinizi yapıştırabilirsiniz.";
 "gate.remove_account" = "Hesabı kaldır";
 "gate.remove_account.title" = "Bu hesap kaldırılsın mı?";
 "gate.remove_account.message" = "Bu, %@ öğesini ve bu cihazda sakladığı her şeyi kaldırır — kataloğu, favorileri, izleme geçmişi ve indirmeler. Bu geri alınamaz.";
@@ -914,7 +760,6 @@
 "player.sleep.off" = "Kapalı";
 "player.sleep.minutes" = "%d dk";
 "player.sleep.end_of_episode" = "Bölümün sonu";
-"player.sleep.remaining" = "%@ sonra duraklatılır";
 
 // MARK: - Build 61 (b5)
 "multiview.title" = "Çoklu Görünüm";
@@ -923,8 +768,6 @@
 "multiview.no_channels" = "Henüz canlı kanal yüklenmedi. Önce bir oynatma listesi yükleyin, ardından Çoklu Görünümü açın.";
 "multiview.select_channel" = "Kanal seç";
 "multiview.search_channels" = "Kanal ara";
-"cast.button.title" = "Yayınla";
-"icloud.sync.title" = "iCloud Senkronizasyonu";
 
 // MARK: - Build 61 (b6)
 "gate.subtitle" = "IPTV • Oynatma Listesi Girişi";
@@ -1241,4 +1084,40 @@
 "favorites.shelf.movies" = "Favori Filmler";
 "favorites.shelf.series" = "Favori Diziler";
 "matches.stats" = "İstatistikler";
-"settings.hub.all_settings" = "Tüm Ayarlar";
+
+"settings.hub.account" = "Hesap";
+"settings.hub.parental_locks" = "Ebeveyn Kontrolleri ve Kilitler";
+"settings.hub.backup_data" = "Yedekleme ve Veriler";
+"home.live_now" = "Şimdi canlı";
+"storage.unavailable.title" = "Depolama açılamadı";
+"storage.unavailable.message" = "Super X depolamasını açamadı. Kaydedilmiş verileriniz silinmedi. Açmayı bir kez daha denemek için «Tekrar Dene»ye dokunun — sorun devam ederse uygulamayı yeniden başlatmak yardımcı olabilir.";
+"storage.unavailable.retry_failed" = "Depolama hâlâ açılamıyor. Verileriniz hâlâ silinmedi — lütfen uygulamayı yeniden başlatıp tekrar deneyin.";
+"matches.explainer.start" = "Keşfetmeye başla";
+"matches.explainer.skip" = "Geç";
+"matches.explainer.soccer.title" = "Futbola hoş geldiniz";
+"matches.explainer.soccer.live.title" = "Canlı skorlar";
+"matches.explainer.soccer.live.detail" = "Her maç, anında güncellenir";
+"matches.explainer.soccer.lineups.title" = "Kadrolar ve dizilişler";
+"matches.explainer.soccer.lineups.detail" = "Kimin nasıl oynadığını görün";
+"matches.explainer.soccer.table.title" = "Puan durumu ve gol krallığı";
+"matches.explainer.soccer.table.detail" = "Puan tablosunun tamamı";
+"matches.explainer.soccer.follow.title" = "Takımlarını takip et";
+"matches.explainer.soccer.follow.detail" = "Her golde bir bildirim";
+"matches.explainer.nfl.title" = "NFL'ye hoş geldiniz";
+"matches.explainer.nfl.live.title" = "Canlı skorlar";
+"matches.explainer.nfl.live.detail" = "Her maç, anında güncellenir";
+"matches.explainer.nfl.standings.title" = "Puan durumu";
+"matches.explainer.nfl.standings.detail" = "NFL puan durumunun tamamı";
+"matches.explainer.nfl.stats.title" = "İstatistikler ve öne çıkanlar";
+"matches.explainer.nfl.stats.detail" = "Her maçın arkasındaki rakamlar";
+"matches.explainer.nfl.follow.title" = "Takımlarını takip et";
+"matches.explainer.nfl.follow.detail" = "Skor bildirimleri, ayrıca başlama ve maç sonu seçenekleri";
+"matches.explainer.nba.title" = "NBA'ye hoş geldiniz";
+"matches.explainer.nba.live.title" = "Canlı skorlar";
+"matches.explainer.nba.live.detail" = "Her maç, anında güncellenir";
+"matches.explainer.nba.standings.title" = "Puan durumu";
+"matches.explainer.nba.standings.detail" = "NBA puan durumunun tamamı";
+"matches.explainer.nba.stats.title" = "İstatistikler ve öne çıkanlar";
+"matches.explainer.nba.stats.detail" = "Her maçın arkasındaki rakamlar";
+"matches.explainer.nba.follow.title" = "Takımlarını takip et";
+"matches.explainer.nba.follow.detail" = "Çekişmeli maç sonlarında bildirimler";

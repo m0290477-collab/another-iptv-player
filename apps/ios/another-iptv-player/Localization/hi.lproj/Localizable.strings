@@ -5,19 +5,15 @@
 "common.delete" = "हटाएँ";
 "common.close" = "बंद करें";
 "common.error" = "त्रुटि";
-"common.yes" = "हाँ";
-"common.back" = "पीछे";
 "common.search" = "खोजें";
 "common.try_again" = "फिर कोशिश करें";
 "common.unknown_error" = "अज्ञात त्रुटि।";
-"common.days_format" = "%d दिन";
 "common.loading" = "लोड हो रहा है...";
 "common.confirm_delete_yes" = "हाँ, हटाएँ";
 "common.edit" = "संपादित करें";
 
 // MARK: - Playlist list
 "playlists.title" = "प्लेलिस्ट";
-"playlists.empty.title" = "कोई प्लेलिस्ट नहीं";
 "playlists.empty.message" = "लाइव टीवी, फिल्में और सीरीज देखने के लिए पहली IPTV प्लेलिस्ट जोड़ें।";
 "playlists.empty.add_button" = "नई प्लेलिस्ट जोड़ें";
 "playlists.local_file" = "स्थानीय फ़ाइल";
@@ -25,15 +21,11 @@
 "playlists.delete.message" = "क्या आप वाकई यह प्लेलिस्ट और उसकी सामग्री हटाना चाहते हैं?";
 
 // MARK: - Playlist type picker
-"playlist_type.title" = "प्लेलिस्ट जोड़ें";
 "playlist_type.section" = "प्लेलिस्ट प्रकार";
 "playlist_type.xtream.title" = "Xtream Code";
-"playlist_type.xtream.subtitle" = "सर्वर URL, उपयोगकर्ता नाम और पासवर्ड।";
 "playlist_type.m3u.title" = "M3U / M3U8";
-"playlist_type.m3u.subtitle" = "रिमोट URL या स्थानीय .m3u / .m3u8 फ़ाइल।";
 
 // MARK: - Add playlist (Xtream)
-"add_playlist.xtream.title_new" = "प्लेलिस्ट जोड़ें";
 "add_playlist.xtream.title_edit" = "प्लेलिस्ट संपादित करें";
 "add_playlist.section.info" = "प्लेलिस्ट जानकारी";
 "add_playlist.section.credentials" = "क्रेडेंशियल";
@@ -47,14 +39,10 @@
 "add_playlist.verifying" = "सत्यापन हो रहा है...";
 "add_playlist.auth_failed" = "प्रमाणीकरण विफल। अपनी जानकारी जाँचें।";
 "add_playlist.fetching_categories" = "श्रेणियाँ डाउनलोड हो रही हैं...";
-"add_playlist.fetching_live" = "लाइव चैनल डाउनलोड हो रहे हैं...";
-"add_playlist.fetching_movies" = "फ़िल्में डाउनलोड हो रही हैं...";
-"add_playlist.fetching_series" = "सीरीज़ डाउनलोड हो रही है...";
 "add_playlist.saving_db" = "डेटाबेस में सहेजा जा रहा है... कृपया प्रतीक्षा करें।";
 "add_playlist.download_save_error" = "डाउनलोड/सहेजने में त्रुटि: %@";
 
 // MARK: - Add playlist (M3U)
-"add_m3u.title_new" = "M3U जोड़ें";
 "add_m3u.title_edit" = "M3U संपादित करें";
 "add_m3u.name_placeholder" = "नाम (उदा. मेरा M3U)";
 "add_m3u.section.source" = "स्रोत";
@@ -138,9 +126,7 @@
 "favorites.remove" = "पसंदीदा से हटाएँ";
 
 // MARK: - Settings (common)
-"settings.back_to_list" = "प्लेलिस्ट पर वापस";
 "settings.refresh_all" = "सारी सामग्री फिर से डाउनलोड करें";
-"settings.player.title" = "प्लेयर सेटिंग्स";
 "settings.player.pip.title" = "पिक्चर इन पिक्चर";
 "settings.player.pip.desc" = "PiP मोड की अनुमति देता है";
 "settings.player.background.title" = "बैकग्राउंड में चालू रखें";
@@ -151,9 +137,6 @@
 "settings.player.autonext.desc" = "एपिसोड समाप्त होने पर अगला अपने आप शुरू होता है";
 "player.autonext.countdown" = "अगला एपिसोड %d में";
 "settings.playlist.info.title" = "प्लेलिस्ट जानकारी";
-"settings.playlist.name" = "नाम";
-"settings.playlist.type" = "प्रकार";
-"settings.playlist.server_url" = "सर्वर URL";
 "settings.playlist.username" = "उपयोगकर्ता नाम";
 "settings.playlist.password" = "पासवर्ड";
 "settings.playlist.subscription" = "शेष समय";
@@ -161,26 +144,16 @@
 "settings.playlist.max_connection" = "अधिकतम कनेक्शन";
 "settings.playlist.unlimited" = "असीमित";
 "settings.playlist.unknown" = "अज्ञात";
-"settings.playlist.unlimited_or_unknown" = "असीमित / अज्ञात";
 "settings.playlist.expired" = "समाप्त";
 "settings.playlist.fetching_info" = "सब्सक्रिप्शन जानकारी लोड हो रही है...";
 "settings.playlist.info_error" = "जानकारी नहीं मिली: %@";
 
-"settings.stats.title" = "सामग्री आँकड़े";
-"settings.stats.live_count" = "लाइव चैनल";
-"settings.stats.movie_count" = "फ़िल्में";
-"settings.stats.series_count" = "सीरीज़";
-"settings.stats.channel_count" = "चैनल";
 "settings.stats.group_count" = "समूह";
 "settings.stats.history_count" = "इतिहास";
-"settings.stats.history_items_format" = "%d आइटम";
 
-"settings.server.title" = "सर्वर जानकारी";
 "settings.server.timezone" = "समय क्षेत्र";
 "settings.server.message" = "सर्वर संदेश";
 
-"settings.content_management.title" = "सामग्री प्रबंधन";
-"settings.filter_adult.title" = "वयस्क सामग्री फ़िल्टर करें";
 "settings.filter_adult.xtream_desc" = "बदलाव के बाद सामग्री फिर से डाउनलोड करें";
 "settings.filter_adult.m3u_desc" = "XXX, 18+, adult वाले चैनल/समूह छिपाए जाएँगे";
 
@@ -188,12 +161,8 @@
 "settings.about.version" = "Super X Pro Max · संस्करण";
 
 // MARK: - M3U settings
-"settings.m3u.type_label" = "M3U / M3U8";
 "settings.m3u.refresh_url" = "URL से फिर से डाउनलोड करें";
 "settings.m3u.refresh_file" = "फ़ाइल से फिर से लोड करें";
-"settings.m3u.source_url" = "स्रोत URL";
-"settings.m3u.source" = "स्रोत";
-"settings.m3u.epg_url" = "EPG URL (जानकारी)";
 "settings.m3u.parsing" = "पार्स हो रहा है...";
 "settings.m3u.saving" = "सहेजा जा रहा है...";
 "settings.m3u.reading_file" = "फ़ाइल पढ़ी जा रही है...";
@@ -201,13 +170,9 @@
 
 // MARK: - Language
 "settings.language.title" = "ऐप भाषा";
-"settings.language.section" = "भाषा";
 "settings.language.system" = "सिस्टम भाषा";
 
 // MARK: - Stream types
-"stream.live" = "लाइव";
-"stream.vod" = "फ़िल्म";
-"stream.series" = "सीरीज़";
 "stream.m3u" = "M3U";
 
 // MARK: - Errors
@@ -245,8 +210,6 @@
 "download.status.queued" = "कतार में";
 "download.status.failed" = "विफल";
 "download.play" = "चलाएँ";
-"download.size_format" = "%@ / %@";
-"download.settings" = "डाउनलोड";
 "download.wifi_only.title" = "केवल Wi-Fi पर डाउनलोड";
 "download.wifi_only.desc" = "डाउनलोड के लिए मोबाइल डेटा का उपयोग नहीं होगा.";
 "download.storage_used" = "स्टोरेज उपयोग";
@@ -263,22 +226,14 @@
 "player.audio_delay.footer" = "धनात्मक मान ऑडियो में देरी करते हैं; ऋणात्मक मान उसे पहले चलाते हैं। ब्लूटूथ हेडफ़ोन और साउंडबार के लिए उपयोगी।";
 
 // MARK: - Player (overlay, tracks & subtitle appearance)
-"player.all_channels" = "सभी चैनल";
 "player.tracks.empty.video" = "कोई वीडियो ट्रैक नहीं";
 "player.tracks.empty.audio" = "कोई ऑडियो ट्रैक नहीं";
 "player.tracks.empty.subtitle" = "कोई सबटाइटल नहीं";
 "player.tracks.title" = "प्लेबैक ट्रैक";
 "player.tracks.video" = "वीडियो";
 "player.tracks.audio" = "ऑडियो";
-"player.tracks.audio_track" = "ऑडियो ट्रैक";
-"player.guide" = "गाइड";
-"player.controls_lock" = "नियंत्रण लॉक करें";
-"player.controls_unlock" = "नियंत्रण अनलॉक करें";
-"player.dock_to_mini" = "पूर्ण स्क्रीन से बाहर निकलें";
 "player.tracks.subtitle" = "सबटाइटल";
 "player.subtitle_off" = "बंद";
-"player.buffering" = "बफ़रिंग";
-"player.ended" = "समाप्त";
 "playback.error.timeout" = "सर्वर जवाब नहीं दे रहा है।";
 "playback.error.forbidden" = "पहुंच अस्वीकृत (403)।";
 "playback.error.unauthorized" = "प्रमाणीकरण आवश्यक (401)।";
@@ -287,30 +242,21 @@
 "playback.error.cannot_reach" = "सर्वर या स्ट्रीम तक नहीं पहुंचा जा सका।";
 "playback.error.unsupported" = "यह कॉन्टेंट इस डिवाइस पर समर्थित नहीं है।";
 "playback.error.no_playable_stream" = "चलाने योग्य ऑडियो या वीडियो नहीं मिला।";
-"playback.error.output_init_failed" = "ऑडियो या वीडियो आउटपुट शुरू नहीं हो सका।";
 "playback.error.failed_check_network" = "प्लेबैक विफल रहा। अपना नेटवर्क कनेक्शन जांचें।";
 "player.live_badge" = "लाइव";
-"player.pip_enter" = "PiP शुरू करें";
-"player.pip_exit" = "PiP से बाहर निकलें";
 "player.aspect_fit" = "फ़िट";
 "player.aspect_fill" = "भरें";
-"player.aspect_native" = "मूल";
 "subtitle.settings_title" = "सबटाइटल सेटिंग्स";
-"subtitle.sample_text" = "नमूना सबटाइटल टेक्स्ट\nयह ऐसा दिखेगा";
-"subtitle.font_settings" = "फ़ॉन्ट";
 "subtitle.font_size" = "फ़ॉन्ट आकार";
 "subtitle.font_height" = "लाइन ऊंचाई";
 "subtitle.letter_spacing" = "अक्षर अंतराल";
 "subtitle.word_spacing" = "शब्द अंतराल";
 "subtitle.padding" = "पैडिंग";
-"subtitle.colors" = "रंग";
 "subtitle.text_color" = "टेक्स्ट का रंग";
 "subtitle.background_color" = "पृष्ठभूमि का रंग";
 "subtitle.style" = "शैली";
 "subtitle.font_weight" = "फ़ॉन्ट मोटाई";
-"subtitle.text_align" = "संरेखण";
 "subtitle.reset" = "रीसेट";
-"subtitle.delay" = "विलंब";
 "subtitle.no_delay" = "कोई विलंब नहीं";
 "subtitle.preview" = "पूर्वावलोकन";
 "subtitle.apply" = "लागू करें";
@@ -348,16 +294,12 @@
 "player.brightness" = "चमक";
 "player.volume" = "वॉल्यूम";
 "player.playback_error" = "प्लेबैक त्रुटि";
-"player.live_on_air" = "प्रसारण में";
-"player.preparing" = "प्लेयर तैयार हो रहा है…";
 
 // MARK: - Content details, search & loading phases
-"category.no_result_in_category" = "इस श्रेणी में कोई परिणाम नहीं।";
 "category.see_all" = "सभी देखें";
 "content.unnamed" = "बिना शीर्षक";
 "detail.episode_count_plural" = "%d एपिसोड";
 "detail.episode_fallback" = "एपिसोड";
-"detail.loading_movie" = "फ़िल्म की जानकारी लोड हो रही है...";
 "detail.loading_series" = "सीरीज़ की जानकारी लोड हो रही है...";
 "detail.remaining_format" = "%@ शेष";
 "detail.restart" = "फिर से शुरू करें";
@@ -369,11 +311,6 @@
 "download.player_warning.go_to_downloads" = "डाउनलोड पर जाएं";
 "download.player_warning.message" = "बैकग्राउंड में एक डाउनलोड चल रहा है। प्लेबैक शुरू करने पर सर्वर की कनेक्शन सीमा के कारण डाउनलोड रुक सकता है। जारी रखें?";
 "download.player_warning.title" = "डाउनलोड जारी है";
-"favorites.empty.live" = "अभी कोई पसंदीदा चैनल नहीं।";
-"favorites.empty.movie" = "अभी कोई पसंदीदा फ़िल्म नहीं।";
-"favorites.empty.series" = "अभी कोई पसंदीदा सीरीज़ नहीं।";
-"favorites.type" = "प्रकार";
-"loading.takes_time_hint" = "आपकी इंटरनेट गति के अनुसार इसमें समय लग सकता है।";
 "misc.xtream.server_error" = "सर्वर त्रुटि: %@";
 "movie.cast" = "कलाकार";
 "movie.director" = "निर्देशक";
@@ -382,27 +319,17 @@
 "movie.play" = "चलाएं";
 "movie.plot" = "कहानी";
 "movie.rating" = "रेटिंग";
-"movie.release_date" = "रिलीज़ की तारीख";
-"movie.resume" = "जारी रखें";
-"movie.trailer" = "ट्रेलर";
-"phase.clearing_content" = "मौजूदा कॉन्टेंट हटाया जा रहा है...";
 "phase.fetch_categories" = "श्रेणियां डाउनलोड हो रही हैं...";
-"phase.fetch_live" = "लाइव स्ट्रीम डाउनलोड हो रही हैं...";
-"phase.fetch_movies" = "फ़िल्में डाउनलोड हो रही हैं...";
-"phase.fetch_series" = "सीरीज़ डाउनलोड हो रही हैं...";
 "phase.preparing" = "तैयार हो रहा है...";
 "phase.preparing_list" = "सूची तैयार हो रही है...";
 "phase.save_db" = "डेटाबेस में सहेजा जा रहा है...";
 "search.all" = "सभी";
 "search.trending" = "अभी ट्रेंडिंग";
 "search.min_chars" = "कम से कम 2 अक्षर लिखें";
-"search.more_results_format" = "%d और परिणाम";
 "search.placeholder" = "खोजें...";
-"search.title" = "खोज";
 "series.empty.no_in_category" = "इस श्रेणी में कोई सीरीज़ नहीं।";
 "series.empty.no_series" = "कोई सीरीज़ नहीं मिली।";
 "series.episode_count_format" = "%d एपिसोड";
-"series.episode_format" = "एपिसोड %d";
 "series.loading_seasons" = "सीज़न लोड हो रहे हैं…";
 "series.no_episodes_in_season" = "इस सीज़न में कोई एपिसोड नहीं।";
 "series.no_seasons_info" = "सीज़न की जानकारी उपलब्ध नहीं।";
@@ -426,8 +353,6 @@
 "player.airplay_active" = "AirPlay से चल रहा है";
 "player.a11y.subtitle_appearance" = "सबटाइटल स्वरूप";
 "player.a11y.track_settings" = "ऑडियो और सबटाइटल ट्रैक";
-"player.a11y.skip_back_15" = "15 सेकंड पीछे";
-"player.a11y.skip_forward_15" = "15 सेकंड आगे";
 "player.a11y.play" = "चलाएँ";
 "player.a11y.pause" = "रोकें";
 "player.a11y.previous_channel" = "पिछला चैनल";
@@ -441,10 +366,6 @@
 "settings.show_password" = "पासवर्ड दिखाएँ";
 "settings.hide_password" = "पासवर्ड छिपाएँ";
 "player.tracks.fallback_title" = "ट्रैक %d";
-"player.tracks.channels" = "%d चैनल";
-"player.tracks.cover_image" = "कवर / छवि";
-"player.tracks.default" = "डिफ़ॉल्ट";
-"player.tracks.forced" = "अनिवार्य";
 
 /* EPG (Electronic Programme Guide) */
 "epg.a11y.now_playing_format" = "अभी चल रहा है: %@";
@@ -501,20 +422,17 @@
 "sort.name_desc" = "नाम (Z–A)";
 "sort.rating_desc" = "रेटिंग";
 "sort.recently_added" = "हाल ही में जोड़े गए";
-"filter.file_type" = "फ़ाइल प्रकार";
 "filter.clear" = "फ़िल्टर साफ़ करें";
 
 // MARK: - Browse all & filters
 "browse.all_movies" = "सभी फ़िल्में";
 "browse.all_series" = "सभी सीरीज़";
 "browse.all_live" = "सभी चैनल";
-"filter.genre" = "शैली";
 "filter.title" = "फ़िल्टर";
 "filter.catchup" = "कैच-अप उपलब्ध";
 "filter.has_epg" = "EPG उपलब्ध";
 
 // MARK: - Entry gate (round 4)
-"gate.welcome" = "स्वागत है — जारी रखने के लिए साइन इन करें";
 "gate.sign_in" = "साइन इन करें";
 "gate.load_playlist" = "प्लेलिस्ट लोड करें";
 "gate.toggle_password_visibility" = "पासवर्ड दिखाएँ या छिपाएँ";
@@ -523,14 +441,12 @@
 "dashboard.home" = "होम";
 
 // MARK: - Continue watching
-"home.trending_channels" = "ट्रेंडिंग चैनल";
 "home.top_movies" = "शीर्ष फ़िल्में";
 "home.popular_series" = "लोकप्रिय सीरीज़";
 "home.search_placeholder" = "फ़िल्में, सीरीज़, चैनल खोजें...";
 "home.featured" = "विशेष";
 "home.play" = "चलाएँ";
 "home.details" = "विवरण";
-"home.top_rated_movies" = "सर्वोच्च रेटिंग वाली फ़िल्में";
 "home.sports_dashboard" = "स्पोर्ट्स डैशबोर्ड";
 "home.top10_today" = "आज के टॉप 10";
 "home.top_rated_series" = "सर्वोच्च रेटिंग वाली सीरीज़";
@@ -538,20 +454,16 @@
 "home.new_series" = "नई सीरीज़";
 "home.chip_all" = "सभी";
 "home.chip_newest" = "नवीनतम";
-"home.chip_history" = "इतिहास";
 "home.count_channels" = "%@ चैनल";
 "home.count_movies" = "%@ फ़िल्में";
 "home.count_series" = "%@ सीरीज़";
 
 // MARK: - Language
 "settings.group.player" = "प्लेयर";
-"settings.group.app" = "ऐप";
 "settings.group.content_data" = "सामग्री और डेटा";
-"settings.group.about_legal" = "जानकारी और कानूनी";
 "settings.playlist.connected" = "कनेक्ट है";
 "settings.playlist.checking" = "जाँच हो रही है…";
 "settings.playlist.connection_failed" = "कनेक्शन विफल";
-"settings.accent_color" = "एक्सेंट रंग";
 "settings.accent.blue" = "नीला";
 "settings.accent.violet" = "बैंगनी";
 "settings.accent.pink" = "गुलाबी";
@@ -572,10 +484,8 @@
 "download.keep" = "डाउनलोड जारी रखें";
 "download.delete.title" = "डाउनलोड हटाएँ?";
 "download.delete.message" = "डाउनलोड की गई फ़ाइल इस डिवाइस से हटा दी जाएगी।";
-"player.skip_intro" = "इंट्रो छोड़ें";
 "player.speed" = "गति";
 "player.sleep_timer" = "स्लीप टाइमर";
-"player.sleep_timer.off" = "बंद";
 "player.sleep_timer.minutes" = "%d मिनट";
 
 // MARK: - Round 10
@@ -596,19 +506,15 @@
 "notifications.expiry.title" = "आपकी प्रदाता सदस्यता";
 "notifications.expiry.message" = "आपकी प्रदाता सदस्यता %d दिनों में समाप्त हो जाएगी (%@)।";
 "notifications.expiry.message_one" = "आपकी प्रदाता सदस्यता 1 दिन में समाप्त हो जाएगी (%@)।";
-"notifications.expiry.message_today" = "आपकी प्रदाता सदस्यता आज समाप्त हो जाएगी (%@)।";
 "notifications.expired.title" = "आपकी प्रदाता सदस्यता";
 "notifications.expired.message" = "आपकी प्रदाता सदस्यता %@ को समाप्त हो गई।";
 "player.sleep_timer.short" = "स्लीप";
-"player.tracks.more" = "अधिक विकल्प";
-"detail.story" = "कहानी";
 "detail.more_like_this" = "इस जैसी और";
 "detail.episodes" = "एपिसोड";
 "detail.about" = "जानकारी";
 "detail.continue_episode" = "जारी रखें • एपिसोड %d";
 "detail.play_episode_1" = "एपिसोड 1 चलाएँ";
 "common.off" = "बंद";
-"common.seconds_format" = "%d सेकंड";
 "playlists.remote_playlist" = "रिमोट प्लेलिस्ट";
 "settings.account.provider_subscription" = "आपकी प्रदाता सदस्यता";
 "settings.account.until_format" = "%@ तक";
@@ -616,45 +522,21 @@
 "settings.account.day_left" = "1 दिन शेष";
 "settings.account.days_left" = "%d दिन शेष";
 "settings.account.no_expiry" = "कोई समाप्ति नहीं";
-"settings.player.next_episode_timer.title" = "अगले एपिसोड का टाइमर";
-"settings.player.show_skip_intro.title" = "\"इंट्रो छोड़ें\" दिखाएँ";
-"settings.player.show_skip_intro.desc" = "एपिसोड का इंट्रो छोड़ने के लिए एक बटन";
-"settings.player.skip_intro_length.title" = "इंट्रो छोड़ने की अवधि";
 "settings.player.sleep_default.title" = "डिफ़ॉल्ट स्लीप टाइमर";
-"settings.player.engine.title" = "प्लेबैक इंजन";
-"settings.player.engine.automatic" = "स्वचालित";
-"settings.player.engine.avplayer" = "AVPlayer";
-"settings.player.engine.ffmpeg" = "FFmpeg";
-"settings.app.notifications.title" = "सूचनाएँ";
 "settings.app.notifications.desc" = "प्रदाता सदस्यता समाप्ति अलर्ट";
 "settings.parental_controls.title" = "अभिभावकीय नियंत्रण";
-"settings.group.activation" = "सक्रियण";
-"settings.activation.activated" = "सक्रिय है";
-"settings.activation.device_id" = "डिवाइस ID";
-"settings.activation.pin" = "PIN";
-"settings.activation.lifetime" = "आजीवन सदस्यता";
-"settings.activation.lifetime_desc" = "हमेशा के लिए मान्य — कोई समाप्ति नहीं";
-"settings.activation.copy" = "कॉपी करें";
 "settings.group.privacy_legal" = "गोपनीयता और कानूनी";
 "settings.legal.contact_support" = "समर्थन से संपर्क करें";
 "settings.legal.privacy_policy" = "गोपनीयता नीति";
 "settings.legal.terms" = "उपयोग की शर्तें";
 "settings.legal.report_content" = "आपत्तिजनक सामग्री की रिपोर्ट करें";
 "settings.legal.delete_account" = "खाता हटाएँ";
-"settings.legal.delete_account_desc" = "यह क्रिया वापस नहीं की जा सकती";
-"settings.legal.delete_account.title" = "खाता हटाएँ?";
-"settings.legal.delete_account.message" = "यह आपकी सभी प्लेलिस्ट और वह सब कुछ हटा देता है जो ऐप ने इस डिवाइस पर संग्रहीत किया है — कैटलॉग, पसंदीदा, देखने का इतिहास और डाउनलोड। यह वापस नहीं किया जा सकता।";
 "settings.legal.support.body" = "Super X एक मुफ़्त ऐप है। इसका कोई समर्थन डेस्क और कोई समर्थन ईमेल पता नहीं है। अधिकांश समस्याएँ उस प्लेलिस्ट या प्रदाता सदस्यता से आती हैं जो आपने जोड़ी है: जाँचें कि आपकी साइन-इन जानकारी ठीक उसी तरह दर्ज है जैसे आपके प्रदाता ने दी थी, और आपकी सदस्यता अभी भी सक्रिय है। आपकी सदस्यता, उसकी सामग्री या उसके नवीनीकरण के बारे में प्रश्नों का उत्तर केवल आपका प्रदाता ही दे सकता है।";
 "settings.legal.report.body" = "Super X कोई चैनल, फ़िल्म या सीरीज़ प्रदान नहीं करता। आप जो कुछ भी देखते हैं वह उस प्लेलिस्ट और प्रदाता सदस्यता से आता है जो आपने स्वयं जोड़ी है, और वह उस प्रदाता द्वारा होस्ट और आपूर्ति किया जाता है। यदि उस सामग्री का कुछ हिस्सा आपत्तिजनक है या आपके अधिकारों का उल्लंघन करता है, तो रिपोर्ट करने का प्रभावी स्थान आपका प्रदाता है। इस डिवाइस पर आप सेटिंग्स में अभिभावकीय नियंत्रण से वयस्क सामग्री भी छिपा सकते हैं, और प्लेलिस्ट हटाने से वह सामग्री इस डिवाइस से हट जाती है।";
 "settings.legal.privacy.body" = "डेटा संग्रह\n\nयह एप्लिकेशन कोई व्यक्तिगत डेटा या उपयोगकर्ता जानकारी एकत्र, संग्रहीत या प्रसारित नहीं करता।\n\nआपकी सामग्री\n\n• IPTV प्लेलिस्ट और चैनल सूचियाँ केवल आपके डिवाइस पर स्थानीय रूप से संग्रहीत होती हैं।\n• ऐप स्वयं किसी बाहरी सर्वर को कोई डेटा नहीं भेजता। जब आप कोई स्ट्रीम चलाते हैं, तो आपका डिवाइस सीधे उस प्रदाता से कनेक्ट होता है जिसे आपने जोड़ा है।\n• कोई एनालिटिक्स या ट्रैकिंग सेवा उपयोग नहीं होती।\n\nतृतीय-पक्ष सेवाएँ\n\nयह एप्लिकेशन किसी तृतीय-पक्ष एनालिटिक्स, विज्ञापन या डेटा संग्रह सेवा को एकीकृत नहीं करता।\n\nपरिवर्तन\n\nयदि यह नीति बदलती है, तो अद्यतन पाठ यहाँ, ऐप में दिखाई देगा।";
 "settings.legal.terms.body" = "1. ऐप\n\nSuper X एक मुफ़्त मीडिया प्लेयर है। इसमें अपने कोई चैनल, फ़िल्में, सीरीज़ या अन्य सामग्री नहीं है, और यह कुछ नहीं बेचता।\n\n2. आपकी प्लेलिस्ट और सदस्यताएँ\n\nआप अपनी प्लेलिस्ट और प्रदाता सदस्यताएँ स्वयं जोड़ते हैं। किसी प्रदाता के साथ आपका समझौता — जिसमें उसकी कीमत, समाप्ति तिथि और सामग्री शामिल है — आपके और उस प्रदाता के बीच है। जब किसी प्रदाता की सदस्यता समाप्त हो जाती है, तो उस प्रदाता की सामग्री का प्लेबैक तब तक रुक जाता है जब तक आप उसे नवीनीकृत नहीं करते या दूसरी प्लेलिस्ट पर स्विच नहीं करते।\n\n3. आपकी ज़िम्मेदारी\n\nयह सुनिश्चित करना आपकी ज़िम्मेदारी है कि आपके पास ऐप में जोड़ी गई सामग्री तक पहुँचने और उसे देखने का अधिकार है।\n\n4. कोई वारंटी नहीं\n\nऐप \"जैसा है\" वैसा ही प्रदान किया जाता है, बिना किसी प्रकार की वारंटी के। तृतीय-पक्ष प्रदाताओं द्वारा आपूर्ति की गई सामग्री की उपलब्धता, गुणवत्ता या वैधता के लिए Super X ज़िम्मेदार नहीं है।";
-"expiry.blocked.title" = "प्रदाता सदस्यता समाप्त";
-"expiry.blocked.message" = "आपकी प्रदाता सदस्यता %@ को समाप्त हो गई। देखते रहने के लिए इसे अपने प्रदाता के पास नवीनीकृत करें, या सेटिंग्स में किसी दूसरी प्लेलिस्ट पर स्विच करें।";
-"expiry.blocked.open_settings" = "सेटिंग्स खोलें";
 
 // MARK: - Round 14/15 finisher completion (R14-NEW-KEYS + code-referenced keys)
-"settings.group.app_appearance" = "ऐप और दिखावट";
-"settings.activation.purpose" = "इस डिवाइस के लिए Super X का मुफ़्त, आजीवन एक्टिवेशन।";
 "settings.app.expiry_alerts.title" = "सदस्यता समाप्ति अलर्ट";
 "settings.player.video_fit.title" = "डिफ़ॉल्ट वीडियो फ़िट";
 "settings.player.subtitle_appearance" = "सबटाइटल दिखावट";
@@ -690,18 +572,7 @@
 "download.error.server_refused" = "सर्वर ने यह डाउनलोड अस्वीकार किया — आपकी सदस्यता समाप्त हो सकती है या कनेक्शन सीमा तक पहुंच गए हैं। बाद में फिर से प्रयास करें।";
 "playback.error.http_status" = "सर्वर ने यह स्ट्रीम अस्वीकार की (HTTP %d)।";
 "player.airplay" = "AirPlay";
-"player.pip_short" = "PiP";
-"player.favorite" = "पसंदीदा";
-"player.connecting" = "कनेक्ट हो रहा है…";
 "player.reconnecting" = "पुनः कनेक्ट हो रहा है…";
-"player.autonext.play_next" = "अगला एपिसोड";
-"player.autonext.season_episode" = "सीज़न %d • एपिसोड %d";
-"player.stats.title" = "प्लेबैक आंकड़े";
-"player.stats.resolution" = "रेज़ोल्यूशन";
-"player.stats.bitrate" = "बिटरेट";
-"player.stats.buffer" = "बफ़र";
-"player.series_finished.title" = "आपने यह सीरीज़ पूरी कर ली";
-"player.series_finished.watch_again" = "फिर से देखें";
 "settings.scope.this_playlist" = "यह प्लेलिस्ट";
 "settings.scope.whole_app" = "पूरा ऐप";
 "settings.reset.title" = "डिफ़ॉल्ट पर रीसेट करें";
@@ -720,8 +591,6 @@
 "settings.backup.import.passwords.message" = "ये प्लेलिस्ट पासवर्ड के बिना आयात हुईं। पूरा करने के लिए हर पासवर्ड दर्ज करें।";
 "settings.backup.import.done_format" = "%d प्लेलिस्ट आयात हुईं।";
 "settings.backup.import.failed" = "वह फ़ाइल आयात नहीं हो सकी।";
-"settings.image_cache.title" = "छवि कैश";
-"settings.image_cache.clear" = "साफ़ करें";
 "settings.group.advanced" = "उन्नत";
 "pin.title" = "अभिभावकीय PIN";
 "pin.set" = "PIN सेट करें";
@@ -741,30 +610,17 @@
 "reminders.enabled.title" = "कार्यक्रम रिमाइंडर";
 "reminders.enabled.desc" = "सदस्यता समाप्ति अलर्ट से अलग";
 "reminders.lead_time" = "रिमाइंडर अग्रिम समय";
-"player.zapping.enabled" = "चैनल बदलने के लिए स्वाइप करें";
-"player.zapping.direction" = "ज़ैप दिशा";
-"player.zapping.direction.up_next" = "ऊपर स्वाइप = अगला";
-"player.zapping.direction.down_next" = "नीचे स्वाइप = अगला";
 "motion.intensity.title" = "मोशन तीव्रता";
 "motion.intensity.full" = "पूर्ण";
 "motion.intensity.reduced" = "कम";
-"player.next_episode_card.title" = "अगले एपिसोड का कार्ड";
-"player.next_episode_card.auto" = "अपने आप चलाएं";
-"player.next_episode_card.ask" = "केवल पूछें";
 "settings.ui_sounds.title" = "UI ध्वनियां";
 "settings.ui_sounds.desc" = "डाउनलोड, रीफ़्रेश और पसंदीदा के लिए छोटी ध्वनियां";
-"gate.qr.scan" = "QR कोड स्कैन करें";
-"gate.qr.unavailable.title" = "कैमरा उपलब्ध नहीं";
-"gate.qr.unavailable.message" = "इस डिवाइस पर QR स्कैनिंग उपलब्ध नहीं है। आप इसके बजाय अपनी साइन-इन जानकारी चिपका सकते हैं।";
 "gate.continue_with_format" = "%@ के साथ जारी रखें";
 "gate.all_expired.title" = "सभी सदस्यताएं समाप्त";
 "gate.all_expired.message" = "हर सहेजी गई सदस्यता समाप्त हो चुकी है। नीचे नई जोड़ें, या मौजूदा को नवीनीकृत करें।";
 "playlists.make_default" = "डिफ़ॉल्ट बनाएं";
 "playlists.default_badge" = "डिफ़ॉल्ट";
 "playlists.change_server" = "सर्वर पता बदलें";
-"playlists.qr.show" = "QR कोड दिखाएं";
-"playlists.qr.title" = "प्लेलिस्ट QR कोड";
-"playlists.qr.warning" = "इस कोड में आपकी प्लेलिस्ट का पासवर्ड सादे पाठ में है। जो कोई भी इसे स्कैन करेगा वह आपकी सदस्यता का उपयोग कर सकता है।";
 "playlists.health.responds" = "प्रतिक्रिया दे रहा है";
 "playlists.health.refused" = "प्रतिक्रिया नहीं दे रहा";
 "playlists.health.expired" = "समाप्त";
@@ -783,9 +639,6 @@
 "home.switch_playlist" = "प्लेलिस्ट बदलें";
 "home.on_now" = "आपके चैनलों पर अभी चल रहा है";
 "home.tonight" = "आज रात";
-"home.because_you_watched" = "क्योंकि आपने देखा";
-"home.new_episodes" = "नए एपिसोड";
-"home.new_episodes_badge" = "नया एपिसोड";
 "home.new_since_visit" = "आपकी आखिरी यात्रा के बाद नया";
 "home.browse_categories" = "श्रेणियां ब्राउज़ करें";
 "epg.reminder.action" = "मुझे याद दिलाएं";
@@ -806,15 +659,8 @@
 "movie.format" = "फ़ॉर्मैट";
 "download.file_size_format" = "फ़ाइल आकार %@";
 "sort.release_year" = "रिलीज़ वर्ष";
-"widget.continue_watching" = "देखना जारी रखें";
-"widget.favorite_channels" = "पसंदीदा चैनल";
-"widget.on_now" = "अभी चल रहा है";
-"widget.open_superx" = "Super X खोलें";
 "settings.title" = "सेटिंग्स";
 "episode_count" = "%d एपिसोड";
-"gate.qr.hint" = "कैमरे को अपने प्रदाता के QR कोड की ओर करें।";
-"gate.qr.denied.title" = "कैमरा एक्सेस बंद है";
-"gate.qr.denied.message" = "QR कोड स्कैन करने के लिए Super X को कैमरा एक्सेस चाहिए। आप सेटिंग्स में Super X के लिए इसे चालू कर सकते हैं, या इसके बजाय अपनी साइन-इन जानकारी चिपका सकते हैं।";
 "gate.remove_account" = "खाता हटाएँ";
 "gate.remove_account.title" = "यह खाता हटाएँ?";
 "gate.remove_account.message" = "इससे %@ और इस डिवाइस पर उसने जो कुछ भी संग्रहीत किया है — उसका कैटलॉग, पसंदीदा, देखने का इतिहास और डाउनलोड — हट जाएगा। इसे पूर्ववत नहीं किया जा सकता।";
@@ -896,7 +742,6 @@
 "player.sleep.off" = "बंद";
 "player.sleep.minutes" = "%d मिनट";
 "player.sleep.end_of_episode" = "एपिसोड के अंत में";
-"player.sleep.remaining" = "%@ में रुकेगा";
 
 // MARK: - Build 61 (b5)
 "multiview.title" = "मल्टीव्यू";
@@ -905,8 +750,6 @@
 "multiview.no_channels" = "अभी कोई लाइव चैनल लोड नहीं हुआ है। पहले प्लेलिस्ट लोड करें, फिर मल्टीव्यू खोलें।";
 "multiview.select_channel" = "चैनल चुनें";
 "multiview.search_channels" = "चैनल खोजें";
-"cast.button.title" = "कास्ट";
-"icloud.sync.title" = "iCloud सिंक";
 
 // MARK: - Build 61 (b6)
 "gate.subtitle" = "IPTV • प्लेलिस्ट लॉगिन";
@@ -1223,4 +1066,40 @@
 "favorites.shelf.movies" = "पसंदीदा फ़िल्में";
 "favorites.shelf.series" = "पसंदीदा सीरीज़";
 "matches.stats" = "आँकड़े";
-"settings.hub.all_settings" = "सभी सेटिंग्स";
+
+"settings.hub.account" = "खाता";
+"settings.hub.parental_locks" = "अभिभावकीय नियंत्रण और लॉक";
+"settings.hub.backup_data" = "बैकअप और डेटा";
+"home.live_now" = "अभी लाइव";
+"storage.unavailable.title" = "स्टोरेज नहीं खोला जा सका";
+"storage.unavailable.message" = "Super X अपना स्टोरेज नहीं खोल सका. आपका सहेजा गया डेटा हटाया नहीं गया है. एक बार फिर खोलने का प्रयास करने के लिए «फिर से प्रयास करें» पर टैप करें — यदि समस्या बनी रहती है, तो ऐप को फिर से शुरू करने से मदद मिल सकती है।";
+"storage.unavailable.retry_failed" = "स्टोरेज अभी भी नहीं खोला जा सका. आपका डेटा अभी भी हटाया नहीं गया है — कृपया ऐप को फिर से शुरू करें और फिर से प्रयास करें।";
+"matches.explainer.start" = "देखना शुरू करें";
+"matches.explainer.skip" = "छोड़ें";
+"matches.explainer.soccer.title" = "फ़ुटबॉल में आपका स्वागत है";
+"matches.explainer.soccer.live.title" = "लाइव स्कोर";
+"matches.explainer.soccer.live.detail" = "हर मैच, तुरंत अपडेट";
+"matches.explainer.soccer.lineups.title" = "लाइनअप और फ़ॉर्मेशन";
+"matches.explainer.soccer.lineups.detail" = "देखें कौन खेलता है और कैसे";
+"matches.explainer.soccer.table.title" = "स्टैंडिंग और शीर्ष स्कोरर";
+"matches.explainer.soccer.table.detail" = "पूरी तालिका";
+"matches.explainer.soccer.follow.title" = "अपनी टीमों को फ़ॉलो करें";
+"matches.explainer.soccer.follow.detail" = "हर गोल पर एक नोटिफ़िकेशन";
+"matches.explainer.nfl.title" = "NFL में आपका स्वागत है";
+"matches.explainer.nfl.live.title" = "लाइव स्कोर";
+"matches.explainer.nfl.live.detail" = "हर मैच, तुरंत अपडेट";
+"matches.explainer.nfl.standings.title" = "स्टैंडिंग";
+"matches.explainer.nfl.standings.detail" = "पूरी NFL स्टैंडिंग";
+"matches.explainer.nfl.stats.title" = "आँकड़े और शीर्ष खिलाड़ी";
+"matches.explainer.nfl.stats.detail" = "हर खेल के पीछे के आँकड़े";
+"matches.explainer.nfl.follow.title" = "अपनी टीमों को फ़ॉलो करें";
+"matches.explainer.nfl.follow.detail" = "स्कोर अलर्ट, साथ में किकऑफ़ और फ़ुल-टाइम विकल्प";
+"matches.explainer.nba.title" = "NBA में आपका स्वागत है";
+"matches.explainer.nba.live.title" = "लाइव स्कोर";
+"matches.explainer.nba.live.detail" = "हर मैच, तुरंत अपडेट";
+"matches.explainer.nba.standings.title" = "स्टैंडिंग";
+"matches.explainer.nba.standings.detail" = "पूरी NBA स्टैंडिंग";
+"matches.explainer.nba.stats.title" = "आँकड़े और शीर्ष खिलाड़ी";
+"matches.explainer.nba.stats.detail" = "हर खेल के पीछे के आँकड़े";
+"matches.explainer.nba.follow.title" = "अपनी टीमों को फ़ॉलो करें";
+"matches.explainer.nba.follow.detail" = "करीबी अंत वाले मैचों में नोटिफ़िकेशन";
