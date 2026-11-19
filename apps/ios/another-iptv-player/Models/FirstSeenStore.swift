@@ -49,10 +49,14 @@ final class FirstSeenStore: ObservableObject {
     /// R2: badges live for 7 days from first sight.
     static let badgeWindow: TimeInterval = 7 * 24 * 3600
 
-    private static func seenKey(playlistId: UUID) -> String { "firstseen.map.\(playlistId.uuidString)" }
-    private static func openedKey(playlistId: UUID) -> String { "firstseen.opened.\(playlistId.uuidString)" }
-    private static func baselineKey(playlistId: UUID) -> String { "firstseen.baseline.\(playlistId.uuidString)" }
-    private static func pendingKey(playlistId: UUID) -> String { "firstseen.pending.\(playlistId.uuidString)" }
+    // Build 64 compile fix: these key builders are pure string
+    // interpolation over the argument — `nonisolated` so the
+    // off-main paths (`loadStateFromDefaults`, the persistence
+    // queue closures) can call them without a main-actor hop.
+    nonisolated private static func seenKey(playlistId: UUID) -> String { "firstseen.map.\(playlistId.uuidString)" }
+    nonisolated private static func openedKey(playlistId: UUID) -> String { "firstseen.opened.\(playlistId.uuidString)" }
+    nonisolated private static func baselineKey(playlistId: UUID) -> String { "firstseen.baseline.\(playlistId.uuidString)" }
+    nonisolated private static func pendingKey(playlistId: UUID) -> String { "firstseen.pending.\(playlistId.uuidString)" }
 
     // MARK: - In-memory state (build 63, item 14)
 
@@ -81,14 +85,18 @@ final class FirstSeenStore: ObservableObject {
 
     /// The series id embedded in an "episode:<seriesId>:<episodeId>"
     /// key, or nil for any other key shape.
-    private static func episodeSeriesId(fromKey key: String) -> Int? {
+    /// Build 64 compile fix: pure string parsing of the argument —
+    /// `nonisolated` (called from `buildEpisodeIndex` off-main).
+    nonisolated private static func episodeSeriesId(fromKey key: String) -> Int? {
         guard key.hasPrefix("episode:") else { return nil }
         let rest = key.dropFirst("episode:".count)
         guard let colon = rest.firstIndex(of: ":") else { return nil }
         return Int(rest[..<colon])
     }
 
-    private static func buildEpisodeIndex(seen: [String: Double]) -> [Int: [String]] {
+    /// Build 64 compile fix: builds a dictionary purely from its
+    /// argument — `nonisolated` (called from `loadStateFromDefaults`).
+    nonisolated private static func buildEpisodeIndex(seen: [String: Double]) -> [Int: [String]] {
         var index: [Int: [String]] = [:]
         for key in seen.keys {
             if let seriesId = episodeSeriesId(fromKey: key) {
