@@ -220,12 +220,55 @@ struct ScopedSectionHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
+            // Build 66 (W10, modern-look pass): the title carries
+            // the shared group-header treatment (small-caps, bold,
+            // white-70) instead of the stock List header rendering.
             Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.white.opacity(0.7))
+                .textCase(.uppercase)
             Text(L(thisPlaylist ? "settings.scope.this_playlist" : "settings.scope.whole_app"))
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
                 .textCase(nil)
         }
+    }
+}
+
+/// Build 66 (W10, modern-look pass): the ONE shared header for
+/// settings sections that have no scope caption — the plain
+/// `Text(...)` section headers rendered as stock gray caps.
+/// Small-caps bold white-70, matching `ScopedSectionHeader`'s
+/// title treatment so every group on the hub pages reads as one
+/// designed system. (The pre-existing `SettingsGroupHeader`
+/// above belongs to the Add/Edit playlist forms and keeps its
+/// own headline treatment.)
+struct SettingsSectionHeader: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Color.white.opacity(0.7))
+            .textCase(.uppercase)
+    }
+}
+
+extension View {
+    /// Build 66 (W10, modern-look pass): the ONE row treatment
+    /// for every section on the Settings hub pages — rows sit on
+    /// the Design-4 card surface (`AppTheme.elevated`, #1A1A21)
+    /// with no stock separators, so an `.insetGrouped` list reads
+    /// as designed card groups. Applied to each `Section` value
+    /// at its construction site (inside the section structs and
+    /// at the hub's inline sections): applying it to a section
+    /// STRUCT instance from outside would rely on the modifier
+    /// propagating through an opaque custom view, which SwiftUI
+    /// does not guarantee; on the `Section` itself it applies to
+    /// every row in that section.
+    func settingsCardRows() -> some View {
+        listRowBackground(AppTheme.elevated)
+            .listRowSeparator(.hidden)
     }
 }
 
@@ -678,12 +721,16 @@ private struct PINSetupSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            // Build 66 (W10): List, not Form — same sections,
+            // bindings and save path, on the hub pages' card
+            // treatment (insetGrouped + card rows).
+            List {
                 if hasExistingPIN {
                     Section {
                         SecureField(L("pin.enter_current"), text: $current)
                             .keyboardType(.numberPad)
                     }
+                    .settingsCardRows()
                 }
                 Section {
                     SecureField(L("pin.enter_new"), text: $newPIN)
@@ -691,14 +738,18 @@ private struct PINSetupSheet: View {
                     SecureField(L("pin.confirm_new"), text: $confirmPIN)
                         .keyboardType(.numberPad)
                 }
+                .settingsCardRows()
                 if let errorText {
                     Section {
                         Text(errorText)
                             .font(.caption)
                             .foregroundColor(.red)
                     }
+                    .settingsCardRows()
                 }
             }
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(16)
             .cinematicScrollBackground()
             .navigationTitle(L("pin.title"))
             .navigationBarTitleDisplayMode(.inline)
@@ -794,6 +845,7 @@ struct ParentalPINSection: View {
                 .buttonStyle(.plain)
             }
         }
+        .settingsCardRows()
         .sheet(isPresented: $showSetup) {
             PINSetupSheet { hasPIN = PINStore.hasPIN }
         }
@@ -884,6 +936,7 @@ struct AppLockSection: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
+        .settingsCardRows()
         .sheet(isPresented: $showSetup) {
             AppPINSetupSheet {
                 hasPIN = AppLockService.hasPIN
@@ -970,6 +1023,7 @@ struct RemindersSettingsSection: View {
             .disabled(!remindersEnabled)
             .opacity(remindersEnabled ? 1 : 0.45)
         }
+        .settingsCardRows()
     }
 }
 
@@ -1006,6 +1060,7 @@ struct MotionSoundSettingsSection: View {
                 }
             }
         }
+        .settingsCardRows()
     }
 }
 
@@ -1032,6 +1087,7 @@ struct ExpiryAlertsSettingsSection: View {
                 }
             }
         }
+        .settingsCardRows()
     }
 }
 
@@ -1139,6 +1195,7 @@ struct BackupSettingsSection: View {
             }
             .buttonStyle(.plain)
         }
+        .settingsCardRows()
         .task(id: playlists.count) { await prepareSettingsExport() }
         .alert(L("settings.backup.full_warning.title"), isPresented: $showFullWarning) {
             Button(L("common.cancel"), role: .cancel) { }
@@ -1350,14 +1407,18 @@ struct BackupSettingsSection: View {
 
     private var passwordPromptSheet: some View {
         NavigationStack {
-            Form {
+            // Build 66 (W10): List, not Form — same sections,
+            // bindings and save path, on the hub pages' card
+            // treatment (insetGrouped + card rows + shared header).
+            List {
                 Section {
                     Text(L("settings.backup.import.passwords.message"))
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
+                .settingsCardRows()
                 ForEach(Array(pendingPasswordDTOs.enumerated()), id: \.offset) { index, dto in
-                    Section(header: Text(dto.name)) {
+                    Section(header: SettingsSectionHeader(title: dto.name)) {
                         Text(dto.username)
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -1368,8 +1429,11 @@ struct BackupSettingsSection: View {
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                     }
+                    .settingsCardRows()
                 }
             }
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(16)
             .cinematicScrollBackground()
             .navigationTitle(L("settings.backup.import.passwords_title"))
             .navigationBarTitleDisplayMode(.inline)
@@ -1533,6 +1597,7 @@ struct PlaybackSettingsSection: View {
                 }
             }
         }
+        .settingsCardRows()
     }
 
 }
@@ -1565,6 +1630,7 @@ struct EPGOffsetSettingsSection: View {
                     .labelsHidden()
             }
         }
+        .settingsCardRows()
     }
 
     /// "+1.5 h" / "-0.5 h" / "0 h" — the stepper's current value.
@@ -1635,6 +1701,7 @@ struct AppearanceSettingsSection: View {
             sectionToggle(.matches, titleKey: "sections.matches", systemImage: "sportscourt.fill", tint: .green)
             sectionToggle(.library, titleKey: "sections.library", systemImage: "star.fill", tint: .yellow)
         }
+        .settingsCardRows()
     }
 
     /// One "Show <section>" toggle — ON means visible (the store
@@ -1722,6 +1789,7 @@ struct LockedCategoriesSection: View {
                 }
             }
         }
+        .settingsCardRows()
         .task { await loadCategories() }
         .onAppear { hasPIN = PINStore.hasPIN }
         .sheet(isPresented: $showPINForUnlockAll) {
@@ -1861,6 +1929,7 @@ struct StorageSettingsSection: View {
             .buttonStyle(.plain)
             .disabled(searchHistoryCount == 0)
         }
+        .settingsCardRows()
         .task {
             refresh()
             searchHistoryCount = SearchHistoryStore.queries.count
@@ -1914,6 +1983,7 @@ struct SubscriptionSettingsSection: View {
                 }
             }
         }
+        .settingsCardRows()
     }
 }
 
@@ -1951,6 +2021,7 @@ struct SubscriptionOverviewView: View {
                     connectionLines(for: playlist)
                 }
                 .padding(.vertical, 2)
+                .settingsCardRows()
             }
         }
         .listStyle(.insetGrouped)
@@ -2135,6 +2206,7 @@ struct SupportSettingsSection: View {
             }
             .buttonStyle(.plain)
         }
+        .settingsCardRows()
         .onDisappear { copyResetTask?.cancel() }
     }
 
@@ -2250,9 +2322,11 @@ struct FAQView: View {
                         .foregroundColor(.primary)
                         .textCase(nil)
                 }
+                .settingsCardRows()
             }
         }
         .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
         .cinematicScrollBackground()
         .navigationTitle(L("support.faq.title"))
         .navigationBarTitleDisplayMode(.inline)
@@ -2342,6 +2416,7 @@ struct DangerZoneSection: View {
             .buttonStyle(.plain)
             .disabled(isWorking)
         }
+        .settingsCardRows()
         .sheet(isPresented: $showPINForErase) {
             PINEntrySheet(message: L("pin.guard.delete_account")) {
                 DispatchQueue.main.async { showEraseFirst = true }
@@ -2531,6 +2606,7 @@ struct PlayerSettingsSection: View {
 
             AudioDelaySettingsRow()
         }
+        .settingsCardRows()
     }
 }
 
@@ -2593,6 +2669,7 @@ struct DownloadsSettingsSection: View {
                 }
             }
         }
+        .settingsCardRows()
         .task { await refreshDownloadUsage() }
         .alert(L("download.delete_all"), isPresented: $showingDeleteAllDownloadsAlert) {
             Button(L("common.cancel"), role: .cancel) { }
@@ -2666,6 +2743,7 @@ struct AdultFilterSettingsSection: View {
                 Task { await saveFilterSetting(newValue: newValue) }
             }
         }
+        .settingsCardRows()
         .sheet(isPresented: $showPINForFilterOff) {
             PINEntrySheet(message: L("pin.guard.filter_off")) {
                 suppressNextFilterSave = true
@@ -2735,6 +2813,7 @@ struct XtreamAccountSettingsSection: View {
         Section(header: ScopedSectionHeader(title: L("settings.playlist.info.title"), thisPlaylist: true)) {
             accountCard
         }
+        .settingsCardRows()
         .sheet(isPresented: $showEditSheet) {
             AddPlaylistView(editingPlaylist: currentPlaylist)
         }
@@ -3163,6 +3242,7 @@ struct M3UAccountSettingsSection: View {
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
         }
+        .settingsCardRows()
         .sheet(isPresented: $showEditSheet) {
             AddM3UPlaylistView(editingPlaylist: currentPlaylist)
         }
@@ -3274,6 +3354,7 @@ struct XtreamContentSettingsSection: View {
             .buttonStyle(.plain)
             .disabled(historyCount == 0)
         }
+        .settingsCardRows()
         .alert(L("history.clear.title"), isPresented: $showClearHistoryAlert) {
             Button(L("common.cancel"), role: .cancel) { }
             Button(L("common.confirm_delete_yes"), role: .destructive) {
@@ -3447,6 +3528,7 @@ struct M3UContentSettingsSection: View {
             .buttonStyle(.plain)
             .disabled(historyCount == 0)
         }
+        .settingsCardRows()
         .fileImporter(
             isPresented: $showFileImporter,
             allowedContentTypes: Self.allowedFileTypes,

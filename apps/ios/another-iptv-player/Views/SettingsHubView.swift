@@ -88,12 +88,15 @@ struct SettingsHubView: View {
                                     }
                                 }
                             }
+                            .settingsCardRows()
                             if isM3U {
                                 M3UContentSettingsSection(playlist: playlist)
                             } else {
                                 XtreamContentSettingsSection(playlist: playlist)
                             }
                         }
+                        .listStyle(.insetGrouped)
+                        .listSectionSpacing(16)
                         .cinematicScrollBackground()
                         .navigationTitle(L("playlists.title"))
                         .navigationBarTitleDisplayMode(.inline)
@@ -114,6 +117,8 @@ struct SettingsHubView: View {
                             }
                             SubscriptionSettingsSection(playlists: allPlaylists ?? [])
                         }
+                        .listStyle(.insetGrouped)
+                        .listSectionSpacing(16)
                         .cinematicScrollBackground()
                         .navigationTitle(L("settings.hub.account"))
                         .navigationBarTitleDisplayMode(.inline)
@@ -130,6 +135,8 @@ struct SettingsHubView: View {
                             PlayerSettingsSection()
                             PlaybackSettingsSection()
                         }
+                        .listStyle(.insetGrouped)
+                        .listSectionSpacing(16)
                         .cinematicScrollBackground()
                         .navigationTitle(L("settings.playback.title"))
                         .navigationBarTitleDisplayMode(.inline)
@@ -163,8 +170,11 @@ struct SettingsHubView: View {
                                     XtreamEPGSettingsRows(playlist: playlist)
                                 }
                             }
+                            .settingsCardRows()
                             EPGOffsetSettingsSection()
                         }
+                        .listStyle(.insetGrouped)
+                        .listSectionSpacing(16)
                         .cinematicScrollBackground()
                         .navigationTitle(L("epg.settings.section_title"))
                         .navigationBarTitleDisplayMode(.inline)
@@ -189,7 +199,10 @@ struct SettingsHubView: View {
                                     }
                                 }
                             }
+                            .settingsCardRows()
                         }
+                        .listStyle(.insetGrouped)
+                        .listSectionSpacing(16)
                         .cinematicScrollBackground()
                         .navigationTitle(L("download.title"))
                         .navigationBarTitleDisplayMode(.inline)
@@ -215,7 +228,10 @@ struct SettingsHubView: View {
                                     }
                                 }
                             }
+                            .settingsCardRows()
                         }
+                        .listStyle(.insetGrouped)
+                        .listSectionSpacing(16)
                         .cinematicScrollBackground()
                         .navigationTitle(L("notifications.title"))
                         .navigationBarTitleDisplayMode(.inline)
@@ -234,6 +250,8 @@ struct SettingsHubView: View {
                             AppLockSection()
                             LockedCategoriesSection(playlist: playlist)
                         }
+                        .listStyle(.insetGrouped)
+                        .listSectionSpacing(16)
                         .cinematicScrollBackground()
                         .navigationTitle(L("settings.hub.parental_locks"))
                         .navigationBarTitleDisplayMode(.inline)
@@ -249,6 +267,8 @@ struct SettingsHubView: View {
                         List {
                             StorageSettingsSection()
                         }
+                        .listStyle(.insetGrouped)
+                        .listSectionSpacing(16)
                         .cinematicScrollBackground()
                         .navigationTitle(L("storage.title"))
                         .navigationBarTitleDisplayMode(.inline)
@@ -266,6 +286,8 @@ struct SettingsHubView: View {
                             // Danger Zone LAST on this page.
                             DangerZoneSection(onExitToGate: onDismiss)
                         }
+                        .listStyle(.insetGrouped)
+                        .listSectionSpacing(16)
                         .cinematicScrollBackground()
                         .navigationTitle(L("settings.hub.backup_data"))
                         .navigationBarTitleDisplayMode(.inline)
@@ -281,6 +303,8 @@ struct SettingsHubView: View {
                         List {
                             SupportSettingsSection(playlists: allPlaylists ?? [])
                         }
+                        .listStyle(.insetGrouped)
+                        .listSectionSpacing(16)
                         .cinematicScrollBackground()
                         .navigationTitle(L("support.title"))
                         .navigationBarTitleDisplayMode(.inline)
@@ -310,8 +334,19 @@ struct SettingsHubView: View {
                                     }
                                 }
                             }
+                            .settingsCardRows()
+                            // W10: PrivacyLegalSection's own file is
+                            // outside this pass's ownership, so its
+                            // Section gets the same row treatment
+                            // here at the instance (listRow* modifiers
+                            // reach its rows through the environment);
+                            // its plain-Text header is flagged in the
+                            // build-66 legacy-look list.
                             PrivacyLegalSection(onExitToGate: onDismiss)
+                                .settingsCardRows()
                         }
+                        .listStyle(.insetGrouped)
+                        .listSectionSpacing(16)
                         .cinematicScrollBackground()
                         .navigationTitle(L("settings.about.title"))
                         .navigationBarTitleDisplayMode(.inline)
