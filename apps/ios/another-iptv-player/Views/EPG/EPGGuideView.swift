@@ -31,6 +31,11 @@ struct EPGGuideView: View {
     @State private var selected: SelectedProgramme?
     @State private var selectionTask: Task<Void, Never>?
     @State private var detailChannel: EPGGuideRow?
+    /// Build 65 (EPG style 2 'Now & Next Cards'): the guide's
+    /// DEFAULT surface is now per-channel cards (NOW with
+    /// progress + NEXT); the classic timeline grid stays one
+    /// toolbar tap away, fully intact.
+    @State private var guideCardsMode = true
     /// G5 (B13): the offline alert for this screen's EPG refresh.
     @State private var showOfflineAlert = false
 
@@ -148,10 +153,181 @@ struct EPGGuideView: View {
                 // appear above the timeline, grouped by channel.
                 if isSearching {
                     programmeResults
+                } else if guideCardsMode {
+                    cardsList
+                } else {
+                    grid
                 }
-                grid
             }
         }
+    }
+
+    // MARK: - Now & Next cards (Build 65, EPG style 2)
+
+    /// Per-channel cards from the SAME loaded day the grid uses:
+    /// each card is the channel header (tap = play, exactly the
+    /// grid's channel-column behavior), the NOW programme with
+    /// its progress bar, and the NEXT programme — all real EPG
+    /// data from the model's own layout cells; tapping a
+    /// programme opens the same detail sheet the grid opens.
+    private var cardsList: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                ForEach(model.items) { item in
+                    switch item {
+                    case .header(let header):
+                        Button {
+                            model.toggleCategory(header.id)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text(header.title)
+                                    .font(.headline)
+                                Text("\(header.channelCount)")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Image(systemName: header.collapsed ? "chevron.down" : "chevron.up")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 4)
+                    case .channel(let row):
+                        channelCard(row)
+                    }
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    private func channelCard(_ row: EPGGuideRow) -> some View {
+        let programmes = dayProgrammes(for: row)
+        let nowDate = EPGOffsetStore.lookupNow()
+        let current = programmes.first { $0.start <= nowDate && $0.stop > nowDate }
+        let upcoming = programmes.filter { $0.start > nowDate }
+        let main = current ?? upcoming.first ?? programmes.last
+        let second: EPGProgramme? = {
+            if let current {
+                return programmes.first { $0.start >= current.stop }
+            }
+            return upcoming.dropFirst().first
+        }()
+        return VStack(alignment: .leading, spacing: 10) {
+            Button {
+                playChannel(row)
+            } label: {
+                HStack(spacing: 10) {
+                    CachedImage(
+                        url: row.iconURL,
+                        width: 40,
+                        height: 40,
+                        cornerRadius: 9,
+                        contentMode: .fit,
+                        iconName: "tv"
+                    )
+                    Text(row.displayName)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Image(systemName: "play.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(AppTheme.accent)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if let main {
+                Button {
+                    showProgramme(main, in: row)
+                } label: {
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 6) {
+                            if current != nil {
+                                Circle()
+                                    .fill(AppTheme.live)
+                                    .frame(width: 7, height: 7)
+                                Text(L("epg.now"))
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(AppTheme.live)
+                            }
+                            Text(EPGTimeFormat.range(main.start, main.stop))
+                                .font(.caption.weight(.medium))
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(main.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        if current != nil, let fraction = main.progress(at: nowDate) {
+                            GeometryReader { proxy in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(Color.primary.opacity(0.14))
+                                    Capsule()
+                                        .fill(AppTheme.accent)
+                                        .frame(width: max(0, proxy.size.width * fraction))
+                                }
+                            }
+                            .frame(height: 4)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            if let second {
+                Button {
+                    showProgramme(second, in: row)
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(L("epg.next"))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                        Text(second.title)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(EPGTimeFormat.time(second.start))
+                            .font(.caption.weight(.medium))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .fill(AppTheme.elevated)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .strokeBorder(AppTheme.cardBorderColor, lineWidth: 0.5)
+        )
+    }
+
+    /// The channel's programmes for the loaded day, from the
+    /// model's own layout cells (fillers dropped, duplicates by
+    /// programme id removed), in start order.
+    private func dayProgrammes(for row: EPGGuideRow) -> [EPGProgramme] {
+        let cells = model.layout(for: row.channelKey).cells
+        var seen = Set<String>()
+        var programmes: [EPGProgramme] = []
+        for cell in cells {
+            guard let programme = cell.programme, seen.insert(programme.id).inserted else { continue }
+            programmes.append(programme)
+        }
+        return programmes.sorted { $0.start < $1.start }
     }
 
     // MARK: - Programme search (F-37)
@@ -387,6 +563,16 @@ struct EPGGuideView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        // Build 65: cards ⇄ timeline-grid switch (both surfaces
+        // are real; cards are the design pick and the default).
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                guideCardsMode.toggle()
+            } label: {
+                Image(systemName: guideCardsMode ? "square.grid.2x2" : "list.bullet")
+            }
+            .accessibilityLabel(L(guideCardsMode ? "epg.view.grid" : "epg.view.cards"))
+        }
         if model.hasCategories {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {

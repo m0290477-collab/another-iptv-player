@@ -77,6 +77,11 @@ struct SeriesView: View {
     // pure orderings: All (shelves) and Newest (the catalog's
     // `lastModified` ordering, extended cut). Their grids/queries went.
     @State private var selectedChip: ContentChip = .all
+    /// Build 65 (inside-sections): category chip selection — nil
+    /// shows the shelf stack; a category id swaps it for that
+    /// category's poster grid.
+    @State private var selectedCategoryId: String? = nil
+    @State private var categoryVisibleCount = 90
 
     @State private var displayCategories: [DBCategory] = []
     @State private var displayItemsByCategory: [String: [SeriesWithCategory]] = [:]
@@ -169,6 +174,33 @@ struct SeriesView: View {
                         // the shelves; Newest renders its grid.
                         switch selectedChip {
                         case .all:
+                            // Build 65 (inside-sections design):
+                            // the Series tab gains the featured
+                            // hero it never had (the Movies tab's
+                            // B7 hero is the model), then the
+                            // category chips; a chip selection
+                            // swaps the shelves for that category's
+                            // poster grid.
+                            if let featured = featuredSeries {
+                                SeriesFeaturedHero(playlist: playlist, series: featured) {
+                                    pendingSeriesDetail = featured
+                                } onPlay: {
+                                    presentFeaturedSeriesPlayer(featured)
+                                }
+                            }
+
+                            if displayCategories.count > 1 {
+                                SectionCategoryChips(
+                                    categories: displayCategories,
+                                    selectedCategoryId: $selectedCategoryId
+                                )
+                                .padding(.bottom, 4)
+                            }
+
+                            if let selectedCategoryId,
+                               let category = displayCategories.first(where: { $0.id == selectedCategoryId }) {
+                                categoryGrid(for: category)
+                            } else {
                             ContinueWatchingRow(
                                 playlist: playlist,
                                 typeFilter: "series",
@@ -209,6 +241,7 @@ struct SeriesView: View {
                                     .id(category.id)
                                 }
                             }
+                            } // Build 65: end of the All (shelves) branch of the category-chip swap.
                         case .newest:
                             newestGrid
                         }
@@ -292,6 +325,7 @@ struct SeriesView: View {
             order: orderStore.orderedIds(playlistId: playlist.id, type: "series")
         )) { await recomputeFilter() }
         .onAppear { shelfReplayToken += 1 }
+        .onChange(of: selectedCategoryId) { _, _ in categoryVisibleCount = 90 }
         .transaction { $0.animation = nil }
         .navigationDestination(item: $pendingSeriesDetail) { series in
             SeriesDetailView(playlist: playlist, series: series)
@@ -381,6 +415,82 @@ struct SeriesView: View {
                 .padding(.top, 8)
 
                 if newestVisibleCount < newestAll.count {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                }
+            }
+        }
+    }
+
+    /// Build 65: the Series hero pick — the top-rated series
+    /// with artwork, else the newest with artwork (the Movies
+    /// hero's B6/B7 fallback rule, real records only).
+    private var featuredSeries: DBSeries? {
+        if let top = topRatedSeries.first(where: { $0.backdropPath != nil || $0.cover != nil }) {
+            return top
+        }
+        return recentlyAddedSeries.first(where: { $0.backdropPath != nil || $0.cover != nil })
+    }
+
+    /// Build 65: the hero's Play runs the SAME episode pipeline
+    /// Home's featured Play uses (SeriesPlayShell: resume the
+    /// in-progress episode, else next unwatched, else S1E1).
+    private func presentFeaturedSeriesPlayer(_ series: DBSeries) {
+        playerOverlay.present(playlistId: playlist.id) {
+            SeriesPlayShell(
+                playlist: playlist,
+                series: series,
+                onNavigateToDetail: { target in
+                    playerOverlay.dismiss()
+                    pendingSeriesDetail = target
+                }
+            )
+        }
+    }
+
+    /// Build 65 (inside-sections): the poster grid for a selected
+    /// category chip — the category's own bucket, paginated like
+    /// the Newest grid, cells identical to it.
+    private func categoryGrid(for category: DBCategory) -> some View {
+        let items = displayItemsByCategory[category.id] ?? []
+        return Group {
+            if items.isEmpty {
+                ContentUnavailableView(
+                    L("list.no_result"),
+                    systemImage: "play.tv.slash"
+                )
+                .padding(.top, 40)
+            } else {
+                LazyVGrid(columns: posterGridColumns, spacing: posterMetrics.gridRowSpacing) {
+                    ForEach(Array(items.prefix(categoryVisibleCount).enumerated()), id: \.element.id) { index, item in
+                        NavigationLink {
+                            SeriesDetailView(playlist: playlist, series: item.series)
+                        } label: {
+                            SeriesCard(
+                                playlistId: playlist.id,
+                                stream: item.series,
+                                posterWidth: posterMetrics.categoryGridPosterWidth,
+                                posterHeight: posterMetrics.categoryGridPosterHeight,
+                                imageLoadProfile: .grid,
+                                watchProgress: progressBySeriesId[String(item.series.seriesId)]?.progress,
+                                seasonEpisodeCounts: contentStore.seriesSeasonEpisodeCounts[item.series.seriesId],
+                                positionText: progressBySeriesId[String(item.series.seriesId)]?.positionText,
+                                watchedPercent: watchedPercentBySeriesId[String(item.series.seriesId)]
+                            )
+                        }
+                        .buttonStyle(PressScaleButtonStyle())
+                        .onAppear {
+                            if index >= categoryVisibleCount - 15 {
+                                categoryVisibleCount = min(categoryVisibleCount + 90, items.count)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+                if categoryVisibleCount < items.count {
                     ProgressView()
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 24)
@@ -587,6 +697,102 @@ struct SeriesView: View {
 /// blurrier than the Movies shelves' crisp portrait posters (owner
 /// recording, build 45). Same card, size and image profile the Movies
 /// shelves use. "See all" opens the existing All Series grid.
+/// Build 65: the Series tab's featured hero — the exact visual
+/// language of the Movies tab's `MovieFeaturedHero` (backdrop,
+/// gradient, badge, big title, real rating/year/genre line, Play
+/// + Details), over the series' own artwork and data.
+struct SeriesFeaturedHero: View {
+    let playlist: Playlist
+    let series: DBSeries
+    let onDetails: () -> Void
+    let onPlay: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            CachedImage(
+                url: series.backdropPath.flatMap { URL(string: $0) } ?? series.cover.flatMap { URL(string: $0) },
+                width: UIScreen.main.bounds.width - 32,
+                height: 210,
+                cornerRadius: AppTheme.heroCornerRadius,
+                contentMode: .fill,
+                iconName: "play.tv",
+                loadProfile: .high
+            )
+            LinearGradient(
+                colors: [.clear, AppTheme.background.opacity(0.88)],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L("home.featured"))
+                    .font(AppTheme.fontBadge)
+                    .foregroundStyle(AppTheme.accent)
+                Text(series.name)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                HStack(spacing: 10) {
+                    if let rating = ContentRating.normalizedDisplayText(rating: series.rating, rating5Based: series.rating5Based) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "star.fill")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(AppTheme.ratingGold)
+                            Text(rating)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    if let year = DetailFormatting.year(from: series.releaseDate) {
+                        Text(year)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                    if let genre = series.genre?.split(separator: ",").first {
+                        Text(genre.trimmingCharacters(in: .whitespaces))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.8))
+                            .lineLimit(1)
+                    }
+                }
+                HStack(spacing: 10) {
+                    Button(action: onPlay) {
+                        Label(L("home.play"), systemImage: "play.fill")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 9)
+                            .background(Capsule().fill(AppTheme.accent))
+                    }
+                    .buttonStyle(.plain)
+                    Button(action: onDetails) {
+                        Label(L("home.details"), systemImage: "info.circle")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 9)
+                            .background(Capsule().fill(.ultraThinMaterial))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(16)
+        }
+        .frame(height: 210)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                .strokeBorder(AppTheme.cardBorderColor, lineWidth: 0.5)
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .padding(.bottom, 8)
+        .tint(SectionTheme.series)
+    }
+}
+
 struct PopularSeriesShelf: View, Equatable {
     let playlist: Playlist
     let items: [DBSeries]

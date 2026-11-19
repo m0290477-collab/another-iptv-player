@@ -1195,3 +1195,32 @@
 "matches.team.recent" = "Résultats récents";
 "matches.team.squad" = "Effectif";
 "matches.search.placeholder" = "Rechercher des équipes";
+
+/* Build 65: redesign surfaces (display, settings hub, EPG cards, match tabs, favorites shelves, downloads dashboard). */
+"display.accent" = "Couleur d'accent";
+"display.automatic" = "Automatique";
+"display.automatic.desc" = "Les mises en page s'adaptent automatiquement quand vous tournez votre appareil : les rangées d'affiches et les grilles passent du portrait au paysage. Le thème peut suivre le réglage du système.";
+"display.density" = "Espacement de l'accueil";
+"display.density.comfortable" = "Confortable";
+"display.density.compact" = "Compact";
+"display.poster_size" = "Taille des affiches";
+"display.poster_size.large" = "Grand";
+"display.poster_size.medium" = "Moyen";
+"display.poster_size.small" = "Petit";
+"display.preview" = "Aperçu";
+"display.preview.note" = "L'aperçu se met à jour en direct quand vous changez les options ci-dessous.";
+"display.theme" = "Thème";
+"display.title" = "Affichage";
+"download.dashboard.free" = "Libre sur l'appareil";
+"download.dashboard.items" = "Téléchargements";
+"download.dashboard.limit" = "Limite";
+"download.dashboard.percent" = "%d%% de la limite utilisée";
+"epg.next" = "Suivant";
+"epg.view.cards" = "Vue en cartes";
+"epg.view.grid" = "Vue chronologique";
+"favorites.empty.all" = "Aucun favori pour le moment. Touchez l'étoile d'une chaîne, d'un film ou d'une série pour l'ajouter ici.";
+"favorites.shelf.channels" = "Chaînes favorites";
+"favorites.shelf.movies" = "Films favoris";
+"favorites.shelf.series" = "Séries favorites";
+"matches.stats" = "Stats";
+"settings.hub.all_settings" = "Tous les réglages";

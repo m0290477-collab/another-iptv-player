@@ -39,12 +39,13 @@ final class MatchDeepLinkRouter: ObservableObject {
 final class PushNotificationService: NSObject, UNUserNotificationCenterDelegate {
     static let shared = PushNotificationService()
 
-    /// PLACEHOLDER — the parent supplies the real watcher endpoint
-    /// constant before this feature can deliver pushes. Until
-    /// then uploads go nowhere (`.invalid` never resolves) and
-    /// fail silently, exactly as designed; the app side is
-    /// complete but inert.
-    static let watcherEndpointURL = URL(string: "https://example.invalid/superx-watcher/register")!
+    /// Build 65: the watcher endpoint is LIVE — the server half
+    /// (superx-watcher on the owner's OVH box, behind
+    /// api.irqus.com) accepts exactly the payload this file posts
+    /// ({token, teams:[{sport, leaguePath, teamId, teamName,
+    /// goals, kickoff, fullTime}]}). Upload failures still fail
+    /// silently by design (see the type note).
+    static let watcherEndpointURL = URL(string: "https://api.irqus.com/superx-watcher/register")!
 
     private static let tokenDefaultsKey = "push.deviceToken.v1"
 

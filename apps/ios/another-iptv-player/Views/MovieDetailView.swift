@@ -407,13 +407,15 @@ struct MovieDetailView: View {
                 }
 
                 if let cast = currentMovie.cast?.trimmingCharacters(in: .whitespacesAndNewlines), !cast.isEmpty {
-                    // C7: cast names are tappable chips (the full
-                    // list scrolls — nothing is clipped away), which
-                    // also covers B7's "cast must not dead-end at 3
-                    // lines" complaint.
-                    DetailInfoTextBlock(label: L("movie.cast"), value: cast) { person in
-                        pendingRoute = .person(person)
-                    }
+                    // Build 65 (Cinematic detail): the cast renders
+                    // as the mockup's round-avatar row. Provider
+                    // data carries cast NAMES only — no headshot
+                    // URLs exist — so each avatar is a monogram of
+                    // the REAL name (never an invented photo).
+                    // Tapping still browses that person's titles
+                    // (the C7 person route), and the full list
+                    // scrolls — nothing is clipped away.
+                    castRow(names: DetailFormatting.peopleList(cast))
                 }
 
                 // Build 61 (B8, metadata completion): the remaining
@@ -458,6 +460,49 @@ struct MovieDetailView: View {
             }
         }
         .ignoresSafeArea(edges: .top)
+    }
+
+    /// Build 65: the cinematic cast row — monogram circles from
+    /// the real cast names (provider data has no headshots).
+    private func castRow(names: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            DetailSectionHeader(title: L("movie.cast"))
+                .padding(.horizontal, 16)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(names, id: \.self) { name in
+                        Button {
+                            pendingRoute = .person(name)
+                        } label: {
+                            VStack(spacing: 6) {
+                                ZStack {
+                                    Circle()
+                                        .fill(AppTheme.accent.opacity(0.22))
+                                    Text(Self.initials(of: name))
+                                        .font(.subheadline.weight(.bold))
+                                        .foregroundStyle(AppTheme.accent)
+                                }
+                                .frame(width: 56, height: 56)
+                                Text(name)
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.center)
+                                    .frame(width: 64)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .scrollClipDisabled()
+        }
+    }
+
+    private static func initials(of name: String) -> String {
+        let parts = name.split(separator: " ").prefix(2)
+        return parts.compactMap { $0.first }.map(String.init).joined().uppercased()
     }
 
     /// C7 watchlist toggle row: bookmark state, distinct from the

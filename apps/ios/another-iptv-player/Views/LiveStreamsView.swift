@@ -39,6 +39,16 @@ struct LiveStreamsView: View {
     @State private var gridDebouncedQuery = ""
     @State private var gridDebounceTask: Task<Void, Never>?
     @State private var gridItems: [LiveStreamWithCategory] = []
+    /// Build 65 (inside-sections): the grid mode's category chip
+    /// selection — nil = every visible channel; a category id
+    /// filters the SAME grid (cards already carry their real EPG
+    /// now/next lines via `EPGNowNextLine`).
+    @State private var selectedCategoryId: String? = nil
+
+    private var filteredGridItems: [LiveStreamWithCategory] {
+        guard let selectedCategoryId else { return gridItems }
+        return gridItems.filter { $0.stream.categoryId == selectedCategoryId }
+    }
     // Build 61 (B8, Z6): recompute when the empty-category toggle flips.
     @AppStorage(EmptyCategoryVisibility.defaultsKey) private var showEmptyCategories = false
     // === B5 (build 61) Item 11: Multiview entry state — wave-2 (B8) preserve ===
@@ -485,9 +495,21 @@ struct LiveStreamsView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 4)
+            // Build 65 (inside-sections design): category chips
+            // above the channel grid — the REAL provider
+            // categories, filtering the grid in place (the
+            // in-grid search above keeps its build-63 behavior
+            // across the full catalog).
+            if displayCategories.count > 1 {
+                SectionCategoryChips(
+                    categories: displayCategories,
+                    selectedCategoryId: $selectedCategoryId
+                )
+                .padding(.vertical, 6)
+            }
             LiveCategoryContent(
                 playlist: playlist,
-                items: gridItems,
+                items: filteredGridItems,
                 onStreamSelected: { stream, history in
                     presentLiveSelection(LivePlayerSelection(stream: stream, history: history))
                 }

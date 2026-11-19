@@ -1195,3 +1195,32 @@
 "matches.team.recent" = "Letzte Ergebnisse";
 "matches.team.squad" = "Kader";
 "matches.search.placeholder" = "Teams suchen";
+
+/* Build 65: redesign surfaces (display, settings hub, EPG cards, match tabs, favorites shelves, downloads dashboard). */
+"display.accent" = "Akzentfarbe";
+"display.automatic" = "Automatisch";
+"display.automatic.desc" = "Layouts passen sich automatisch an, wenn du dein Gerät drehst – Poster-Reihen und Raster wechseln zwischen Hoch- und Querformat. Das Design kann deiner Systemeinstellung folgen.";
+"display.density" = "Abstand auf dem Startbildschirm";
+"display.density.comfortable" = "Komfortabel";
+"display.density.compact" = "Kompakt";
+"display.poster_size" = "Postergröße";
+"display.poster_size.large" = "Groß";
+"display.poster_size.medium" = "Mittel";
+"display.poster_size.small" = "Klein";
+"display.preview" = "Vorschau";
+"display.preview.note" = "Die Vorschau aktualisiert sich live, während du die Optionen unten änderst.";
+"display.theme" = "Design";
+"display.title" = "Anzeige";
+"download.dashboard.free" = "Frei auf dem Gerät";
+"download.dashboard.items" = "Downloads";
+"download.dashboard.limit" = "Limit";
+"download.dashboard.percent" = "%d%% des Limits genutzt";
+"epg.next" = "Danach";
+"epg.view.cards" = "Kartenansicht";
+"epg.view.grid" = "Zeitleistenansicht";
+"favorites.empty.all" = "Noch keine Favoriten. Tippe auf den Stern bei einem Sender, Film oder einer Serie, um sie hier hinzuzufügen.";
+"favorites.shelf.channels" = "Lieblingssender";
+"favorites.shelf.movies" = "Lieblingsfilme";
+"favorites.shelf.series" = "Lieblingsserien";
+"matches.stats" = "Statistiken";
+"settings.hub.all_settings" = "Alle Einstellungen";

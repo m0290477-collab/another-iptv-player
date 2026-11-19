@@ -1195,3 +1195,32 @@
 "matches.team.recent" = "最近战绩";
 "matches.team.squad" = "球员名单";
 "matches.search.placeholder" = "搜索球队";
+
+/* Build 65: redesign surfaces (display, settings hub, EPG cards, match tabs, favorites shelves, downloads dashboard). */
+"display.accent" = "强调色";
+"display.automatic" = "自动";
+"display.automatic.desc" = "旋转设备时布局会自动适应——海报栏和网格会在竖屏与横屏之间重新排列。主题可跟随系统设置。";
+"display.density" = "主页间距";
+"display.density.comfortable" = "舒适";
+"display.density.compact" = "紧凑";
+"display.poster_size" = "海报大小";
+"display.poster_size.large" = "大";
+"display.poster_size.medium" = "中";
+"display.poster_size.small" = "小";
+"display.preview" = "预览";
+"display.preview.note" = "更改下方选项时，预览会实时更新。";
+"display.theme" = "主题";
+"display.title" = "显示";
+"download.dashboard.free" = "设备可用空间";
+"download.dashboard.items" = "下载";
+"download.dashboard.limit" = "上限";
+"download.dashboard.percent" = "已使用上限的 %d%%";
+"epg.next" = "接下来";
+"epg.view.cards" = "卡片视图";
+"epg.view.grid" = "时间线视图";
+"favorites.empty.all" = "尚无收藏。点击任意频道、电影或剧集上的星标即可添加到此处。";
+"favorites.shelf.channels" = "收藏的频道";
+"favorites.shelf.movies" = "收藏的电影";
+"favorites.shelf.series" = "收藏的剧集";
+"matches.stats" = "数据";
+"settings.hub.all_settings" = "全部设置";

@@ -71,7 +71,9 @@ struct M3UDashboardView: View {
 
                 Tab(value: 1) {
                     NavigationStack {
-                        M3UPlaylistSettingsView(playlist: playlist, onDismiss: onDismiss, onSwitchPlaylist: onSwitchPlaylist)
+                        // Build 65 (Settings style 2): same
+                        // Visual Cards hub as the Xtream dashboard.
+                        SettingsHubView(playlist: playlist, onDismiss: onDismiss, onSwitchPlaylist: onSwitchPlaylist)
                             .navigationTitle(L("dashboard.settings"))
                             .navigationBarTitleDisplayMode(.large)
                     }

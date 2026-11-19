@@ -19,16 +19,23 @@ import SwiftUI
 /// the user's own PROVIDER subscription — the copy says so.
 struct AddPlaylistProgressView: View {
     let stages: [PlaylistValidationService.Stage: PlaylistValidationService.StageState]
+    /// Build 65 (style 3 'Card Summary'): the playlist's name
+    /// heads the card, as the mockup shows. Optional — the card
+    /// renders without it when a caller has no name yet.
+    var playlistName: String? = nil
     let onCancel: () -> Void
 
-    // Build 63 (owner pick, Style 2 "Bar"): the checklist is
-    // replaced by a slim red-orange progress bar across the top,
-    // a row of step dots (completed filled), the current step
-    // label, and a Cancel text action — all derived PURELY from
-    // the same stage states; semantics unchanged. The mockup's
-    // big counting numbers live on the SUMMARY card (below):
-    // real counts exist only once content is stored, and this
-    // view never fabricates mid-load numbers.
+    // Build 63 (owner pick, Style 2 "Bar") → Build 65 (style 3
+    // 'Card Summary'): ONE card — playlist name on top, one row
+    // per content type (Channels / Movies / Series / Guide)
+    // whose state glyph is bound to the REAL importer stage for
+    // that type, the current-step label, and the slim
+    // red-orange progress bar UNDER the rows, with Cancel.
+    // Numbers: the importer publishes real counts ONLY at
+    // completion, so mid-load rows carry state, never invented
+    // numbers — the real big counts land on the SUMMARY card
+    // (below) the moment they exist, exactly as build 63
+    // established.
 
     private var orderedStages: [PlaylistValidationService.Stage] {
         PlaylistValidationService.Stage.allCases.sorted { $0.rawValue < $1.rawValue }
@@ -63,37 +70,30 @@ struct AddPlaylistProgressView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Slim progress bar across the top.
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(AppTheme.surface)
-                        .frame(height: 5)
-                    Capsule()
-                        .fill(AppTheme.accent)
-                        .frame(width: proxy.size.width * progressFraction, height: 5)
+        VStack(alignment: .leading, spacing: 14) {
+            // Card head: the playlist name (the mockup's top
+            // line) + the progress title under it.
+            VStack(alignment: .leading, spacing: 3) {
+                if let playlistName, !playlistName.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Text(playlistName)
+                        .font(.title3.weight(.bold))
+                        .lineLimit(1)
                 }
+                Text(L("addplaylist.progress.title"))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
-            .frame(height: 5)
-            .animation(.easeInOut(duration: 0.35), value: progressFraction)
 
-            Text(L("addplaylist.progress.title"))
-                .font(.headline)
-
-            // Step dots: done filled, active ringed, failed
-            // orange, pending hollow.
-            HStack(spacing: 0) {
-                ForEach(orderedStages, id: \.rawValue) { stage in
-                    stepDot(state(of: stage))
-                    if stage != orderedStages.last {
-                        Spacer(minLength: 8)
-                    }
-                }
+            // One row per content type, bound to its real stage.
+            VStack(spacing: 10) {
+                summaryRow(icon: "tv", label: L("dashboard.live"), stage: .loadingChannels)
+                summaryRow(icon: "film", label: L("dashboard.movies"), stage: .loadingMoviesSeries)
+                summaryRow(icon: "rectangle.stack", label: L("dashboard.series"), stage: .loadingMoviesSeries)
+                summaryRow(icon: "calendar", label: L("epg.guide.title"), stage: .loadingGuide)
             }
-            .accessibilityHidden(true)
 
-            // Current step label.
+            // Current step label (connecting / verifying have no
+            // content row — they speak here).
             HStack(spacing: 8) {
                 if state(of: currentStage) == .active {
                     ProgressView()
@@ -108,6 +108,22 @@ struct AddPlaylistProgressView: View {
             .accessibilityLabel(L(currentStage.titleKey))
             .accessibilityValue(accessibilityValue(for: state(of: currentStage)))
 
+            // Slim progress bar UNDER the rows (Style 2's bar,
+            // kept — the Card Summary places it at the card's
+            // foot).
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(AppTheme.surface)
+                        .frame(height: 5)
+                    Capsule()
+                        .fill(AppTheme.accent)
+                        .frame(width: proxy.size.width * progressFraction, height: 5)
+                }
+            }
+            .frame(height: 5)
+            .animation(.easeInOut(duration: 0.35), value: progressFraction)
+
             Button(L("common.cancel")) { onCancel() }
                 .font(.subheadline.weight(.semibold))
                 .foregroundColor(AppTheme.accent)
@@ -119,21 +135,38 @@ struct AddPlaylistProgressView: View {
         .shadow(radius: 20)
     }
 
-    @ViewBuilder
-    private func stepDot(_ state: PlaylistValidationService.StageState) -> some View {
-        switch state {
-        case .done:
-            Circle().fill(AppTheme.accent).frame(width: 12, height: 12)
-        case .active:
-            ZStack {
-                Circle().stroke(AppTheme.accent, lineWidth: 2).frame(width: 14, height: 14)
-                Circle().fill(AppTheme.accent).frame(width: 6, height: 6)
+    /// One content-type row of the summary card: icon + label +
+    /// the stage's state glyph (spinner while loading, check
+    /// when stored, warning on failure, hollow circle while
+    /// queued). No numbers — see the type note.
+    private func summaryRow(icon: String, label: String, stage: PlaylistValidationService.Stage) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 22)
+            Text(label)
+                .font(.subheadline.weight(.semibold))
+            Spacer(minLength: 8)
+            switch state(of: stage) {
+            case .done:
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(AppTheme.accent)
+            case .active:
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(AppTheme.accent)
+            case .failed:
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            case .pending:
+                Image(systemName: "circle")
+                    .foregroundStyle(.secondary.opacity(0.5))
             }
-        case .failed:
-            Circle().fill(.orange).frame(width: 12, height: 12)
-        case .pending:
-            Circle().stroke(Color.secondary.opacity(0.5), lineWidth: 1.5).frame(width: 12, height: 12)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label)
+        .accessibilityValue(accessibilityValue(for: state(of: stage)))
     }
 
     private func accessibilityValue(for state: PlaylistValidationService.StageState) -> String {
@@ -156,6 +189,13 @@ struct AddPlaylistSummaryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            // Build 65 (Card Summary continuity): the progress
+            // card's slim bar, complete — the summary is the same
+            // card at 100%, now carrying the real counts.
+            Capsule()
+                .fill(AppTheme.accent)
+                .frame(height: 5)
+
             HStack(spacing: 10) {
                 // X7 (B7): the add-success summary leads with the
                 // drawn animated check (+ light success haptic);

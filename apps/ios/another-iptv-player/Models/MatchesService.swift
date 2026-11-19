@@ -450,6 +450,10 @@ struct MatchDetailHeader {
     let state: MatchState
     let displayClock: String?
     let period: Int?
+    /// Build 65: real kickoff from the summary payload (nil when
+    /// the payload carries none — the view then shows no date
+    /// rather than an invented one).
+    let startDate: Date?
 }
 
 struct MatchDetail {
@@ -523,6 +527,10 @@ private struct ESPNHeaderCompetition: Decodable {
     let competitors: [ESPNCompetitor]?
     let details: [ESPNDetail]?
     let status: ESPNStatus?
+    /// Build 65: the summary payload's own event date — decoded
+    /// so a deep-linked match detail (no seed event) can still
+    /// show its real kickoff in the scoreboard header.
+    let date: String?
 }
 
 private struct ESPNDetail: Decodable {
@@ -708,7 +716,8 @@ extension MatchesService {
             away: mapSide(awayRaw),
             state: state,
             displayClock: competition?.status?.displayClock,
-            period: competition?.status?.period
+            period: competition?.status?.period,
+            startDate: competition?.date.flatMap { parseEventDate($0) }
         )
     }
 

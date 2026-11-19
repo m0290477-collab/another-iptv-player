@@ -1755,22 +1755,12 @@ private struct PlayerViewImpl: View {
                     .allowsHitTesting(miniProgress < 0.02)
                     .zIndex(30)
 
-                    if isLiveStream, let programme = currentNowNext?.now {
-                        PlayerProgrammeStrip(programme: programme)
-                            .frame(maxWidth: 240, alignment: .leading)
-                            .clipped()
-                            .padding(.leading, 20 + outerSafeAreaInsets.leading)
-                            .padding(.bottom, 20 + outerSafeAreaInsets.bottom)
-                            .frame(
-                                maxWidth: .infinity,
-                                maxHeight: .infinity,
-                                alignment: .bottomLeading
-                            )
-                            .allowsHitTesting(false)
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
-                            .opacity(fullChromeOpacity)
-                            .zIndex(31)
-                    }
+                    // Build 65 (Player style 2 'Rich Bar'): the
+                    // standalone bottom-left programme strip is
+                    // GONE — its content (programme title, time
+                    // range, progress) now lives inside the frosted
+                    // rich bar's identity row in
+                    // `bottomTransportChrome`, exactly once.
 
                     PlayerControlCenterStyleEdgeSliders(
                         player: player,
@@ -2650,14 +2640,99 @@ private struct PlayerViewImpl: View {
                 upNextStrip(next: next)
             }
 
-            // Build 61 (B14, V1): the ONE bottom control row, directly above
-            // the progress bar: Speed · Subtitles · Audio · Sleep · Aspect.
-            bottomControlRow
+            // Build 65 (Player style 2 'Rich Bar'): identity row
+            // + the ONE bottom control row + the VOD seek bar,
+            // composed as ONE frosted-glass bar (the mockup's
+            // form). VISUAL ONLY — every control inside keeps its
+            // exact action, menu and gesture behavior; the bar
+            // rides the same show/hide chrome as before.
+            VStack(spacing: 2) {
+                richBarIdentityRow
+                // Build 61 (B14, V1): the ONE bottom control row,
+                // directly above the progress bar: Speed ·
+                // Subtitles · Audio · Sleep · Aspect.
+                bottomControlRow
 
-            if !isLiveStream {
-                scrubTimelineCard
+                if !isLiveStream {
+                    scrubTimelineCard
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .fill(Color.black.opacity(0.22))
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
+            .padding(.horizontal, 4)
+        }
+    }
+
+    /// Build 65 (Rich Bar): the bar's identity row — channel /
+    /// content artwork + title, and for live the CURRENT
+    /// programme (red live dot, title, time range, progress
+    /// capsule) — the exact information the removed standalone
+    /// `PlayerProgrammeStrip` carried, from the same EPG
+    /// snapshot. VOD shows its real subtitle line when present.
+    private var richBarIdentityRow: some View {
+        HStack(spacing: 10) {
+            if let artworkURL {
+                CachedImage(
+                    url: artworkURL,
+                    width: 38,
+                    height: 38,
+                    cornerRadius: 9,
+                    contentMode: .fit,
+                    iconName: "tv"
+                )
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if isLiveStream, let now = currentNowNext?.now {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 6, height: 6)
+                        Text(now.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .lineLimit(1)
+                        Text(EPGTimeFormat.range(now.start, now.stop))
+                            .font(.caption2.weight(.medium))
+                            .monospacedDigit()
+                            .foregroundStyle(.white.opacity(0.65))
+                    }
+                } else if let subtitle, !subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(subtitle)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            if isLiveStream, let now = currentNowNext?.now,
+               let fraction = now.progress(at: EPGOffsetStore.lookupNow()) {
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.22)).frame(width: 64, height: 3)
+                    Capsule().fill(AppTheme.accent).frame(width: max(0, 64 * fraction), height: 3)
+                }
+                .frame(width: 64, height: 3)
             }
         }
+        .padding(.horizontal, 12)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Build 61 (B14, V-pack) control row / strips / lock / info

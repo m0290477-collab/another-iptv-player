@@ -1195,3 +1195,32 @@
 "matches.team.recent" = "Resultados recientes";
 "matches.team.squad" = "Plantilla";
 "matches.search.placeholder" = "Buscar equipos";
+
+/* Build 65: redesign surfaces (display, settings hub, EPG cards, match tabs, favorites shelves, downloads dashboard). */
+"display.accent" = "Color de acento";
+"display.automatic" = "Automático";
+"display.automatic.desc" = "Los diseños se adaptan automáticamente al girar el dispositivo: los rieles de pósteres y las cuadrículas cambian entre vertical y horizontal. El tema puede seguir el ajuste del sistema.";
+"display.density" = "Espaciado de inicio";
+"display.density.comfortable" = "Cómodo";
+"display.density.compact" = "Compacto";
+"display.poster_size" = "Tamaño del póster";
+"display.poster_size.large" = "Grande";
+"display.poster_size.medium" = "Mediano";
+"display.poster_size.small" = "Pequeño";
+"display.preview" = "Vista previa";
+"display.preview.note" = "La vista previa se actualiza en vivo al cambiar las opciones de abajo.";
+"display.theme" = "Tema";
+"display.title" = "Pantalla";
+"download.dashboard.free" = "Libre en el dispositivo";
+"download.dashboard.items" = "Descargas";
+"download.dashboard.limit" = "Límite";
+"download.dashboard.percent" = "%d%% del límite usado";
+"epg.next" = "Siguiente";
+"epg.view.cards" = "Vista de tarjetas";
+"epg.view.grid" = "Vista de línea de tiempo";
+"favorites.empty.all" = "Aún no hay favoritos. Toca la estrella en cualquier canal, película o serie para añadirlo aquí.";
+"favorites.shelf.channels" = "Canales favoritos";
+"favorites.shelf.movies" = "Películas favoritas";
+"favorites.shelf.series" = "Series favoritas";
+"matches.stats" = "Estadísticas";
+"settings.hub.all_settings" = "Todos los ajustes";

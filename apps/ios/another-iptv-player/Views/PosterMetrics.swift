@@ -70,7 +70,11 @@ struct PosterMetrics: Equatable, Sendable {
     }
 
     private func scaled(_ base: CGFloat) -> CGFloat {
-        (base * layoutScale).rounded(.toNearestOrAwayFromZero)
+        // Build 65: the user's poster-size preference (Display
+        // settings) multiplies the display-derived scale — the
+        // ONE place every poster metric flows through, so the
+        // choice applies app-wide from a single read.
+        (base * layoutScale * PosterSizePreference.current.factor).rounded(.toNearestOrAwayFromZero)
     }
 }
 

@@ -111,7 +111,10 @@ struct AddPlaylistSheetView: View {
                 if isLoading {
                     if !addStages.isEmpty {
                         // Build 61 (B10, L1): staged checklist.
-                        AddPlaylistProgressView(stages: addStages) {
+                        AddPlaylistProgressView(
+                            stages: addStages,
+                            playlistName: formKind == .xtream ? xtreamName : m3uName
+                        ) {
                             saveTask?.cancel()
                             saveTask = nil
                             isLoading = false

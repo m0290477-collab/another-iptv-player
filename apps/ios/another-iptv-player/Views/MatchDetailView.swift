@@ -33,7 +33,46 @@ struct MatchDetailView: View {
     @State private var watchLoaded = false
     /// Item 10e state.
     @State private var reminderOn = false
+    /// Build 65 (Match detail style 1 'Scoreboard Pro'): the
+    /// detail sections below the scoreboard are TABBED —
+    /// Timeline / Lineups / Stats — each tab existing ONLY when
+    /// the feed actually carries that data. (No H2H tab: the
+    /// ESPN summary payload has no head-to-head data, and an
+    /// empty invented tab would be fake UI.)
+    @State private var detailTab = 0
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
+
+    private enum DetailTab: Hashable {
+        case timeline, lineups, stats
+
+        var title: String {
+            switch self {
+            case .timeline: return L("matches.detail.timeline")
+            case .lineups: return L("matches.lineups")
+            case .stats: return L("matches.stats")
+            }
+        }
+    }
+
+    private var hasTimeline: Bool { !(detail?.timeline.isEmpty ?? true) }
+    private var hasLineups: Bool { !(detail?.lineups.isEmpty ?? true) }
+    private var hasStats: Bool { !(detail?.stats.isEmpty ?? true) }
+
+    /// The tabs that exist for THIS match, in display order.
+    private var availableTabs: [DetailTab] {
+        var tabs: [DetailTab] = []
+        if hasTimeline { tabs.append(.timeline) }
+        if hasLineups { tabs.append(.lineups) }
+        if hasStats { tabs.append(.stats) }
+        return tabs
+    }
+
+    /// The selected tab, clamped when data changes.
+    private var selectedTab: DetailTab? {
+        let tabs = availableTabs
+        guard !tabs.isEmpty else { return nil }
+        return tabs[min(detailTab, tabs.count - 1)]
+    }
 
     init(sport: MatchSport, leaguePath: String, match: MatchEvent, leagueName: String? = nil) {
         self.sport = sport
@@ -118,18 +157,6 @@ struct MatchDetailView: View {
 
             watchSection
 
-            if let detail, !detail.lineups.isEmpty {
-                Section {
-                    NavigationLink {
-                        LineupsView(sport: sport, leaguePath: leaguePath, sides: detail.lineups)
-                    } label: {
-                        Label(L("matches.lineups"), systemImage: "sportscourt")
-                            .font(AppTheme.fontCardTitle)
-                    }
-                }
-                .listRowBackground(AppTheme.surface)
-            }
-
             if let detail, !detail.leaders.isEmpty {
                 Section {
                     leadersRow(detail.leaders)
@@ -139,26 +166,50 @@ struct MatchDetailView: View {
                 .listRowBackground(AppTheme.surface)
             }
 
-            if let detail, !detail.timeline.isEmpty {
+            // Build 65 (Scoreboard Pro): ONE tab bar over the
+            // detail sections; the selected tab's rows render
+            // below it. Tabs exist only for data the feed
+            // actually carries (see `availableTabs`).
+            if let detail, !availableTabs.isEmpty {
                 Section {
-                    ForEach(detail.timeline) { event in
-                        timelineRow(event)
+                    Picker("", selection: $detailTab) {
+                        ForEach(Array(availableTabs.enumerated()), id: \.offset) { index, tab in
+                            Text(tab.title).tag(index)
+                        }
                     }
-                } header: {
-                    sectionHeader(L("matches.detail.timeline"))
+                    .pickerStyle(.segmented)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                 }
-                .listRowBackground(AppTheme.surface)
-            }
+                .listRowBackground(Color.clear)
 
-            if let detail, !detail.stats.isEmpty {
-                Section {
-                    ForEach(detail.stats) { line in
-                        statsRow(line)
+                if selectedTab == .timeline {
+                    Section {
+                        ForEach(detail.timeline) { event in
+                            timelineRow(event)
+                        }
                     }
-                } header: {
-                    sectionHeader(L("matches.detail.team_stats"))
+                    .listRowBackground(AppTheme.surface)
+                } else if selectedTab == .lineups {
+                    Section {
+                        NavigationLink {
+                            LineupsView(sport: sport, leaguePath: leaguePath, sides: detail.lineups)
+                        } label: {
+                            Label(L("matches.lineups"), systemImage: "sportscourt")
+                                .font(AppTheme.fontCardTitle)
+                        }
+                    }
+                    .listRowBackground(AppTheme.surface)
+                } else if selectedTab == .stats {
+                    Section {
+                        ForEach(detail.stats) { line in
+                            statsRow(line)
+                        }
+                    } header: {
+                        sectionHeader(L("matches.detail.team_stats"))
+                    }
+                    .listRowBackground(AppTheme.surface)
                 }
-                .listRowBackground(AppTheme.surface)
             }
 
             if let detail, detail.isEmpty {
@@ -183,15 +234,72 @@ struct MatchDetailView: View {
 
     // MARK: Header
 
+    /// Build 65 (Scoreboard Pro): the header is a scoreboard —
+    /// big crests flanking ONE huge center score, with the
+    /// state (LIVE + minute / FT / kickoff) as a pill beneath.
+    /// Same real header data as before, scoreboard composition.
     private var headerView: some View {
-        VStack(spacing: 12) {
-            HStack(alignment: .top, spacing: 8) {
+        VStack(spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
                 teamColumn(home)
-                stateColumn
+                scoreColumn
                 teamColumn(away)
             }
+            statePill
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private var scoreColumn: some View {
+        VStack(spacing: 2) {
+            if state != .upcoming, let homeScore = home?.score, let awayScore = away?.score {
+                Text("\(homeScore) – \(awayScore)")
+                    .font(.system(size: 38, weight: .black, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            } else if let start = seedMatch?.startDate ?? detail?.header?.startDate {
+                Text(MatchesView.kickoffText(start))
+                    .font(.title3.weight(.bold))
+                    .multilineTextAlignment(.center)
+            } else {
+                Text("– : –")
+                    .font(.system(size: 30, weight: .black, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 118)
+    }
+
+    @ViewBuilder
+    private var statePill: some View {
+        switch state {
+        case .live:
+            HStack(spacing: 5) {
+                Circle().fill(Color.white).frame(width: 6, height: 6)
+                Text(L("matches.live"))
+                    .font(AppTheme.fontBadge)
+                if let clock = seedMatch?.displayClock ?? detail?.header?.displayClock {
+                    Text(clock)
+                        .font(AppTheme.fontBadge)
+                        .monospacedDigit()
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(AppTheme.live))
+        case .finished:
+            Text(L("matches.final"))
+                .font(AppTheme.fontBadge)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(Color.secondary.opacity(0.16)))
+        case .upcoming, .none:
+            EmptyView()
+        }
     }
 
     @ViewBuilder
@@ -213,58 +321,22 @@ struct MatchDetailView: View {
     }
 
     private func teamColumnContent(_ side: MatchTeamSide?) -> some View {
+        // Build 65 (Scoreboard Pro): bigger crest, name under it;
+        // the SCORE itself lives once, huge, in the center
+        // score column — no longer repeated per team.
         VStack(spacing: 8) {
             CachedImage(
                 url: side?.logoURL,
-                width: 52, height: 52,
-                cornerRadius: 26,
+                width: 64, height: 64,
+                cornerRadius: 32,
                 iconName: "shield"
             )
             Text(side?.name ?? "")
                 .font(AppTheme.fontCardTitle)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
-            if state != .upcoming, let score = side?.score {
-                Text(score)
-                    .font(.title2.weight(.black))
-                    .monospacedDigit()
-            }
         }
         .frame(maxWidth: .infinity)
-    }
-
-    @ViewBuilder
-    private var stateColumn: some View {
-        VStack(spacing: 4) {
-            switch state {
-            case .live:
-                HStack(spacing: 4) {
-                    Circle().fill(AppTheme.accent).frame(width: 6, height: 6)
-                    Text(L("matches.live"))
-                        .font(AppTheme.fontBadge)
-                        .foregroundStyle(AppTheme.accent)
-                }
-                if let clock = seedMatch?.displayClock ?? detail?.header?.displayClock {
-                    Text(clock)
-                        .font(AppTheme.fontMetadata.weight(.semibold))
-                        .foregroundStyle(AppTheme.accent)
-                        .monospacedDigit()
-                }
-            case .finished:
-                Text(L("matches.final"))
-                    .font(AppTheme.fontMetadata.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            case .upcoming, .none:
-                if let start = seedMatch?.startDate {
-                    Text(MatchesView.kickoffText(start))
-                        .font(AppTheme.fontMetadata.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-            }
-        }
-        .frame(width: 76)
-        .padding(.top, 18)
     }
 
     // MARK: Reminder (item 10e)

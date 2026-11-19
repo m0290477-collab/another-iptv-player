@@ -1195,3 +1195,32 @@
 "matches.team.recent" = "हाल के परिणाम";
 "matches.team.squad" = "दस्ता";
 "matches.search.placeholder" = "टीमें खोजें";
+
+/* Build 65: redesign surfaces (display, settings hub, EPG cards, match tabs, favorites shelves, downloads dashboard). */
+"display.accent" = "एक्सेंट रंग";
+"display.automatic" = "स्वचालित";
+"display.automatic.desc" = "डिवाइस घुमाने पर लेआउट अपने आप बदल जाते हैं — पोस्टर रेल और ग्रिड पोर्ट्रेट व लैंडस्केप के बीच ढल जाते हैं। थीम आपके सिस्टम सेटिंग का पालन कर सकती है।";
+"display.density" = "होम स्पेसिंग";
+"display.density.comfortable" = "आरामदायक";
+"display.density.compact" = "संक्षिप्त";
+"display.poster_size" = "पोस्टर आकार";
+"display.poster_size.large" = "बड़ा";
+"display.poster_size.medium" = "मध्यम";
+"display.poster_size.small" = "छोटा";
+"display.preview" = "पूर्वावलोकन";
+"display.preview.note" = "नीचे विकल्प बदलते ही पूर्वावलोकन लाइव अपडेट होता है।";
+"display.theme" = "थीम";
+"display.title" = "डिस्प्ले";
+"download.dashboard.free" = "डिवाइस पर खाली";
+"download.dashboard.items" = "डाउनलोड";
+"download.dashboard.limit" = "सीमा";
+"download.dashboard.percent" = "सीमा का %d%% उपयोग हुआ";
+"epg.next" = "अगला";
+"epg.view.cards" = "कार्ड दृश्य";
+"epg.view.grid" = "टाइमलाइन दृश्य";
+"favorites.empty.all" = "अभी कोई पसंदीदा नहीं है। किसी भी चैनल, फ़िल्म या सीरीज़ पर स्टार दबाकर यहाँ जोड़ें।";
+"favorites.shelf.channels" = "पसंदीदा चैनल";
+"favorites.shelf.movies" = "पसंदीदा फ़िल्में";
+"favorites.shelf.series" = "पसंदीदा सीरीज़";
+"matches.stats" = "आँकड़े";
+"settings.hub.all_settings" = "सभी सेटिंग्स";

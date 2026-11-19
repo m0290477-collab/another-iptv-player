@@ -141,46 +141,37 @@ struct DetailHero: View {
     }
 
     private var overlayLayer: some View {
-        HStack(alignment: .bottom, spacing: 16) {
-            CachedImage(
-                url: config.posterURL,
-                width: metrics.seriesDetailHeroWidth,
-                height: metrics.seriesDetailHeroHeight,
-                cornerRadius: AppTheme.cornerRadius,
-                contentMode: .fill,
-                iconName: config.posterIconName
-            )
-            .shadow(color: .black.opacity(0.45), radius: 14, y: 8)
-            .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                    .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
-            )
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if let url = config.posterURL {
-                    onPosterTap?(url)
-                }
-            }
-            .allowsHitTesting(config.posterURL != nil)
+        // Build 65 (Detail style 1 'Cinematic'): the poster
+        // thumbnail leaves the hero — the composition is the
+        // mockup's: full-width backdrop, a BIG white title across
+        // the bottom, and the meta as a row of dark badge chips.
+        // The poster itself is still one tap away: tapping the
+        // hero art opens it full-screen (the existing
+        // `onPosterTap` path, moved from the thumbnail to the
+        // backdrop).
+        VStack(alignment: .leading, spacing: 12) {
+            Text(config.title)
+                .font(.largeTitle.weight(.black))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .shadow(color: .black.opacity(0.55), radius: 10, y: 2)
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text(config.title)
-                    .font(.title.weight(.bold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
-                    .shadow(color: .black.opacity(0.5), radius: 8, y: 2)
-
-                DetailHeroMetaRow(
-                    year: config.year,
-                    releaseDate: config.releaseDate,
-                    runtime: config.runtime,
-                    rating10: config.rating10,
-                    ratingText: config.ratingText
-                )
+            DetailHeroMetaRow(
+                year: config.year,
+                releaseDate: config.releaseDate,
+                runtime: config.runtime,
+                rating10: config.rating10,
+                ratingText: config.ratingText
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 4)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if let url = config.posterURL {
+                onPosterTap?(url)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, 4)
         }
     }
 }
@@ -201,7 +192,10 @@ private struct DetailHeroMetaRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        // Build 65 (Cinematic detail): every meta element is a
+        // dark badge chip over the art (the mockup's 2024 • PG-13
+        // • ★8.3 row) — same real values, chip form.
+        HStack(spacing: 8) {
             if let rating10, rating10 > 0, rating10 <= 10 {
                 HStack(spacing: 4) {
                     Image(systemName: "star.fill")
@@ -209,11 +203,11 @@ private struct DetailHeroMetaRow: View {
                         .foregroundStyle(AppTheme.ratingGold)
                     Text(String(format: "%.1f", locale: DetailFormatting.appLocale, rating10))
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.white)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Capsule().fill(.ultraThinMaterial))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(Color.black.opacity(0.45)))
             } else if let ratingText, !ratingText.isEmpty {
                 RatingLabel(rating: ratingText, style: .standard)
             }
@@ -225,11 +219,17 @@ private struct DetailHeroMetaRow: View {
                     Text(fullReleaseDate)
                         .font(.caption.weight(.semibold))
                 }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(Color.black.opacity(0.45)))
             } else if let year, !year.isEmpty {
                 Text(year)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color.black.opacity(0.45)))
             }
 
             if let runtime, !runtime.isEmpty {
@@ -238,8 +238,11 @@ private struct DetailHeroMetaRow: View {
                         .font(.caption2)
                     Text(runtime)
                         .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
                 }
-                .foregroundStyle(.secondary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(Color.black.opacity(0.45)))
             }
         }
     }
@@ -270,27 +273,25 @@ struct DetailActionBar: View {
     private var primaryCTA: some View {
         Button(action: onPrimary) {
             VStack(spacing: 0) {
-                HStack(spacing: 12) {
+                // Build 65 (Cinematic detail): the mockup's big
+                // centered Play — icon + title centered, the
+                // resume position rides inline after the title.
+                HStack(spacing: 10) {
                     Image(systemName: primaryIcon)
-                        .font(.title3)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(primaryTitle)
-                            .font(.subheadline.weight(.bold))
-                        if let sub = primarySubtitle, !sub.isEmpty {
-                            Text(sub)
-                                .font(.caption2)
-                                .opacity(0.82)
-                                .lineLimit(1)
-                        }
+                        .font(.title3.weight(.bold))
+                    Text(primaryTitle)
+                        .font(.headline.weight(.bold))
+                    if let sub = primarySubtitle, !sub.isEmpty {
+                        Text(sub)
+                            .font(.subheadline.weight(.semibold))
+                            .opacity(0.85)
+                            .lineLimit(1)
                     }
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.bold))
-                        .opacity(0.85)
                 }
+                .frame(maxWidth: .infinity)
                 .foregroundStyle(.white)
                 .padding(.horizontal, 18)
-                .padding(.vertical, 14)
+                .padding(.vertical, 15)
 
                 if let progress {
                     ProgressView(value: min(max(progress, 0), 1))

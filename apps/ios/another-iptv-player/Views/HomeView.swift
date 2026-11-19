@@ -552,7 +552,10 @@ struct HomeView: View {
                 emptyState
             } else {
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 26) {
+                    // Build 65: the row spacing is the Display
+                    // screen's Home-density preference (default
+                    // comfortable = the long-standing 26).
+                    VStack(alignment: .leading, spacing: HomeDensityPreference.current.shelfSpacing) {
                         // Round 10 (owner, build 46): the STRONG-style
                         // top bar — wordmark on one side, tidy square
                         // icon buttons on the other (Favorites star,
@@ -595,24 +598,11 @@ struct HomeView: View {
                         WhatsNewBanner(playlist: playlist)
                             .padding(.horizontal, 16)
 
-                        // Build 64 (B1, Home style 2 'Dashboard
-                        // Pro'): the sports dashboard leads the
-                        // content — a section header + the three
-                        // sport tiles carrying real live scores.
-                        // Build 63 kept the tiles inside the
-                        // discovery row's category tiles; style 2
-                        // moves them up here as their own block
-                        // (the category tiles row itself stays in
-                        // the discovery row, unchanged). Same F6
-                        // gate as before.
-                        if !UserDefaults.standard.bool(forKey: "sections.hidden.matches") {
-                            VStack(alignment: .leading, spacing: 12) {
-                                CinematicSectionHeader(title: L("home.sports_dashboard")) {
-                                    MatchesView()
-                                }
-                                sportTileRow
-                            }
-                        }
+                        // Build 65 (Home v2 style 1 'Cinematic
+                        // Hero'): the hero leads the screen again —
+                        // the build-64 sports dashboard block moves
+                        // BELOW it as a compact sports strip (see
+                        // after the hero). Same F6 gate as before.
 
                         // Build 61 (B7, Z12): the hero leads with
                         // LIVE content — the featured live channel
@@ -659,6 +649,33 @@ struct HomeView: View {
                             // B6: skeleton placeholders instead of the
                             // bare spinner while the catalog lands.
                             SkeletonShelf()
+                        }
+
+                        // Build 65 (Home v2 style 1): the compact
+                        // sports strip sits directly under the hero
+                        // (the Matches system stays one tap away,
+                        // with its real live scores). Same tiles,
+                        // same F6 gate as build 64's top block.
+                        if !UserDefaults.standard.bool(forKey: "sections.hidden.matches") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                CinematicSectionHeader(title: L("home.sports_dashboard")) {
+                                    MatchesView()
+                                }
+                                sportTileRow
+                            }
+                        }
+
+                        // Build 65 (Home v2 style 1, landscape):
+                        // in landscape the cinematic layout pairs
+                        // the hero with a "Trending Now" list (the
+                        // mockup's right column) — the store's
+                        // shared top-rated movies, real scores
+                        // only, tap → the same detail path as the
+                        // shelves. Portrait keeps the Top 10 rail
+                        // in the rows below instead.
+                        if UIScreen.main.bounds.width > UIScreen.main.bounds.height,
+                           !topRatedMovies.isEmpty {
+                            landscapeTrendingStrip
                         }
 
                         // Build 61 (B7, J3): Edit-mode toggle for
@@ -1209,6 +1226,85 @@ struct HomeView: View {
 
     // MARK: - Featured carousel
 
+    /// Build 65 (Home v2 style 1 'Cinematic Hero'): the hero is
+    /// TALL in portrait — the mockup's backdrop fills roughly the
+    /// top half of the screen (poster art center-crops into the
+    /// taller frame; slides with true 16:9 backdrops crop the same
+    /// way the mockup's own art does). Landscape keeps the 16:9
+    /// cinematic frame (the height-capped `cardWidth` already
+    /// bounds it there).
+    private var heroHeight: CGFloat {
+        let bounds = UIScreen.main.bounds
+        if bounds.width > bounds.height {
+            return cardWidth * 9 / 16
+        }
+        return min(cardWidth * 1.08, bounds.height * 0.52)
+    }
+
+    /// Build 65: the landscape hero's companion column (mockup:
+    /// "Trending Now" list beside the hero) rendered as a wide-card
+    /// strip under the hero in the landscape scroll — same data
+    /// and detail path as the Top 10 rail.
+    private var landscapeTrendingStrip: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            CinematicSectionHeader(title: L("search.trending")) {
+                AllVODView(playlist: playlist)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 14) {
+                    ForEach(topRatedMovies.prefix(6).indices, id: \.self) { index in
+                        let movie = topRatedMovies[index]
+                        Button {
+                            pendingMovieDetail = movie
+                        } label: {
+                            HStack(spacing: 12) {
+                                CachedImage(
+                                    url: moviePosterURL(movie),
+                                    width: 62,
+                                    height: 92,
+                                    cornerRadius: AppTheme.smallCornerRadius,
+                                    iconName: "film"
+                                )
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(movie.name)
+                                        .font(AppTheme.fontCardTitle)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.leading)
+                                    if let meta = cardMetaLine(year: DetailFormatting.year(from: movie.releaseDate), genre: movie.genre) {
+                                        Text(meta)
+                                            .font(AppTheme.fontMetadata)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    if let rating = ContentRating.normalizedDisplayText(rating: movie.rating, rating5Based: movie.rating5Based) {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "star.fill")
+                                                .font(.caption2.weight(.semibold))
+                                                .foregroundStyle(AppTheme.ratingGold)
+                                            Text(rating)
+                                                .font(AppTheme.fontMetadata.weight(.bold))
+                                                .foregroundStyle(.primary)
+                                        }
+                                    }
+                                }
+                                .frame(width: 150, alignment: .leading)
+                            }
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                                    .fill(AppTheme.surface)
+                            )
+                        }
+                        .buttonStyle(PressScaleButtonStyle())
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .scrollClipDisabled()
+        }
+    }
+
     private var featuredCarousel: some View {
         VStack(spacing: 10) {
             TabView(selection: $featuredIndex) {
@@ -1217,6 +1313,7 @@ struct HomeView: View {
                         entry: featured[index],
                         isCurrent: index == featuredIndex,
                         width: cardWidth,
+                        height: heroHeight,
                         onPlay: { playFeatured(featured[index]) },
                         onDetails: { showFeaturedDetails(featured[index]) }
                     )
@@ -1224,7 +1321,7 @@ struct HomeView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(width: cardWidth, height: cardWidth * 9 / 16)
+            .frame(width: cardWidth, height: heroHeight)
             .frame(maxWidth: .infinity)
             .onChange(of: featuredIndex) { _, _ in
                 // Timer-driven advances set the suppression flag first; a
@@ -2597,6 +2694,9 @@ private struct FeaturedSlide: View {
     let entry: FeaturedEntry
     let isCurrent: Bool
     let width: CGFloat
+    /// Build 65 (Cinematic Hero): the slide's frame height — tall
+    /// in portrait, 16:9 in landscape (computed by the carousel).
+    let height: CGFloat
     let onPlay: () -> Void
     let onDetails: () -> Void
 
@@ -2615,7 +2715,7 @@ private struct FeaturedSlide: View {
                 CachedImage(
                     url: entry.artURL,
                     width: width,
-                    height: width * 9 / 16,
+                    height: height,
                     cornerRadius: AppTheme.heroCornerRadius,
                     contentMode: .fill,
                     iconName: entry.iconName,
@@ -2629,7 +2729,7 @@ private struct FeaturedSlide: View {
             CachedImage(
                 url: entry.artURL,
                 width: width,
-                height: width * 9 / 16,
+                height: height,
                 cornerRadius: AppTheme.heroCornerRadius,
                 contentMode: entry.hasBackdropArt ? .fill : .fit,
                 iconName: entry.iconName,
@@ -2646,23 +2746,19 @@ private struct FeaturedSlide: View {
             )
             .allowsHitTesting(false)
 
-            Text(L("home.featured"))
-                .font(AppTheme.fontBadge)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Capsule().fill(AppTheme.accent))
-                .padding(12)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            // Build 65 (Cinematic Hero): the mockup carries NO
+            // badge over the art — the backdrop, the big title and
+            // the actions are the whole treatment.
 
             VStack(alignment: .leading, spacing: 8) {
-                // Build 61 (Design-4, home panel 4): the hero title
-                // is BIG and in the accent (the mockup's red-orange
-                // headline over the art).
+                // Build 65 (Home v2 style 1): the hero title is BIG
+                // and WHITE over the art (the build-61 accent
+                // headline gives way to the cinematic treatment);
+                // the accent lives in the Play pill.
                 Text(entry.title)
-                    .font(.title.weight(.black))
-                    .foregroundStyle(AppTheme.accent)
-                    .lineLimit(1)
+                    .font(.largeTitle.weight(.black))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
 
                 HStack(spacing: 8) {
                     if let ratingText = entry.ratingText {
@@ -2700,18 +2796,23 @@ private struct FeaturedSlide: View {
                     .buttonStyle(PressScaleButtonStyle())
 
                     Button(action: onDetails) {
+                        // Build 65: the mockup's ghost action beside
+                        // Play — a translucent capsule with a hairline
+                        // border (its "+ Watchlist"; ours opens the
+                        // same detail page as before).
                         Text(L("home.details"))
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(.white)
                             .padding(.horizontal, 22)
                             .padding(.vertical, 10)
-                            .background(Capsule().fill(AppTheme.elevated))
+                            .background(Capsule().fill(Color.white.opacity(0.14)))
+                            .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
                     }
                     .buttonStyle(PressScaleButtonStyle())
                 }
             }
             .padding(.horizontal, AppTheme.spacingScreenMargin)
-            .padding(.bottom, 14)
+            .padding(.bottom, 18)
             .frame(width: width, alignment: .leading)
             // B12: slide change animates the title block
             // (transform/opacity only).
@@ -2725,7 +2826,7 @@ private struct FeaturedSlide: View {
             .offset(y: textShown ? 0 : 12)
             .allowsHitTesting(isCurrent)
         }
-        .frame(width: width, height: width * 9 / 16)
+        .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
         // X4 (B7): subtle shine across the hero art while pressed.

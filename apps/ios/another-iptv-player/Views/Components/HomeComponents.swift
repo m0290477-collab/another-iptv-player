@@ -414,15 +414,19 @@ struct LiveHeroCard: View {
                     }
                     Spacer()
                     VStack(alignment: .leading, spacing: 3) {
+                        // Build 65 (Cinematic Hero): the live hero
+                        // carries the same big-title treatment as
+                        // the featured hero — the preview mechanics
+                        // above are untouched.
                         Text(stream.name)
-                            .font(.title3.weight(.bold))
+                            .font(.title2.weight(.black))
                             .foregroundStyle(.white)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                         if let nowProgramTitle, !nowProgramTitle.isEmpty {
                             Text(nowProgramTitle)
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.75))
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.8))
                                 .lineLimit(1)
                         }
                     }

@@ -75,6 +75,11 @@ struct VODView: View {
     // chips are pure orderings: All (shelves) and Newest (the catalog's
     // `added` ordering, extended cut). Their grids/queries went too.
     @State private var selectedChip: ContentChip = .all
+    /// Build 65 (inside-sections): the category chip selection —
+    /// nil shows the shelf stack; a category id swaps it for that
+    /// category's poster grid.
+    @State private var selectedCategoryId: String? = nil
+    @State private var categoryVisibleCount = 90
 
     // The filtering results are computed in the background; only the assignment is made on the main thread
     @State private var displayCategories: [DBCategory] = []
@@ -152,6 +157,24 @@ struct VODView: View {
                                 }
                             }
 
+                            // Build 65 (inside-sections design):
+                            // category chips under the hero — the
+                            // REAL provider categories. A selection
+                            // swaps the shelves for that category's
+                            // poster grid (see below); All restores
+                            // them.
+                            if displayCategories.count > 1 {
+                                SectionCategoryChips(
+                                    categories: displayCategories,
+                                    selectedCategoryId: $selectedCategoryId
+                                )
+                                .padding(.bottom, 4)
+                            }
+
+                            if let selectedCategoryId,
+                               let category = displayCategories.first(where: { $0.id == selectedCategoryId }) {
+                                categoryGrid(for: category)
+                            } else {
                             ContinueWatchingRow(
                                 playlist: playlist,
                                 typeFilter: "vod",
@@ -193,6 +216,7 @@ struct VODView: View {
                                     .id(category.id)
                                 }
                             }
+                            } // Build 65: end of the All (shelves) branch of the category-chip swap.
                         case .newest:
                             newestGrid
                         }
@@ -283,6 +307,7 @@ struct VODView: View {
             order: orderStore.orderedIds(playlistId: playlist.id, type: "vod")
         )) { await recomputeFilter() }
         .onAppear { shelfReplayToken += 1 }
+        .onChange(of: selectedCategoryId) { _, _ in categoryVisibleCount = 90 }
         .transaction { $0.animation = nil }
         .navigationDestination(item: $pendingMovieDetail) { movie in
             MovieDetailView(playlist: playlist, movie: movie)
@@ -371,6 +396,56 @@ struct VODView: View {
                 .padding(.top, 8)
 
                 if newestVisibleCount < newestAll.count {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                }
+            }
+        }
+    }
+
+    /// Build 65 (inside-sections): the poster grid shown when a
+    /// category chip is selected — the category's OWN items (the
+    /// same `displayItemsByCategory` bucket its shelf renders),
+    /// in the tab's grid language, paginated like the Newest grid.
+    /// In-section search behavior is untouched (the tab's search
+    /// sheet still searches the full catalog, build 63/64).
+    private func categoryGrid(for category: DBCategory) -> some View {
+        let items = displayItemsByCategory[category.id] ?? []
+        let queue = items.map(\.stream)
+        return Group {
+            if items.isEmpty {
+                ContentUnavailableView(
+                    L("list.no_result"),
+                    systemImage: "film.slash"
+                )
+                .padding(.top, 40)
+            } else {
+                LazyVGrid(columns: posterGridColumns, spacing: posterMetrics.gridRowSpacing) {
+                    ForEach(Array(items.prefix(categoryVisibleCount).enumerated()), id: \.element.id) { index, item in
+                        NavigationLink {
+                            MovieDetailView(playlist: playlist, movie: item.stream, queue: queue)
+                        } label: {
+                            VODStreamCard(
+                                playlistId: playlist.id,
+                                stream: item.stream,
+                                posterWidth: posterMetrics.categoryGridPosterWidth,
+                                posterHeight: posterMetrics.categoryGridPosterHeight,
+                                imageLoadProfile: .grid
+                            )
+                        }
+                        .buttonStyle(PressScaleButtonStyle())
+                        .onAppear {
+                            if index >= categoryVisibleCount - 15 {
+                                categoryVisibleCount = min(categoryVisibleCount + 90, items.count)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+                if categoryVisibleCount < items.count {
                     ProgressView()
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 24)

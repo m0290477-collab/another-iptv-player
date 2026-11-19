@@ -10,6 +10,80 @@ import SwiftUI
 /// the section bodies are the former @ViewBuilder properties'
 /// contents, unchanged.
 
+/// Build 65 (Downloads style 1 'Storage Dashboard'): the ring
+/// header — downloads-on-disk against the REAL enforced
+/// storage cap (the same cap the picker below sets and
+/// `DownloadManager` enforces), plus the device's real free
+/// space. Every number comes from the stores/services the
+/// rows below already use; nothing is estimated.
+struct DownloadsDashboardSection: View {
+    let usedBytes: Int64
+    let capGB: Int
+    let freeBytes: Int64?
+    let itemCount: Int
+
+    private var capBytes: Int64 { Int64(capGB) * 1_000_000_000 }
+
+    private var fraction: Double {
+        guard capBytes > 0 else { return 0 }
+        return min(max(Double(usedBytes) / Double(capBytes), 0), 1)
+    }
+
+    var body: some View {
+        Section {
+            HStack(spacing: 18) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.primary.opacity(0.12), lineWidth: 9)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(fraction))
+                        .stroke(AppTheme.accent, style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    VStack(spacing: 1) {
+                        Text(ByteCountFormatter.string(fromByteCount: usedBytes, countStyle: .file))
+                            .font(.subheadline.weight(.bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
+                        Text(L("downloadcap.used"))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(13)
+                }
+                .frame(width: 104, height: 104)
+
+                VStack(alignment: .leading, spacing: 9) {
+                    dashboardRow(label: L("download.dashboard.limit"), value: "\(capGB) GB")
+                    dashboardRow(label: L("download.dashboard.items"), value: "\(itemCount)")
+                    if let freeBytes {
+                        dashboardRow(
+                            label: L("download.dashboard.free"),
+                            value: ByteCountFormatter.string(fromByteCount: freeBytes, countStyle: .file)
+                        )
+                    }
+                    Text(L("download.dashboard.percent", Int((fraction * 100).rounded())))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 6)
+        }
+    }
+
+    private func dashboardRow(label: String, value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 6)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+        }
+    }
+}
+
 struct DownloadsHeaderSections: View {
     @ObservedObject var manager: DownloadManager
     @Binding var storageCapGB: Int

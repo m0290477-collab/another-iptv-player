@@ -146,7 +146,10 @@ struct DashboardView: View {
 
                 Tab(value: DashboardTab.settings) {
                     NavigationStack {
-                        PlaylistSettingsView(playlist: playlist, onDismiss: onDismiss, onSwitchPlaylist: onSwitchPlaylist)
+                        // Build 65 (Settings style 2): the tab
+                        // opens on the Visual Cards hub; the full
+                        // form lives one tap inside it.
+                        SettingsHubView(playlist: playlist, onDismiss: onDismiss, onSwitchPlaylist: onSwitchPlaylist)
                             .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.settings"))
                     }
                 } label: { tabLabel(L("dashboard.settings"), glyph: "TabGlyphSettings", tab: DashboardTab.settings) }

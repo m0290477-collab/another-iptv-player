@@ -1213,3 +1213,32 @@
 "matches.team.recent" = "Recent results";
 "matches.team.squad" = "Squad";
 "matches.search.placeholder" = "Search teams";
+
+/* Build 65: redesign surfaces (display, settings hub, EPG cards, match tabs, favorites shelves, downloads dashboard). */
+"display.accent" = "Accent color";
+"display.automatic" = "Automatic";
+"display.automatic.desc" = "Layouts adapt automatically when you rotate your device — poster rails and grids reflow between portrait and landscape. The theme can follow your system setting.";
+"display.density" = "Home spacing";
+"display.density.comfortable" = "Comfortable";
+"display.density.compact" = "Compact";
+"display.poster_size" = "Poster size";
+"display.poster_size.large" = "Large";
+"display.poster_size.medium" = "Medium";
+"display.poster_size.small" = "Small";
+"display.preview" = "Preview";
+"display.preview.note" = "Preview updates live as you change the options below.";
+"display.theme" = "Theme";
+"display.title" = "Display";
+"download.dashboard.free" = "Free on device";
+"download.dashboard.items" = "Downloads";
+"download.dashboard.limit" = "Limit";
+"download.dashboard.percent" = "%d%% of the limit used";
+"epg.next" = "Next";
+"epg.view.cards" = "Cards view";
+"epg.view.grid" = "Timeline view";
+"favorites.empty.all" = "No favorites yet. Tap the star on any channel, movie or series to add it here.";
+"favorites.shelf.channels" = "Favorite Channels";
+"favorites.shelf.movies" = "Favorite Movies";
+"favorites.shelf.series" = "Favorite Series";
+"matches.stats" = "Stats";
+"settings.hub.all_settings" = "All Settings";

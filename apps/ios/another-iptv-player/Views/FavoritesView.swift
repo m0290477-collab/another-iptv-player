@@ -14,9 +14,15 @@ import GRDBQuery
 struct FavoritesView: View {
     let playlist: Playlist
 
+    /// Build 65 (Favorites style 2 'Shelves by Type'): the type
+    /// is no longer a switch — all three shelves render in one
+    /// scroll. The caller's `initialType` now only decides which
+    /// shelf comes FIRST (deep links from a section land on
+    /// their shelf).
     @State private var selectedType: String
     @State private var searchText = ""
     @Environment(\.posterMetrics) private var posterMetrics
+    @Environment(\.epgSnapshot) private var epgSnapshot
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
 
     @Query<FavoriteLiveRequest> private var favoriteLive: [LiveStreamWithCategory]
@@ -33,13 +39,6 @@ struct FavoritesView: View {
         _favoriteSeries = Query(FavoriteSeriesRequest(playlistId: playlist.id), in: \.appDatabase)
         _vodProgressMap = Query(WatchProgressMapRequest(playlistId: playlist.id, type: "vod"), in: \.appDatabase)
         _seriesProgressMap = Query(WatchProgressMapRequest(playlistId: playlist.id, type: "series"), in: \.appDatabase)
-    }
-
-    private var gridColumns: [GridItem] {
-        if selectedType == "live" {
-            return [GridItem(.adaptive(minimum: posterMetrics.liveGridIconSize), spacing: posterMetrics.gridSpacing)]
-        }
-        return [GridItem(.adaptive(minimum: posterMetrics.categoryGridPosterWidth), spacing: posterMetrics.gridSpacing)]
     }
 
     var body: some View {
@@ -69,33 +68,12 @@ struct FavoritesView: View {
                     .background(AppTheme.elevated, in: RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius))
                 }
                 .buttonStyle(.plain)
-
-                HStack(spacing: 8) {
-                    PillChipButton(title: L("dashboard.live"), isSelected: selectedType == "live") {
-                        selectedType = "live"
-                    }
-                    PillChipButton(title: L("dashboard.movies"), isSelected: selectedType == "vod") {
-                        selectedType = "vod"
-                    }
-                    PillChipButton(title: L("dashboard.series"), isSelected: selectedType == "series") {
-                        selectedType = "series"
-                    }
-                    Spacer(minLength: 0)
-                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 4)
             .padding(.bottom, 12)
 
-            Group {
-                if selectedType == "live" {
-                    liveGrid
-                } else if selectedType == "vod" {
-                    vodGrid
-                } else {
-                    seriesGrid
-                }
-            }
+            shelvesScroll
 
             // Build 61 (B8, R6): favorites whose catalog entry has
             // vanished stay listed here, marked unavailable — user
@@ -127,13 +105,19 @@ struct FavoritesView: View {
     }
 
     private var unavailableFavorites: [DBFavorite] {
-        let availableIds: Set<Int>
-        switch selectedType {
-        case "live": availableIds = Set(favoriteLive.map(\.stream.streamId))
-        case "vod": availableIds = Set(favoriteVODs.map(\.stream.streamId))
-        default: availableIds = Set(favoriteSeries.map(\.series.seriesId))
+        // Build 65: with shelves, unavailable favorites from ALL
+        // types list together (was: only the selected type's).
+        let liveIds = Set(favoriteLive.map(\.stream.streamId))
+        let vodIds = Set(favoriteVODs.map(\.stream.streamId))
+        let seriesIds = Set(favoriteSeries.map(\.series.seriesId))
+        return rawFavorites.filter { favorite in
+            switch favorite.type {
+            case "live": return !liveIds.contains(favorite.streamId)
+            case "vod": return !vodIds.contains(favorite.streamId)
+            case "series": return !seriesIds.contains(favorite.streamId)
+            default: return false
+            }
         }
-        return rawFavorites.filter { $0.type == selectedType && !availableIds.contains($0.streamId) }
     }
 
     private var unavailableSection: some View {
@@ -223,54 +207,137 @@ struct FavoritesView: View {
         }
     }
 
+    // MARK: - Build 65: Shelves by Type
+
+    /// Shelf order: the caller's type first, then Live · Movies
+    /// · Series.
+    private var shelfOrder: [String] {
+        let base = ["live", "vod", "series"]
+        guard base.contains(selectedType) else { return base }
+        return [selectedType] + base.filter { $0 != selectedType }
+    }
+
+    private var hasAnyDisplayed: Bool {
+        !displayedLive.isEmpty || !displayedVODs.isEmpty || !displayedSeries.isEmpty
+    }
+
     @ViewBuilder
-    private var liveGrid: some View {
-        if displayedLive.isEmpty {
-            emptyState(icon: "tv.slash", message: trimmedQuery.isEmpty ? L("favorites.empty.live") : L("list.no_result"))
+    private var shelvesScroll: some View {
+        if !hasAnyDisplayed {
+            emptyState(
+                icon: "star.slash",
+                message: trimmedQuery.isEmpty ? L("favorites.empty.all") : L("list.no_result")
+            )
         } else {
             ScrollView {
-                LazyVGrid(columns: gridColumns, spacing: posterMetrics.gridRowSpacing) {
-                    ForEach(displayedLive) { item in
-                        LiveStreamCard(
-                            playlistId: playlist.id,
-                            stream: item.stream,
-                            width: posterMetrics.liveGridIconSize,
-                            iconSize: posterMetrics.liveGridIconSize,
-                            imageLoadProfile: .grid,
-                            onStreamSelected: { stream, history in
-                                presentFavoriteLive(stream: stream, history: history)
-                            }
-                        )
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                removeFavorite(streamId: item.stream.streamId, type: "live")
-                            } label: {
-                                Label(L("favorites.remove"), systemImage: "star.slash")
-                            }
+                VStack(alignment: .leading, spacing: 26) {
+                    ForEach(shelfOrder, id: \.self) { type in
+                        switch type {
+                        case "live":
+                            if !displayedLive.isEmpty { liveShelf }
+                        case "vod":
+                            if !displayedVODs.isEmpty { vodShelf }
+                        default:
+                            if !displayedSeries.isEmpty { seriesShelf }
                         }
                     }
                 }
-                .padding()
+                .padding(.vertical, 6)
+                .padding(.bottom, 18)
             }
         }
     }
 
-    @ViewBuilder
-    private var vodGrid: some View {
-        if displayedVODs.isEmpty {
-            emptyState(icon: "film.slash", message: trimmedQuery.isEmpty ? L("favorites.empty.movie") : L("list.no_result"))
-        } else {
-            ScrollView {
-                LazyVGrid(columns: gridColumns, spacing: posterMetrics.gridRowSpacing) {
+    private func shelfHeader(_ title: String, count: Int) -> some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(AppTheme.accent)
+                .frame(width: 3, height: 18)
+            Text(title)
+                .font(AppTheme.fontSectionTitle)
+            Text("\(count)")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+    }
+
+    /// Favorite Channels shelf: logo ROWS with the real EPG
+    /// now/next line (the same `EPGNowNextLine` the channel
+    /// cards render, LIVE badge included).
+    private var liveShelf: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            shelfHeader(L("favorites.shelf.channels"), count: displayedLive.count)
+            VStack(spacing: 8) {
+                ForEach(displayedLive) { item in
+                    Button {
+                        presentFavoriteLive(stream: item.stream, history: nil)
+                    } label: {
+                        HStack(spacing: 12) {
+                            CachedImage(
+                                url: item.stream.streamIcon.flatMap { URL(string: $0) },
+                                width: 52, height: 38,
+                                cornerRadius: 8,
+                                contentMode: .fit,
+                                iconName: "tv"
+                            )
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item.stream.name)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                if let snapshot = epgSnapshot {
+                                    EPGNowNextLine(
+                                        nowNext: snapshot[EPGChannelKey.forXtream(item.stream)],
+                                        width: 230,
+                                        reserveSpace: true
+                                    )
+                                }
+                            }
+                            Spacer(minLength: 4)
+                            Image(systemName: "play.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(AppTheme.accent)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius, style: .continuous)
+                                .fill(AppTheme.elevated)
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            removeFavorite(streamId: item.stream.streamId, type: "live")
+                        } label: {
+                            Label(L("favorites.remove"), systemImage: "star.slash")
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
+    /// Favorite Movies shelf: a poster rail (same cards, menus
+    /// and detail navigation the grid used).
+    private var vodShelf: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            shelfHeader(L("favorites.shelf.movies"), count: displayedVODs.count)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(displayedVODs) { item in
                         NavigationLink(destination: MovieDetailView(playlist: playlist, movie: item.stream, queue: displayedVODs.map(\.stream))) {
                             VODStreamCard(
                                 playlistId: playlist.id,
                                 stream: item.stream,
                                 categoryName: item.categoryName,
-                                posterWidth: posterMetrics.categoryGridPosterWidth,
-                                posterHeight: posterMetrics.categoryGridPosterHeight,
-                                imageLoadProfile: ImageLoadProfile.grid,
+                                posterWidth: posterMetrics.searchCardWidth,
+                                posterHeight: posterMetrics.searchCardHeight,
+                                imageLoadProfile: ImageLoadProfile.shelf,
                                 watchProgress: vodProgressMap[String(item.stream.streamId)]
                             )
                         }
@@ -286,27 +353,28 @@ struct FavoritesView: View {
                         }
                     }
                 }
-                .padding()
+                .padding(.horizontal, 16)
             }
+            .scrollClipDisabled()
+            .shelfEdgeFade()
         }
     }
 
-    @ViewBuilder
-    private var seriesGrid: some View {
-        if displayedSeries.isEmpty {
-            emptyState(icon: "play.tv.fill", message: trimmedQuery.isEmpty ? L("favorites.empty.series") : L("list.no_result"))
-        } else {
-            ScrollView {
-                LazyVGrid(columns: gridColumns, spacing: posterMetrics.gridRowSpacing) {
+    /// Favorite Series shelf: a poster rail, same treatment.
+    private var seriesShelf: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            shelfHeader(L("favorites.shelf.series"), count: displayedSeries.count)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(displayedSeries) { item in
                         NavigationLink(destination: SeriesDetailView(playlist: playlist, series: item.series)) {
                             SeriesCard(
                                 playlistId: playlist.id,
                                 stream: item.series,
                                 categoryName: item.categoryName,
-                                posterWidth: posterMetrics.categoryGridPosterWidth,
-                                posterHeight: posterMetrics.categoryGridPosterHeight,
-                                imageLoadProfile: ImageLoadProfile.grid,
+                                posterWidth: posterMetrics.searchCardWidth,
+                                posterHeight: posterMetrics.searchCardHeight,
+                                imageLoadProfile: ImageLoadProfile.shelf,
                                 watchProgress: seriesProgressMap[String(item.series.seriesId)]
                             )
                         }
@@ -322,8 +390,10 @@ struct FavoritesView: View {
                         }
                     }
                 }
-                .padding()
+                .padding(.horizontal, 16)
             }
+            .scrollClipDisabled()
+            .shelfEdgeFade()
         }
     }
 

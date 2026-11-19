@@ -162,6 +162,16 @@ struct DownloadsView: View {
                 ContentUnavailableView.search(text: searchText)
             } else {
                 List {
+                    // Build 65 (Storage Dashboard): ring header
+                    // with the real on-disk total, cap and free
+                    // space — above the existing management
+                    // sections, which are unchanged.
+                    DownloadsDashboardSection(
+                        usedBytes: StorageService.downloadsSizeBytes(),
+                        capGB: storageCapGB,
+                        freeBytes: DownloadStorage.availableCapacityBytes(),
+                        itemCount: items.count
+                    )
                     DownloadsHeaderSections(
                         manager: manager,
                         storageCapGB: $storageCapGB,

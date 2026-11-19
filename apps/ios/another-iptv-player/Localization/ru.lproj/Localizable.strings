@@ -1195,3 +1195,32 @@
 "matches.team.recent" = "Последние результаты";
 "matches.team.squad" = "Состав";
 "matches.search.placeholder" = "Поиск команд";
+
+/* Build 65: redesign surfaces (display, settings hub, EPG cards, match tabs, favorites shelves, downloads dashboard). */
+"display.accent" = "Акцентный цвет";
+"display.automatic" = "Автоматически";
+"display.automatic.desc" = "Макеты автоматически подстраиваются при повороте устройства: ленты постеров и сетки перестраиваются между книжной и альбомной ориентацией. Тема может следовать системной настройке.";
+"display.density" = "Интервалы главного экрана";
+"display.density.comfortable" = "Комфортный";
+"display.density.compact" = "Компактный";
+"display.poster_size" = "Размер постеров";
+"display.poster_size.large" = "Большой";
+"display.poster_size.medium" = "Средний";
+"display.poster_size.small" = "Маленький";
+"display.preview" = "Предпросмотр";
+"display.preview.note" = "Предпросмотр обновляется сразу при изменении параметров ниже.";
+"display.theme" = "Тема";
+"display.title" = "Отображение";
+"download.dashboard.free" = "Свободно на устройстве";
+"download.dashboard.items" = "Загрузки";
+"download.dashboard.limit" = "Лимит";
+"download.dashboard.percent" = "Использовано %d%% лимита";
+"epg.next" = "Далее";
+"epg.view.cards" = "Вид карточками";
+"epg.view.grid" = "Вид шкалы времени";
+"favorites.empty.all" = "Пока нет избранного. Нажмите звезду на канале, фильме или сериале, чтобы добавить сюда.";
+"favorites.shelf.channels" = "Избранные каналы";
+"favorites.shelf.movies" = "Избранные фильмы";
+"favorites.shelf.series" = "Избранные сериалы";
+"matches.stats" = "Статистика";
+"settings.hub.all_settings" = "Все настройки";

@@ -1213,3 +1213,32 @@
 "matches.team.recent" = "Son Maçlar";
 "matches.team.squad" = "Kadro";
 "matches.search.placeholder" = "Takım Ara";
+
+/* Build 65: redesign surfaces (display, settings hub, EPG cards, match tabs, favorites shelves, downloads dashboard). */
+"display.accent" = "Vurgu rengi";
+"display.automatic" = "Otomatik";
+"display.automatic.desc" = "Cihazınızı döndürdüğünüzde düzenler otomatik uyum sağlar — poster rafları ve ızgaralar dikey ile yatay arasında yeniden akar. Tema, sistem ayarınızı takip edebilir.";
+"display.density" = "Ana ekran aralığı";
+"display.density.comfortable" = "Rahat";
+"display.density.compact" = "Kompakt";
+"display.poster_size" = "Poster boyutu";
+"display.poster_size.large" = "Büyük";
+"display.poster_size.medium" = "Orta";
+"display.poster_size.small" = "Küçük";
+"display.preview" = "Önizleme";
+"display.preview.note" = "Aşağıdaki seçenekleri değiştirdikçe önizleme canlı güncellenir.";
+"display.theme" = "Tema";
+"display.title" = "Görünüm";
+"download.dashboard.free" = "Cihazda boş alan";
+"download.dashboard.items" = "İndirilenler";
+"download.dashboard.limit" = "Sınır";
+"download.dashboard.percent" = "%%%d kullanıldı";
+"epg.next" = "Sonraki";
+"epg.view.cards" = "Kart görünümü";
+"epg.view.grid" = "Zaman çizelgesi görünümü";
+"favorites.empty.all" = "Henüz favori yok. Buraya eklemek için herhangi bir kanal, film veya dizideki yıldıza dokunun.";
+"favorites.shelf.channels" = "Favori Kanallar";
+"favorites.shelf.movies" = "Favori Filmler";
+"favorites.shelf.series" = "Favori Diziler";
+"matches.stats" = "İstatistikler";
+"settings.hub.all_settings" = "Tüm Ayarlar";

@@ -1195,3 +1195,32 @@
 "matches.team.recent" = "النتائج الأخيرة";
 "matches.team.squad" = "التشكيلة";
 "matches.search.placeholder" = "ابحث عن الفرق";
+
+/* Build 65: redesign surfaces (display, settings hub, EPG cards, match tabs, favorites shelves, downloads dashboard). */
+"display.accent" = "لون التمييز";
+"display.automatic" = "تلقائي";
+"display.automatic.desc" = "تتكيف التخطيطات تلقائيًا عند تدوير جهازك — تتبدل أشرطة الملصقات والشبكات بين الوضعين العمودي والأفقي. ويمكن للمظهر اتباع إعداد نظامك.";
+"display.density" = "تباعد الشاشة الرئيسية";
+"display.density.comfortable" = "مريح";
+"display.density.compact" = "مدمج";
+"display.poster_size" = "حجم الملصق";
+"display.poster_size.large" = "كبير";
+"display.poster_size.medium" = "متوسط";
+"display.poster_size.small" = "صغير";
+"display.preview" = "معاينة";
+"display.preview.note" = "تتحدث المعاينة مباشرة أثناء تغيير الخيارات أدناه.";
+"display.theme" = "المظهر";
+"display.title" = "العرض";
+"download.dashboard.free" = "المساحة الحرة بالجهاز";
+"download.dashboard.items" = "التنزيلات";
+"download.dashboard.limit" = "الحد";
+"download.dashboard.percent" = "تم استخدام %d%% من الحد";
+"epg.next" = "التالي";
+"epg.view.cards" = "عرض البطاقات";
+"epg.view.grid" = "عرض الخط الزمني";
+"favorites.empty.all" = "لا مفضلات بعد. اضغط النجمة على أي قناة أو فيلم أو مسلسل لإضافته هنا.";
+"favorites.shelf.channels" = "القنوات المفضلة";
+"favorites.shelf.movies" = "الأفلام المفضلة";
+"favorites.shelf.series" = "المسلسلات المفضلة";
+"matches.stats" = "الإحصائيات";
+"settings.hub.all_settings" = "كل الإعدادات";
