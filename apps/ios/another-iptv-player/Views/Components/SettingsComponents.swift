@@ -628,7 +628,10 @@ struct BackupPlaylistDTO: Codable, Equatable {
         name = playlist.name
         serverURL = playlist.serverURL
         username = playlist.username
-        password = includePassword ? playlist.password : nil
+        // Build 66 (W2, item 6): a credential-bearing export reads
+        // the working password from the Keychain resolver, never
+        // the legacy (blank) database column.
+        password = includePassword ? CredentialStore.password(for: playlist) : nil
         kind = playlist.type
         filterAdultContent = playlist.filterAdultContent
         m3uEpgURL = playlist.m3uEpgURL
@@ -1469,10 +1472,15 @@ struct BackupSettingsSection: View {
                 }
             }
             guard !exists else { return false }
-            try await AppDatabase.shared.write { db in try playlist.save(db) }
             // N1 (B13): an imported playlist joins the keychain
             // restore mirror like any other save path.
+            // Build 66 (W2, item 6): mirror FIRST (the Keychain is
+            // the working store), then write the row with the
+            // legacy password column blanked.
             CredentialStore.mirror(playlist)
+            var stored = playlist
+            stored.password = ""
+            try await AppDatabase.shared.write { db in try stored.save(db) }
             return true
         } catch {
             return false

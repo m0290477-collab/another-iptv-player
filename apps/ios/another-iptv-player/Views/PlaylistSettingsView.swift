@@ -89,6 +89,12 @@ struct PlaylistSettingsView: View {
         allPlaylists?.first(where: { $0.id == playlist.id }) ?? playlist
     }
 
+    /// Build 66 (W2, item 6): the working password comes from the
+    /// Keychain resolver — the database column is legacy and blank.
+    private var resolvedPassword: String {
+        CredentialStore.password(for: currentPlaylist) ?? ""
+    }
+
     var body: some View {
         Group {
             if needsPINLock {
@@ -627,8 +633,8 @@ struct PlaylistSettingsView: View {
                         .foregroundColor(.white.opacity(0.6))
                         .frame(width: 108, alignment: .leading)
                     Text(isPasswordRevealed
-                         ? currentPlaylist.password
-                         : String(repeating: "•", count: currentPlaylist.password.count))
+                         ? resolvedPassword
+                         : String(repeating: "•", count: resolvedPassword.count))
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.9))
                         .lineLimit(1)

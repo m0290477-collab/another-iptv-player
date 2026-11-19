@@ -22,8 +22,6 @@
 		<string>IBMPlexSansArabic-Regular.ttf</string>
 		<string>IBMPlexSansArabic-SemiBold.ttf</string>
 	</array>
-	<key>NSCameraUsageDescription</key>
-	<string>Used to scan your provider's sign-in QR code.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Used to unlock Super X when the app lock is on.</string>
 	<key>LSApplicationQueriesSchemes</key>

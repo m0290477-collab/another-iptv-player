@@ -30,14 +30,20 @@ enum XtreamImporter {
         let (liveCats, vodCats, seriesCats, liveStreams, vods, series) = try await (
             liveCatsTask, vodCatsTask, seriesCatsTask, liveStreamsTask, vodsTask, seriesTask
         )
-        // 1. Save the playlist first so it shows up in the list even if content insertion fails.
-        try await AppDatabase.shared.write { db in
-            try playlist.save(db)
-        }
-        // N1 (B13): mirror the credentials into the synchronizable
-        // keychain at the store layer — every Xtream add/edit path
-        // funnels through this gateway.
+        // Build 66 (W2, item 6): the Keychain is the primary
+        // password store — mirror FIRST (capturing the in-memory
+        // password), then save the playlist row with the legacy
+        // database column blanked. The row is still saved before
+        // content so it shows up in the list even if content
+        // insertion fails.
+        // N1 (B13): mirroring happens at the store layer — every
+        // Xtream add/edit path funnels through this gateway.
         CredentialStore.mirror(playlist)
+        var storedPlaylist = playlist
+        storedPlaylist.password = ""
+        try await AppDatabase.shared.write { db in
+            try storedPlaylist.save(db)
+        }
 
         progress(L("add_playlist.saving_db"))
 

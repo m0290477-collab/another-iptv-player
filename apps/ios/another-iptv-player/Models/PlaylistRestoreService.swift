@@ -45,6 +45,15 @@ final class PlaylistRestoreService: ObservableObject {
         guard !didRun else { return 0 }
         didRun = true
 
+        // Build 66 (W2, item 6): one-time password migration for
+        // existing installs, on this same launch path — any row
+        // whose password still lives only in the database column
+        // is copied into the Keychain and the column blanked (the
+        // copy/blank decision lives in CredentialStore, the
+        // single place; this service only supplies the rows and
+        // writes back the blanked copies it returns).
+        await migrateLegacyPasswords()
+
         let existingCount = (try? await AppDatabase.shared.read { db in
             try Playlist.fetchCount(db)
         }) ?? 0
@@ -57,7 +66,15 @@ final class PlaylistRestoreService: ObservableObject {
         do {
             try await AppDatabase.shared.write { db in
                 for playlist in playlists {
-                    try playlist.insert(db)
+                    // Build 66 (W2, item 6): the restored row is
+                    // written with the legacy password column
+                    // EMPTY — the Keychain record it came from
+                    // stays the working copy. The in-memory
+                    // `playlists` keep the real password for the
+                    // background re-validation below.
+                    var stored = playlist
+                    stored.password = ""
+                    try stored.insert(db)
                 }
             }
         } catch {
@@ -77,6 +94,24 @@ final class PlaylistRestoreService: ObservableObject {
             }
         }
         return playlists.count
+    }
+
+    /// Build 66 (W2, item 6): feeds every stored playlist row
+    /// through `CredentialStore.migrateLegacyPasswordIfNeeded`
+    /// and writes back the blanked copies it returns. Rows whose
+    /// Keychain copy could not be verified keep their column —
+    /// the migration simply retries on a later launch.
+    private func migrateLegacyPasswords() async {
+        let stored = (try? await AppDatabase.shared.read { db in
+            try Playlist.fetchAll(db)
+        }) ?? []
+        let blanked = stored.compactMap { CredentialStore.migrateLegacyPasswordIfNeeded($0) }
+        guard !blanked.isEmpty else { return }
+        _ = try? await AppDatabase.shared.write { db in
+            for playlist in blanked {
+                try playlist.save(db)
+            }
+        }
     }
 
     /// The existing validation paths, per kind. Failures are

@@ -42,7 +42,9 @@ struct AddPlaylistView: View {
         _name = State(initialValue: editingPlaylist.name)
         _url = State(initialValue: editingPlaylist.serverURL)
         _username = State(initialValue: editingPlaylist.username)
-        _password = State(initialValue: editingPlaylist.password)
+        // Build 66 (W2, item 6): the edit form pre-fills from the
+        // Keychain resolver — the database column is blank.
+        _password = State(initialValue: CredentialStore.password(for: editingPlaylist) ?? "")
         _filterAdultContent = State(initialValue: editingPlaylist.filterAdultContent)
         _backupURL = State(initialValue: editingPlaylist.backupURL ?? "")
         _epgURL = State(initialValue: editingPlaylist.epgURLOverride ?? "")
@@ -255,19 +257,23 @@ struct AddPlaylistView: View {
         let detailsChanged =
             newPlaylist.serverURL != editingPlaylist.serverURL ||
             newPlaylist.username != editingPlaylist.username ||
-            newPlaylist.password != editingPlaylist.password ||
+            newPlaylist.password != (CredentialStore.password(for: editingPlaylist) ?? "") ||
             newPlaylist.filterAdultContent != editingPlaylist.filterAdultContent
 
         if !detailsChanged {
             // Only name / connection extras changed: save the SAME
             // record directly (no resync needed for those fields).
             do {
-                try await AppDatabase.shared.write { db in
-                    try newPlaylist.save(db)
-                }
-                // N1 (B13): keep the keychain restore mirror in
-                // step on this direct save path too.
+                // N1 (B13): keep the keychain mirror in step on
+                // this direct save path too. Build 66 (W2, item
+                // 6): mirror FIRST (Keychain is the working store),
+                // then save the row with the password column blank.
                 CredentialStore.mirror(newPlaylist)
+                var stored = newPlaylist
+                stored.password = ""
+                try await AppDatabase.shared.write { db in
+                    try stored.save(db)
+                }
                 dismiss()
             } catch {
                 errorMessage = error.localizedDescription

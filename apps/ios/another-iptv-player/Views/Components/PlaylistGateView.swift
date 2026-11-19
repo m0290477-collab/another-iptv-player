@@ -1,4 +1,3 @@
-import AVFoundation
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -39,7 +38,9 @@ import UniformTypeIdentifiers
 // the adult-filter toggle on the M3U form too, a help line with an
 // explainer sheet + the Privacy/Terms destinations, and
 // non-sensitive draft fields (name / URL / username — never the
-// password) persisted across restarts via @AppStorage.
+// password) persisted across restarts via @AppStorage. Build 66:
+// the M3U URL draft is the exception — it commonly embeds
+// credentials, so it lives in @State only (see the form state).
 //
 // Deliberately absent (the reference app's reseller layer, excluded by
 // the owner): no device ID, no subscription check, no activation/support
@@ -87,9 +88,12 @@ struct PlaylistGateView: View {
     @State private var showPassword = false
     @State private var filterAdultContent = false
 
-    // M3U form state (name / URL also restart-persisted drafts).
+    // M3U form state. The NAME is a restart-persisted draft; the
+    // URL is NOT (build 66, W2): an M3U URL commonly embeds the
+    // provider credentials, so it is kept in @State only and
+    // never written to UserDefaults.
     @AppStorage("gate.draft.m3u.name") private var m3uName = ""
-    @AppStorage("gate.draft.m3u.url") private var m3uURL = ""
+    @State private var m3uURL = ""
     @State private var m3uFilterAdultContent = false
     @State private var localFileName: String? = nil
     @State private var localContent: String? = nil
@@ -137,12 +141,12 @@ struct PlaylistGateView: View {
     // Round 14 (B13): "No sign-in details?" explainer sheet.
     @State private var showHelp = false
 
-    // Round 15 (C13): QR sign-in + the sign-out "Continue with"
-    // row. The name is NAME ONLY (written by ContentView at
-    // sign-out) — no URL, no credentials ever touch this key.
+    // Round 15 (C13): the sign-out "Continue with" row. The name
+    // is NAME ONLY (written by ContentView at sign-out) — no URL,
+    // no credentials ever touch this key.
+    // Build 66 (W2, item 2): QR sign-in is REMOVED — the scanner,
+    // its sheet and its state are gone with the camera permission.
     @AppStorage("gate.lastPlaylistName") private var lastPlaylistName = ""
-    @State private var showScanner = false
-    @State private var showScannerUnavailable = false
 
     // Round 17 (R17-5): removal of the saved account behind the
     // "Continue with" row — confirmation state + failure surface.
@@ -309,16 +313,6 @@ struct PlaylistGateView: View {
         .sheet(isPresented: $showHelp) {
             GateHelpView()
         }
-        .sheet(isPresented: $showScanner) {
-            QRScannerView(
-                onScan: { scanned in
-                    showScanner = false
-                    handleScanned(scanned)
-                },
-                onClose: { showScanner = false }
-            )
-            .ignoresSafeArea()
-        }
         // Round 17 (R17-5): the saved-account removal confirmation
         // + its failure surface (the shared deletion path reports
         // honestly, exactly like Settings' Delete Account).
@@ -339,11 +333,6 @@ struct PlaylistGateView: View {
             Button(L("common.ok"), role: .cancel) {}
         } message: {
             Text(L("settings.legal.delete_account.error_message"))
-        }
-        .alert(L("gate.qr.unavailable.title"), isPresented: $showScannerUnavailable) {
-            Button(L("common.ok"), role: .cancel) { }
-        } message: {
-            Text(L("gate.qr.unavailable.message"))
         }
         .fileImporter(
             isPresented: $showFileImporter,
@@ -418,29 +407,6 @@ struct PlaylistGateView: View {
             // Same `formKind` state, same two forms below; the type
             // subtitles still live in the help sheet's explainer.
             segmentedTypeSwitch
-
-            // Round 15 (C13): QR sign-in — the scan feeds the
-            // existing XtreamLinkDetector / smart-paste parser
-            // (see `handleScanned`). Devices without a usable
-            // camera get the graceful unavailable path instead.
-            Button {
-                // Round 17 (R17-1): the scanner is now the app's
-                // own AVCaptureSession scanner — the only gate is
-                // a physical camera; authorization is handled
-                // inside the scanner (denied shows a message,
-                // never a black screen).
-                if AVCaptureDevice.default(for: .video) != nil {
-                    showScanner = true
-                } else {
-                    showScannerUnavailable = true
-                }
-            } label: {
-                Label(L("gate.qr.scan"), systemImage: "qrcode.viewfinder")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(AppTheme.accent)
-            }
-            .buttonStyle(.plain)
-            .frame(maxWidth: .infinity, alignment: .leading)
 
             Group {
                 if formKind == .xtream {
@@ -939,31 +905,6 @@ struct PlaylistGateView: View {
             RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
                 .strokeBorder(Color.orange.opacity(0.45), lineWidth: 1)
         )
-    }
-
-    /// Routes a scanned string through the EXISTING parsers: a
-    /// get.php link goes to XtreamLinkDetector and fills the Xtream
-    /// form; a plain playlist URL fills the M3U form; anything else
-    /// is handed to the smart-paste parser via the pasteboard it
-    /// already reads.
-    private func handleScanned(_ raw: String) {
-        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        if let credentials = XtreamLinkDetector.detect(urlString: text) {
-            formKind = .xtream
-            xtreamURL = credentials.serverURL
-            xtreamUsername = credentials.username
-            xtreamPassword = credentials.password
-            return
-        }
-        if Self.isValidServerURL(text), !text.contains(" ") {
-            formKind = .m3u
-            m3uURL = text
-            return
-        }
-        formKind = .xtream
-        UIPasteboard.general.string = text
-        pasteAll()
     }
 
     // MARK: - Help line (round 14, B13)
@@ -1608,241 +1549,6 @@ private struct GateHelpView: View {
                 }
             }
         }
-    }
-}
-
-// MARK: - QR scanner (round 15, C13; rebuilt round 17, R17-1)
-
-/// QR sign-in scanner. Round 17 (R17-1): the VisionKit
-/// `DataScannerViewController` version rendered a BLACK screen on
-/// the owner's phone — its only start call sat in
-/// `updateUIViewController` (`try? startScanning()`), which fires
-/// before the controller is in a window / before camera
-/// authorization settles; the throw was swallowed by `try?` and
-/// nothing ever retried, leaving the system's "Find nearby text
-/// or barcodes." guidance line over a dead preview. It also only
-/// delivered a value on a user TAP (`didTapOn`).
-///
-/// The scanner is now the app's own `AVCaptureSession` pipeline,
-/// where every step is explicit and observable:
-/// - authorization is checked/requested FIRST; denied or
-///   restricted shows a real message screen (icon + text + close),
-///   never a black preview;
-/// - the session is configured on a background queue and the
-///   preview layer is bound in `viewDidLoad` and re-framed on
-///   every layout pass, so the camera feed is actually visible;
-/// - scanning starts in `viewDidAppear` (a live window) and stops
-///   in `viewDidDisappear`;
-/// - the first QR the metadata output recognizes is delivered
-///   automatically — no tap on the code required.
-private struct QRScannerView: UIViewControllerRepresentable {
-    let onScan: (String) -> Void
-    let onClose: () -> Void
-
-    func makeUIViewController(context: Context) -> QRScannerViewController {
-        let controller = QRScannerViewController()
-        controller.onScan = onScan
-        controller.onClose = onClose
-        return controller
-    }
-
-    func updateUIViewController(_ controller: QRScannerViewController, context: Context) {}
-}
-
-private final class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
-    var onScan: ((String) -> Void)?
-    var onClose: (() -> Void)?
-
-    private let session = AVCaptureSession()
-    private let sessionQueue = DispatchQueue(label: "superx.qr-scanner")
-    private var previewLayer: AVCaptureVideoPreviewLayer?
-    private var isConfigured = false
-    private var didDeliver = false
-
-    private let hintLabel = UILabel()
-    private let messageStack = UIStackView()
-    private let messageIcon = UIImageView()
-    private let messageLabel = UILabel()
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = UIColor(white: 0.05, alpha: 1)
-
-        // Hint pill at the bottom — visible over the live preview.
-        hintLabel.text = L("gate.qr.hint")
-        hintLabel.font = .preferredFont(forTextStyle: .subheadline)
-        hintLabel.textColor = .white
-        hintLabel.textAlignment = .center
-        hintLabel.numberOfLines = 0
-        hintLabel.backgroundColor = UIColor.black.withAlphaComponent(0.55)
-        hintLabel.layer.cornerRadius = 12
-        hintLabel.layer.masksToBounds = true
-        hintLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(hintLabel)
-
-        // Close — always reachable, scanning or not.
-        let closeButton = UIButton(type: .system)
-        closeButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
-        closeButton.tintColor = .white
-        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(closeButton)
-
-        // Denied / unavailable message (hidden unless needed):
-        // an icon + wrapped text on the dark background — the
-        // explicit alternative to the old black screen.
-        messageIcon.image = UIImage(systemName: "video.slash.fill")
-        messageIcon.tintColor = .white
-        messageIcon.contentMode = .scaleAspectFit
-        messageIcon.translatesAutoresizingMaskIntoConstraints = false
-        messageLabel.font = .preferredFont(forTextStyle: .body)
-        messageLabel.textColor = .white
-        messageLabel.textAlignment = .center
-        messageLabel.numberOfLines = 0
-        messageStack.axis = .vertical
-        messageStack.alignment = .center
-        messageStack.spacing = 14
-        messageStack.addArrangedSubview(messageIcon)
-        messageStack.addArrangedSubview(messageLabel)
-        messageStack.translatesAutoresizingMaskIntoConstraints = false
-        messageStack.isHidden = true
-        view.addSubview(messageStack)
-
-        NSLayoutConstraint.activate([
-            closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
-            closeButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-            closeButton.widthAnchor.constraint(equalToConstant: 34),
-            closeButton.heightAnchor.constraint(equalToConstant: 34),
-            hintLabel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
-            hintLabel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
-            hintLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -28),
-            messageIcon.widthAnchor.constraint(equalToConstant: 44),
-            messageIcon.heightAnchor.constraint(equalToConstant: 44),
-            messageStack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 32),
-            messageStack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -32),
-            messageStack.centerYAnchor.constraint(equalTo: view.centerYAnchor)
-        ])
-
-        requestAuthorizationAndConfigure()
-    }
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        startSessionIfReady()
-    }
-
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        let session = self.session
-        sessionQueue.async {
-            if session.isRunning { session.stopRunning() }
-        }
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        previewLayer?.frame = view.bounds
-    }
-
-    @objc private func closeTapped() {
-        onClose?()
-    }
-
-    // MARK: Authorization + configuration
-
-    private func requestAuthorizationAndConfigure() {
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
-        case .authorized:
-            configureSession()
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                guard let self else { return }
-                if granted {
-                    self.configureSession()
-                } else {
-                    DispatchQueue.main.async { self.showMessage(
-                        title: L("gate.qr.denied.title"),
-                        body: L("gate.qr.denied.message")
-                    ) }
-                }
-            }
-        case .denied, .restricted:
-            showMessage(title: L("gate.qr.denied.title"), body: L("gate.qr.denied.message"))
-        @unknown default:
-            showMessage(title: L("gate.qr.unavailable.title"), body: L("gate.qr.unavailable.message"))
-        }
-    }
-
-    private func configureSession() {
-        sessionQueue.async { [weak self] in
-            guard let self else { return }
-            self.session.beginConfiguration()
-            self.session.sessionPreset = .high
-            var configured = false
-            if let device = AVCaptureDevice.default(for: .video),
-               let input = try? AVCaptureDeviceInput(device: device),
-               self.session.canAddInput(input) {
-                self.session.addInput(input)
-                let output = AVCaptureMetadataOutput()
-                if self.session.canAddOutput(output) {
-                    self.session.addOutput(output)
-                    output.setMetadataObjectsDelegate(self, queue: .main)
-                    if output.availableMetadataObjectTypes.contains(.qr) {
-                        output.metadataObjectTypes = [.qr]
-                        configured = true
-                    }
-                }
-            }
-            self.session.commitConfiguration()
-            guard configured else {
-                DispatchQueue.main.async {
-                    self.showMessage(title: L("gate.qr.unavailable.title"), body: L("gate.qr.unavailable.message"))
-                }
-                return
-            }
-            self.isConfigured = true
-            DispatchQueue.main.async {
-                let preview = AVCaptureVideoPreviewLayer(session: self.session)
-                preview.videoGravity = .resizeAspectFill
-                preview.frame = self.view.bounds
-                self.view.layer.insertSublayer(preview, at: 0)
-                self.previewLayer = preview
-                if self.view.window != nil { self.startSessionIfReady() }
-            }
-        }
-    }
-
-    private func startSessionIfReady() {
-        guard isConfigured, !didDeliver else { return }
-        let session = self.session
-        sessionQueue.async {
-            if !session.isRunning { session.startRunning() }
-        }
-    }
-
-    private func showMessage(title: String, body: String) {
-        hintLabel.isHidden = true
-        messageLabel.text = "\(title)\n\n\(body)"
-        messageStack.isHidden = false
-    }
-
-    // MARK: AVCaptureMetadataOutputObjectsDelegate
-
-    func metadataOutput(_ output: AVCaptureMetadataOutput,
-                        didOutput metadataObjects: [AVMetadataObject],
-                        from connection: AVCaptureConnection) {
-        guard !didDeliver,
-              let object = metadataObjects.compactMap({ $0 as? AVMetadataMachineReadableCodeObject }).first,
-              object.type == .qr,
-              let value = object.stringValue,
-              !value.isEmpty
-        else { return }
-        didDeliver = true
-        let session = self.session
-        sessionQueue.async {
-            if session.isRunning { session.stopRunning() }
-        }
-        onScan?(value)
     }
 }
 

@@ -1,3 +1,2 @@
 "NSLocalNetworkUsageDescription" = "Für die AirPlay-Wiedergabe wird das Video über das lokale Netzwerk an das Apple TV übertragen.";
-"NSCameraUsageDescription" = "Wird verwendet, um den Anmelde-QR-Code deines Anbieters zu scannen.";
 "NSFaceIDUsageDescription" = "Super X nutzt Face ID, um die App zu entsperren, wenn die App-Sperre aktiv ist.";

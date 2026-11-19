@@ -56,7 +56,10 @@ nonisolated struct EPGRefreshCoordinator {
                         url: url,
                         etag: prior?.etag,
                         lastModified: prior?.lastModified,
-                        username: playlist.username, password: playlist.password,
+                        // Build 66 (W2, item 6): redaction parameters
+                        // resolve the working password from the
+                        // Keychain like every other use site.
+                        username: playlist.username, password: CredentialStore.password(for: playlist),
                         playlist: playlist
                     )
                     switch download {

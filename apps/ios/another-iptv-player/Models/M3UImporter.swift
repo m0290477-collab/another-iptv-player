@@ -26,6 +26,16 @@ enum M3UImporter {
         updated.m3uEpgURL = epgURL
         if clearServerURL { updated.serverURL = "" }
 
+        // Build 66 (W2, item 6) + N1 (B13): mirror into the
+        // synchronizable keychain at the store layer (every M3U
+        // add/edit/refresh path funnels through this gateway),
+        // then blank the legacy database password column before
+        // the row is written — the Keychain is the working store.
+        // (An M3U playlist's password is empty by definition; its
+        // URL is the playlist definition and stays in serverURL.)
+        CredentialStore.mirror(updated)
+        updated.password = ""
+
         let pid = playlist.id
         try await AppDatabase.shared.write { db in
             try updated.save(db)
@@ -60,11 +70,6 @@ enum M3UImporter {
                 try row.save(db)
             }
         }
-        // N1 (B13): mirror the credentials into the synchronizable
-        // keychain at the store layer — every M3U add/edit/refresh
-        // path funnels through this gateway. Mirrors `updated`
-        // (post-EPG-URL state), exactly what was saved.
-        CredentialStore.mirror(updated)
     }
 
     /// Deterministic channel ID generation: after a reimport the same URL gets the same ID.

@@ -292,6 +292,10 @@ struct AddM3UPlaylistView: View {
         if !hasLocalFile, trimmedURL == editingPlaylist.serverURL {
             var updated = applyingExtras(to: editingPlaylist)
             updated.name = trimmedName
+            // Build 66 (W2, item 6): the legacy password column is
+            // written empty (an M3U password is empty by definition;
+            // the Keychain mirror below stays the working store).
+            updated.password = ""
             do {
                 try await AppDatabase.shared.write { db in
                     try updated.save(db)
