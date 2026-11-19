@@ -1121,3 +1121,7 @@
 "matches.explainer.nba.stats.detail" = "The numbers behind every game";
 "matches.explainer.nba.follow.title" = "Follow your teams";
 "matches.explainer.nba.follow.detail" = "Notifications in close finishes";
+
+"b67w8.progress.percent" = "%d%%";
+"b67w8.progress.guide_background" = "The guide is still loading in the background.";
+"b67w6.categories" = "Categories";

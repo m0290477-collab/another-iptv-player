@@ -1103,3 +1103,7 @@
 "matches.explainer.nba.stats.detail" = "हर खेल के पीछे के आँकड़े";
 "matches.explainer.nba.follow.title" = "अपनी टीमों को फ़ॉलो करें";
 "matches.explainer.nba.follow.detail" = "करीबी अंत वाले मैचों में नोटिफ़िकेशन";
+
+"b67w8.progress.percent" = "%d%%";
+"b67w8.progress.guide_background" = "गाइड पृष्ठभूमि में अभी भी लोड हो रही है।";
+"b67w6.categories" = "श्रेणियाँ";

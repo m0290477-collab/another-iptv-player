@@ -1103,3 +1103,7 @@
 "matches.explainer.nba.stats.detail" = "Les chiffres derrière chaque match";
 "matches.explainer.nba.follow.title" = "Suivez vos équipes";
 "matches.explainer.nba.follow.detail" = "Des notifications dans les fins de match serrées";
+
+"b67w8.progress.percent" = "%d%%";
+"b67w8.progress.guide_background" = "Le guide continue de se charger en arrière-plan.";
+"b67w6.categories" = "Catégories";

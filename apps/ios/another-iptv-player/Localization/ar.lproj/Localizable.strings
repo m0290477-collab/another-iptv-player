@@ -1103,3 +1103,7 @@
 "matches.explainer.nba.stats.detail" = "الأرقام وراء كل مباراة";
 "matches.explainer.nba.follow.title" = "تابع فرقك";
 "matches.explainer.nba.follow.detail" = "إشعارات في النهايات المتقاربة";
+
+"b67w8.progress.percent" = "%d%%";
+"b67w8.progress.guide_background" = "الدليل ما زال يُحمَّل في الخلفية.";
+"b67w6.categories" = "الفئات";

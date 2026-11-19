@@ -1103,3 +1103,7 @@
 "matches.explainer.nba.stats.detail" = "每场比赛背后的数据";
 "matches.explainer.nba.follow.title" = "关注你的球队";
 "matches.explainer.nba.follow.detail" = "胶着比赛结尾时的通知";
+
+"b67w8.progress.percent" = "%d%%";
+"b67w8.progress.guide_background" = "节目指南仍在后台加载。";
+"b67w6.categories" = "分类";

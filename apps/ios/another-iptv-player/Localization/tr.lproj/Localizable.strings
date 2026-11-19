@@ -1121,3 +1121,7 @@
 "matches.explainer.nba.stats.detail" = "Her maçın arkasındaki rakamlar";
 "matches.explainer.nba.follow.title" = "Takımlarını takip et";
 "matches.explainer.nba.follow.detail" = "Çekişmeli maç sonlarında bildirimler";
+
+"b67w8.progress.percent" = "%d%%";
+"b67w8.progress.guide_background" = "Rehber arka planda yüklenmeye devam ediyor.";
+"b67w6.categories" = "Kategoriler";

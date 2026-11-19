@@ -1103,3 +1103,7 @@
 "matches.explainer.nba.stats.detail" = "Цифры каждого матча";
 "matches.explainer.nba.follow.title" = "Следите за своими командами";
 "matches.explainer.nba.follow.detail" = "Уведомления в напряжённых концовках";
+
+"b67w8.progress.percent" = "%d%%";
+"b67w8.progress.guide_background" = "Гид продолжает загружаться в фоновом режиме.";
+"b67w6.categories" = "Категории";
