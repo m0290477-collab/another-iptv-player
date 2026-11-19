@@ -626,6 +626,36 @@ private struct PlayerViewImpl: View {
         }
     }
 
+    // Build 68 compile fix: extracted verbatim from body's modifier chain —
+    // the inline closures made the chain expression too complex for the
+    // type-checker (timeout reported at `player.teardown()`).
+    private func handlePlayerAppear() {
+        log.info("Opening player: \(title, privacy: .public)")
+        resetTimer()
+        player.setupAudioHandler()
+        // Defer to the next run loop: the KSPlayer surface's view setup and
+        // `play` can race within the same tick. First layout also relieves the main queue.
+        DispatchQueue.main.async {
+            applyPlaybackTransitionIfNeeded()
+            armDefaultSleepTimerIfNeeded()
+            applySelectedAspectMode(force: true)
+            applySeriesEpisodeRemoteCommands()
+            if let v = volumeBackupDuringChannelBrowser {
+                player.setVolume(v)
+                volumeBackupDuringChannelBrowser = nil
+            }
+        }
+    }
+
+    private func teardownPlayerOnDisappear() {
+        timer?.invalidate()
+        saveHistoryTimer?.invalidate()
+        // Save under the applied playback identity, not the (possibly newer)
+        // incoming props — mirrors the timer path above.
+        saveWatchHistory(tags: historySaveTags)
+        player.teardown()
+    }
+
     var body: some View {
         GeometryReader { geo in
             let containerSize = geo.size
@@ -749,21 +779,7 @@ private struct PlayerViewImpl: View {
             applyPlayerOrientation()
         }
         .onAppear {
-            log.info("Opening player: \(title, privacy: .public)")
-            resetTimer()
-            player.setupAudioHandler()
-            // Defer to the next run loop: the KSPlayer surface's view setup and
-            // `play` can race within the same tick. First layout also relieves the main queue.
-            DispatchQueue.main.async {
-                applyPlaybackTransitionIfNeeded()
-                armDefaultSleepTimerIfNeeded()
-                applySelectedAspectMode(force: true)
-                applySeriesEpisodeRemoteCommands()
-                if let v = volumeBackupDuringChannelBrowser {
-                    player.setVolume(v)
-                    volumeBackupDuringChannelBrowser = nil
-                }
-            }
+            handlePlayerAppear()
         }
         .onChange(of: playbackIdentity) { _, _ in
             cancelAutoAdvanceCountdown(resetEndHandling: true)
@@ -807,12 +823,7 @@ private struct PlayerViewImpl: View {
             restoreBrowseOrientation()
         }
         .onDisappear {
-            timer?.invalidate()
-            saveHistoryTimer?.invalidate()
-            // Save under the applied playback identity, not the (possibly newer)
-            // incoming props — mirrors the timer path above.
-            saveWatchHistory(tags: historySaveTags)
-            player.teardown()
+            teardownPlayerOnDisappear()
         }
         .sheet(isPresented: $showTrackSettings) {
             PlaybackTrackSettingsSheet(player: player, showDebugOverlay: $showDebugOverlay, streamURL: url)
