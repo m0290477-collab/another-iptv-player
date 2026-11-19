@@ -96,9 +96,7 @@ struct AddPlaylistProgressView: View {
             // content row — they speak here).
             HStack(spacing: 8) {
                 if state(of: currentStage) == .active {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(AppTheme.accent)
+                    BrandedLoader(size: 20)
                 }
                 Text(L(currentStage.titleKey))
                     .font(.subheadline.weight(.semibold))
@@ -153,9 +151,7 @@ struct AddPlaylistProgressView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(AppTheme.accent)
             case .active:
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(AppTheme.accent)
+                BrandedLoader(size: 20)
             case .failed:
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)

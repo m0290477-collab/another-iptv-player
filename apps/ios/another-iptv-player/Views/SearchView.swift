@@ -396,6 +396,7 @@ private struct SearchResultsView: View {
 
     @ObservedObject private var contentStore = PlaylistContentStore.shared
     @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
+    @ObservedObject private var parentalStore = ParentalControlStore.shared
     @Environment(\.posterMetrics) private var posterMetrics
 
     @State private var liveResults: [LiveStreamWithCategory] = []
@@ -455,7 +456,7 @@ private struct SearchResultsView: View {
                     // as if the content has disappeared. When streamsLoaded [becomes true], the [real state] below
                     // .task tekrar arar.
                     VStack(spacing: 12) {
-                        ProgressView()
+                        BrandedLoader()
                         Text(L("common.loading"))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -477,6 +478,7 @@ private struct SearchResultsView: View {
         .task(id: query) { await runSearch() }
         .task(id: filter) { await runSearch() }
         .task(id: hiddenStore.version) { await runSearch() }
+        .task(id: parentalStore.version) { await runSearch() }
         .task(id: contentStore.streamsLoaded) { await runSearch() }
         .sheet(item: $selectedProgramme) { result in
             EPGProgrammeDetailSheet(
@@ -506,7 +508,7 @@ private struct SearchResultsView: View {
                 .padding(.bottom, 4)
             if epgResults.isEmpty {
                 if epgSearchRunning {
-                    ProgressView()
+                    BrandedLoader()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ContentUnavailableView.search(text: query)
@@ -844,21 +846,40 @@ private struct SearchResultsView: View {
     /// ordering now use the catalog's existing relevance machinery
     /// (`CatalogTextSearch` — exact/prefix matches first), the same
     /// sort the store's per-category search applies, and results are
-    /// capped at `resultCap`. Hidden categories stay excluded.
+    /// capped at `resultCap`. Hidden categories stay excluded,
+    /// and (build 66, item 17) so do parental-blocked categories —
+    /// the filter lives inside the three per-type builders below,
+    /// so the All tab's merged results (which are built FROM those
+    /// builders) are covered by the same single place per type.
     /// Round 15 (C7) + build 61 (Q13): the per-type searches,
     /// extracted verbatim (build 64) so the single-type tabs and
     /// the All tab share ONE implementation. Title matching is
     /// typo-tolerant (fuzzy tier per Z8); people names match too —
     /// a movie/series whose cast/director list contains the query
     /// joins after the title matches.
-    private static func searchMovies(source: [VODWithCategory], hidden: Set<String>, q: String) -> [VODWithCategory] {
+    /// Build 66 (item 17): the category ids parental-lock blocks
+    /// RIGHT NOW for one type — the exact `isBlocked` verdict the
+    /// detail pages use (locked + PIN set + not session-unlocked),
+    /// resolved to a set on the main actor (this view's context),
+    /// mirroring how the hidden set is precomputed: the per-type
+    /// searches run detached and `ParentalControlStore` is
+    /// MainActor-isolated, so they receive the finished set.
+    private func parentalBlockedIds(type: String) -> Set<String> {
+        Set(parentalStore.lockedIds(playlistId: playlist.id, type: type).filter {
+            parentalStore.isBlocked(playlistId: playlist.id, type: type, categoryId: $0)
+        })
+    }
+
+    private static func searchMovies(source: [VODWithCategory], hidden: Set<String>, blocked: Set<String>, q: String) -> [VODWithCategory] {
         let titleMatches = source.filter {
             !hidden.contains($0.stream.categoryId ?? "")
+                && !blocked.contains($0.stream.categoryId ?? "")
                 && CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name)
         }
         let titleIds = Set(titleMatches.map(\.stream.streamId))
         let peopleMatches = source.filter { item in
             !hidden.contains(item.stream.categoryId ?? "")
+                && !blocked.contains(item.stream.categoryId ?? "")
                 && !titleIds.contains(item.stream.streamId)
                 && (DetailFormatting.peopleList(item.stream.cast) + DetailFormatting.peopleList(item.stream.director))
                     .contains { CatalogTextSearch.matches(search: q, text: $0) }
@@ -867,14 +888,16 @@ private struct SearchResultsView: View {
         return Array(ordered.prefix(Self.resultCap))
     }
 
-    private static func searchSeries(source: [SeriesWithCategory], hidden: Set<String>, q: String) -> [SeriesWithCategory] {
+    private static func searchSeries(source: [SeriesWithCategory], hidden: Set<String>, blocked: Set<String>, q: String) -> [SeriesWithCategory] {
         let titleMatches = source.filter {
             !hidden.contains($0.series.categoryId ?? "")
+                && !blocked.contains($0.series.categoryId ?? "")
                 && CatalogTextSearch.matchesFuzzy(search: q, text: $0.series.name)
         }
         let titleIds = Set(titleMatches.map(\.series.seriesId))
         let peopleMatches = source.filter { item in
             !hidden.contains(item.series.categoryId ?? "")
+                && !blocked.contains(item.series.categoryId ?? "")
                 && !titleIds.contains(item.series.seriesId)
                 && (DetailFormatting.peopleList(item.series.cast) + DetailFormatting.peopleList(item.series.director))
                     .contains { CatalogTextSearch.matches(search: q, text: $0) }
@@ -883,7 +906,7 @@ private struct SearchResultsView: View {
         return Array(ordered.prefix(Self.resultCap))
     }
 
-    private static func searchLive(source: [LiveStreamWithCategory], hidden: Set<String>, q: String) -> [LiveStreamWithCategory] {
+    private static func searchLive(source: [LiveStreamWithCategory], hidden: Set<String>, blocked: Set<String>, q: String) -> [LiveStreamWithCategory] {
         // H5 search half: the multi-field fuzzy matcher
         // (`matchesFuzzyAny`) is in CatalogTextSearch ready for
         // the provider channel number, but this base tree's stream
@@ -892,6 +915,7 @@ private struct SearchResultsView: View {
         // that does not exist.
         let filtered = source.filter {
             !hidden.contains($0.stream.categoryId ?? "")
+                && !blocked.contains($0.stream.categoryId ?? "")
                 && CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name)
         }
         return Array(CatalogTextSearch.sortLiveByRelevance(filtered, search: q).prefix(Self.resultCap))
@@ -913,10 +937,13 @@ private struct SearchResultsView: View {
             let vodHidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod")
             let seriesHidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")
             let liveHidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")
+            let vodBlocked = parentalBlockedIds(type: "vod")
+            let seriesBlocked = parentalBlockedIds(type: "series")
+            let liveBlocked = parentalBlockedIds(type: "live")
             let result = await Task.detached(priority: .userInitiated) { () -> [UnifiedSearchResult] in
-                let movies = Self.searchMovies(source: vodSource, hidden: vodHidden, q: q)
-                let series = Self.searchSeries(source: seriesSource, hidden: seriesHidden, q: q)
-                let live = Self.searchLive(source: liveSource, hidden: liveHidden, q: q)
+                let movies = Self.searchMovies(source: vodSource, hidden: vodHidden, blocked: vodBlocked, q: q)
+                let series = Self.searchSeries(source: seriesSource, hidden: seriesHidden, blocked: seriesBlocked, q: q)
+                let live = Self.searchLive(source: liveSource, hidden: liveHidden, blocked: liveBlocked, q: q)
                 var combined: [(result: UnifiedSearchResult, seq: Int)] = []
                 var seq = 0
                 for item in movies { combined.append((.movie(item), seq)); seq += 1 }
@@ -941,8 +968,9 @@ private struct SearchResultsView: View {
         case .movies:
             let source = contentStore.vodStreams
             let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod")
+            let blocked = parentalBlockedIds(type: "vod")
             let result = await Task.detached(priority: .userInitiated) {
-                Self.searchMovies(source: source, hidden: hidden, q: q)
+                Self.searchMovies(source: source, hidden: hidden, blocked: blocked, q: q)
             }.value
             guard !Task.isCancelled else { return }
             movieResults = result
@@ -952,8 +980,9 @@ private struct SearchResultsView: View {
         case .series:
             let source = contentStore.seriesItems
             let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")
+            let blocked = parentalBlockedIds(type: "series")
             let result = await Task.detached(priority: .userInitiated) {
-                Self.searchSeries(source: source, hidden: hidden, q: q)
+                Self.searchSeries(source: source, hidden: hidden, blocked: blocked, q: q)
             }.value
             guard !Task.isCancelled else { return }
             seriesResults = result
@@ -963,8 +992,9 @@ private struct SearchResultsView: View {
         case .live:
             let source = contentStore.liveStreams
             let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")
+            let blocked = parentalBlockedIds(type: "live")
             let result = await Task.detached(priority: .userInitiated) {
-                Self.searchLive(source: source, hidden: hidden, q: q)
+                Self.searchLive(source: source, hidden: hidden, blocked: blocked, q: q)
             }.value
             guard !Task.isCancelled else { return }
             liveResults = result

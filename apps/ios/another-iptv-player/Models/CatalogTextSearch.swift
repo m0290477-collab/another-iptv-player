@@ -6,14 +6,47 @@ nonisolated enum CatalogTextSearch {
     private static let foldLocale = Locale(identifier: "en_US_POSIX")
     private static let alphanumericSet = CharacterSet.alphanumerics
 
-    /// Locale-invariant fold: tr_TR lowercasing maps "I"→"ı" and breaks queries like
-    /// "history" against ALL-CAPS catalog names ("HISTORY HD" → "hıstory hd").
-    /// The extra "ı"→"i" pass keeps Turkish dotless-ı queries matching ALL-CAPS
-    /// Turkish text ("IŞIK" and "ışık" both normalize to "isik").
-    private static func normalize(_ s: String) -> String {
-        let folded = s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: foldLocale)
-        return folded
+    /// Build 66 (item 16): the ONE fold every search path shares —
+    /// strict, fuzzy and section alike (previously the Arabic
+    /// equivalences below lived only in `sectionFold`, so global
+    /// search silently missed Arabic titles that in-section search
+    /// found). Locale-invariant fold: tr_TR lowercasing maps "I"→"ı"
+    /// and breaks queries like "history" against ALL-CAPS catalog
+    /// names ("HISTORY HD" → "hıstory hd"); the "ı"→"i" pass keeps
+    /// Turkish dotless-ı queries matching ALL-CAPS Turkish text
+    /// ("IŞIK" and "ışık" both normalize to "isik").
+    ///
+    /// The Arabic equivalences: ة (U+0629) has no canonical
+    /// decomposition to ه (U+0647), and ى (U+0649) none to ي
+    /// (U+064A) — yet users type ه for ة and ي for ى constantly.
+    /// Persian keyboard variants ک (U+06A9) / ی (U+06CC) map to
+    /// their Arabic counterparts, and the tatweel (U+0640, category
+    /// Lm — it survives the alphanumeric split) is stripped.
+    ///
+    /// IDEMPOTENT: every replacement's OUTPUT (ه، ي، ك، i) is never
+    /// another replacement's INPUT, and the tatweel pass deletes
+    /// its only input — so applying this fold (or the equivalence
+    /// pass alone) twice is a no-op, and stacking the old section
+    /// fold on top changes nothing.
+    ///
+    /// SQL MIRROR: `Persistence.swift`'s `localized_*` functions
+    /// carry their own copy of the pre-66 fold ("must stay in sync"
+    /// there). Those SQL requests have no live search consumer
+    /// today (global/section search is all in-memory through this
+    /// enum), but the mirror copy needs the same five replacements
+    /// added to stay in sync — flagged for that file's owner.
+    private static func baseFold(_ s: String) -> String {
+        s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: foldLocale)
             .replacingOccurrences(of: "ı", with: "i")
+            .replacingOccurrences(of: "\u{0629}", with: "\u{0647}")
+            .replacingOccurrences(of: "\u{0649}", with: "\u{064A}")
+            .replacingOccurrences(of: "\u{06A9}", with: "\u{0643}")
+            .replacingOccurrences(of: "\u{06CC}", with: "\u{064A}")
+            .replacingOccurrences(of: "\u{0640}", with: "")
+    }
+
+    private static func normalize(_ s: String) -> String {
+        baseFold(s)
             .components(separatedBy: alphanumericSet.inverted)
             .joined()
     }
@@ -31,28 +64,17 @@ nonisolated enum CatalogTextSearch {
 
     // MARK: - Build 63 (item 15): in-section search matching
     //
-    // The strict `matches` above is mirrored by the GRDB SQL layer
-    // and must not change. Section search (the Series / Movies /
-    // Live category + grid searches) gets its own matcher with the
-    // same fold PLUS the Arabic typing equivalences the strict
-    // fold cannot express: ة (U+0629) has no canonical
-    // decomposition to ه (U+0647), and ى (U+0649) none to ي
-    // (U+064A) — yet users type ه for ة and ي for ى constantly, so
-    // strict contains silently missed those titles. Persian
-    // keyboard variants ک (U+06A9) / ی (U+06CC) map to their
-    // Arabic counterparts, and the tatweel (U+0640, category Lm —
-    // it survives the alphanumeric split) is stripped. Applied to
-    // BOTH the query and the title, exactly like `normalize`.
-    /// The shared section fold (case/diacritic fold + the Arabic
-    /// equivalences above), before token splitting.
+    // Section search (the Series / Movies / Live category + grid
+    // searches) keeps its own matcher API, but since Build 66
+    // (item 16) its fold IS the shared `baseFold` — the Arabic
+    // equivalences that used to live only here now apply to the
+    // strict and fuzzy paths too, so global and in-section search
+    // fold identically. `sectionFold` stays as the named entry
+    // point; it adds nothing on top of `baseFold` (and could not:
+    // the equivalence pass is idempotent, see `baseFold`).
+    /// The shared section fold (= `baseFold`), before token splitting.
     private static func sectionFold(_ s: String) -> String {
-        s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: foldLocale)
-            .replacingOccurrences(of: "ı", with: "i")
-            .replacingOccurrences(of: "\u{0629}", with: "\u{0647}")
-            .replacingOccurrences(of: "\u{0649}", with: "\u{064A}")
-            .replacingOccurrences(of: "\u{06A9}", with: "\u{0643}")
-            .replacingOccurrences(of: "\u{06CC}", with: "\u{064A}")
-            .replacingOccurrences(of: "\u{0640}", with: "")
+        baseFold(s)
     }
 
     private static func normalizeSection(_ s: String) -> String {
@@ -107,20 +129,20 @@ nonisolated enum CatalogTextSearch {
 
     // MARK: - Build 61 (B10, Q13): fuzzy / typo-tolerant matching
     //
-    // `matches` above stays the strict core (its `normalize` is
-    // mirrored by the GRDB `localized_*` SQL functions — do not
-    // change it). The fuzzy layer is separate and additive:
-    // token-preserving normalization + a bounded edit distance, so
-    // "histroy" still finds "History HD" and "beın" finds "Bein".
-    // Ranking: exact < prefix < substring < fuzzy, so strict hits
-    // always lead and typo-tolerant hits follow.
+    // The fuzzy layer is separate and additive: token-preserving
+    // normalization + a bounded edit distance, so "histroy" still
+    // finds "History HD" and "beın" finds "Bein". Ranking: exact <
+    // prefix < substring < fuzzy, so strict hits always lead and
+    // typo-tolerant hits follow. Build 66 (item 16): its tokens now
+    // come from the same `baseFold` as every other path — this is
+    // the fold global search's title matching actually runs on, so
+    // the Arabic equivalences reach global search through here AND
+    // through `normalize` (exact/prefix ranking, cast/director).
 
-    /// Diacritic/case fold that KEEPS word boundaries (unlike
-    /// `normalize`, which strips separators for substring search).
+    /// Shared fold that KEEPS word boundaries (unlike `normalize`,
+    /// which strips separators for substring search).
     private static func normalizeTokens(_ s: String) -> [String] {
-        let folded = s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: foldLocale)
-            .replacingOccurrences(of: "ı", with: "i")
-        return folded
+        baseFold(s)
             .components(separatedBy: alphanumericSet.inverted)
             .filter { !$0.isEmpty }
     }

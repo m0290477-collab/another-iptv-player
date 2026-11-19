@@ -144,8 +144,7 @@ struct SeriesView: View {
                 if contentStore.isLoading || playlist.id != contentStore.activePlaylistId
                     || (!contentStore.streamsLoaded && contentStore.loadError == nil) {
                     VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.2)
+                        BrandedLoader()
                         Text(contentStore.loadingMessage ?? L("series.empty.preparing"))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -415,7 +414,7 @@ struct SeriesView: View {
                 .padding(.top, 8)
 
                 if newestVisibleCount < newestAll.count {
-                    ProgressView()
+                    BrandedLoader(size: 28)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 24)
                 }
@@ -491,7 +490,7 @@ struct SeriesView: View {
                 .padding(.top, 8)
 
                 if categoryVisibleCount < items.count {
-                    ProgressView()
+                    BrandedLoader(size: 28)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 24)
                 }
@@ -1410,7 +1409,7 @@ struct SeriesCategoryContent: View, Equatable {
                     .padding()
 
                     if visibleCount < displayItems.count {
-                        ProgressView()
+                        BrandedLoader(size: 28)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 24)
                     }
@@ -1708,8 +1707,13 @@ struct SeriesDetailView: View {
     var body: some View {
         Group {
             if isLoading && !currentSeries.seasonsLoaded {
-                ProgressView(L("detail.loading_series"))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 12) {
+                    BrandedLoader()
+                    Text(L("detail.loading_series"))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = errorMessage {
                 errorView(error)
             } else {
@@ -2735,7 +2739,7 @@ struct EpisodesPanel: View {
     var body: some View {
         Group {
             if !observer.hasLoaded {
-                ProgressView()
+                BrandedLoader(size: 28)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 20)
             } else if observer.episodes.isEmpty {
