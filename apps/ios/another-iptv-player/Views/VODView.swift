@@ -1637,7 +1637,9 @@ struct VODPlayerShell: View {
 
     @State private var currentMovie: DBVODStream
     @State private var resumeMs: Int?
+    @State private var showPlayFailure = false
     @Environment(\.playerOverlayPresentationID) private var overlayPresentationID
+    @Environment(\.playerOverlayDismiss) private var overlayDismiss
 
     init(
         playlist: Playlist,
@@ -1693,6 +1695,23 @@ struct VODPlayerShell: View {
             .onChange(of: overlayPresentationID) { _, _ in
                 applyInitialSelectionIfNeeded()
             }
+        } else {
+            // Build 69 (F1): this was the app's last silent
+            // playback death — a failed movie URL build rendered
+            // NOTHING inside the presented overlay: no player, no
+            // error, no way out (the owner's dead Watch Now tap).
+            // It now surfaces the same play-failure alert the
+            // queue-less movie path uses (MovieDetailView), and
+            // OK also dismisses the overlay, so no empty
+            // presentation is left standing.
+            Color.clear
+                .onAppear { showPlayFailure = true }
+                .alert(L("playback.error.failed_to_start"), isPresented: $showPlayFailure) {
+                    Button(L("common.ok")) {
+                        showPlayFailure = false
+                        overlayDismiss?()
+                    }
+                }
         }
     }
 

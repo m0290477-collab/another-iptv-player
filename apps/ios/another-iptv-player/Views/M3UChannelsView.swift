@@ -29,6 +29,9 @@ struct M3UChannelsView: View {
     /// Category jump: whether the picker sheet is open, and the most recently requested group (for scrollTo).
     @State private var showingCategoryPicker = false
     @State private var pendingScrollTarget: String? = nil
+    /// Build 69 (F3): the visible Play failure for a channel
+    /// whose stored URL fails sanitization.
+    @State private var showPlayFailure = false
 
     /// The groups to show in the shelf list (hidden ones removed). The picker sees all groups.
     private var visibleShelfGroups: [String] {
@@ -173,6 +176,11 @@ struct M3UChannelsView: View {
         .onChange(of: hiddenChannelStore.version) { _, _ in Task { await recomputeFilter() } }
         .onAppear { applyFull() }
         .cinematicBackground()
+        // Build 69 (F3): the play-failure alert (existing
+        // playback error copy — no new strings).
+        .alert(L("playback.error.failed_to_start"), isPresented: $showPlayFailure) {
+            Button(L("common.ok")) { showPlayFailure = false }
+        }
     }
 
     /// Return to the full-list view instantly (skip the debounce).
@@ -364,7 +372,12 @@ struct M3UChannelsView: View {
     // MARK: - Playback
 
     private func present(_ channel: DBM3UChannel) {
-        guard M3UParser.sanitizedURL(from: channel.url) != nil else { return }
+        // Build 69 (F3): was a silent return — the tap looked
+        // dead. Surface the plain failure instead.
+        guard M3UParser.sanitizedURL(from: channel.url) != nil else {
+            showPlayFailure = true
+            return
+        }
         let queue = queueForChannel(channel)
         playerOverlay.present {
             M3UPlayerShell(
@@ -391,7 +404,12 @@ struct M3UChannelsView: View {
             // will be updated on the next refresh.
             return
         }
-        guard M3UParser.sanitizedURL(from: channel.url) != nil else { return }
+        // Build 69 (F3): was a silent return — the tap looked
+        // dead. Surface the plain failure instead.
+        guard M3UParser.sanitizedURL(from: channel.url) != nil else {
+            showPlayFailure = true
+            return
+        }
         let queue = queueForChannel(channel)
         playerOverlay.present {
             M3UPlayerShell(
@@ -605,6 +623,9 @@ struct M3UGroupDetailView: View {
     @State private var debouncedQuery = ""
     @State private var debounceTask: Task<Void, Never>?
     @State private var displayItems: [DBM3UChannel] = []
+    /// Build 69 (F3): the visible Play failure for a channel
+    /// whose stored URL fails sanitization.
+    @State private var showPlayFailure = false
 
     @ObservedObject private var store = M3UContentStore.shared
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
@@ -631,6 +652,11 @@ struct M3UGroupDetailView: View {
         .onDisappear { debounceTask?.cancel(); debounceTask = nil }
         .task(id: debouncedQuery) { await recomputeItems() }
         .onChange(of: store.channels) { _, _ in Task { await recomputeItems() } }
+        // Build 69 (F3): the play-failure alert (existing
+        // playback error copy — no new strings).
+        .alert(L("playback.error.failed_to_start"), isPresented: $showPlayFailure) {
+            Button(L("common.ok")) { showPlayFailure = false }
+        }
     }
 
     private func recomputeItems() async {
@@ -660,7 +686,12 @@ struct M3UGroupDetailView: View {
     }
 
     private func present(_ channel: DBM3UChannel) {
-        guard M3UParser.sanitizedURL(from: channel.url) != nil else { return }
+        // Build 69 (F3): was a silent return — the tap looked
+        // dead. Surface the plain failure instead.
+        guard M3UParser.sanitizedURL(from: channel.url) != nil else {
+            showPlayFailure = true
+            return
+        }
         // In this detail screen, the queue = all channels of this group (filtered if there is a search).
         playerOverlay.present {
             M3UPlayerShell(

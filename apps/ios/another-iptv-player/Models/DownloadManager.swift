@@ -16,6 +16,26 @@ struct DownloadProgress: Equatable {
     }
 }
 
+/// Build 69 (F1): resume-once guard for the bounded local-file
+/// lookup race in `localURL(forId:timeout:)` — the lookup and the
+/// deadline compete to resume the caller's continuation; exactly
+/// one of them may win.
+private final class LocalURLRaceBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var resumed = false
+
+    /// Resumes `continuation` with `value` if this is the first
+    /// call; returns whether this call won the race.
+    func resume(_ continuation: CheckedContinuation<URL?, Never>, with value: URL?) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !resumed else { return false }
+        resumed = true
+        continuation.resume(returning: value)
+        return true
+    }
+}
+
 /// Serial queue: only 1 download runs at a time. The rest wait with the `.queued` DB status.
 /// Sorted by `createdAt`; when one finishes, the next starts automatically. When the app is
 /// reopened, half-finished downloads are taken back to the head of the queue and resumed one by one.
@@ -617,15 +637,29 @@ final class DownloadManager: NSObject, ObservableObject {
     /// Play can never be held hostage by it. Other callers keep
     /// the unbounded form (they need the definitive answer).
     func localURL(forId id: String, timeout: TimeInterval) async -> URL? {
-        await withTaskGroup(of: URL?.self) { group in
-            group.addTask { await self.localURL(forId: id) }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                return nil
+        // Build 69 (F1): the task-group form this replaces was
+        // NOT a hard bound — a task group cannot exit until every
+        // child finishes, and the GRDB read inside
+        // localURL(forId:) does not honor cancellation, so a
+        // read blocked behind a write held the Play tap hostage
+        // for the whole block. This form races the lookup
+        // against the deadline with unstructured tasks and a
+        // resume-once box: whichever finishes first answers, and
+        // at the deadline the caller proceeds with nil (the
+        // remote URL) while the orphaned read is cancelled and
+        // left to finish off the caller's path — it is a
+        // read-only lookup, safe to abandon.
+        let box = LocalURLRaceBox()
+        return await withCheckedContinuation { continuation in
+            let lookup = Task {
+                let result = await self.localURL(forId: id)
+                _ = box.resume(continuation, with: result)
             }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                guard box.resume(continuation, with: nil) else { return }
+                lookup.cancel()
+            }
         }
     }
 

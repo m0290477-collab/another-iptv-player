@@ -117,6 +117,9 @@ struct HomeView: View {
     @ObservedObject private var sectionVisibility = SectionVisibilityStore.shared
     @ObservedObject private var updateService = AppUpdateService.shared
     @State private var showOfflineAlert = false
+    // Build 69 (F2): Continue Watching's visible Play failure —
+    // the same alert the detail paths use.
+    @State private var showPlayFailure = false
 
     // Build 68 (W-E, Home Style 3 'Focus Rows'): the J3
     // reorderable-rows assembly is GONE from Home — the owner
@@ -685,6 +688,11 @@ struct HomeView: View {
             Button(L("common.cancel"), role: .cancel) { }
         } message: {
             Text(L("offline.message"))
+        }
+        // Build 69 (F2): the play-failure alert (existing
+        // playback error copy — no new strings).
+        .alert(L("playback.error.failed_to_start"), isPresented: $showPlayFailure) {
+            Button(L("common.ok")) { showPlayFailure = false }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("superx.downloadCompleted"))) { _ in
             AppSound.play(.downloadComplete)
@@ -1746,7 +1754,13 @@ struct HomeView: View {
     private var homeLiveQueue: [DBLiveStream] { homeLiveSections.flatMap(\.streams) }
 
     private func presentHistoryItem(_ item: DBWatchHistory) {
-        guard let url = historyURL(for: item) else { return }
+        // Build 69 (F2): was a silent return — a Continue
+        // Watching tap whose URL failed to build looked dead.
+        // Surface the plain failure instead.
+        guard let url = historyURL(for: item) else {
+            showPlayFailure = true
+            return
+        }
         if item.type == "series" {
             playerOverlay.present(playlistId: playlist.id) {
                 HistorySeriesPlayerShell(playlist: playlist, history: item, url: url)
@@ -1794,7 +1808,10 @@ struct HomeView: View {
         case "live":
             return builder.liveURL(streamId: Int(item.streamId) ?? 0)
         case "vod":
-            return builder.movieURL(streamId: Int(item.streamId) ?? 0, containerExtension: nil)
+            // Build 69 (F2): the history record's REAL container
+            // extension — nil here forced .mp4, so non-mp4 movies
+            // resumed against a wrong-extension URL.
+            return builder.movieURL(streamId: Int(item.streamId) ?? 0, containerExtension: item.containerExtension)
         case "series":
             return builder.seriesURL(streamId: item.streamId, containerExtension: nil)
         default:
