@@ -3065,7 +3065,7 @@ private struct PlayerViewImpl: View {
         }
         .foregroundStyle(.white.opacity(0.96))
         .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
-        .frame(width: 48, minHeight: 44)
+        .frame(width: 48, height: 44)
         .contentShape(Rectangle())
     }
 

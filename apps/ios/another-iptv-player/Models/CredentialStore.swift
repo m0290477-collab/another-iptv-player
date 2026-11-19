@@ -125,13 +125,13 @@ enum CredentialStore {
     /// records (whose column is blank by design now); without
     /// this guard those paths would wipe the working credential.
     static func mirror(_ playlist: Playlist) {
-        var record = Record(playlist: playlist)
-        if record.password.isEmpty,
+        var newRecord = Record(playlist: playlist)
+        if newRecord.password.isEmpty,
            let existing = record(for: playlist.id),
            !existing.password.isEmpty {
-            record.password = existing.password
+            newRecord.password = existing.password
         }
-        guard let data = try? JSONEncoder().encode(record) else { return }
+        guard let data = try? JSONEncoder().encode(newRecord) else { return }
         let query = baseQuery(account: playlist.id.uuidString)
         SecItemDelete(query as CFDictionary)
         var attributes = query
