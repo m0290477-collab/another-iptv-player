@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import Nuke
 import GRDB
+import GRDBQuery
 import UniformTypeIdentifiers
 
 /// Small rounded icon tile at the leading edge of a settings row — the
@@ -45,112 +46,6 @@ struct SettingsPickerRow<Value: Hashable, Options: View>: View {
             }
         }
         .pickerStyle(.menu)
-    }
-}
-
-/// Round 12 (point 6, owner's explicit order): the Activation
-/// section — STRONG's arrangement (header + card rows), placed after
-/// Playlists and before Player in BOTH settings screens. Every value
-/// is real: "Activated ✓" and "Lifetime Subscription" describe the
-/// app itself (free forever — never the word "currently"), and the
-/// Device ID / PIN come from `DeviceActivationStore` (generated once
-/// by the app, persisted, stable per install), each with a working
-/// copy button. No network call, no backend, nothing read from the
-/// owner's screenshots.
-struct ActivationSettingsSection: View {
-    private enum CopiedField { case deviceID, pin }
-
-    @State private var copiedField: CopiedField?
-    @State private var copyResetTask: Task<Void, Never>?
-
-    var body: some View {
-        // Round 14 (B4): ONE short purpose line under the group
-        // title — the card itself (name, "Activated ✓", Device ID /
-        // PIN, "Lifetime Subscription") is exactly as the owner
-        // ordered in round 12 and does not change.
-        Section(header: VStack(alignment: .leading, spacing: 3) {
-            Text(L("settings.group.activation"))
-            Text(L("settings.scope.whole_app"))
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
-                .textCase(nil)
-            Text(L("settings.activation.purpose"))
-                .font(.caption)
-                .fontWeight(.regular)
-                .foregroundStyle(.secondary)
-                .textCase(nil)
-        }) {
-            HStack(spacing: 12) {
-                SettingsIconTile(systemImage: "checkmark.seal.fill", tint: .green)
-                Text(L("settings.activation.activated"))
-                    .font(.body.weight(.semibold))
-                Spacer()
-                Image(systemName: "checkmark")
-                    .font(.body.weight(.bold))
-                    .foregroundColor(.green)
-            }
-
-            activationValueRow(
-                systemImage: "doc.on.doc.fill",
-                tint: .orange,
-                label: L("settings.activation.device_id"),
-                value: DeviceActivationStore.deviceID,
-                field: .deviceID
-            )
-
-            activationValueRow(
-                systemImage: "lock.fill",
-                tint: .gray,
-                label: L("settings.activation.pin"),
-                value: DeviceActivationStore.pin,
-                field: .pin
-            )
-
-            HStack(spacing: 12) {
-                SettingsIconTile(systemImage: "infinity", tint: AppTheme.accent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L("settings.activation.lifetime"))
-                    Text(L("settings.activation.lifetime_desc"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .onDisappear { copyResetTask?.cancel() }
-    }
-
-    private func activationValueRow(
-        systemImage: String, tint: Color, label: String, value: String, field: CopiedField
-    ) -> some View {
-        HStack(spacing: 12) {
-            SettingsIconTile(systemImage: systemImage, tint: tint)
-            Text(label)
-            Spacer()
-            Text(value)
-                .font(.subheadline.monospaced())
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            Button {
-                copy(value, field: field)
-            } label: {
-                Image(systemName: copiedField == field ? "checkmark" : "doc.on.doc")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(copiedField == field ? Color.green : AppTheme.accent)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(L("settings.activation.copy"))
-        }
-    }
-
-    private func copy(_ value: String, field: CopiedField) {
-        UIPasteboard.general.string = value
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-        copiedField = field
-        copyResetTask?.cancel()
-        copyResetTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            if !Task.isCancelled { copiedField = nil }
-        }
     }
 }
 
@@ -308,55 +203,9 @@ extension View {
     }
 }
 
-/// Accent color picker (round 7) — lives in the App group of both
-/// playlist settings screens, per the owner's order ("there must be an
-/// option to change the app's color"). A row of preset swatches; the
-/// selected one carries a checkmark and a bright ring. Tapping a swatch
-/// sets `AccentThemeStore.shared.preset`, which persists the choice and
-/// recolors the app accent everywhere (tab bar, Play buttons, "See
-/// all", Featured badge, toggles, gate sign-in — see the store). The
-/// LIVE badge red and the rating gold are semantic and do not follow.
-struct AccentColorPickerRow: View {
-    @ObservedObject private var theme = AccentThemeStore.shared
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                SettingsIconTile(systemImage: "paintpalette.fill", tint: theme.color)
-                Text(L("settings.accent_color"))
-            }
-            HStack(spacing: 12) {
-                ForEach(AccentPreset.allCases, id: \.self) { preset in
-                    Button {
-                        theme.preset = preset
-                    } label: {
-                        Circle()
-                            .fill(preset.color)
-                            .frame(width: 30, height: 30)
-                            .overlay {
-                                if theme.preset == preset {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 13, weight: .bold))
-                                        .foregroundStyle(.white)
-                                }
-                            }
-                            .overlay {
-                                Circle()
-                                    .strokeBorder(
-                                        .white.opacity(theme.preset == preset ? 0.9 : 0.15),
-                                        lineWidth: theme.preset == preset ? 2 : 1
-                                    )
-                            }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(L(preset.nameKey))
-                }
-            }
-            .padding(.leading, 40)
-        }
-        .padding(.vertical, 2)
-    }
-}
+/// Build 66 (W1): the round-7 accent picker row is DELETED —
+/// DisplaySettingsView's accent swatches are now the ONLY accent
+/// UI in Settings (one appearance writer, one accent writer).
 
 // MARK: - Round 15 (Part C) shared settings infrastructure
 
@@ -496,12 +345,16 @@ enum AppPreferenceKeys {
         // Player
         "player.pipEnabled", "player.continuePlayingInBackground",
         "player.speedUpOnLongPress", "player.autoPlayNextEpisode",
-        "player.showSkipIntro", "player.skipIntroLengthSeconds",
         "player.defaultSleepTimerMinutes",
         // Build 61 (FA, H1): audio-only default (a live preference
         // with a real reader — AudioOnlyStore — not a fossil key).
         "player.audioOnlyDefault",
         "player.videoAspectMode",
+        // Build 66 (W1): "player.showSkipIntro",
+        // "player.skipIntroLengthSeconds", "player.zappingEnabled",
+        // "player.zappingDirection" and "player.nextEpisodeCardMode"
+        // leave the list by the same rule — their Settings controls
+        // are deleted and nothing in the player ever read them.
         // Round 16 (R6): "player.debugOverlayEnabled" and
         // "player.nextEpisodeTimerSeconds" leave the list — both
         // features are deleted (the overlay in this round, the
@@ -513,9 +366,6 @@ enum AppPreferenceKeys {
         // reader, so reset/export no longer carries the fossil
         // key. A stale value already stored on a device is inert
         // (nothing reads it) and is simply never carried again.
-        // Round 15 player features
-        "player.zappingEnabled", "player.zappingDirection",
-        "player.nextEpisodeCardMode",
         // Downloads
         "download.wifi_only", "downloads.autoDownloadNextEpisode",
         // Notifications & reminders
@@ -544,7 +394,20 @@ enum AppPreferenceKeys {
         "pin.lockSettings",
         // Gate form drafts (non-sensitive fields only)
         "gate.draft.xtream.name", "gate.draft.xtream.url", "gate.draft.xtream.username",
-        "gate.draft.m3u.name", "gate.draft.m3u.url"
+        "gate.draft.m3u.name", "gate.draft.m3u.url",
+        // Build 66 (W1): live keys previously omitted — Reset and
+        // backup export/import silently stranded them (team review
+        // Settings-S3). Display poster/density (DisplayPreferences),
+        // appearance extras, the downloads storage cap
+        // (DownloadsView), the EPG offset (EPGOffsetStore), the
+        // app-open lock (AppLockService) and every concrete
+        // section-visibility key (SectionVisibilityStore).
+        "display.posterSize", "display.homeDensity",
+        "appearance.reduceEffects", "appearance.showEmptyCategories",
+        "download.storage_cap_gb", "epg.timeOffsetHours",
+        "applock.enabled",
+        "sections.hidden.movies", "sections.hidden.series",
+        "sections.hidden.matches", "sections.hidden.library"
     ]
 
     /// C5 Reset to Defaults: removes every preference above. The
@@ -1060,7 +923,7 @@ struct AppLockSection: View {
 // MARK: - Image cache row (C5) — REMOVED in build 61 (B3, O6)
 //
 // The round-15 image-cache size/clear row that lived here (and
-// was shown inside NewFeatureSettingsSection) is gone: build
+// was shown inside the former Advanced section) is gone: build
 // 61's Storage group (StorageSettingsSection, below) is the ONE
 // cache size/clear control in Settings, per the owner's
 // single-instance rule. Its pipeline facts still hold — the
@@ -1069,33 +932,22 @@ struct AppLockSection: View {
 
 // MARK: - New feature settings (C5)
 
-/// C5: the settings born with build 50's features, shared by both
-/// dashboards so each control exists exactly once per screen with
-/// the exact AppStorage keys the features read:
-/// - Reminders: "reminders.enabled" (separate from the expiry
-///   alerts toggle) + "reminders.leadTimeMinutes" (5/10/15/30).
-/// - Zapping: "player.zappingEnabled" (default ON) +
-///   "player.zappingDirection" ("upNext" / "downNext").
-/// - Motion intensity: "motion.intensity" ("full"/"reduced"/"off").
-/// - T-50 card mode: "player.nextEpisodeCardMode" ("auto"/"ask").
-/// - UI sounds: "settings.uiSounds" (default ON, C12's gate).
-/// (The auto-download-next toggle with
-/// key "downloads.autoDownloadNextEpisode", default OFF, already
-/// lives in both screens' Downloads groups — not duplicated here.)
-struct NewFeatureSettingsSection: View {
+/// Build 66 (W1): the reminders half of the former
+/// Advanced section, moved to the hub's Notifications
+/// page. Keys are the exact ones the reminder engine reads:
+/// "reminders.enabled" (separate from the expiry-alerts toggle)
+/// + "reminders.leadTimeMinutes" (5/10/15/30). The section's old
+/// Zapping and Next-episode-card controls are DELETED in build
+/// 66 — they persisted keys no player code ever read.
+struct RemindersSettingsSection: View {
     @AppStorage("reminders.enabled") private var remindersEnabled = true
     @AppStorage("reminders.leadTimeMinutes") private var reminderLeadTimeMinutes = 10
-    @AppStorage("player.zappingEnabled") private var zappingEnabled = true
-    @AppStorage("player.zappingDirection") private var zappingDirection = "upNext"
-    @AppStorage("motion.intensity") private var motionIntensity = "full"
-    @AppStorage("player.nextEpisodeCardMode") private var nextEpisodeCardMode = "auto"
-    @AppStorage("settings.uiSounds") private var uiSounds = true
 
     var body: some View {
-        Section(header: ScopedSectionHeader(title: L("settings.group.advanced"), thisPlaylist: false)) {
+        Section(header: ScopedSectionHeader(title: L("reminders.enabled.title"), thisPlaylist: false)) {
             Toggle(isOn: $remindersEnabled) {
                 HStack(spacing: 12) {
-                    SettingsIconTile(systemImage: "bell.badge.fill", tint: .orange)
+                    SettingsIconTile(systemImage: "bell.badge.fill", tint: AppTheme.accent)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(L("reminders.enabled.title"))
                         Text(L("reminders.enabled.desc"))
@@ -1107,7 +959,7 @@ struct NewFeatureSettingsSection: View {
 
             SettingsPickerRow(
                 systemImage: "timer",
-                tint: .orange,
+                tint: AppTheme.accent,
                 title: L("reminders.lead_time"),
                 selection: $reminderLeadTimeMinutes
             ) {
@@ -1117,26 +969,20 @@ struct NewFeatureSettingsSection: View {
             }
             .disabled(!remindersEnabled)
             .opacity(remindersEnabled ? 1 : 0.45)
+        }
+    }
+}
 
-            Toggle(isOn: $zappingEnabled) {
-                HStack(spacing: 12) {
-                    SettingsIconTile(systemImage: "arrow.up.arrow.down", tint: AppTheme.accent)
-                    Text(L("player.zapping.enabled"))
-                }
-            }
+/// Build 66 (W1): the motion + UI-sounds half of the former
+/// Advanced section, moved to the hub's Display page.
+/// Keys: "motion.intensity" ("full"/"reduced"/"off") and
+/// "settings.uiSounds" (default ON, C12's gate).
+struct MotionSoundSettingsSection: View {
+    @AppStorage("motion.intensity") private var motionIntensity = "full"
+    @AppStorage("settings.uiSounds") private var uiSounds = true
 
-            SettingsPickerRow(
-                systemImage: "hand.draw.fill",
-                tint: AppTheme.accent,
-                title: L("player.zapping.direction"),
-                selection: $zappingDirection
-            ) {
-                Text(L("player.zapping.direction.up_next")).tag("upNext")
-                Text(L("player.zapping.direction.down_next")).tag("downNext")
-            }
-            .disabled(!zappingEnabled)
-            .opacity(zappingEnabled ? 1 : 0.45)
-
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("settings.group.advanced"), thisPlaylist: false)) {
             SettingsPickerRow(
                 systemImage: "wand.and.stars",
                 tint: SectionTheme.series,
@@ -1148,19 +994,9 @@ struct NewFeatureSettingsSection: View {
                 Text(L("common.off")).tag("off")
             }
 
-            SettingsPickerRow(
-                systemImage: "forward.frame.fill",
-                tint: .teal,
-                title: L("player.next_episode_card.title"),
-                selection: $nextEpisodeCardMode
-            ) {
-                Text(L("player.next_episode_card.auto")).tag("auto")
-                Text(L("player.next_episode_card.ask")).tag("ask")
-            }
-
             Toggle(isOn: $uiSounds) {
                 HStack(spacing: 12) {
-                    SettingsIconTile(systemImage: "speaker.wave.2.fill", tint: .pink)
+                    SettingsIconTile(systemImage: "speaker.wave.2.fill", tint: AppTheme.accent)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(L("settings.ui_sounds.title"))
                         Text(L("settings.ui_sounds.desc"))
@@ -1169,7 +1005,32 @@ struct NewFeatureSettingsSection: View {
                     }
                 }
             }
+        }
+    }
+}
 
+/// Build 66 (W1): the provider-expiry alerts toggle — the sole
+/// writer of "notifications.expiryAlertsEnabled", which
+/// NotificationsView reads to gate its items. On the hub's
+/// Notifications page for BOTH playlist kinds (the legacy M3U
+/// form had no such toggle, so M3U users could never turn the
+/// alerts off — team review Buttons-3).
+struct ExpiryAlertsSettingsSection: View {
+    @AppStorage("notifications.expiryAlertsEnabled") private var expiryAlertsEnabled = true
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("notifications.title"), thisPlaylist: false)) {
+            Toggle(isOn: $expiryAlertsEnabled) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "bell.fill", tint: AppTheme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("settings.app.expiry_alerts.title"))
+                        Text(L("settings.app.notifications.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
     }
 }
@@ -1575,9 +1436,6 @@ struct PlaybackSettingsSection: View {
     @AppStorage(DataSaverService.toggleKey) private var dataSaverOnCellular = false
     @AppStorage(ChannelHealthStore.hideDeadKey) private var hideDeadChannels = false
     @ObservedObject private var channelHealth = ChannelHealthStore.shared
-    /// F1 (B13): the ONE EPG time offset store — guide display,
-    /// programme details and reminder fire dates all read it.
-    @ObservedObject private var epgOffset = EPGOffsetStore.shared
 
     var body: some View {
         Section(header: ScopedSectionHeader(title: L("settings.playback.title"), thisPlaylist: false)) {
@@ -1590,25 +1448,6 @@ struct PlaybackSettingsSection: View {
                 Text(L("settings.buffer.low")).tag("low")
                 Text(L("settings.buffer.default")).tag("default")
                 Text(L("settings.buffer.high")).tag("high")
-            }
-
-            // F1: EPG time offset, −12…+12 h in 0.5 h steps,
-            // per-APP (the store is a singleton over one key).
-            HStack(spacing: 12) {
-                SettingsIconTile(systemImage: "clock.arrow.2.circlepath", tint: .orange)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L("epgoffset.title"))
-                    Text(L("epgoffset.desc"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(epgOffsetValueText)
-                    .font(.subheadline.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                Stepper("", value: $epgOffset.offsetHours, in: -12...12, step: 0.5)
-                    .labelsHidden()
             }
 
             Toggle(isOn: $playLastChannel) {
@@ -1696,6 +1535,38 @@ struct PlaybackSettingsSection: View {
         }
     }
 
+}
+
+/// Build 66 (W1): the EPG time-offset stepper, MOVED out of
+/// PlaybackSettingsSection into the hub's Guide page (team review
+/// Settings-S6: the offset belongs with the guide controls). F1
+/// (B13): the ONE EPG time offset store — guide display,
+/// programme details and reminder fire dates all read it
+/// (`epg.timeOffsetHours`, −12…+12 h in 0.5 h steps, per-APP).
+struct EPGOffsetSettingsSection: View {
+    @ObservedObject private var epgOffset = EPGOffsetStore.shared
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("epgoffset.title"), thisPlaylist: false)) {
+            HStack(spacing: 12) {
+                SettingsIconTile(systemImage: "clock.arrow.2.circlepath", tint: AppTheme.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("epgoffset.title"))
+                    Text(L("epgoffset.desc"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(epgOffsetValueText)
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                Stepper("", value: $epgOffset.offsetHours, in: -12...12, step: 0.5)
+                    .labelsHidden()
+            }
+        }
+    }
+
     /// "+1.5 h" / "-0.5 h" / "0 h" — the stepper's current value.
     private var epgOffsetValueText: String {
         let value = epgOffset.offsetHours
@@ -1704,13 +1575,14 @@ struct PlaybackSettingsSection: View {
     }
 }
 
-/// APPEARANCE group (item 7a): the appearance choice
-/// (System / Light / Dark, default Dark), read by the app root.
-/// The accent-colour picker stays where it already lives (the
-/// legacy App & Appearance group) — O6: one instance only, it is
-/// not duplicated here.
+/// APPEARANCE leftovers (item 7a), shown on the hub's Display
+/// page in build 66: reduce effects, show-empty-categories and
+/// the section-visibility toggles. The appearance CHOICE itself
+/// (System / Light / Dark) and the accent picker live ONLY in
+/// DisplaySettingsView — build 66 removed the duplicate picker
+/// that used to sit at the top of this section, so there is
+/// exactly one appearance writer and one accent writer.
 struct AppearanceSettingsSection: View {
-    @AppStorage("app.appearance") private var appearance = "dark"
     /// Build 61 (B10, Q21): the single reduce-effects flag. B7's
     /// D-pack effects and B13's onboarding/splash read this exact
     /// key (`appearance.reduceEffects`); the image pipeline reads
@@ -1726,17 +1598,6 @@ struct AppearanceSettingsSection: View {
 
     var body: some View {
         Section(header: ScopedSectionHeader(title: L("settings.appearance.title"), thisPlaylist: false)) {
-            SettingsPickerRow(
-                systemImage: "circle.lefthalf.filled",
-                tint: .gray,
-                title: L("settings.appearance.title"),
-                selection: $appearance
-            ) {
-                Text(L("settings.appearance.system")).tag("system")
-                Text(L("settings.appearance.light")).tag("light")
-                Text(L("settings.appearance.dark")).tag("dark")
-            }
-
             Toggle(isOn: $reduceEffects) {
                 HStack(spacing: 12) {
                     SettingsIconTile(systemImage: "sparkles.slash", tint: .gray)
@@ -2574,6 +2435,1156 @@ struct DangerZoneSection: View {
         if wiped {
             onExitToGate()
         } else {
+            showError = true
+        }
+    }
+}
+
+// MARK: - Build 66 (W1) hub sections moved from the legacy forms
+//
+// The structs below are the legacy settings forms' row groups,
+// MOVED (not re-implemented)
+// into shared sections when build 66 retired the two legacy
+// forms: the hub's Playback page uses PlayerSettingsSection, the
+// Downloads page DownloadsSettingsSection, the Parental & Locks
+// page AdultFilterSettingsSection, the Account page the two
+// account sections, and the Playlists page the two content
+// sections. The Skip Intro toggle + length rows that used to sit
+// in the Player group are NOT here — build 66 deleted them (the
+// keys were read by nothing).
+
+/// The legacy Player group (auto-play next, PiP, sleep timer,
+/// background, long-press, video fit, subtitle appearance, audio
+/// delay) — every row bound to the same key/behaviour as before.
+struct PlayerSettingsSection: View {
+    @AppStorage("player.autoPlayNextEpisode") private var autoPlayNextEpisode = true
+    @AppStorage("player.pipEnabled") private var pipEnabled = true
+    @AppStorage("player.defaultSleepTimerMinutes") private var defaultSleepTimerMinutes = 0
+    @AppStorage("player.continuePlayingInBackground") private var continuePlayingInBackground = true
+    @AppStorage("player.speedUpOnLongPress") private var speedUpOnLongPress = true
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("settings.group.player"), thisPlaylist: false)) {
+            Toggle(isOn: $autoPlayNextEpisode) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "play.fill", tint: AppTheme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("settings.player.autonext.title"))
+                        Text(L("settings.player.autonext.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Toggle(isOn: $pipEnabled) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "pip.enter", tint: AppTheme.elevated)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("settings.player.pip.title"))
+                        Text(L("settings.player.pip.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            SettingsPickerRow(
+                systemImage: "moon.fill",
+                tint: AppTheme.elevated,
+                title: L("settings.player.sleep_default.title"),
+                selection: $defaultSleepTimerMinutes
+            ) {
+                Text(L("common.off")).tag(0)
+                ForEach([15, 30, 45, 60], id: \.self) { minutes in
+                    Text(L("player.sleep_timer.minutes", minutes)).tag(minutes)
+                }
+            }
+
+            Toggle(isOn: $continuePlayingInBackground) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "speaker.wave.2.fill", tint: SectionTheme.series)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("settings.player.background.title"))
+                        Text(L("settings.player.background.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Toggle(isOn: $speedUpOnLongPress) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "timer", tint: AppTheme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("settings.player.longpress.title"))
+                        Text(L("settings.player.longpress.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            VideoFitSettingsRow()
+
+            SubtitleAppearanceSettingsRow()
+
+            AudioDelaySettingsRow()
+        }
+    }
+}
+
+/// The legacy Downloads group toggles: Wi-Fi only
+/// ("download.wifi_only"), auto-download next episode
+/// ("downloads.autoDownloadNextEpisode" — the DownloadManager
+/// reads it), the storage-used row and Delete All Downloads.
+/// The downloads library itself (with the storage-cap picker)
+/// stays DownloadsView, linked from the same hub page.
+struct DownloadsSettingsSection: View {
+    let playlist: Playlist
+
+    @AppStorage("download.wifi_only") private var downloadWifiOnly = false
+    @AppStorage("downloads.autoDownloadNextEpisode") private var autoDownloadNextEpisode = false
+    @State private var downloadUsedBytes: Int64 = 0
+    @State private var showingDeleteAllDownloadsAlert = false
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("download.title"), thisPlaylist: true)) {
+            Toggle(isOn: $downloadWifiOnly) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "wifi", tint: AppTheme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("download.wifi_only.title"))
+                        Text(L("download.wifi_only.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Toggle(isOn: $autoDownloadNextEpisode) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "arrow.down.to.line.compact", tint: AppTheme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("download.auto_next.title"))
+                        Text(L("download.auto_next.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            HStack(spacing: 12) {
+                SettingsIconTile(systemImage: "internaldrive", tint: AppTheme.elevated)
+                Text(L("download.storage_used"))
+                Spacer()
+                Text(ByteCountFormatter.string(fromByteCount: downloadUsedBytes, countStyle: .file))
+                    .foregroundColor(.secondary)
+            }
+
+            if downloadUsedBytes > 0 {
+                Button(role: .destructive) {
+                    showingDeleteAllDownloadsAlert = true
+                } label: {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "trash", tint: AppTheme.live)
+                        Text(L("download.delete_all"))
+                    }
+                }
+            }
+        }
+        .task { await refreshDownloadUsage() }
+        .alert(L("download.delete_all"), isPresented: $showingDeleteAllDownloadsAlert) {
+            Button(L("common.cancel"), role: .cancel) { }
+            Button(L("common.confirm_delete_yes"), role: .destructive) {
+                Task {
+                    await DownloadManager.shared.deleteAll(playlistId: playlist.id)
+                    await refreshDownloadUsage()
+                }
+            }
+        } message: {
+            Text(L("download.delete_all.message"))
+        }
+    }
+
+    private func refreshDownloadUsage() async {
+        let pid = playlist.id
+        let bytes = await Task.detached(priority: .utility) {
+            DownloadStorage.usedBytes(playlistId: pid)
+        }.value
+        await MainActor.run { downloadUsedBytes = bytes }
+    }
+}
+
+/// The adult-content filter toggle with its PIN guard (turning
+/// the filter OFF requires the parental PIN when one is set),
+/// moved from both legacy forms into the hub's Parental & Locks
+/// page. Saving follows the legacy behaviour per kind: Xtream
+/// re-downloads the catalog, M3U reloads its content store.
+struct AdultFilterSettingsSection: View {
+    let playlist: Playlist
+
+    @Query<PlaylistRequest> private var allPlaylists: [Playlist]?
+    @State private var filterAdultContent: Bool
+    @State private var showPINForFilterOff = false
+    @State private var suppressNextFilterSave = false
+
+    init(playlist: Playlist) {
+        self.playlist = playlist
+        _filterAdultContent = State(initialValue: playlist.filterAdultContent)
+        _allPlaylists = Query(PlaylistRequest(), in: \.appDatabase)
+    }
+
+    private var currentPlaylist: Playlist {
+        allPlaylists?.first(where: { $0.id == playlist.id }) ?? playlist
+    }
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("settings.parental_controls.title"), thisPlaylist: false)) {
+            Toggle(isOn: $filterAdultContent) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "shield.fill", tint: AppTheme.live)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("settings.parental_controls.title"))
+                        Text(L(playlist.kind == .m3u ? "settings.filter_adult.m3u_desc" : "settings.filter_adult.xtream_desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .onChange(of: filterAdultContent) { _, newValue in
+                if suppressNextFilterSave {
+                    suppressNextFilterSave = false
+                    return
+                }
+                if newValue == false, PINStore.hasPIN {
+                    suppressNextFilterSave = true
+                    filterAdultContent = true
+                    showPINForFilterOff = true
+                    return
+                }
+                Task { await saveFilterSetting(newValue: newValue) }
+            }
+        }
+        .sheet(isPresented: $showPINForFilterOff) {
+            PINEntrySheet(message: L("pin.guard.filter_off")) {
+                suppressNextFilterSave = true
+                filterAdultContent = false
+                Task { await saveFilterSetting(newValue: false) }
+            }
+        }
+    }
+
+    private func saveFilterSetting(newValue: Bool) async {
+        var updated = currentPlaylist
+        updated.filterAdultContent = newValue
+        do {
+            try await AppDatabase.shared.write { db in
+                try updated.save(db)
+            }
+            if updated.kind == .m3u {
+                await M3UContentStore.shared.reloadIfActive(playlist: updated)
+            } else {
+                // Legacy Xtream behaviour: a filter change
+                // re-downloads the contents automatically.
+                try? await PlaylistContentStore.shared.syncFromNetworkReplacingLocal(playlist: updated) { _ in }
+                await PlaylistContentStore.shared.reloadFromDatabaseIfActive(playlistId: updated.id)
+            }
+        } catch {
+            Log.error("Settings", "Adult filter save error: \(error.localizedDescription)")
+        }
+    }
+}
+
+/// The Xtream account card, moved from the legacy form:
+/// identity, live connection status, provider subscription
+/// expiry/connections (all from the live auth fetch), password
+/// reveal, Edit / Sign Out and Test Connection. No server URL
+/// row (round 11).
+struct XtreamAccountSettingsSection: View {
+    let playlist: Playlist
+    let onDismiss: () -> Void
+
+    @Query<PlaylistRequest> private var allPlaylists: [Playlist]?
+    @State private var authResponse: XtreamAuthResponse?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+    @State private var isPasswordRevealed = false
+    @State private var showEditSheet = false
+    @State private var isTestingConnection = false
+    @State private var connectionTestResult: String?
+
+    init(playlist: Playlist, onDismiss: @escaping () -> Void) {
+        self.playlist = playlist
+        self.onDismiss = onDismiss
+        _allPlaylists = Query(PlaylistRequest(), in: \.appDatabase)
+    }
+
+    private var currentPlaylist: Playlist {
+        allPlaylists?.first(where: { $0.id == playlist.id }) ?? playlist
+    }
+
+    /// Build 66: the working password lives in the Keychain (CredentialStore is
+    /// primary; the DB column is blanked after migration) — never read the
+    /// record's password column for display.
+    private var resolvedPassword: String {
+        CredentialStore.password(for: currentPlaylist) ?? ""
+    }
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("settings.playlist.info.title"), thisPlaylist: true)) {
+            accountCard
+        }
+        .sheet(isPresented: $showEditSheet) {
+            AddPlaylistView(editingPlaylist: currentPlaylist)
+        }
+        .task { await fetchAuthInfo() }
+    }
+
+    private var accountCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                SettingsIconTile(systemImage: "tv", tint: AppTheme.accent, size: 44)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(currentPlaylist.name)
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        if authResponse?.userInfo != nil {
+                            Circle().fill(Color.green).frame(width: 7, height: 7)
+                            Text(L("settings.playlist.connected"))
+                                .font(.caption)
+                                .foregroundColor(.green)
+                        } else if isLoading {
+                            Circle().fill(Color.secondary).frame(width: 7, height: 7)
+                            Text(L("settings.playlist.checking"))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Circle().fill(Color.red).frame(width: 7, height: 7)
+                            Text(L("settings.playlist.connection_failed"))
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                        Text("Xtream")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.white.opacity(0.16), in: Capsule())
+                    }
+                }
+                Spacer()
+            }
+
+            if let userInfo = authResponse?.userInfo,
+               let fraction = subscriptionRemainingFraction(userInfo: userInfo) {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.white.opacity(0.18))
+                        Capsule().fill(AppTheme.accent).frame(width: proxy.size.width * fraction)
+                    }
+                }
+                .frame(height: 3)
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                accountInfoRow(label: L("settings.playlist.username"), value: currentPlaylist.username)
+
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(L("settings.playlist.password"))
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.6))
+                        .frame(width: 108, alignment: .leading)
+                    Text(isPasswordRevealed
+                         ? resolvedPassword
+                         : String(repeating: "•", count: resolvedPassword.count))
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.9))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Button {
+                        isPasswordRevealed.toggle()
+                    } label: {
+                        Image(systemName: isPasswordRevealed ? "eye.slash" : "eye")
+                            .font(.caption)
+                            .foregroundColor(AppTheme.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isPasswordRevealed ? L("settings.hide_password") : L("settings.show_password"))
+                }
+
+                if isLoading {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(L("settings.playlist.fetching_info"))
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                } else if let error = errorMessage {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(L("settings.playlist.info_error", error))
+                            .font(.caption)
+                            .foregroundColor(.red)
+                        Button(L("common.try_again")) {
+                            Task { await fetchAuthInfo() }
+                        }
+                        .font(.caption.weight(.semibold))
+                    }
+                } else if let userInfo = authResponse?.userInfo {
+                    if let expiry = providerExpiryDate(userInfo.expDate) {
+                        accountInfoRow(
+                            label: L("settings.account.provider_subscription"),
+                            value: L("settings.account.until_format", formattedExpiry(expiry))
+                        )
+                        accountInfoRow(
+                            label: L("settings.playlist.subscription"),
+                            value: ProviderExpiryStore.isExpired(expDateString: userInfo.expDate)
+                                ? L("settings.playlist.expired")
+                                : providerRemainingText(expiry: expiry)
+                        )
+                    } else {
+                        accountInfoRow(
+                            label: L("settings.account.provider_subscription"),
+                            value: L("settings.account.no_expiry")
+                        )
+                    }
+                    accountInfoRow(
+                        label: L("settings.playlist.active_connection"),
+                        value: userInfo.activeCons ?? L("settings.playlist.unknown")
+                    )
+                    accountInfoRow(
+                        label: L("settings.playlist.max_connection"),
+                        value: userInfo.maxConnections ?? L("settings.playlist.unlimited")
+                    )
+                }
+            }
+
+            Divider().overlay(Color.white.opacity(0.10))
+
+            HStack(spacing: 10) {
+                Button {
+                    showEditSheet = true
+                } label: {
+                    Label(L("common.edit"), systemImage: "pencil")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background(Color.white.opacity(0.14), in: Capsule())
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    onDismiss()
+                } label: {
+                    Label(L("settings.sign_out"), systemImage: "rectangle.portrait.and.arrow.right")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background(Color.red.opacity(0.16), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+
+            Divider().overlay(Color.white.opacity(0.10))
+
+            Button {
+                Task { await testConnection() }
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "antenna.radiowaves.left.and.right", tint: AppTheme.accent)
+                    Text(L("settings.test_connection.title"))
+                        .foregroundColor(.white)
+                    Spacer()
+                    if isTestingConnection {
+                        ProgressView().tint(.white)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isTestingConnection)
+
+            if isTestingConnection {
+                Text(L("settings.test_connection.testing"))
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.6))
+            } else if let connectionTestResult {
+                Text(connectionTestResult)
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .background {
+            ZStack {
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .fill(AppTheme.background)
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .fill(LinearGradient(colors: [AppTheme.accent.opacity(0.38), AppTheme.surface],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        }
+        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private func accountInfoRow(label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.6))
+                .frame(width: 108, alignment: .leading)
+            Text(value)
+                .font(.subheadline)
+                .foregroundColor(.white.opacity(0.9))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func providerExpiryDate(_ expDate: String?) -> Date? {
+        guard let expDate, let timestamp = TimeInterval(expDate), timestamp > 0 else { return nil }
+        return Date(timeIntervalSince1970: timestamp)
+    }
+
+    private func formattedExpiry(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
+
+    private func providerRemainingText(expiry: Date) -> String {
+        let now = Date()
+        if expiry <= now { return L("settings.playlist.expired") }
+        let calendar = Calendar.current
+        if calendar.isDateInToday(expiry) { return L("settings.account.expires_today") }
+        let days = calendar.dateComponents(
+            [.day],
+            from: calendar.startOfDay(for: now),
+            to: calendar.startOfDay(for: expiry)
+        ).day ?? 0
+        if days <= 1 { return L("settings.account.day_left") }
+        return L("settings.account.days_left", days)
+    }
+
+    private func subscriptionRemainingFraction(userInfo: XtreamUserInfo) -> Double? {
+        guard let createdStr = userInfo.createdAt, let created = TimeInterval(createdStr),
+              let expStr = userInfo.expDate, let exp = TimeInterval(expStr),
+              exp > created else { return nil }
+        let remaining = exp - Date().timeIntervalSince1970
+        guard remaining > 0 else { return nil }
+        return min(1, max(0, remaining / (exp - created)))
+    }
+
+    private func fetchAuthInfo() async {
+        isLoading = true
+        errorMessage = nil
+        let client = XtreamAPIClient(playlist: currentPlaylist)
+        do {
+            let response = try await client.verify()
+            PlaylistHealthStore.recordVerified(playlistId: currentPlaylist.id, expDate: response.userInfo?.expDate)
+            await MainActor.run {
+                self.authResponse = response
+                self.isLoading = false
+            }
+            if let tz = response.serverInfo?.timezone?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !tz.isEmpty, tz != currentPlaylist.serverTimezone {
+                var updated = currentPlaylist
+                updated.serverTimezone = tz
+                try? await AppDatabase.shared.write { db in try updated.save(db) }
+            }
+        } catch {
+            PlaylistHealthStore.record(.refused, for: currentPlaylist.id)
+            await MainActor.run {
+                self.errorMessage = error.localizedDescription
+                self.isLoading = false
+            }
+        }
+    }
+
+    /// Test connection: verify + a bounded stream probe, reported
+    /// in plain language (moved verbatim from the legacy form).
+    private func testConnection() async {
+        isTestingConnection = true
+        connectionTestResult = nil
+        defer { isTestingConnection = false }
+
+        let client = XtreamAPIClient(playlist: currentPlaylist)
+        let response: XtreamAuthResponse
+        do {
+            response = try await client.verify()
+        } catch {
+            PlaylistHealthStore.record(.refused, for: currentPlaylist.id)
+            connectionTestResult = L("settings.test_connection.unreachable")
+            return
+        }
+        PlaylistHealthStore.recordVerified(playlistId: currentPlaylist.id, expDate: response.userInfo?.expDate)
+
+        var parts: [String] = [L("settings.test_connection.server_ok")]
+        let expired = ProviderExpiryStore.isExpired(expDateString: response.userInfo?.expDate)
+            || (response.userInfo?.status?.caseInsensitiveCompare("Expired") == .orderedSame)
+        parts.append(expired
+            ? L("settings.test_connection.account_expired")
+            : L("settings.test_connection.account_active"))
+
+        let pid = currentPlaylist.id
+        let firstLiveId: Int? = try? await AppDatabase.shared.read { db in
+            try Int.fetchOne(db, sql: "SELECT streamId FROM liveStream WHERE playlistId = ? ORDER BY streamId LIMIT 1", arguments: [pid])
+        }
+        guard let firstLiveId,
+              let probeURL = PlaybackURLBuilder(playlist: currentPlaylist).liveURL(streamId: firstLiveId) else {
+            parts.append(L("settings.test_connection.no_channel"))
+            connectionTestResult = parts.joined(separator: " · ")
+            return
+        }
+
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 8
+        config.timeoutIntervalForResource = 8
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        do {
+            let (bytes, httpResponse) = try await session.bytes(for: URLRequest(url: probeURL))
+            if let http = httpResponse as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                parts.append(L("settings.test_connection.stream_refused"))
+            } else {
+                var iterator = bytes.makeAsyncIterator()
+                let firstByte = try await iterator.next()
+                parts.append(firstByte != nil
+                    ? L("settings.test_connection.stream_ok")
+                    : L("settings.test_connection.stream_refused"))
+            }
+        } catch {
+            parts.append(L("settings.test_connection.stream_refused"))
+        }
+        connectionTestResult = parts.joined(separator: " · ")
+    }
+}
+
+/// The M3U identity card, moved from the legacy form:
+/// kind badge + source KIND (never the raw URL), Edit / Sign Out.
+struct M3UAccountSettingsSection: View {
+    let playlist: Playlist
+    let onDismiss: () -> Void
+
+    @Query<PlaylistRequest> private var allPlaylists: [Playlist]?
+    @State private var showEditSheet = false
+
+    init(playlist: Playlist, onDismiss: @escaping () -> Void) {
+        self.playlist = playlist
+        self.onDismiss = onDismiss
+        _allPlaylists = Query(PlaylistRequest(), in: \.appDatabase)
+    }
+
+    private var currentPlaylist: Playlist {
+        allPlaylists?.first(where: { $0.id == playlist.id }) ?? playlist
+    }
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("settings.playlist.info.title"), thisPlaylist: true)) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "list.bullet", tint: AppTheme.accent, size: 44)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(currentPlaylist.name)
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                        HStack(spacing: 6) {
+                            Text("M3U")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.white.opacity(0.16), in: Capsule())
+                            Text(currentPlaylist.serverURL.isEmpty ? L("playlists.local_file") : L("playlists.remote_playlist"))
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.75))
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                }
+
+                Divider().overlay(Color.white.opacity(0.10))
+
+                HStack(spacing: 10) {
+                    Button {
+                        showEditSheet = true
+                    } label: {
+                        Label(L("common.edit"), systemImage: "pencil")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(Color.white.opacity(0.14), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Label(L("settings.sign_out"), systemImage: "rectangle.portrait.and.arrow.right")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(Color.red.opacity(0.16), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(14)
+            .background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                        .fill(AppTheme.background)
+                    RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                        .fill(LinearGradient(colors: [AppTheme.accent.opacity(0.38), AppTheme.surface],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            }
+            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+        .sheet(isPresented: $showEditSheet) {
+            AddM3UPlaylistView(editingPlaylist: currentPlaylist)
+        }
+    }
+}
+
+/// The Xtream Content & Data rows, moved from
+/// legacy form minus the EPG rows (those live on the
+/// hub's Guide page now, exactly once): Re-download All Content,
+/// the counts strip, server time zone + message, Clear Watch
+/// History for this playlist.
+struct XtreamContentSettingsSection: View {
+    let playlist: Playlist
+
+    @Query<PlaylistRequest> private var allPlaylists: [Playlist]?
+    @State private var authResponse: XtreamAuthResponse?
+    @State private var isSyncing = false
+    @State private var progressMessage: String?
+    @State private var syncError: String?
+    @State private var liveCount: Int = 0
+    @State private var vodCount: Int = 0
+    @State private var seriesCount: Int = 0
+    @State private var historyCount: Int = 0
+    @State private var showClearHistoryAlert = false
+
+    init(playlist: Playlist) {
+        self.playlist = playlist
+        _allPlaylists = Query(PlaylistRequest(), in: \.appDatabase)
+    }
+
+    private var currentPlaylist: Playlist {
+        allPlaylists?.first(where: { $0.id == playlist.id }) ?? playlist
+    }
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("settings.group.content_data"), thisPlaylist: true)) {
+            Button(action: {
+                Task { await syncContents() }
+            }) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "arrow.clockwise", tint: AppTheme.accent)
+                    Text(L("settings.refresh_all"))
+                        .foregroundColor(.primary)
+                    Spacer()
+                    if isSyncing { ProgressView() }
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isSyncing)
+
+            if isSyncing, let msg = progressMessage {
+                Text(msg)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let syncError {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(syncError)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                    Button(L("common.try_again")) {
+                        Task { await syncContents() }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack(spacing: 0) {
+                statCell(value: liveCount, label: L("dashboard.live"))
+                statCell(value: vodCount, label: L("dashboard.movies"))
+                statCell(value: seriesCount, label: L("dashboard.series"))
+                statCell(value: historyCount, label: L("settings.stats.history_count"))
+            }
+            .padding(.vertical, 2)
+
+            if let timeZone = authResponse?.serverInfo?.timezone {
+                HStack(spacing: 12) {
+                    Text(L("settings.server.timezone"))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(timeZone)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
+            if let message = authResponse?.userInfo?.message, !message.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L("settings.server.message"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(message)
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Button(role: .destructive) {
+                showClearHistoryAlert = true
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "trash", tint: AppTheme.live)
+                    Text(L("history.clear.button_entry"))
+                        .foregroundColor(.red)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(historyCount == 0)
+        }
+        .alert(L("history.clear.title"), isPresented: $showClearHistoryAlert) {
+            Button(L("common.cancel"), role: .cancel) { }
+            Button(L("common.confirm_delete_yes"), role: .destructive) {
+                Task { await clearHistory() }
+            }
+        } message: {
+            Text(L("history.clear.message.all"))
+        }
+        .task {
+            await fetchLocalStats()
+            await fetchServerInfo()
+        }
+    }
+
+    private func statCell(value: Int, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(CatalogCountFormatter.string(value))
+                .font(.subheadline.weight(.bold))
+                .foregroundColor(.primary)
+                .lineLimit(1)
+            Text(label)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func fetchServerInfo() async {
+        let client = XtreamAPIClient(playlist: currentPlaylist)
+        if let response = try? await client.verify() {
+            await MainActor.run { self.authResponse = response }
+        }
+    }
+
+    private func fetchLocalStats() async {
+        do {
+            let pid = playlist.id
+            let counts = try await AppDatabase.shared.read { db in
+                let live = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM liveStream WHERE playlistId = ?", arguments: [pid]) ?? 0
+                let vod = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM vodStream WHERE playlistId = ?", arguments: [pid]) ?? 0
+                let series = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM series WHERE playlistId = ?", arguments: [pid]) ?? 0
+                let history = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM watchHistory WHERE playlistId = ?", arguments: [pid]) ?? 0
+                return (live, vod, series, history)
+            }
+            await MainActor.run {
+                self.liveCount = counts.0
+                self.vodCount = counts.1
+                self.seriesCount = counts.2
+                self.historyCount = counts.3
+            }
+        } catch {
+            Log.error("Settings", "Stats fetch error: \(error.localizedDescription)")
+        }
+    }
+
+    private func clearHistory() async {
+        do {
+            let pid = playlist.id
+            try await AppDatabase.shared.write { db in
+                try db.execute(sql: "DELETE FROM watchHistory WHERE playlistId = ?", arguments: [pid])
+            }
+            await fetchLocalStats()
+        } catch {
+            Log.error("Settings", "History clear error: \(error.localizedDescription)")
+        }
+    }
+
+    private func syncContents() async {
+        isSyncing = true
+        syncError = nil
+        do {
+            try await PlaylistContentStore.shared.syncFromNetworkReplacingLocal(playlist: currentPlaylist) { msg in
+                progressMessage = msg
+            }
+            await fetchLocalStats()
+            await PlaylistContentStore.shared.reloadFromDatabaseIfActive(playlistId: playlist.id)
+            await MainActor.run {
+                self.isSyncing = false
+                self.progressMessage = nil
+            }
+        } catch {
+            await MainActor.run {
+                self.syncError = L("misc.refresh_error", error.localizedDescription)
+                self.isSyncing = false
+                self.progressMessage = nil
+            }
+        }
+    }
+}
+
+/// The M3U Content & Data rows, moved from
+/// legacy form minus the EPG rows (Guide page now):
+/// refresh from URL / from file, the counts strip, Clear Watch
+/// History for this playlist.
+struct M3UContentSettingsSection: View {
+    let playlist: Playlist
+
+    @Query<PlaylistRequest> private var allPlaylists: [Playlist]?
+    @State private var channelCount: Int = 0
+    @State private var groupCount: Int = 0
+    @State private var historyCount: Int = 0
+    @State private var isSyncing = false
+    @State private var syncMessage: String?
+    @State private var errorMessage: String?
+    @State private var showError = false
+    @State private var showFileImporter = false
+    @State private var showClearHistoryAlert = false
+
+    init(playlist: Playlist) {
+        self.playlist = playlist
+        _allPlaylists = Query(PlaylistRequest(), in: \.appDatabase)
+    }
+
+    private var currentPlaylist: Playlist {
+        allPlaylists?.first(where: { $0.id == playlist.id }) ?? playlist
+    }
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("settings.group.content_data"), thisPlaylist: true)) {
+            if !currentPlaylist.serverURL.isEmpty {
+                Button {
+                    Task { await refreshFromURL() }
+                } label: {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "arrow.clockwise", tint: AppTheme.accent)
+                        Text(L("settings.m3u.refresh_url"))
+                            .foregroundColor(.primary)
+                        Spacer()
+                        if isSyncing { ProgressView() }
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isSyncing)
+            }
+
+            Button {
+                showFileImporter = true
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "doc.badge.arrow.up", tint: AppTheme.accent)
+                    Text(L("settings.m3u.refresh_file"))
+                        .foregroundColor(.primary)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isSyncing)
+
+            if isSyncing, let msg = syncMessage {
+                Text(msg)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 0) {
+                statCell(value: channelCount, label: L("dashboard.channels"))
+                statCell(value: groupCount, label: L("settings.stats.group_count"))
+                statCell(value: historyCount, label: L("settings.stats.history_count"))
+            }
+            .padding(.vertical, 2)
+
+            Button(role: .destructive) {
+                showClearHistoryAlert = true
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "trash", tint: AppTheme.live)
+                    Text(L("history.clear.button_entry"))
+                        .foregroundColor(.red)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(historyCount == 0)
+        }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: Self.allowedFileTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            handleFileImport(result)
+        }
+        .alert(L("common.error"), isPresented: $showError, actions: {
+            Button(L("common.ok"), role: .cancel) { }
+        }, message: {
+            Text(errorMessage ?? L("common.unknown_error"))
+        })
+        .alert(L("history.clear.title"), isPresented: $showClearHistoryAlert) {
+            Button(L("common.cancel"), role: .cancel) { }
+            Button(L("common.confirm_delete_yes"), role: .destructive) {
+                Task { await clearHistory() }
+            }
+        } message: {
+            Text(L("history.clear.message.all"))
+        }
+        .task { await fetchStats() }
+    }
+
+    private func statCell(value: Int, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(CatalogCountFormatter.string(value))
+                .font(.subheadline.weight(.bold))
+                .foregroundColor(.primary)
+                .lineLimit(1)
+            Text(label)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private static var allowedFileTypes: [UTType] {
+        var types: [UTType] = [.plainText, .data]
+        if let m3u = UTType(filenameExtension: "m3u") { types.insert(m3u, at: 0) }
+        if let m3u8 = UTType(filenameExtension: "m3u8") { types.insert(m3u8, at: 0) }
+        return types
+    }
+
+    private func handleFileImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .failure(let err):
+            errorMessage = err.localizedDescription
+            showError = true
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            Task { await refreshFromLocalFile(url: url) }
+        }
+    }
+
+    private func refreshFromURL() async {
+        isSyncing = true
+        syncMessage = L("settings.m3u.downloading")
+        defer {
+            isSyncing = false
+            syncMessage = nil
+        }
+        do {
+            let content = try await M3UService().fetchRemote(urlString: currentPlaylist.serverURL, playlist: currentPlaylist)
+            syncMessage = L("settings.m3u.parsing")
+            let parsed = try await M3UParser.parseAsync(content)
+            syncMessage = L("settings.m3u.saving")
+            try await M3UImporter.replace(
+                playlist: currentPlaylist,
+                channels: parsed.channels,
+                epgURL: parsed.epgURL
+            )
+            PlaylistHealthStore.record(.responds, for: currentPlaylist.id)
+            await fetchStats()
+            await M3UContentStore.shared.reloadIfActive(playlist: currentPlaylist)
+        } catch {
+            PlaylistHealthStore.record(.refused, for: currentPlaylist.id)
+            errorMessage = error.localizedDescription
+            showError = true
+        }
+    }
+
+    private func refreshFromLocalFile(url: URL) async {
+        isSyncing = true
+        syncMessage = L("settings.m3u.reading_file")
+        defer {
+            isSyncing = false
+            syncMessage = nil
+        }
+        do {
+            let content = try await M3UService().readLocalAsync(url: url)
+            syncMessage = L("settings.m3u.parsing")
+            let parsed = try await M3UParser.parseAsync(content)
+            syncMessage = L("settings.m3u.saving")
+            try await M3UImporter.replace(
+                playlist: currentPlaylist,
+                channels: parsed.channels,
+                epgURL: parsed.epgURL,
+                clearServerURL: true
+            )
+            PlaylistHealthStore.record(.responds, for: currentPlaylist.id)
+            await fetchStats()
+            await M3UContentStore.shared.reloadIfActive(playlist: currentPlaylist)
+        } catch {
+            PlaylistHealthStore.record(.refused, for: currentPlaylist.id)
+            errorMessage = error.localizedDescription
+            showError = true
+        }
+    }
+
+    private func fetchStats() async {
+        do {
+            let pid = playlist.id
+            let stats = try await AppDatabase.shared.read { db -> (Int, Int, Int) in
+                let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM m3uChannel WHERE playlistId = ?", arguments: [pid]) ?? 0
+                let groups = try Int.fetchOne(db, sql: "SELECT COUNT(DISTINCT groupTitle) FROM m3uChannel WHERE playlistId = ?", arguments: [pid]) ?? 0
+                let history = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM watchHistory WHERE playlistId = ?", arguments: [pid]) ?? 0
+                return (count, groups, history)
+            }
+            await MainActor.run {
+                self.channelCount = stats.0
+                self.groupCount = stats.1
+                self.historyCount = stats.2
+            }
+        } catch {
+            Log.error("M3USettings", "stats fetch error: \(error.localizedDescription)")
+        }
+    }
+
+    private func clearHistory() async {
+        do {
+            let pid = playlist.id
+            try await AppDatabase.shared.write { db in
+                try db.execute(sql: "DELETE FROM watchHistory WHERE playlistId = ?", arguments: [pid])
+            }
+            await fetchStats()
+        } catch {
+            errorMessage = L("misc.history_delete_error", error.localizedDescription)
             showError = true
         }
     }

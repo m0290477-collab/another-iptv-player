@@ -111,7 +111,7 @@ nonisolated struct EPGRefreshCoordinator {
                 // guide URL (e.g. via a network error's description) —
                 // route it through EPGURLRedactor before it is stored.
                 let rawMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                let safeMessage = EPGURLRedactor.redact(rawMessage, username: playlist.username, password: playlist.password)
+                let safeMessage = EPGURLRedactor.redact(rawMessage, username: playlist.username, password: CredentialStore.password(for: playlist))
                 await recordError(playlistId: playlist.id, message: safeMessage)
             }
             throw error
