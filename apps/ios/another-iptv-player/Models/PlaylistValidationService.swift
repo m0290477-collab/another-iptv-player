@@ -106,6 +106,73 @@ enum PlaylistValidationService {
         }
     }
 
+    // MARK: - Build 67 (W8, F5): bounded add-flow guide stage
+
+    /// Hard cap for the guide attempt INSIDE the add flow. The
+    /// owner's build-66 report: the checklist sat on "Loading
+    /// the guide" indefinitely — the guide fetch went through
+    /// the shared `PanelURLSession` (90 s resource timeout, and
+    /// the XMLTV parse behind it is unbounded), so a slow
+    /// provider guide could hold the add open forever.
+    static let addFlowGuideTimeout: TimeInterval = 30
+
+    /// The add flow's OWN guide session: 30 s request/resource
+    /// timeouts, independent of `PanelURLSession`, whose other
+    /// consumers (catalog sync, background EPG refresh) keep
+    /// their existing behaviour untouched.
+    private static let addFlowGuideSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = addFlowGuideTimeout
+        config.timeoutIntervalForResource = addFlowGuideTimeout
+        return URLSession(configuration: config)
+    }()
+
+    /// The guide stage as the ADD FLOW runs it (F5): a real EPG
+    /// refresh through the existing coordinator, but bounded —
+    /// the dedicated session above plus a task-group race at the
+    /// same 30 s cap (the session timeouts bound the download;
+    /// the race also bounds the parse behind it). Returns true
+    /// when the stage FAILED:
+    /// - success inside the cap → stage done, false;
+    /// - timeout or any failure → stage failed, true, and the
+    ///   guide keeps loading in the BACKGROUND via
+    ///   `GuideBackgroundLoader` (the same coordinator on the
+    ///   shared session, its own 240 s budget), so the caller
+    ///   completes the add through the L3 partial-success path
+    ///   and the guide still lands — or records its error on the
+    ///   playlist's EPG source record, where playlist settings
+    ///   surface it with a retry.
+    /// Playlists with EPG disabled complete the stage without a
+    /// fetch, exactly as before.
+    static func runAddFlowGuideStage(
+        playlist: Playlist,
+        onStage: @escaping @MainActor (Stage, StageState) -> Void
+    ) async -> Bool {
+        await onStage(.loadingGuide, .active)
+        guard playlist.epgEnabled else {
+            await onStage(.loadingGuide, .done)
+            return false
+        }
+        do {
+            _ = try await withStageTimeout(addFlowGuideTimeout) {
+                try await EPGRefreshCoordinator(
+                    downloader: EPGDownloader(urlSession: addFlowGuideSession)
+                ).refresh(playlist: playlist) { _ in }
+            }
+            await onStage(.loadingGuide, .done)
+            return false
+        } catch {
+            await onStage(.loadingGuide, .failed)
+            // A cancelled add starts no background load — the
+            // caller surfaces the cancellation itself.
+            guard !Task.isCancelled else { return true }
+            // Skip-and-continue: the add completes without the
+            // guide; the load itself continues in the background.
+            GuideBackgroundLoader.start(playlist: playlist)
+            return true
+        }
+    }
+
     /// L2/L3 outcome of a completed (or partially completed) add.
     struct AddSummary: Equatable {
         let playlist: Playlist
@@ -126,6 +193,13 @@ enum PlaylistValidationService {
         /// probe or the probe was cancelled. Informational only —
         /// it never blocks a valid account.
         let compatibility: CompatibilityResult?
+        /// Build 67 (W8, F5): true only when the failed guide
+        /// stage is still loading in the background
+        /// (`GuideBackgroundLoader`) — the summary says so. A
+        /// failed RETRY runs no background load, so summaries
+        /// rebuilt after one must leave this false. Defaults to
+        /// false so existing construction sites stay truthful.
+        var guideLoadingInBackground: Bool = false
     }
 
     /// Z1 outcome: how many of the sampled live streams answered
@@ -320,26 +394,26 @@ enum PlaylistValidationService {
         // internally — it can no longer hold the flow open either).
         let compatibility = await probeCompatibility(playlist: probed.playlist)
         if Task.isCancelled { throw CancellationError() }
-        // Build 63 (owner report, build 62): the guide stage NO
-        // LONGER awaits the XMLTV download + parse inline — on a
-        // large provider that was minutes of dead checklist. The
-        // playlist is fully saved at this point; the guide load is
-        // handed to GuideBackgroundLoader (own 240 s budget, its
-        // progress/bookkeeping lands on the playlist's EPG source
-        // record, exactly like every other refresh) and the stage
-        // completes at handoff. A guide failure can therefore
-        // never block or fail an add again.
-        await onStage(.loadingGuide, .active)
-        if probed.playlist.epgEnabled {
-            GuideBackgroundLoader.start(playlist: probed.playlist)
-        }
-        await onStage(.loadingGuide, .done)
+        // Build 67 (W8, F5): the guide stage is a REAL but
+        // BOUNDED attempt (see `runAddFlowGuideStage`). Build 62
+        // awaited the full XMLTV download + parse inline and
+        // hung the checklist; build 63's instant handoff marked
+        // the stage done before a single byte was fetched, so a
+        // guide failure could never reach this summary. Now:
+        // success inside the 30 s cap completes the stage; a
+        // timeout or failure is the L3 partial success — the
+        // playlist IS saved, the summary names the guide and
+        // offers Retry for it alone, and the load continues in
+        // the background under GuideBackgroundLoader.
+        let guideFailed = await runAddFlowGuideStage(playlist: probed.playlist, onStage: onStage)
+        if Task.isCancelled { throw CancellationError() }
         return AddSummary(
             playlist: probed.playlist,
             expiryDate: ProviderExpiryStore.parseExpiryDate(probed.response.userInfo?.expDate),
             liveCount: counts.live, movieCount: counts.movies, seriesCount: counts.series,
-            failedStage: nil,
-            compatibility: compatibility
+            failedStage: guideFailed ? .loadingGuide : nil,
+            compatibility: compatibility,
+            guideLoadingInBackground: guideFailed
         )
     }
 
@@ -387,15 +461,22 @@ enum PlaylistValidationService {
         var saved = playlist
         saved.m3uEpgURL = probed.parsed.epgURL
         if localContent != nil { saved.serverURL = "" }
-        // Build 63: same guide rule as the Xtream path — the add
-        // completes once content is stored; the guide (when the
-        // source carries one) loads in the background under
-        // GuideBackgroundLoader and can never block completion.
-        await onStage(.loadingGuide, .active)
-        if saved.effectiveEPGURL != nil, saved.epgEnabled {
-            GuideBackgroundLoader.start(playlist: saved)
+        // Build 67 (W8, F5): same bounded guide stage as the
+        // Xtream path, run only when the source actually carries
+        // a guide URL. With no source the stage completes
+        // trivially — there is no guide to load, and the
+        // checklist row is marked done, not faked: the
+        // importer's parse already captured the source's EPG
+        // URL. A failed/timed-out attempt is the L3 partial
+        // success and continues in the background.
+        let guideFailed: Bool
+        if saved.effectiveEPGURL != nil {
+            guideFailed = await runAddFlowGuideStage(playlist: saved, onStage: onStage)
+        } else {
+            await onStage(.loadingGuide, .active)
+            await onStage(.loadingGuide, .done)
+            guideFailed = false
         }
-        await onStage(.loadingGuide, .done)
         // Z1: compatibility probe AFTER the catalog load.
         let compatibility = await probeCompatibility(playlist: saved)
         if Task.isCancelled { throw CancellationError() }
@@ -403,8 +484,9 @@ enum PlaylistValidationService {
             playlist: saved,
             expiryDate: nil,
             liveCount: probed.parsed.channels.count, movieCount: 0, seriesCount: 0,
-            failedStage: nil,
-            compatibility: compatibility
+            failedStage: guideFailed ? .loadingGuide : nil,
+            compatibility: compatibility,
+            guideLoadingInBackground: guideFailed
         )
     }
 
@@ -599,8 +681,11 @@ enum PlaylistValidationService {
 
 // MARK: - Build 63: background guide loading
 
-/// Owns the post-add guide load. The add flow hands the playlist
-/// here once its content is stored and completes immediately; the
+/// Owns the post-add guide load. Since build 67 (W8, F5) the
+/// add flow first makes its own bounded inline attempt
+/// (`runAddFlowGuideStage`); only when that attempt times out
+/// or fails does the playlist land here, so the add can complete
+/// as an L3 partial success while the load carries on. The
 /// refresh itself runs detached with a hard 240 s budget through
 /// the SAME `EPGRefreshCoordinator` every other refresh uses, so
 /// its progress and outcome land in the playlist's EPG source

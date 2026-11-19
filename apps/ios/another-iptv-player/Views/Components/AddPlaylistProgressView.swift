@@ -17,152 +17,235 @@ import SwiftUI
 /// part failed and offers Retry for that stage only.
 /// Free-forever wording (§3.5): the subscription named here is
 /// the user's own PROVIDER subscription — the copy says so.
+///
+/// Build 67 (W8, S7 — owner pick, style 1 'Glass Ring'): the
+/// progress card is now a frosted-glass card with a big circular
+/// progress RING (percentage in the centre, current step under
+/// it) and the step rows below. HONESTY RULES, unchanged in
+/// spirit from build 63 and tightened here:
+/// - the ring % derives ONLY from completed content steps
+///   (Live TV / Movies / Series / TV Guide): 3 of 4 resolved =
+///   75%. A step counts when it is done OR failed (the flow has
+///   finished with it); an active step contributes NOTHING —
+///   the % never animates on a timer and never interpolates
+///   inside a stage.
+/// - step counters land at COMPLETION with real imported
+///   counts: a row shows a count only when its stage is done
+///   AND the caller supplied the real count (the importer
+///   publishes counts only at completion; the full real counts
+///   live on the summary card the moment the add lands).
+/// - the failed-guide end state (F5) shows the ring at its
+///   truthful value with the guide row in warning state, and
+///   the card hands over to the L3 partial-success summary —
+///   it never sits on "Loading the guide" indefinitely.
 struct AddPlaylistProgressView: View {
     let stages: [PlaylistValidationService.Stage: PlaylistValidationService.StageState]
-    /// Build 65 (style 3 'Card Summary'): the playlist's name
-    /// heads the card, as the mockup shows. Optional — the card
-    /// renders without it when a caller has no name yet.
+    /// The playlist's name heads the card, as the mockup shows.
+    /// Optional — the card renders without it when a caller has
+    /// no name yet.
     var playlistName: String? = nil
+    /// Build 67 (W8, S7): REAL imported counts for the step
+    /// rows, supplied by a caller only once the matching import
+    /// has completed and the counts were read back. Nil (the
+    /// default) renders no number — never an estimate.
+    var liveCount: Int? = nil
+    var movieCount: Int? = nil
+    var seriesCount: Int? = nil
     let onCancel: () -> Void
-
-    // Build 63 (owner pick, Style 2 "Bar") → Build 65 (style 3
-    // 'Card Summary'): ONE card — playlist name on top, one row
-    // per content type (Channels / Movies / Series / Guide)
-    // whose state glyph is bound to the REAL importer stage for
-    // that type, the current-step label, and the slim
-    // red-orange progress bar UNDER the rows, with Cancel.
-    // Numbers: the importer publishes real counts ONLY at
-    // completion, so mid-load rows carry state, never invented
-    // numbers — the real big counts land on the SUMMARY card
-    // (below) the moment they exist, exactly as build 63
-    // established.
-
-    private var orderedStages: [PlaylistValidationService.Stage] {
-        PlaylistValidationService.Stage.allCases.sorted { $0.rawValue < $1.rawValue }
-    }
 
     private func state(of stage: PlaylistValidationService.Stage) -> PlaylistValidationService.StageState {
         stages[stage] ?? .pending
     }
 
-    /// Bar fraction: each finished stage contributes its full
-    /// share; the active stage contributes half of its share.
-    private var progressFraction: Double {
-        let total = Double(max(orderedStages.count, 1))
-        var value = 0.0
-        for stage in orderedStages {
-            switch state(of: stage) {
-            case .done, .failed: value += 1
-            case .active: value += 0.5
-            case .pending: break
-            }
-        }
-        return min(value / total, 1)
+    /// The four content steps the ring measures, in card order.
+    /// Movies and Series are separate ROWS bound to the one real
+    /// importer stage that loads them together, so the ring
+    /// counts that stage twice — once per row it completes.
+    private var ringSteps: [PlaylistValidationService.Stage] {
+        [.loadingChannels, .loadingMoviesSeries, .loadingMoviesSeries, .loadingGuide]
     }
 
-    /// The stage the label names: the active one, else the
-    /// failed one, else the next pending, else the last.
+    /// Ring fraction: resolved steps (done or failed) over the
+    /// four content steps. Nothing else moves the ring.
+    private var progressFraction: Double {
+        let resolved = ringSteps.filter {
+            state(of: $0) == .done || state(of: $0) == .failed
+        }.count
+        return Double(resolved) / Double(ringSteps.count)
+    }
+
+    private var percent: Int {
+        Int((progressFraction * 100).rounded())
+    }
+
+    private var allStepsResolved: Bool {
+        ringSteps.allSatisfy { state(of: $0) == .done || state(of: $0) == .failed }
+    }
+
+    private var anyStepFailed: Bool {
+        ringSteps.contains { state(of: $0) == .failed }
+    }
+
+    /// The stage the ring's centre label names: the active one,
+    /// else the failed one, else the next pending, else the last.
     private var currentStage: PlaylistValidationService.Stage {
-        orderedStages.first { state(of: $0) == .active }
-            ?? orderedStages.first { state(of: $0) == .failed }
-            ?? orderedStages.first { state(of: $0) == .pending }
-            ?? orderedStages.last!
+        let ordered = PlaylistValidationService.Stage.allCases.sorted { $0.rawValue < $1.rawValue }
+        return ordered.first { state(of: $0) == .active }
+            ?? ordered.first { state(of: $0) == .failed }
+            ?? ordered.first { state(of: $0) == .pending }
+            ?? ordered.last!
+    }
+
+    /// Centre-of-ring caption: the running step's name while the
+    /// flow is live; once every step is resolved it states the
+    /// outcome plainly (done / failed) instead of naming a step
+    /// that is no longer running.
+    private var ringSubtitle: String {
+        if anyStepFailed { return L("addplaylist.stage.state.failed") }
+        if allStepsResolved { return L("addplaylist.stage.state.done") }
+        return L(currentStage.titleKey)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // Card head: the playlist name (the mockup's top
-            // line) + the progress title under it.
-            VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 18) {
+            // Card head (mockup's top line): accent dot, the
+            // playlist name, then the progress title.
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(AppTheme.accent)
+                    .frame(width: 9, height: 9)
                 if let playlistName, !playlistName.trimmingCharacters(in: .whitespaces).isEmpty {
                     Text(playlistName)
-                        .font(.title3.weight(.bold))
+                        .font(.headline.weight(.bold))
                         .lineLimit(1)
+                    Text("—")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
                 }
                 Text(L("addplaylist.progress.title"))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.headline.weight(.semibold))
+                    .lineLimit(1)
             }
+
+            // The Glass Ring: track + gradient arc, the real
+            // percentage and the current step in the centre.
+            ZStack {
+                Circle()
+                    .stroke(AppTheme.surface, lineWidth: 10)
+                Circle()
+                    .trim(from: 0, to: progressFraction)
+                    .stroke(
+                        AppTheme.brandGradient,
+                        style: StrokeStyle(lineWidth: 10, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .shadow(color: AppTheme.accentStart.opacity(0.45), radius: 10)
+                VStack(spacing: 2) {
+                    Text(L("b67w8.progress.percent", percent))
+                        .font(.system(size: 40, weight: .heavy))
+                        .monospacedDigit()
+                    Text(ringSubtitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 20)
+            }
+            .frame(width: 168, height: 168)
+            .frame(maxWidth: .infinity)
+            .animation(.easeInOut(duration: 0.35), value: progressFraction)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(ringSubtitle)
+            .accessibilityValue(L("b67w8.progress.percent", percent))
 
             // One row per content type, bound to its real stage.
-            VStack(spacing: 10) {
-                summaryRow(icon: "tv", label: L("dashboard.live"), stage: .loadingChannels)
-                summaryRow(icon: "film", label: L("dashboard.movies"), stage: .loadingMoviesSeries)
-                summaryRow(icon: "rectangle.stack", label: L("dashboard.series"), stage: .loadingMoviesSeries)
-                summaryRow(icon: "calendar", label: L("epg.guide.title"), stage: .loadingGuide)
+            VStack(spacing: 8) {
+                stageRow(label: L("dashboard.live"), stage: .loadingChannels,
+                         countText: liveCount.map { L("addplaylist.summary.live", $0) })
+                stageRow(label: L("dashboard.movies"), stage: .loadingMoviesSeries,
+                         countText: movieCount.map { L("addplaylist.summary.movies", $0) })
+                stageRow(label: L("dashboard.series"), stage: .loadingMoviesSeries,
+                         countText: seriesCount.map { L("addplaylist.summary.series", $0) })
+                stageRow(label: L("epg.guide.title"), stage: .loadingGuide, countText: nil)
             }
 
-            // Current step label (connecting / verifying have no
-            // content row — they speak here).
-            HStack(spacing: 8) {
-                if state(of: currentStage) == .active {
-                    BrandedLoader(size: 20)
-                }
-                Text(L(currentStage.titleKey))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(state(of: currentStage) == .failed ? .orange : .primary)
+            Button {
+                onCancel()
+            } label: {
+                Text(L("common.cancel"))
+                    .font(.subheadline.weight(.bold))
+                    .foregroundColor(AppTheme.accent)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(AppTheme.surface.opacity(0.65), in: Capsule())
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(L(currentStage.titleKey))
-            .accessibilityValue(accessibilityValue(for: state(of: currentStage)))
-
-            // Slim progress bar UNDER the rows (Style 2's bar,
-            // kept — the Card Summary places it at the card's
-            // foot).
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(AppTheme.surface)
-                        .frame(height: 5)
-                    Capsule()
-                        .fill(AppTheme.accent)
-                        .frame(width: proxy.size.width * progressFraction, height: 5)
-                }
-            }
-            .frame(height: 5)
-            .animation(.easeInOut(duration: 0.35), value: progressFraction)
-
-            Button(L("common.cancel")) { onCancel() }
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(AppTheme.accent)
-                .frame(maxWidth: .infinity)
+            .buttonStyle(.plain)
         }
         .padding(24)
-        .background(AppTheme.elevated.opacity(0.97))
-        .cornerRadius(AppTheme.cornerRadius)
+        .background { glassCard }
         .shadow(radius: 20)
     }
 
-    /// One content-type row of the summary card: icon + label +
-    /// the stage's state glyph (spinner while loading, check
-    /// when stored, warning on failure, hollow circle while
-    /// queued). No numbers — see the type note.
-    private func summaryRow(icon: String, label: String, stage: PlaylistValidationService.Stage) -> some View {
+    /// Frosted-glass card fill: the system thin material over
+    /// the app's elevated tint (the Cinematic Glass language).
+    private var glassCard: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                .fill(AppTheme.elevated.opacity(0.55))
+            RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                .fill(.ultraThinMaterial)
+        }
+    }
+
+    /// One content-type row of the Glass Ring card: the stage's
+    /// state glyph (spinner while loading, check when stored,
+    /// warning on failure, hollow circle while queued), the
+    /// label, and — only on a done row with a real supplied
+    /// count — the count. See the type note.
+    private func stageRow(
+        label: String,
+        stage: PlaylistValidationService.Stage,
+        countText: String?
+    ) -> some View {
         HStack(spacing: 11) {
-            Image(systemName: icon)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(AppTheme.accent)
-                .frame(width: 22)
+            stateGlyph(for: state(of: stage))
             Text(label)
                 .font(.subheadline.weight(.semibold))
             Spacer(minLength: 8)
-            switch state(of: stage) {
-            case .done:
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(AppTheme.accent)
-            case .active:
-                BrandedLoader(size: 20)
-            case .failed:
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-            case .pending:
-                Image(systemName: "circle")
-                    .foregroundStyle(.secondary.opacity(0.5))
+            if state(of: stage) == .done, let countText {
+                Text(countText)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            AppTheme.surface.opacity(0.65),
+            in: RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius, style: .continuous)
+        )
         .accessibilityElement(children: .combine)
         .accessibilityLabel(label)
         .accessibilityValue(accessibilityValue(for: state(of: stage)))
+    }
+
+    @ViewBuilder
+    private func stateGlyph(for state: PlaylistValidationService.StageState) -> some View {
+        switch state {
+        case .done:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(AppTheme.accent)
+        case .active:
+            BrandedLoader(size: 20)
+        case .failed:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+        case .pending:
+            Image(systemName: "circle")
+                .foregroundStyle(.secondary.opacity(0.5))
+        }
     }
 
     private func accessibilityValue(for state: PlaylistValidationService.StageState) -> String {
@@ -183,27 +266,42 @@ struct AddPlaylistSummaryView: View {
     let onRetryFailedStage: (() -> Void)?
     let onStartWatching: () -> Void
 
+    /// Build 67 (W8, S7 continuity): the summary is the Glass
+    /// Ring card at its end state. Only the guide can land in
+    /// `failedStage` (see `AddSummary`), so a partial summary's
+    /// ring stands at 3 of 4 content steps — its truthful value.
+    private var summaryRingFraction: Double {
+        summary.failedStage == nil ? 1 : 0.75
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            // Build 65 (Card Summary continuity): the progress
-            // card's slim bar, complete — the summary is the same
-            // card at 100%, now carrying the real counts.
-            Capsule()
-                .fill(AppTheme.accent)
-                .frame(height: 5)
-
-            HStack(spacing: 10) {
-                // X7 (B7): the add-success summary leads with the
-                // drawn animated check (+ light success haptic);
-                // the partial-success warning glyph is unchanged.
-                if summary.failedStage == nil {
-                    AnimatedCheckView(size: 26)
-                        .onAppear { Haptics.success() }
-                } else {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.orange)
+            HStack(spacing: 12) {
+                // Build 67 (W8, S7): the progress card's ring at
+                // its end state, carrying the outcome glyph —
+                // X7 (B7): the drawn animated check (+ light
+                // success haptic) on full success; the partial-
+                // success warning glyph is unchanged.
+                ZStack {
+                    Circle()
+                        .stroke(AppTheme.surface, lineWidth: 5)
+                    Circle()
+                        .trim(from: 0, to: summaryRingFraction)
+                        .stroke(
+                            AppTheme.brandGradient,
+                            style: StrokeStyle(lineWidth: 5, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                    if summary.failedStage == nil {
+                        AnimatedCheckView(size: 22)
+                            .onAppear { Haptics.success() }
+                    } else {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.orange)
+                    }
                 }
+                .frame(width: 46, height: 46)
                 Text(summary.failedStage == nil ? L("addplaylist.summary.title") : L("addplaylist.summary.partial_title"))
                     .font(.headline)
             }
@@ -258,6 +356,16 @@ struct AddPlaylistSummaryView: View {
                     .font(.subheadline)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+                // Build 67 (W8, F5): when the failed guide is
+                // still loading in the background, the summary
+                // says so; after a failed RETRY nothing is
+                // loading, and this line stays out.
+                if summary.guideLoadingInBackground {
+                    Text(L("b67w8.progress.guide_background"))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if let onRetryFailedStage {
                     Button {
                         onRetryFailedStage()
@@ -292,8 +400,14 @@ struct AddPlaylistSummaryView: View {
             .accessibilityHint(L("addplaylist.summary.start_watching.hint"))
         }
         .padding(24)
-        .background(AppTheme.elevated.opacity(0.97))
-        .cornerRadius(AppTheme.cornerRadius)
+        .background {
+            ZStack {
+                RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                    .fill(AppTheme.elevated.opacity(0.55))
+                RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            }
+        }
         .shadow(radius: 20)
     }
 

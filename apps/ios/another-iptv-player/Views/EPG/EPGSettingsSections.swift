@@ -9,6 +9,14 @@ struct EPGRefreshStatusView: View {
     let playlist: Playlist
     var canRefresh: Bool = true
     @ObservedObject private var epgStore = EPGStore.shared
+    /// Build 67 (W8, F5): the guide error the refresh coordinator
+    /// last recorded on the playlist's EPG source record. The
+    /// background loads (post-add continuation, scheduled
+    /// refreshes) do not pass through `EPGStore.refreshState`, so
+    /// without this read their failures were recorded in the
+    /// database but never shown anywhere — a guide that failed
+    /// silently looked identical to one still loading.
+    @State private var recordedError: String?
 
     init(playlist: Playlist, canRefresh: Bool = true) {
         self.playlist = playlist
@@ -18,6 +26,7 @@ struct EPGRefreshStatusView: View {
     private var state: EPGRefreshState { epgStore.refreshState[playlist.id] ?? .idle }
 
     var body: some View {
+        Group {
         Button {
             Task { await epgStore.forceRefresh(playlist: playlist) }
         } label: {
@@ -47,7 +56,27 @@ struct EPGRefreshStatusView: View {
             Text(message)
                 .font(.footnote)
                 .foregroundColor(.red)
+        } else if let recordedError {
+            // Build 67 (W8, F5): a background guide load failed —
+            // show the recorded error here, where the Refresh
+            // button above is the retry. Never a silent state.
+            Text(recordedError)
+                .font(.footnote)
+                .foregroundColor(.red)
         }
+        }
+        .task { await loadRecordedError() }
+        .onChange(of: state) { _, _ in
+            Task { await loadRecordedError() }
+        }
+    }
+
+    /// Loads (and re-loads, whenever this playlist's live refresh
+    /// state settles) the coordinator-recorded guide error.
+    private func loadRecordedError() async {
+        recordedError = try? await AppDatabase.shared.read { db in
+            try DBEPGSource.fetchOne(db, key: playlist.id)?.lastError
+        } ?? nil
     }
 }
 

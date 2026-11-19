@@ -477,14 +477,18 @@ struct AddPlaylistSheetView: View {
             setStage(.loadingChannels, .done)
             setStage(.loadingMoviesSeries, .done)
             ProviderExpiryStore.record(playlistId: probed.playlist.id, expDate: probed.response.userInfo?.expDate)
-            // Build 63: guide loads in the background (this sheet
-            // never blocked on it; now it also doesn't wait for
-            // the dashboard's staleness check to fetch it).
-            setStage(.loadingGuide, .active)
-            if probed.playlist.epgEnabled {
-                GuideBackgroundLoader.start(playlist: probed.playlist)
+            // Build 67 (W8, F5): the same bounded guide stage the
+            // staged service runs — a real attempt capped at
+            // 30 s, never an indefinite "Loading the guide". On
+            // failure the stage shows failed and the load
+            // continues in the background; this sheet's contract
+            // is Add & Activate with no summary card, so the add
+            // completes either way and the guide's outcome lands
+            // on the playlist's EPG source record, where playlist
+            // settings surface it with a retry.
+            _ = await PlaylistValidationService.runAddFlowGuideStage(playlist: probed.playlist) { stage, state in
+                self.setStage(stage, state)
             }
-            setStage(.loadingGuide, .done)
             await MainActor.run {
                 self.isLoading = false
                 self.progressMessage = nil
