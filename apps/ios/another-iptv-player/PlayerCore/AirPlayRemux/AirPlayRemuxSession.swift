@@ -111,7 +111,18 @@ final class AirPlayRemuxSession {
       // If a subtitle rendition was requested, the writer has upgraded the client
       // playlist to the subtitle master by now (written on the first segment; readiness
       // needs many more). Otherwise this is still the raw video playlist.
-      let localURL = URL(string: "\(baseURL)/\(self.writer.clientPlaylistFileName)")!
+      // Build 66 (W4, item 15b): guarded construction — a malformed
+      // base/name fails the start through the normal failure path
+      // instead of crashing on a force unwrap.
+      guard let localURL = URL(string: "\(baseURL)/\(self.writer.clientPlaylistFileName)") else {
+        Log.error("AirPlayRemux", "Invalid local playlist URL built from LAN base — failing start")
+        self.stop()
+        completion(.failure(NSError(
+          domain: "AirPlayRemux", code: 4,
+          userInfo: [NSLocalizedDescriptionKey: "Invalid local playlist URL"]
+        )))
+        return
+      }
       self.localPlaylistURL = localURL
       completion(.success(localURL))
     }
@@ -151,7 +162,16 @@ final class AirPlayRemuxSession {
     // /ping returns 200 immediately, independent of the playlist; the first request can trigger the iOS "Local Network" permission
     // dialog — retries are needed until the user answers.
     let attempts = Self.hasVerifiedLocalNetwork ? 5 : 20
-    let pingURL = URL(string: "http://\(ip):\(server.port)/ping")!
+    // Build 66 (W4, item 15b): guarded construction (was a force
+    // unwrap) — failure routes through the existing failOnce path.
+    guard let pingURL = URL(string: "http://\(ip):\(server.port)/ping") else {
+      Log.error("AirPlayRemux", "Invalid local ping URL built from LAN address — failing start")
+      failOnce(NSError(
+        domain: "AirPlayRemux", code: 5,
+        userInfo: [NSLocalizedDescriptionKey: "Invalid local server URL"]
+      ))
+      return
+    }
     Task { [weak self] in
       guard let self else { return }
       // Round 15 (C11): async/await reachability probe (was a

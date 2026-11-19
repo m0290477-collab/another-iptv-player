@@ -30,6 +30,10 @@ struct SeriesPlayShell: View {
     @State private var neighborPrev: DBEpisode?
     @State private var neighborNext: DBEpisode?
     @State private var loadFailed = false
+    /// Build 66 (W4, item 5b): a series-info fetch failure is no
+    /// longer swallowed — it surfaces here with a Retry action (the
+    /// same errorMessage pattern Series Detail uses).
+    @State private var loadErrorMessage: String?
     @Environment(\.playerOverlayDismiss) private var overlayDismiss
     @Environment(\.dismiss) private var dismiss
 
@@ -60,6 +64,27 @@ struct SeriesPlayShell: View {
                     onNextEpisode: { jumpTo(neighborNext) },
                     onNavigateToDetail: onNavigateToDetail == nil ? nil : { _, _ in onNavigateToDetail?(series) }
                 )
+            } else if let loadErrorMessage {
+                VStack(spacing: 16) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.secondary)
+                    Text(loadErrorMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button(L("common.try_again")) {
+                        Task { await prepare() }
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.white)
+                    Button(L("common.close")) {
+                        if let overlayDismiss { overlayDismiss() } else { dismiss() }
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.white)
+                }
+                .padding(24)
             } else if loadFailed {
                 VStack(spacing: 16) {
                     Image(systemName: "play.slash")
@@ -94,6 +119,7 @@ struct SeriesPlayShell: View {
         neighborPrev = nil
         neighborNext = nil
         loadFailed = false
+        loadErrorMessage = nil
 
         // 1. Episodes must exist locally; fetch them exactly like the
         // detail screen does when `seasonsLoaded` is false.
@@ -243,7 +269,18 @@ struct SeriesPlayShell: View {
 
     private func loadEpisodesFromAPI() async {
         let client = XtreamAPIClient(playlist: playlist)
-        guard let info = try? await client.getSeriesInfo(seriesId: series.seriesId) else { return }
+        // Build 66 (W4, item 5b): was `guard let info = try? … else
+        // { return }` — a fetch failure silently left the shell on
+        // its spinner/no-seasons path. Now logged + surfaced with
+        // Retry (see the loadErrorMessage branch in `body`).
+        let info: XtreamSeriesInfoResponse
+        do {
+            info = try await client.getSeriesInfo(seriesId: series.seriesId)
+        } catch {
+            Log.error("SeriesPlayShell", "Series info fetch failed: \(error.localizedDescription)")
+            loadErrorMessage = error.localizedDescription
+            return
+        }
 
         let episodesBySeason = info.episodesBySeasonNumber
 

@@ -451,10 +451,18 @@ final class PlaylistContentStore: ObservableObject {
     /// the local content is preserved).
     func refreshFromNetwork(playlist: Playlist) async {
         do {
-            try await syncFromNetworkReplacingLocal(playlist: playlist) { [weak self] msg in
+            // Build 66 (W4, item 8a): when the sync's fingerprint
+            // check finds the catalog unchanged, it skips the DB
+            // rewrite — and now the in-memory reload (and the
+            // rankings recompute it triggers) is skipped too, so a
+            // no-change pull-to-refresh no longer rebuilds the whole
+            // in-memory catalog for nothing.
+            let changed = try await syncFromNetworkReplacingLocal(playlist: playlist) { [weak self] msg in
                 self?.loadingMessage = msg
             }
-            await reloadFromDatabaseIfActive(playlistId: playlist.id)
+            if changed {
+                await reloadFromDatabaseIfActive(playlistId: playlist.id)
+            }
         } catch {
             loadError = error.localizedDescription
         }
@@ -466,10 +474,15 @@ final class PlaylistContentStore: ObservableObject {
     /// types keep their local data untouched.
     func refreshFromNetwork(playlist: Playlist, only type: CatalogContentType) async {
         do {
-            try await syncFromNetworkReplacingLocal(playlist: playlist, only: type) { [weak self] msg in
+            // Build 66 (W4, item 8a/8b): same unchanged-skip as the
+            // full refresh — a fingerprint match for this type skips
+            // the scoped reload (and its rankings recompute) too.
+            let changed = try await syncFromNetworkReplacingLocal(playlist: playlist, only: type) { [weak self] msg in
                 self?.loadingMessage = msg
             }
-            await reloadFromDatabaseIfActive(playlistId: playlist.id, only: type)
+            if changed {
+                await reloadFromDatabaseIfActive(playlistId: playlist.id, only: type)
+            }
         } catch {
             loadError = error.localizedDescription
         }
@@ -809,7 +822,12 @@ final class PlaylistContentStore: ObservableObject {
     /// Settings screen: full refresh with a staged progress message.
     /// Local content is NOT DELETED until all network requests complete successfully: deletion and rewriting
     /// are done in a single transaction so a panel/network error does not empty the working library.
-    func syncFromNetworkReplacingLocal(playlist: Playlist, progress: @escaping (String) -> Void) async throws {
+    /// - Returns: `true` when the local catalog was rewritten,
+    /// `false` when the fingerprint check found it unchanged and
+    /// the rewrite was skipped (Build 66, W4, item 8a — callers use
+    /// this to skip their own reload work on a no-change refresh).
+    @discardableResult
+    func syncFromNetworkReplacingLocal(playlist: Playlist, progress: @escaping (String) -> Void) async throws -> Bool {
         let client = XtreamAPIClient(playlist: playlist)
         let pid = playlist.id
 
@@ -844,7 +862,7 @@ final class PlaylistContentStore: ObservableObject {
             try Self.localCatalogFingerprint(playlistId: pid, db: db)
         }
         if let localFingerprint, localFingerprint == remoteFingerprint {
-            return
+            return false
         }
 
         progress(L("phase.save_db"))
@@ -854,6 +872,7 @@ final class PlaylistContentStore: ObservableObject {
             try Self.replaceVODCatalog(db: db, pid: pid, categories: vodCats, streams: vods, filterAdult: filterAdult)
             try Self.replaceSeriesCatalog(db: db, pid: pid, categories: seriesCats, series: series, filterAdult: filterAdult)
         }
+        return true
     }
 
     // MARK: - Round 14 (B10) catalog fingerprint
@@ -934,11 +953,35 @@ final class PlaylistContentStore: ObservableObject {
         )
     }
 
+    /// Build 66 (W4, item 8b): per-type slice of the SAME catalog
+    /// fingerprint the full sync compares (counts + first/last ids
+    /// + category count for that one type — the fingerprint's
+    /// definition is unchanged, only the comparison is scoped).
+    nonisolated private static func fingerprintMatches(
+        _ a: CatalogFingerprint, _ b: CatalogFingerprint, only type: CatalogContentType
+    ) -> Bool {
+        switch type {
+        case .live:
+            return a.liveCount == b.liveCount && a.liveFirstId == b.liveFirstId
+                && a.liveLastId == b.liveLastId && a.liveCategoryCount == b.liveCategoryCount
+        case .vod:
+            return a.vodCount == b.vodCount && a.vodFirstId == b.vodFirstId
+                && a.vodLastId == b.vodLastId && a.vodCategoryCount == b.vodCategoryCount
+        case .series:
+            return a.seriesCount == b.seriesCount && a.seriesFirstId == b.seriesFirstId
+                && a.seriesLastId == b.seriesLastId && a.seriesCategoryCount == b.seriesCategoryCount
+        }
+    }
+
     /// Scoped sync: refetches and rewrites a single content type; the other types'
     /// rows are left untouched. Same atomic delete-then-insert guarantee per type.
+    /// - Returns: `true` when this type's rows were rewritten,
+    /// `false` when the per-type fingerprint matched and the
+    /// delete+rewrite was skipped (Build 66, W4, item 8b).
+    @discardableResult
     func syncFromNetworkReplacingLocal(
         playlist: Playlist, only type: CatalogContentType, progress: @escaping (String) -> Void
-    ) async throws {
+    ) async throws -> Bool {
         let client = XtreamAPIClient(playlist: playlist)
         let pid = playlist.id
         let filterAdult = playlist.filterAdultContent
@@ -949,26 +992,62 @@ final class PlaylistContentStore: ObservableObject {
             async let catsTask = client.getLiveCategories()
             async let streamsTask = client.getLiveStreams()
             let (cats, streams) = try await (catsTask, streamsTask)
+            let remote = Self.remoteCatalogFingerprint(
+                liveCats: cats, vodCats: [], seriesCats: [],
+                liveStreams: streams, vods: [], series: [],
+                filterAdult: filterAdult
+            )
+            let local = try? await AppDatabase.shared.read { db in
+                try Self.localCatalogFingerprint(playlistId: pid, db: db)
+            }
+            if let local, Self.fingerprintMatches(local, remote, only: .live) {
+                return false
+            }
             progress(L("phase.save_db"))
             try await AppDatabase.shared.write { db in
                 try Self.replaceLiveCatalog(db: db, pid: pid, categories: cats, streams: streams, filterAdult: filterAdult)
             }
+            return true
         case .vod:
             async let catsTask = client.getVODCategories()
             async let streamsTask = client.getVODStreams()
             let (cats, streams) = try await (catsTask, streamsTask)
+            let remote = Self.remoteCatalogFingerprint(
+                liveCats: [], vodCats: cats, seriesCats: [],
+                liveStreams: [], vods: streams, series: [],
+                filterAdult: filterAdult
+            )
+            let local = try? await AppDatabase.shared.read { db in
+                try Self.localCatalogFingerprint(playlistId: pid, db: db)
+            }
+            if let local, Self.fingerprintMatches(local, remote, only: .vod) {
+                return false
+            }
             progress(L("phase.save_db"))
             try await AppDatabase.shared.write { db in
                 try Self.replaceVODCatalog(db: db, pid: pid, categories: cats, streams: streams, filterAdult: filterAdult)
             }
+            return true
         case .series:
             async let catsTask = client.getSeriesCategories()
             async let seriesTask = client.getSeries()
             let (cats, items) = try await (catsTask, seriesTask)
+            let remote = Self.remoteCatalogFingerprint(
+                liveCats: [], vodCats: [], seriesCats: cats,
+                liveStreams: [], vods: [], series: items,
+                filterAdult: filterAdult
+            )
+            let local = try? await AppDatabase.shared.read { db in
+                try Self.localCatalogFingerprint(playlistId: pid, db: db)
+            }
+            if let local, Self.fingerprintMatches(local, remote, only: .series) {
+                return false
+            }
             progress(L("phase.save_db"))
             try await AppDatabase.shared.write { db in
                 try Self.replaceSeriesCatalog(db: db, pid: pid, categories: cats, series: items, filterAdult: filterAdult)
             }
+            return true
         }
     }
 

@@ -106,7 +106,13 @@ nonisolated struct EPGRefreshCoordinator {
             throw lastError ?? EPGError.noSource
         } catch {
             if !(error is CancellationError) {
-                await recordError(playlistId: playlist.id, message: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+                // Build 66 (W4): the recorded error text is shown in
+                // the settings UI and can embed the credential-bearing
+                // guide URL (e.g. via a network error's description) —
+                // route it through EPGURLRedactor before it is stored.
+                let rawMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                let safeMessage = EPGURLRedactor.redact(rawMessage, username: playlist.username, password: playlist.password)
+                await recordError(playlistId: playlist.id, message: safeMessage)
             }
             throw error
         }

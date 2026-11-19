@@ -38,7 +38,18 @@ nonisolated struct EPGDownloader {
         do {
             (downloadedTemp, response) = try await urlSession.download(for: request)
         } catch {
-            throw EPGError.network(error)
+            // Build 66 (W4): a URLSession error's description can
+            // embed the full guide URL — credentials included. The
+            // username/password parameters exist for exactly this
+            // redaction; route the description through
+            // EPGURLRedactor before it is wrapped and surfaced.
+            let safe = EPGURLRedactor.redact(
+                error.localizedDescription, username: username, password: password
+            )
+            throw EPGError.network(NSError(
+                domain: (error as NSError).domain, code: (error as NSError).code,
+                userInfo: [NSLocalizedDescriptionKey: safe]
+            ))
         }
 
         // Move off the volatile download location immediately.

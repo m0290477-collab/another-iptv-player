@@ -10,6 +10,12 @@ struct HistorySeriesPlayerShell: View {
     @State private var session: SeriesPlaybackSession
     @State private var neighborPrev: DBEpisode?
     @State private var neighborNext: DBEpisode?
+    /// Build 66 (W4, item 5b): a series-info fetch failure is no
+    /// longer swallowed — it surfaces in an alert with a Retry
+    /// action (the same errorMessage pattern Series Detail uses).
+    /// Playback of the current episode is unaffected; only the
+    /// episode-chain fetch failed.
+    @State private var episodeLoadError: String?
     @Environment(\.playerOverlayPresentationID) private var overlayPresentationID
     
     var onNavigateToDetail: ((String, String) -> Void)? = nil
@@ -47,6 +53,25 @@ struct HistorySeriesPlayerShell: View {
         )
         .task(id: session.streamId) {
             await refreshNeighbors()
+        }
+        // Build 66 (W4, item 5b): visible failure + Retry for the
+        // episode fetch (mirrors Series Detail's errorMessage flow).
+        .alert(L("common.error"), isPresented: Binding(
+            get: { episodeLoadError != nil },
+            set: { if !$0 { episodeLoadError = nil } }
+        )) {
+            Button(L("common.try_again")) {
+                episodeLoadError = nil
+                if let seriesIdStr = session.seriesId, let sid = Int(seriesIdStr) {
+                    Task {
+                        await loadEpisodesFromAPI(seriesId: sid)
+                        await refreshNeighbors()
+                    }
+                }
+            }
+            Button(L("common.ok"), role: .cancel) { episodeLoadError = nil }
+        } message: {
+            Text(episodeLoadError ?? "")
         }
         .onChange(of: overlayPresentationID) { _, _ in
             applyInitialSelectionIfNeeded()
@@ -97,7 +122,18 @@ struct HistorySeriesPlayerShell: View {
 
     private func loadEpisodesFromAPI(seriesId: Int) async {
         let client = XtreamAPIClient(playlist: playlist)
-        guard let info = try? await client.getSeriesInfo(seriesId: seriesId) else { return }
+        // Build 66 (W4, item 5b): was `guard let info = try? … else
+        // { return }` — a fetch failure silently left prev/next
+        // episode navigation dead. Now logged + surfaced with Retry
+        // (see the alert in `body`).
+        let info: XtreamSeriesInfoResponse
+        do {
+            info = try await client.getSeriesInfo(seriesId: seriesId)
+        } catch {
+            Log.error("HistorySeriesPlayerShell", "Series info fetch failed: \(error.localizedDescription)")
+            await MainActor.run { episodeLoadError = error.localizedDescription }
+            return
+        }
 
         let episodesBySeason = info.episodesBySeasonNumber
 

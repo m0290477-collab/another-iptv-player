@@ -16,6 +16,10 @@ struct ContentView: View {
     /// when a saved playlist exists.
     @State private var suppressAutoLoad = false
     @State private var showStorageWarning = false
+    /// Build 66 (W4, item 15a): storage could not be opened at all
+    /// at launch — the whole UI is replaced by the recovery screen
+    /// until a retry succeeds.
+    @State private var storageUnavailable = AppDatabase.isStorageUnavailable
     /// Build 61 (B10, L4): the full-screen expired state for the
     /// playlist auto-load would have entered, plus its Renew
     /// (edit-form) sheet.
@@ -45,7 +49,15 @@ struct ContentView: View {
     var body: some View {
         // === B15 (build 61) W1: app-open lock gate ===
         Group {
-            if appLock.isLocked {
+            if storageUnavailable {
+                // Build 66 (W4, item 15a): no usable store exists —
+                // nothing below may render (every screen queries the
+                // placeholder DB). Only the recovery screen shows.
+                StorageUnavailableView(
+                    onRetry: { AppDatabase.retryStorageOpen() },
+                    onRecovered: { storageUnavailable = false }
+                )
+            } else if appLock.isLocked {
                 AppLockView()
             } else {
                 mainBody
@@ -181,11 +193,10 @@ struct ContentView: View {
                 // ways; duration 0 when Motion is reduced/off).
                 .transition(.opacity)
                 .onAppear {
-                    // Round 15 (C3, Features): refresh the widget
-                    // snapshot when a dashboard is entered (covers
-                    // both dashboards; the Xtream dashboard refreshes
-                    // again after its catalog load).
-                    Task { await WidgetSnapshotStore.refresh(playlist: playlist) }
+                    // Build 66 (W4): the widget-snapshot writer
+                    // call that stood here is removed — the widget
+                    // snapshot store itself is deleted in this build
+                    // (another builder's scope).
                     // Reaching a playlist dashboard = a successful session.
                     RatingManager.shared.registerSuccessfulSession()
                     Task {

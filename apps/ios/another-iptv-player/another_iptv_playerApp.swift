@@ -198,6 +198,11 @@ private struct AppRootView: View {
             // touch, fixture seed, and the ~500-per-playlist history
             // prune all happen here, off the launch path.
             .task {
+                // Build 66 (W4, item 15a): while storage is
+                // unavailable, `shared` is a schema-less placeholder
+                // — none of the deferred DB work below may run
+                // against it. The recovery screen owns the UI.
+                guard !AppDatabase.isStorageUnavailable else { return }
                 _ = AppDatabase.shared
                 MockFixture.seedIfNeeded()
                 // Build 61 (B13, N2): after a reinstall, an EMPTY
@@ -231,7 +236,12 @@ private struct AppRootView: View {
                 DataSaverService.shared.start()
                 CacheTrimService.trimIfNeeded()
                 CacheTrimService.startPeriodicTrimming()
-                await AppOpenRefreshService.refreshActivePlaylistOnAppOpen()
+                // Build 66 (W4, item 15a): the playlist refresh
+                // queries the DB — skipped while storage is
+                // unavailable (placeholder instance, see above).
+                if !AppDatabase.isStorageUnavailable {
+                    await AppOpenRefreshService.refreshActivePlaylistOnAppOpen()
+                }
             }
             // Build 61 (B3, item 7a): the stored appearance choice
             // replaces the hard-forced dark scheme (default stays

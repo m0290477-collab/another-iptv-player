@@ -280,6 +280,63 @@ struct XtreamSeriesInfoResponse: Codable {
     let seasons: [XtreamSeason]?
     let info: XtreamSeriesDetails?
     let episodes: [String: [XtreamEpisode]]?
+
+    enum CodingKeys: String, CodingKey {
+        case seasons, info, episodes
+    }
+
+    /// Build 66 (W4, item 5a): tolerant per-field decoding, mirroring
+    /// the FailableDecodable pattern used for catalog lists. Panels
+    /// send this payload in messy shapes — `episodes` as `[]` instead
+    /// of a dictionary, `seasons` as an object keyed by season number
+    /// instead of an array, `info` as `[]` instead of an object — and
+    /// the old synthesized decode failed the WHOLE response on any
+    /// one of them. Each top-level field now decodes independently:
+    /// a malformed field lands as nil and the others survive.
+    init(from decoder: Decoder) throws {
+        let container = try? decoder.container(keyedBy: CodingKeys.self)
+        seasons = Self.decodeSeasons(container)
+        info = container.flatMap { c in
+            (try? c.decodeIfPresent(XtreamSeriesDetails.self, forKey: .info)) ?? nil
+        }
+        episodes = Self.decodeEpisodes(container)
+    }
+
+    private static func decodeSeasons(
+        _ container: KeyedDecodingContainer<CodingKeys>?
+    ) -> [XtreamSeason]? {
+        guard let container else { return nil }
+        // Array form (lossy per element, like the catalog lists).
+        if let array = (try? container.decodeIfPresent(
+            [FailableDecodable<XtreamSeason>].self, forKey: .seasons)) ?? nil {
+            return array.compactMap { $0.base }
+        }
+        // Object form: { "1": {…season…}, "2": {…} } — order by the
+        // numeric key so the array matches panel order as closely
+        // as the payload allows.
+        if let object = (try? container.decodeIfPresent(
+            [String: FailableDecodable<XtreamSeason>].self, forKey: .seasons)) ?? nil {
+            let orderedKeys = object.keys.sorted {
+                (Int($0.trimmingCharacters(in: .whitespaces)) ?? Int.max)
+                    < (Int($1.trimmingCharacters(in: .whitespaces)) ?? Int.max)
+            }
+            return orderedKeys.compactMap { object[$0]?.base }
+        }
+        return nil
+    }
+
+    private static func decodeEpisodes(
+        _ container: KeyedDecodingContainer<CodingKeys>?
+    ) -> [String: [XtreamEpisode]]? {
+        guard let container else { return nil }
+        // Dictionary form (lossy per episode). The `[]` array form
+        // fails this decode and lands as nil — same as absent.
+        if let dict = (try? container.decodeIfPresent(
+            [String: [FailableDecodable<XtreamEpisode>]].self, forKey: .episodes)) ?? nil {
+            return dict.mapValues { $0.compactMap { $0.base } }
+        }
+        return nil
+    }
 }
 
 extension XtreamSeriesInfoResponse {
@@ -473,10 +530,26 @@ struct XtreamEpisodeInfo: Codable {
 struct XtreamVODInfoResponse: Codable {
     let info: XtreamVODInfo?
     let movieData: XtreamVODMovieData?
-    
+
     enum CodingKeys: String, CodingKey {
         case info
         case movieData = "movie_data"
+    }
+
+    /// Build 66 (W4, item 5a): tolerant per-field decoding, mirroring
+    /// the FailableDecodable pattern used for catalog lists. Panels
+    /// sometimes send `info` / `movie_data` as `[]` instead of an
+    /// object; the old synthesized decode failed the WHOLE response
+    /// on that. Each field now decodes independently — a malformed
+    /// field lands as nil and the other survives.
+    init(from decoder: Decoder) throws {
+        let container = try? decoder.container(keyedBy: CodingKeys.self)
+        info = container.flatMap { c in
+            (try? c.decodeIfPresent(XtreamVODInfo.self, forKey: .info)) ?? nil
+        }
+        movieData = container.flatMap { c in
+            (try? c.decodeIfPresent(XtreamVODMovieData.self, forKey: .movieData)) ?? nil
+        }
     }
 }
 
