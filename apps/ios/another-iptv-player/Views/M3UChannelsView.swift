@@ -97,15 +97,8 @@ struct M3UChannelsView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                NavigationLink {
-                    EPGGuideView(source: .m3u(playlist))
-                } label: {
-                    Image(systemName: "calendar.day.timeline.left")
-                        .font(.body.weight(.semibold))
-                }
-                .accessibilityLabel(L("epg.guide.title"))
-            }
+            // Build 68 (owner order): the TV Guide / EPG feature is
+            // REMOVED entirely — this toolbar's guide entry is gone.
             ToolbarItem(placement: .navigationBarTrailing) {
                 NavigationLink {
                     M3UFavoritesView(playlist: playlist)
@@ -725,7 +718,15 @@ struct M3UGroupGridContent: View {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: posterMetrics.gridRowSpacing) {
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, channel in
-                            M3UChannelCard(
+                            // Build 68 (W-B, Live TV interior —
+                            // owner pick "Channel Tiles"): the M3U
+                            // grid renders the tile form (big
+                            // centered logo + name ONLY — no
+                            // programme lines; the TV Guide / EPG
+                            // feature is removed, owner order); the
+                            // group shelves keep the build-66
+                            // M3UChannelCard.
+                            M3UChannelTileCard(
                                 channel: channel,
                                 width: posterMetrics.liveGridIconSize,
                                 iconSize: posterMetrics.liveGridIconSize,
