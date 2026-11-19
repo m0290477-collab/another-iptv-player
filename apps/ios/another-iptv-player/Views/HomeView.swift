@@ -66,8 +66,11 @@ struct HomeView: View {
     @State private var newMovies: [DBVODStream] = []
     @State private var newSeries: [DBSeries] = []
     // Round 14/15 (B6/C6) extra shelves, all from real store/EPG/history data.
-    @State private var becauseYouWatched: [FeaturedEntry] = []
-    @State private var newEpisodeSeries: [DBSeries] = []
+    // Build 66 (W3): the "Because you watched" rail and the Home
+    // "New episodes" shelf are REMOVED (Critic kills — the rail was
+    // the cut "For You" recommendation engine; the shelf was
+    // cut-adjacent to the removed new-episode alerts). No state,
+    // no shelf, no recompute for either remains.
     @State private var newSinceVisit: [FeaturedEntry] = []
     @State private var tonightEntries: [TonightEntry] = []
     // Round 10: the category tiles are icon cards now — the tile-art
@@ -116,12 +119,13 @@ struct HomeView: View {
     @ObservedObject private var homeOrderStore = HomeSectionOrderStore.shared
     @State private var editingHomeRows = false
 
-    // Build 61 fixer (Z12, M-pack hero variant): the first LIVE
+    // Build 61 fixer (Z12, M-pack variant): the first LIVE
     // match found in the real MatchesService data for today, plus
     // its league name. Nil until a fetch finds one — and nil again
-    // when none is live, in which case the hero keeps its existing
-    // live-channel → featured-movie fallback. No placeholder data:
-    // this is only ever set from a decoded ESPN payload.
+    // when none is live. Build 66 (W3): this no longer drives the
+    // hero — it leads the "Live now" rail below the Cinematic
+    // Hero. No placeholder data: this is only ever set from a
+    // decoded ESPN payload.
     @State private var heroLiveMatch: MatchEvent?
     @State private var heroLiveMatchLeague: String?
 
@@ -141,29 +145,25 @@ struct HomeView: View {
 
     // MARK: - Build 61 (B7): Z12 hero + O1/J3 rows
 
-    /// Z12: the featured live channel for the hero — the first
-    /// channel with a programme on air right now (the On-now set),
-    /// else the first live channel in the catalog. Nil only when the
-    /// playlist carries no live channels (hero falls back to the
-    /// featured carousel, whose lead is the top movie).
+    /// Z12: the featured live channel — the first channel with a
+    /// programme on air right now (the On-now set), else the first
+    /// live channel in the catalog. Build 66 (W3): no longer the
+    /// hero; it is the first channel of the "Live now" rail below
+    /// the Cinematic Hero. Nil only when the playlist carries no
+    /// live channels at all.
     private var heroLiveStream: DBLiveStream? {
         onNowEntries.first?.stream ?? contentStore.liveStreams.first?.stream
     }
 
-    private var heroLiveNowTitle: String? {
-        guard let hero = heroLiveStream else { return nil }
-        return onNowEntries.first(where: { $0.stream.streamId == hero.streamId })?.nowTitle
-    }
-
-    /// Z12 (fixer): one MatchesService pass for the hero — sports in
-    /// MatchesView's tab order (soccer → NFL → NBA), leagues in
-    /// payload order, first `.live` match wins; the pass stops at
-    /// the first hit. Runs once per Home appearance and again when
-    /// the app returns to the foreground (event-driven, no polling
-    /// loop). When the user hid the Matches section (F6), the probe
-    /// does not run and no match hero is shown. Any failure leaves
-    /// the previous state to the fallback chain (nil → live
-    /// channel → movie carousel).
+    /// Z12 (fixer): one MatchesService pass for the live match —
+    /// sports in MatchesView's tab order (soccer → NFL → NBA),
+    /// leagues in payload order, first `.live` match wins; the
+    /// pass stops at the first hit. Runs once per Home appearance
+    /// and again when the app returns to the foreground
+    /// (event-driven, no polling loop). When the user hid the
+    /// Matches section (F6), the probe does not run and no match
+    /// card is shown. Build 66 (W3): the result feeds the "Live
+    /// now" rail, not the hero.
     private func loadHeroLiveMatch() async {
         guard !UserDefaults.standard.bool(forKey: "sections.hidden.matches") else {
             heroLiveMatch = nil
@@ -361,10 +361,6 @@ struct HomeView: View {
                 newMovies = newMovies.filter { seenMovies.insert($0.streamId).inserted }
             case .newSeries:
                 newSeries = newSeries.filter { seenSeries.insert($0.seriesId).inserted }
-            case .because:
-                becauseYouWatched = dedupeEntries(becauseYouWatched, seenMovies: &seenMovies, seenSeries: &seenSeries)
-            case .newEpisodes:
-                newEpisodeSeries = newEpisodeSeries.filter { seenSeries.insert($0.seriesId).inserted }
             case .newSinceVisit:
                 newSinceVisit = dedupeEntries(newSinceVisit, seenMovies: &seenMovies, seenSeries: &seenSeries)
             case .favorites, .tonight:
@@ -405,8 +401,8 @@ struct HomeView: View {
         for id in homeSeenLiveIDs { keys.insert("live:\(id)") }
         for entry in onNowShelfEntries { keys.insert("live:\(entry.stream.streamId)") }
         for movie in topRatedMovies + newMovies { keys.insert("vod:\(movie.streamId)") }
-        for series in topRatedSeries + newSeries + newEpisodeSeries { keys.insert("series:\(series.seriesId)") }
-        for entry in becauseYouWatched + newSinceVisit {
+        for series in topRatedSeries + newSeries { keys.insert("series:\(series.seriesId)") }
+        for entry in newSinceVisit {
             switch entry {
             case .movie(let movie): keys.insert("vod:\(movie.streamId)")
             case .series(let series): keys.insert("series:\(series.seriesId)")
@@ -604,52 +600,33 @@ struct HomeView: View {
                         // BELOW it as a compact sports strip (see
                         // after the hero). Same F6 gate as before.
 
-                        // Build 61 (B7, Z12): the hero leads with
-                        // LIVE content — the featured live channel
-                        // (first channel with a live EPG programme,
-                        // else the first live channel) with its
-                        // inline preview. The featured movie/series
-                        // carousel is the fallback when the playlist
-                        // has no live channels at all. The hero is
-                        // NOT a J3-reorderable row.
-                        // Build 61 fixer (Z12, M-pack variant): a
-                        // LIVE match right now outranks the live
-                        // channel — the hero becomes the match card
-                        // and taps through to MatchesView. Driven
-                        // only by the real MatchesService fetch in
-                        // `loadHeroLiveMatch`.
-                        if let heroMatch = heroLiveMatch {
-                            NavigationLink {
-                                MatchesView()
-                            } label: {
-                                LiveMatchHeroCard(match: heroMatch, leagueName: heroLiveMatchLeague)
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.horizontal, 16)
-                            .frame(maxWidth: 560)
-                            .frame(maxWidth: .infinity)
-                            .background(AmbientHeroGlow())
-                        } else if let heroLive = heroLiveStream {
-                            LiveHeroCard(
-                                stream: heroLive,
-                                nowProgramTitle: heroLiveNowTitle,
-                                previewURL: PlaybackURLBuilder(playlist: playlist).liveURL(streamId: heroLive.streamId),
-                                previewActive: isVisible && scenePhase == .active,
-                                userAgent: playlist.trimmedUserAgent
-                            ) {
-                                presentLiveSelectionFromHome(heroLive)
-                            }
-                            .padding(.horizontal, 16)
-                            .frame(maxWidth: 560)
-                            .frame(maxWidth: .infinity)
-                            .background(AmbientHeroGlow())
-                        } else if !featured.isEmpty {
+                        // Build 66 (W3, Home-2): the owner-picked
+                        // Cinematic Hero is now the DEFAULT and
+                        // PRIMARY hero — the tall featured carousel
+                        // leads whenever it has entries (on any real
+                        // playlist it does). Build 61's live-first
+                        // priority (live match → live channel →
+                        // carousel) is inverted: live content no
+                        // longer outranks the picked hero; it lives
+                        // in the "Live now" rail directly below
+                        // (`liveNowRail`). The hero is NOT a
+                        // J3-reorderable row.
+                        if !featured.isEmpty {
                             featuredCarousel
                         } else if !contentStore.streamsLoaded {
                             // B6: skeleton placeholders instead of the
                             // bare spinner while the catalog lands.
                             SkeletonShelf()
                         }
+
+                        // Build 66 (W3): the "Live now" rail —
+                        // the demoted live hero content at rail
+                        // size, directly below the hero: the live
+                        // match card first (when a match is live),
+                        // then the live channels (the old hero
+                        // channel first, then the on-now set).
+                        // Renders nothing when nothing is live.
+                        liveNowRail
 
                         // Build 65 (Home v2 style 1): the compact
                         // sports strip sits directly under the hero
@@ -1381,6 +1358,98 @@ struct HomeView: View {
         }
     }
 
+    // MARK: - Live now rail (Build 66, W3)
+
+    /// The rail's live channels: the old hero lead channel first
+    /// (first channel with a programme on air right now, else the
+    /// first live channel), then the rest of the on-now set in EPG
+    /// order, deduped, capped at 8. Parental-blocked live categories
+    /// are excluded here too (item 17): a locked channel must not
+    /// surface in the rail even though the player path also gates
+    /// it. Session-unlocked categories pass, per the store verdict.
+    private var liveRailChannels: [DBLiveStream] {
+        var channels: [DBLiveStream] = []
+        var seen = Set<Int>()
+        func appendIfAllowed(_ stream: DBLiveStream) {
+            guard seen.insert(stream.streamId).inserted,
+                  !ParentalControlStore.shared.isBlocked(playlistId: playlist.id, type: "live", categoryId: stream.categoryId)
+            else { return }
+            channels.append(stream)
+        }
+        if let hero = heroLiveStream { appendIfAllowed(hero) }
+        for entry in onNowEntries { appendIfAllowed(entry.stream) }
+        if channels.isEmpty {
+            // No on-air channel survived (e.g. the lead is
+            // parental-blocked and the guide is empty): fall back
+            // to the first unblocked live channel in the catalog.
+            for item in contentStore.liveStreams {
+                appendIfAllowed(item.stream)
+                if !channels.isEmpty { break }
+            }
+        }
+        return Array(channels.prefix(8))
+    }
+
+    private func liveRailNowTitle(for stream: DBLiveStream) -> String? {
+        onNowEntries.first(where: { $0.stream.streamId == stream.streamId })?.nowTitle
+    }
+
+    /// Build 66 (W3): the "Live now" rail directly below the
+    /// Cinematic Hero — build 61's hero content (live match, live
+    /// channels) demoted to rail size with its tap behaviour
+    /// unchanged: match card first (tap → MatchesView), then live
+    /// channels (tap → the live player via the same Home path).
+    /// Renders nothing when nothing is live. This replaces nothing:
+    /// the sports tiles strip and the On-now row further down stay
+    /// exactly where they were.
+    @ViewBuilder
+    private var liveNowRail: some View {
+        let channels = liveRailChannels
+        if heroLiveMatch != nil || !channels.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                CinematicSectionHeader(title: L("home.live_now")) {
+                    AllLiveView(playlist: playlist)
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 12) {
+                        if let heroMatch = heroLiveMatch {
+                            NavigationLink {
+                                MatchesView()
+                            } label: {
+                                LiveMatchHeroCard(match: heroMatch, leagueName: heroLiveMatchLeague)
+                                    .frame(width: 300)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        ForEach(channels, id: \.streamId) { stream in
+                            LiveHeroCard(
+                                stream: stream,
+                                nowProgramTitle: liveRailNowTitle(for: stream),
+                                previewURL: PlaybackURLBuilder(playlist: playlist).liveURL(streamId: stream.streamId),
+                                // Home-8 safety: the live preview
+                                // decodes ONLY while no player is
+                                // presented — the same gate the
+                                // carousel timer already uses. Only
+                                // the rail's FIRST channel previews;
+                                // the rest show their channel art, so
+                                // the rail never runs parallel decodes.
+                                previewActive: isVisible && scenePhase == .active
+                                    && playerOverlay.presentation == nil
+                                    && stream.streamId == channels.first?.streamId,
+                                userAgent: playlist.trimmedUserAgent
+                            ) {
+                                presentLiveSelectionFromHome(stream)
+                            }
+                            .frame(width: 300)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .scrollClipDisabled()
+            }
+        }
+    }
+
     private func playFeatured(_ entry: FeaturedEntry) {
         switch entry {
         case .movie(let movie):
@@ -1534,11 +1603,21 @@ struct HomeView: View {
     }
 
     /// The Top 10 rail's displayed list: the full top-rated list,
-    /// or its members carrying the selected genre (rank = position
-    /// in the displayed rail).
+    /// or its members carrying the selected genre. Used as the
+    /// detail queue — order only, no ranks derived from it.
     private var top10Displayed: [DBVODStream] {
         guard let genre = top10Genre else { return topRatedMovies }
         return topRatedMovies.filter { DetailFormatting.genreList($0.genre).contains(genre) }
+    }
+
+    /// Build 66 (W3, Home-6): the rail's rendered rows WITH their
+    /// ORIGINAL ranks — rank is the position in the UNFILTERED
+    /// top-10 list, computed before any genre filtering, so a
+    /// genre-filtered #4 still renders as 4, never renumbered to 1.
+    private var top10Ranked: [(rank: Int, movie: DBVODStream)] {
+        let ranked = topRatedMovies.enumerated().map { (rank: $0.offset + 1, movie: $0.element) }
+        guard let genre = top10Genre else { return ranked }
+        return ranked.filter { DetailFormatting.genreList($0.movie.genre).contains(genre) }
     }
 
     private var topRatedMoviesShelf: some View {
@@ -1568,16 +1647,17 @@ struct HomeView: View {
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(top10Displayed.indices, id: \.self) { index in
+                    ForEach(top10Ranked.indices, id: \.self) { index in
+                        let ranked = top10Ranked[index]
                         NavigationLink {
-                            MovieDetailView(playlist: playlist, movie: top10Displayed[index], queue: top10Displayed)
+                            MovieDetailView(playlist: playlist, movie: ranked.movie, queue: top10Displayed)
                         } label: {
                             RankedPosterCard(
-                                rank: index + 1,
-                                imageURL: moviePosterURL(top10Displayed[index]),
-                                title: top10Displayed[index].name,
-                                ratingText: ContentRating.normalizedDisplayText(rating: top10Displayed[index].rating, rating5Based: top10Displayed[index].rating5Based),
-                                metaText: cardMetaLine(year: DetailFormatting.year(from: top10Displayed[index].releaseDate), genre: top10Displayed[index].genre),
+                                rank: ranked.rank,
+                                imageURL: moviePosterURL(ranked.movie),
+                                title: ranked.movie.name,
+                                ratingText: ContentRating.normalizedDisplayText(rating: ranked.movie.rating, rating5Based: ranked.movie.rating5Based),
+                                metaText: cardMetaLine(year: DetailFormatting.year(from: ranked.movie.releaseDate), genre: ranked.movie.genre),
                                 posterWidth: posterMetrics.shelfPosterWidth,
                                 posterHeight: posterMetrics.shelfPosterHeight,
                                 iconName: "film"
@@ -1587,12 +1667,12 @@ struct HomeView: View {
                         .shelfEntrance(index: index)
                         .contextMenu {
                             Button {
-                                toggleFavorite(streamId: top10Displayed[index].streamId, type: "vod",
-                                               currentlyFavorite: isFavoriteMovie(top10Displayed[index]))
+                                toggleFavorite(streamId: ranked.movie.streamId, type: "vod",
+                                               currentlyFavorite: isFavoriteMovie(ranked.movie))
                             } label: {
-                                Label(isFavoriteMovie(top10Displayed[index]) ? L("favorites.remove") : L("favorites.add"), systemImage: "star")
+                                Label(isFavoriteMovie(ranked.movie) ? L("favorites.remove") : L("favorites.add"), systemImage: "star")
                             }
-                            if let categoryId = top10Displayed[index].categoryId {
+                            if let categoryId = ranked.movie.categoryId {
                                 Button {
                                     hiddenStore.setHidden(true, playlistId: playlist.id, type: "vod", categoryId: categoryId)
                                 } label: {
@@ -1766,7 +1846,7 @@ struct HomeView: View {
 
     private enum HomeShelfKind: Hashable {
         case topMovies, topSeries, newMovies, newSeries
-        case because, favorites, newEpisodes, tonight, newSinceVisit
+        case favorites, tonight, newSinceVisit
     }
 
     /// C6: shelf order varies by time-of-day bucket DERIVED FROM
@@ -1783,10 +1863,10 @@ struct HomeView: View {
         }
         let bucket = bucketCounts.max(by: { $0.value < $1.value })?.key
             ?? { let h = cal.component(.hour, from: Date()); return h < 5 ? 3 : (h < 11 ? 0 : (h < 17 ? 1 : (h < 23 ? 2 : 3))) }()
-        let discovery: [HomeShelfKind] = [.topMovies, .topSeries, .newMovies, .newSeries, .tonight, .because, .favorites, .newEpisodes, .newSinceVisit]
-        let veteran: [HomeShelfKind] = [.because, .favorites, .tonight, .newEpisodes, .topMovies, .topSeries, .newMovies, .newSeries, .newSinceVisit]
-        let evening: [HomeShelfKind] = [.tonight, .because, .favorites, .newEpisodes, .topMovies, .newSeries, .topSeries, .newMovies, .newSinceVisit]
-        let morning: [HomeShelfKind] = [.newMovies, .newSeries, .newSinceVisit, .topMovies, .topSeries, .tonight, .because, .favorites, .newEpisodes]
+        let discovery: [HomeShelfKind] = [.topMovies, .topSeries, .newMovies, .newSeries, .tonight, .favorites, .newSinceVisit]
+        let veteran: [HomeShelfKind] = [.favorites, .tonight, .topMovies, .topSeries, .newMovies, .newSeries, .newSinceVisit]
+        let evening: [HomeShelfKind] = [.tonight, .favorites, .topMovies, .newSeries, .topSeries, .newMovies, .newSinceVisit]
+        let morning: [HomeShelfKind] = [.newMovies, .newSeries, .newSinceVisit, .topMovies, .topSeries, .tonight, .favorites]
         if !isVeteranHome { return discovery }
         switch bucket {
         case 0: return morning
@@ -1808,12 +1888,8 @@ struct HomeView: View {
             if sectionVisibility.isVisible(.movies), !newMovies.isEmpty { newMoviesShelf }
         case .newSeries:
             if sectionVisibility.isVisible(.series), !newSeries.isEmpty { newSeriesShelf }
-        case .because:
-            if !becauseYouWatched.isEmpty { becauseShelf }
         case .favorites:
             if sectionVisibility.isVisible(.library), !favoriteLive.isEmpty || !favoriteVODs.isEmpty || !favoriteSeries.isEmpty { favoritesShelf }
-        case .newEpisodes:
-            if !newEpisodeSeries.isEmpty { newEpisodesShelf }
         case .tonight:
             if !tonightEntries.isEmpty { tonightShelf }
         case .newSinceVisit:
@@ -1929,67 +2005,10 @@ struct HomeView: View {
         }
     }
 
-    // MARK: Because you watched (B6) / New episodes (C6) / New since visit (C6)
-
-    private var becauseShelf: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CinematicSectionHeader(title: L("home.because_you_watched")) {
-                AllVODView(playlist: playlist)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(becauseYouWatched.indices, id: \.self) { index in
-                        entryPosterLink(becauseYouWatched[index], queue: becauseYouWatched.compactMap { if case .movie(let m) = $0 { return m } else { return nil } })
-                            .shelfEntrance(index: index)
-                    }
-                }
-                .padding(.horizontal, AppTheme.spacingScreenMargin)
-            }
-            .scrollClipDisabled()
-            .shelfEdgeFade()
-        }
-    }
-
-    private var newEpisodesShelf: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CinematicSectionHeader(title: L("home.new_episodes")) {
-                AllSeriesView(playlist: playlist)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(newEpisodeSeries.indices, id: \.self) { index in
-                        NavigationLink {
-                            SeriesDetailView(playlist: playlist, series: newEpisodeSeries[index])
-                        } label: {
-                            SeriesCard(
-                                playlistId: playlist.id,
-                                stream: newEpisodeSeries[index],
-                                posterWidth: posterMetrics.shelfPosterWidth,
-                                posterHeight: posterMetrics.shelfPosterHeight,
-                                imageLoadProfile: .shelf
-                            )
-                            .overlay(alignment: .topTrailing) {
-                                // C6: "New episodes" badge — only for
-                                // series whose lastModified is newer than
-                                // the user's last watch (see recompute).
-                                Text(L("home.new_episodes_badge"))
-                                    .font(AppTheme.fontBadge)
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 7).padding(.vertical, 3)
-                                    .background(Capsule().fill(AppTheme.accent))
-                                    .padding(6)
-                            }
-                        }
-                        .buttonStyle(PressScaleButtonStyle())
-                        .shelfEntrance(index: index)
-                    }
-                }
-                .padding(.horizontal, AppTheme.spacingScreenMargin)
-            }
-            .scrollClipDisabled()
-            .shelfEdgeFade()
-        }
-    }
+    // MARK: New since visit (C6)
+    // Build 66 (W3): the Because-you-watched shelf and the Home
+    // New-episodes shelf that used to live here are deleted
+    // outright (Critic kills) — not renamed, not replaced.
 
     private var newSinceVisitShelf: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -2331,12 +2350,12 @@ struct HomeView: View {
 
     /// B6/B10/C6 post-pass (main actor, cheap set/array work only):
     /// shared store rankings preferred over this view's own pass;
-    /// metadata-poor fallbacks (Top Rated merges with New under 3
-    /// rated; hero falls back to newest-with-artwork); hero rotation
+    /// hero fallback to newest-with-artwork; hero rotation
     /// (finished titles excluded, daily exposure cap 3, not-yet-shown
-    /// preferred); Because-you-watched from real history genres; New
-    /// episodes (lastModified newer than last watch); New since your
-    /// last visit against the saved visit stamp.
+    /// preferred); New since your last visit against the saved
+    /// visit stamp. Build 66 (W3): ranked pools are rating-only
+    /// (no unrated top-up), and every pool is parental-filtered
+    /// before the cross-row dedupe runs.
     private func applySharedShelvesAndHistoryRules() {
         let visibleVOD = Set(contentStore.vodCategories.filter { !vodHiddenIds.contains($0.id) }.map(\.id))
         let visibleSeries = Set(contentStore.seriesCategories.filter { !seriesHiddenIds.contains($0.id) }.map(\.id))
@@ -2350,14 +2369,13 @@ struct HomeView: View {
         let sharedNewSeries = contentStore.sharedNewestSeries.filter { visibleSeries.contains($0.categoryId ?? "") }
         if !sharedNewSeries.isEmpty { newSeries = Array(sharedNewSeries.prefix(15)) }
 
-        if topRatedMovies.count < 3 {
-            let have = Set(topRatedMovies.map(\.streamId))
-            topRatedMovies += newMovies.filter { !have.contains($0.streamId) }.prefix(10 - topRatedMovies.count)
-        }
-        if topRatedSeries.count < 3 {
-            let have = Set(topRatedSeries.map(\.seriesId))
-            topRatedSeries += newSeries.filter { !have.contains($0.seriesId) }.prefix(10 - topRatedSeries.count)
-        }
+        // Build 66 (W3, Home-6): the unrated top-up merge is
+        // REMOVED. Both ranked pools (this view's pass and the
+        // shared store's) only ever contain items with a real
+        // normalized rating; nothing unrated is merged in to fill
+        // the rail. When fewer than 3 rated items remain, the
+        // shelf gates in `shelfView` (count >= 3) hide the rail —
+        // an honest short rail is never padded with unrated picks.
 
         let finishedMovieIds = Set(recentHistory.filter {
             $0.type == "vod" && $0.durationMs > 0 && Double($0.lastTimeMs) / Double($0.durationMs) >= 0.98
@@ -2396,55 +2414,10 @@ struct HomeView: View {
         for entry in featured { exposure[entry.id, default: 0] += 1 }
         UserDefaults.standard.set(exposure, forKey: dayKey)
 
-        var genres = Set<String>()
-        var watchedMovieIds = Set<Int>()
-        var watchedSeriesIds = Set<Int>()
-        for item in recentHistory {
-            switch item.type {
-            case "vod":
-                if let id = Int(item.streamId) { watchedMovieIds.insert(id) }
-                if let record = contentStore.vodStreams.first(where: { $0.stream.streamId == Int(item.streamId) })?.stream,
-                   let genre = DetailFormatting.genreList(record.genre).first { genres.insert(genre) }
-            case "series":
-                if let sid = item.seriesId.flatMap(Int.init) ?? Int(item.streamId) { watchedSeriesIds.insert(sid) }
-                if let record = contentStore.seriesItems.first(where: { "\($0.series.seriesId)" == (item.seriesId ?? item.streamId) })?.series,
-                   let genre = DetailFormatting.genreList(record.genre).first { genres.insert(genre) }
-            default: break
-            }
-        }
-        if !genres.isEmpty {
-            var picks: [FeaturedEntry] = []
-            for item in contentStore.vodStreams where !watchedMovieIds.contains(item.stream.streamId) {
-                if let genre = DetailFormatting.genreList(item.stream.genre).first, genres.contains(genre) {
-                    picks.append(.movie(item.stream))
-                }
-                if picks.count >= 6 { break }
-            }
-            for item in contentStore.seriesItems where !watchedSeriesIds.contains(item.series.seriesId) {
-                if let genre = DetailFormatting.genreList(item.series.genre).first, genres.contains(genre) {
-                    picks.append(.series(item.series))
-                }
-                if picks.count >= 10 { break }
-            }
-            becauseYouWatched = picks
-        } else {
-            becauseYouWatched = []
-        }
-
-        var lastWatchedBySeries: [Int: Date] = [:]
-        for item in recentHistory where item.type == "series" {
-            guard let sid = item.seriesId.flatMap(Int.init) ?? Int(item.streamId) else { continue }
-            if let existing = lastWatchedBySeries[sid] {
-                if item.lastWatchedAt > existing { lastWatchedBySeries[sid] = item.lastWatchedAt }
-            } else {
-                lastWatchedBySeries[sid] = item.lastWatchedAt
-            }
-        }
-        newEpisodeSeries = lastWatchedBySeries.compactMap { (sid, watchedAt) -> DBSeries? in
-            guard let record = contentStore.seriesItems.first(where: { $0.series.seriesId == sid })?.series,
-                  let modified = record.lastModified.flatMap(Int.init) else { return nil }
-            return TimeInterval(modified) > watchedAt.timeIntervalSince1970 ? record : nil
-        }
+        // Build 66 (W3): the Because-you-watched picks block and
+        // the New-episodes derivation that used to run here are
+        // deleted with their shelves (Critic kills) — no genre
+        // inference over watch history remains on Home.
 
         let lastVisit = UserDefaults.standard.double(forKey: Self.lastVisitKey)
         if lastVisit > 0 {
@@ -2466,6 +2439,44 @@ struct HomeView: View {
             newSinceVisit = fresh
         } else {
             newSinceVisit = []
+        }
+
+        // Build 66 (W3, item 17 — Home half of the parental-lock
+        // leak fix): every Home pool drops items whose category is
+        // blocked by ParentalControlStore — the SAME verdict the
+        // detail pages enforce (MovieDetailView's guard) — so a
+        // locked category's titles/posters never render on Home at
+        // all. One filter per pool, here in the recompute pass,
+        // never per-cell. Session-unlocked categories pass (the
+        // store's verdict already accounts for the unlock).
+        let parental = ParentalControlStore.shared
+        featured = featured.filter { entry in
+            switch entry {
+            case .movie(let movie):
+                return !parental.isBlocked(playlistId: playlist.id, type: "vod", categoryId: movie.categoryId)
+            case .series(let series):
+                return !parental.isBlocked(playlistId: playlist.id, type: "series", categoryId: series.categoryId)
+            }
+        }
+        topRatedMovies = topRatedMovies.filter {
+            !parental.isBlocked(playlistId: playlist.id, type: "vod", categoryId: $0.categoryId)
+        }
+        topRatedSeries = topRatedSeries.filter {
+            !parental.isBlocked(playlistId: playlist.id, type: "series", categoryId: $0.categoryId)
+        }
+        newMovies = newMovies.filter {
+            !parental.isBlocked(playlistId: playlist.id, type: "vod", categoryId: $0.categoryId)
+        }
+        newSeries = newSeries.filter {
+            !parental.isBlocked(playlistId: playlist.id, type: "series", categoryId: $0.categoryId)
+        }
+        newSinceVisit = newSinceVisit.filter { entry in
+            switch entry {
+            case .movie(let movie):
+                return !parental.isBlocked(playlistId: playlist.id, type: "vod", categoryId: movie.categoryId)
+            case .series(let series):
+                return !parental.isBlocked(playlistId: playlist.id, type: "series", categoryId: series.categoryId)
+            }
         }
 
         // Build 61 fixer (F-3): the O1 cross-row dedupe runs LAST in
