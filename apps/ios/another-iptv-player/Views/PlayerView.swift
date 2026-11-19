@@ -746,6 +746,23 @@ private struct PlayerViewImpl: View {
             // Mini kartta durum çubuğu her zaman görünür.
             .statusBarHidden(statusBarHiddenInCurrentMode)
         .onAppear {
+            // Build 63 (owner, item 3): the player owns the
+            // orientation lock while it is on screen (see
+            // `applyPlayerOrientation`). Nothing else in the app
+            // ever raised the browse portrait lock for the player,
+            // so rotating the phone during playback did nothing.
+            applyPlayerOrientation()
+        }
+        .onChange(of: overlayMode) { _, _ in
+            applyPlayerOrientation()
+        }
+        .onChange(of: controlsLocked) { _, _ in
+            // V2 screen lock freezes orientation too (item 3's
+            // lock rule); unlocking hands rotation back to the
+            // device.
+            applyPlayerOrientation()
+        }
+        .onAppear {
             log.info("Opening player: \(title, privacy: .public)")
             resetTimer()
             player.setupAudioHandler()
@@ -801,6 +818,10 @@ private struct PlayerViewImpl: View {
         // playerChromeAndVideo) and never touches the load path.
         .onReceive(NotificationCenter.default.publisher(for: .superXLiveZap)) { _ in
             zapSweepTrigger += 1
+        }
+        .onDisappear {
+            // Build 63 (item 3): hand the browse portrait lock back.
+            restoreBrowseOrientation()
         }
         .onDisappear {
             timer?.invalidate()
@@ -941,6 +962,55 @@ private struct PlayerViewImpl: View {
                 swapSkipForNav: isLiveStream
             )
         }
+    }
+
+    // MARK: - Build 63 (item 3): device-rotation following
+
+    /// The orientation rule the owner asked for: while the player
+    /// is FULLSCREEN and the V2 screen lock is OFF, the interface
+    /// follows the device (rotate to landscape → fullscreen
+    /// landscape; rotate back → portrait). Screen lock ON freezes
+    /// the CURRENT orientation, exactly the pre-63 behaviour of a
+    /// locked player. The mini player and every non-player surface
+    /// stay under the browse lock (portrait on iPhone). iPad is
+    /// untouched (its browse lock already allows rotation).
+    /// Playback semantics and the V1–V6 control layout are not
+    /// touched — this only drives `AppDelegate.orientationLock`,
+    /// the app's existing orientation plumbing.
+    private func applyPlayerOrientation() {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { return }
+        if overlayMode == .mini {
+            AppDelegate.setOrientationLock(
+                AppDelegate.browseOrientationLock,
+                forceOrientation: .portrait
+            )
+            return
+        }
+        if controlsLocked {
+            let scene = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first(where: { $0.activationState == .foregroundActive })
+                ?? UIApplication.shared.connectedScenes
+                    .compactMap { $0 as? UIWindowScene }.first
+            switch scene?.interfaceOrientation {
+            case .landscapeLeft:
+                AppDelegate.setOrientationLock(.landscapeLeft)
+            case .landscapeRight:
+                AppDelegate.setOrientationLock(.landscapeRight)
+            default:
+                AppDelegate.setOrientationLock(.portrait)
+            }
+        } else {
+            AppDelegate.setOrientationLock(.allButUpsideDown)
+        }
+    }
+
+    private func restoreBrowseOrientation() {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { return }
+        AppDelegate.setOrientationLock(
+            AppDelegate.browseOrientationLock,
+            forceOrientation: .portrait
+        )
     }
 
     private func applyPlaybackTransitionIfNeeded() {

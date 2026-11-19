@@ -37,6 +37,9 @@ struct MovieDetailView: View {
     // VOD detail-open path — mirrors LiveStreamsView's live guard.
     @State private var parentalBlocked = false
     @State private var showParentalPIN = false
+    /// Build 63 (item 6): a Play tap that cannot build a stream
+    /// URL must SAY so — build 62 returned silently here.
+    @State private var showPlayFailure = false
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
     @Query<VODByIDRequest> private var movieRecord: DBVODStream?
     @Query<IsFavoriteRequest> private var isFavorite: Bool
@@ -259,6 +262,11 @@ struct MovieDetailView: View {
                 }
                 parentalBlocked = false
             }
+        }
+        // Build 63 (item 6): the play-failure alert (existing
+        // playback error copy — no new strings).
+        .alert(L("playback.error.failed_to_start"), isPresented: $showPlayFailure) {
+            Button(L("common.ok")) { showPlayFailure = false }
         }
         .overlay {
             if parentalBlocked {
@@ -640,8 +648,12 @@ struct MovieDetailView: View {
 
     private func presentMoviePlayer(resume: Bool) {
         Task {
+            // Build 63 (item 6): bounded lookup — Play presents
+            // within ~1.5 s worst case, streaming from the remote
+            // URL if the local-file check can't answer in time.
             let localURL = await DownloadManager.shared.localURL(
-                forId: DownloadManager.idFor(vod: playlist.id, streamId: currentMovie.streamId)
+                forId: DownloadManager.idFor(vod: playlist.id, streamId: currentMovie.streamId),
+                timeout: 1.5
             )
             await MainActor.run {
                 presentMoviePlayer(resume: resume, localOverrideURL: localURL)
@@ -697,7 +709,12 @@ struct MovieDetailView: View {
                 containerExtension: currentMovie.containerExtension
             ) ?? URL(fileURLWithPath: "/dev/null")
         }()
-        guard url.path != "/dev/null" else { return }
+        guard url.path != "/dev/null" else {
+            // Build 63 (item 6): was a silent return — the tap
+            // looked dead. Surface the plain failure instead.
+            showPlayFailure = true
+            return
+        }
         let parts = [currentMovie.genre, currentMovie.releaseDate].compactMap { $0 }.filter { !$0.isEmpty }
         playerOverlay.present(skipDownloadCheck: localOverrideURL != nil, playlistId: playlist.id) {
             PlayerView(

@@ -1166,3 +1166,28 @@
 "audioonly.default.title" = "Solo audio por defecto";
 "audioonly.off" = "Desactivar solo audio";
 "audioonly.on" = "Activar solo audio";
+
+// Build 63: matches detail / follow / extras (items 8b-12)
+"matches.detail.timeline" = "Cronología";
+"matches.detail.top_performers" = "Destacados";
+"matches.detail.team_stats" = "Estadísticas del equipo";
+"matches.detail.no_details" = "Aún no hay detalles disponibles para este partido.";
+"matches.follow" = "Seguir";
+"matches.following" = "Siguiendo";
+"matches.notify.title" = "Notificaciones";
+"matches.notify.goals" = "Goles";
+"matches.notify.kickoff" = "Inicio del partido";
+"matches.notify.fulltime" = "Resultado final";
+"matches.standings" = "Clasificación";
+"matches.scorers" = "Goleadores";
+"matches.watch.title" = "Ver en tus canales";
+"matches.watch.none" = "No encontrado en tus listas";
+"matches.myteams" = "Mis equipos";
+"matches.lineups" = "Alineaciones";
+"matches.reminder.title" = "Recordatorio de partido";
+"matches.reminder.body" = "El partido empieza en 15 minutos";
+"matches.goal" = "¡Gol!";
+"matches.team.next" = "Próximos partidos";
+"matches.team.recent" = "Resultados recientes";
+"matches.team.squad" = "Plantilla";
+"matches.search.placeholder" = "Buscar equipos";

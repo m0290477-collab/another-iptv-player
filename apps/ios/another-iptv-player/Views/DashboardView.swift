@@ -287,7 +287,31 @@ struct DashboardView: View {
             }
             .environmentObject(playerOverlay)
         }
+        // Build 63 (item 9): a push tap lands here — the router's
+        // pending deep link presents the match detail as a sheet.
+        .sheet(item: $matchDeepLink.pending) { link in
+            NavigationStack {
+                MatchDetailView(
+                    sport: link.sport, leaguePath: link.leaguePath, eventId: link.eventId
+                )
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(L("common.close")) { matchDeepLink.pending = nil }
+                    }
+                }
+            }
+            .environmentObject(playerOverlay)
+        }
+        // Build 63 (item 12d): the goal celebration host —
+        // browsing only; GoalAlertPresenter drops every alert
+        // while a player presentation is active, so this can
+        // never appear over playback.
+        .overlay { GoalAlertHostView() }
+        .onAppear { GoalAlertService.shared.startIfNeeded() }
     }
+
+    /// Build 63 (item 9): push deep-link router (shared).
+    @ObservedObject private var matchDeepLink = MatchDeepLinkRouter.shared
 
     // MARK: - Round 15 (C3): pending Siri / App Intent playback
 

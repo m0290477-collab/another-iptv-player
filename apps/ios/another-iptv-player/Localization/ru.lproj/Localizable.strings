@@ -1166,3 +1166,28 @@
 "audioonly.default.title" = "Только аудио по умолчанию";
 "audioonly.off" = "Выключить только аудио";
 "audioonly.on" = "Включить только аудио";
+
+// Build 63: matches detail / follow / extras (items 8b-12)
+"matches.detail.timeline" = "Ход матча";
+"matches.detail.top_performers" = "Лучшие игроки";
+"matches.detail.team_stats" = "Статистика команд";
+"matches.detail.no_details" = "Подробности этого матча пока недоступны.";
+"matches.follow" = "Подписаться";
+"matches.following" = "Вы подписаны";
+"matches.notify.title" = "Уведомления";
+"matches.notify.goals" = "Голы";
+"matches.notify.kickoff" = "Начало матча";
+"matches.notify.fulltime" = "Финальный результат";
+"matches.standings" = "Таблица";
+"matches.scorers" = "Бомбардиры";
+"matches.watch.title" = "Смотреть на ваших каналах";
+"matches.watch.none" = "Не найдено в ваших плейлистах";
+"matches.myteams" = "Мои команды";
+"matches.lineups" = "Составы";
+"matches.reminder.title" = "Напоминание о матче";
+"matches.reminder.body" = "Матч начнётся через 15 минут";
+"matches.goal" = "Гол!";
+"matches.team.next" = "Следующие матчи";
+"matches.team.recent" = "Последние результаты";
+"matches.team.squad" = "Состав";
+"matches.search.placeholder" = "Поиск команд";

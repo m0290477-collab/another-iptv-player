@@ -76,9 +76,20 @@ struct EmptyStateView: View {
 /// pure view swap: it owns no state beyond its pulse and never
 /// touches buffering/loading logic at any call site. Static (no
 /// pulse) under Reduce Motion / Q21 / motion-off.
+///
+/// Build 63 (item 13, owner): in the player the loader read as
+/// DEAD — the flame's pulse is subtle and the ring arc never
+/// moved, so a buffering channel looked frozen. The ring now
+/// ROTATES (one light linear spin) for as long as the loader is
+/// on screen; every call site shows this view only during its
+/// loading state and removes it the moment content plays, so
+/// the spin exists exactly while loading is alive and stops
+/// with it. Same size/art; static under Reduce Motion / Q21 /
+/// motion-off, as before.
 struct BrandedLoader: View {
     var size: CGFloat = 44
     @State private var pulsing = false
+    @State private var spinning = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var animates: Bool { EffectsGate.allowsHeavyEffects(reduceMotion: reduceMotion) }
@@ -93,7 +104,13 @@ struct BrandedLoader: View {
                     AppTheme.brandGradient,
                     style: StrokeStyle(lineWidth: 3, lineCap: .round)
                 )
-                .rotationEffect(.degrees(-90))
+                .rotationEffect(.degrees(-90 + (spinning ? 360 : 0)))
+                .animation(
+                    animates
+                        ? .linear(duration: 1.1).repeatForever(autoreverses: false)
+                        : nil,
+                    value: spinning
+                )
             Image(systemName: "flame.fill")
                 .font(.system(size: size * 0.42, weight: .bold))
                 .foregroundStyle(AppTheme.brandGradient)
@@ -103,10 +120,13 @@ struct BrandedLoader: View {
         .frame(width: size, height: size)
         .accessibilityLabel(L("b7.loader.loading"))
         .onAppear {
-            guard animates, !pulsing else { return }
-            withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
-                pulsing = true
+            guard animates else { return }
+            if !pulsing {
+                withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
+                    pulsing = true
+                }
             }
+            if !spinning { spinning = true }
         }
     }
 }
@@ -357,10 +377,12 @@ enum HomeRowKind: String, CaseIterable {
 
     /// O1 default: Continue Watching → Continue Series → Recent
     /// Channels → Live → Movies/Series (discovery) → Recently
-    /// Added → Today's Matches.
+    /// Added. Build 63 (item 7): `.matches` is no longer a Home
+    /// row — the sports moved to top shortcut tiles — so it is
+    /// out of the default order and filtered from restored ones.
     static let defaultOrder: [HomeRowKind] = [
         .continueWatching, .continueSeries, .recentChannels, .live,
-        .discovery, .recentlyAdded, .matches
+        .discovery, .recentlyAdded
     ]
 }
 
@@ -372,7 +394,9 @@ final class HomeSectionOrderStore: ObservableObject {
 
     private init() {
         let stored = UserDefaults.standard.stringArray(forKey: Self.storageKey) ?? []
-        var restored = stored.compactMap(HomeRowKind.init(rawValue:))
+        // Build 63 (item 7): `.matches` rows from earlier builds'
+        // stored orders are dropped — the row no longer exists.
+        var restored = stored.compactMap(HomeRowKind.init(rawValue:)).filter { $0 != .matches }
         // Sanitize: drop duplicates, append any row the stored order
         // predates (new rows land at their O1 position's end-state —
         // appended in default order), so the list is always complete.

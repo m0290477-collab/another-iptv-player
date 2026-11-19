@@ -529,13 +529,14 @@ enum CatalogCountFormatter {
 
 // MARK: - Ranked poster card (round 5)
 
-/// Top-Rated row card (elite Home design): a poster with a giant OUTLINED
-/// rank numeral overlapping its left edge, the title under the poster and
-/// the real rating (gold star) beside it. Round 8 (audit C3) cut the
-/// numeral to two layers; round 9 replaces those with a TRUE outline
-/// (see `rankNumeral`). Only items with a valid normalized rating ever
-/// reach this card (callers filter), so the rating line always shows a
-/// real score.
+/// Top-Rated row card (elite Home design): a poster with its rank
+/// as a compact badge INSIDE the poster's bottom-leading corner
+/// (build 63, item 5 — the round-9 giant outlined numeral that
+/// overlapped the left edge overflowed the card and is gone), the
+/// title under the poster and the real rating (gold star) beside
+/// it. Only items with a valid normalized rating ever reach this
+/// card (callers filter), so the rating line always shows a real
+/// score.
 struct RankedPosterCard: View {
     let rank: Int
     let imageURL: URL?
@@ -561,10 +562,8 @@ struct RankedPosterCard: View {
                     iconName: iconName,
                     loadProfile: .shelf
                 )
-                .padding(.leading, 26)
 
                 rankNumeral
-                    .offset(y: 10)
             }
 
             Text(title)
@@ -572,7 +571,6 @@ struct RankedPosterCard: View {
                 .foregroundStyle(.primary)
                 .lineLimit(2)
                 .frame(width: posterWidth, alignment: .leading)
-                .padding(.leading, 26)
 
             if let metaText {
                 Text(metaText)
@@ -580,8 +578,7 @@ struct RankedPosterCard: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .frame(width: posterWidth, alignment: .leading)
-                    .padding(.leading, 26)
-            }
+                }
 
             if let ratingText {
                 HStack(spacing: 4) {
@@ -592,80 +589,41 @@ struct RankedPosterCard: View {
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.secondary)
                 }
-                .padding(.leading, 26)
             }
         }
     }
 
     private var rankNumeral: some View {
-        // Round 9 (owner screenshot, build 45): the round-8 two-layer
-        // trick — a white copy scaled 1.05 behind a copy FILLED with
-        // the near-black background color — rendered as a SOLID BLACK
-        // digit with a hairline rim: a black hole on dark posters and
-        // a black sticker on light ones ("the color is black, it's not
-        // visible"). The approved ELITE pattern is an OUTLINED numeral,
-        // so the digit is now drawn stroke-only (transparent interior)
-        // with a strong light stroke and a soft dark shadow that keeps
-        // the outline legible over light AND dark art. One layer, no
-        // fill anywhere. Size and overlap position are unchanged; the
-        // two-digit "10" sizes intrinsically wider, exactly as the old
-        // Text did.
-        OutlinedRankText(text: "\(rank)", fontSize: 84)
-            .shadow(color: .black.opacity(0.45), radius: 7, x: 0, y: 2)
+        // Build 63 (owner, item 5): the round-9 giant OUTLINED
+        // numeral (84 pt stroke text, offset past the card's bottom
+        // edge) overflowed its card — glyphs far larger than the
+        // poster bled over the art and into the neighbouring
+        // cards. The rank is now a compact BADGE contained inside
+        // the poster's own bounds: fixed 15 pt bold numerals (the
+        // widest case, "10", is a ~34 pt pill), dark fill + accent
+        // ring, pinned 8 pt inside the bottom-leading corner. It
+        // can never exceed the card: its size does not scale with
+        // anything and it lives entirely within the poster frame.
+        Text("\(rank)")
+            .font(.system(size: 15, weight: .black))
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.black.opacity(0.72))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(AppTheme.accent, lineWidth: 1)
+                    )
+            )
+            .padding(8)
     }
 }
 
-/// Stroke-only text for the Top-Rated rank numerals. SwiftUI `Text` has
-/// no text-stroke, so this wraps a `UILabel` whose attributed string
-/// uses a POSITIVE `strokeWidth` — CoreText then paints ONLY the stroke
-/// (the glyph interior stays transparent; the poster shows through).
-/// The stroke is specified as a percentage of the font size
-/// (4.5% of 84 pt ≈ 3.8 pt), thick enough to read as a design outline
-/// at arm's length. The label's own shadow is drawn from the stroked
-/// glyphs, grounding the numeral on light posters.
-private struct OutlinedRankText: UIViewRepresentable {
-    let text: String
-    let fontSize: CGFloat
-
-    private var attributed: NSAttributedString {
-        NSAttributedString(
-            string: text,
-            attributes: [
-                .font: UIFont.systemFont(ofSize: fontSize, weight: .black),
-                .strokeColor: UIColor.white.withAlphaComponent(0.95),
-                .strokeWidth: 4.5,
-                .foregroundColor: UIColor.clear
-            ]
-        )
-    }
-
-    func makeUIView(context: Context) -> UILabel {
-        let label = UILabel()
-        label.backgroundColor = .clear
-        label.clipsToBounds = false
-        label.shadowColor = UIColor.black.withAlphaComponent(0.55)
-        label.shadowOffset = CGSize(width: 0, height: 2)
-        label.attributedText = attributed
-        return label
-    }
-
-    func updateUIView(_ label: UILabel, context: Context) {
-        label.attributedText = attributed
-    }
-
-    func sizeThatFits(
-        _ proposal: ProposedViewSize,
-        uiView: UILabel,
-        context: Context
-    ) -> CGSize? {
-        // Intrinsic text size: one digit is compact, "10" takes the
-        // width it needs — the card's ZStack imposes no fixed frame.
-        uiView.attributedText = attributed
-        return uiView.sizeThatFits(
-            CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        )
-    }
-}
+// Build 63 (item 5): OutlinedRankText (the 84 pt stroke numeral) was
+// removed with the badge redesign — nothing renders it anymore.
 
 // MARK: - In-view search field (round 10)
 

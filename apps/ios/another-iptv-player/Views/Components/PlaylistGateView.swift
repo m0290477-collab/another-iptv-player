@@ -1226,8 +1226,17 @@ struct PlaylistGateView: View {
         if addStages.isEmpty { resetStages(); setStage(.connecting, .done); setStage(.verifying, .done) }
         setStage(.loadingChannels, .active)
         do {
-            try await PlaylistSaveService.syncXtream(playlist: newPlaylist, client: client) { message in
-                self.progressMessage = message
+            // Build 63: bounded content import, same budget as the
+            // service path (600 s) — a timeout surfaces as the
+            // plain unreachable error instead of an endless stage.
+            do {
+                try await PlaylistValidationService.withStageTimeout(600) {
+                    try await PlaylistSaveService.syncXtream(playlist: newPlaylist, client: client) { message in
+                        self.progressMessage = message
+                    }
+                }
+            } catch is PlaylistValidationService.StageTimeoutError {
+                throw PlaylistValidationService.ValidationFailure.unreachable
             }
             guard !Task.isCancelled else {
                 await MainActor.run {
@@ -1241,9 +1250,15 @@ struct PlaylistGateView: View {
             setStage(.loadingMoviesSeries, .done)
 
             let compatibility = await PlaylistValidationService.probeCompatibility(playlist: newPlaylist)
-            let guideFailed = await PlaylistValidationService.runGuideStage(playlist: newPlaylist) { stage, state in
-                self.setStage(stage, state)
+            // Build 63: the guide no longer blocks the add here
+            // either — background handoff, stage completes at once
+            // (see PlaylistValidationService.importXtream).
+            self.setStage(.loadingGuide, .active)
+            if newPlaylist.epgEnabled {
+                GuideBackgroundLoader.start(playlist: newPlaylist)
             }
+            self.setStage(.loadingGuide, .done)
+            let guideFailed = false
             let counts = await PlaylistValidationService.importedCounts(playlistId: newPlaylist.id, kind: .xtream)
             let expiry = ProviderExpiryStore.expiryDate(playlistId: newPlaylist.id)
 

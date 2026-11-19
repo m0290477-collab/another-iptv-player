@@ -21,22 +21,93 @@ struct AddPlaylistProgressView: View {
     let stages: [PlaylistValidationService.Stage: PlaylistValidationService.StageState]
     let onCancel: () -> Void
 
+    // Build 63 (owner pick, Style 2 "Bar"): the checklist is
+    // replaced by a slim red-orange progress bar across the top,
+    // a row of step dots (completed filled), the current step
+    // label, and a Cancel text action — all derived PURELY from
+    // the same stage states; semantics unchanged. The mockup's
+    // big counting numbers live on the SUMMARY card (below):
+    // real counts exist only once content is stored, and this
+    // view never fabricates mid-load numbers.
+
+    private var orderedStages: [PlaylistValidationService.Stage] {
+        PlaylistValidationService.Stage.allCases.sorted { $0.rawValue < $1.rawValue }
+    }
+
+    private func state(of stage: PlaylistValidationService.Stage) -> PlaylistValidationService.StageState {
+        stages[stage] ?? .pending
+    }
+
+    /// Bar fraction: each finished stage contributes its full
+    /// share; the active stage contributes half of its share.
+    private var progressFraction: Double {
+        let total = Double(max(orderedStages.count, 1))
+        var value = 0.0
+        for stage in orderedStages {
+            switch state(of: stage) {
+            case .done, .failed: value += 1
+            case .active: value += 0.5
+            case .pending: break
+            }
+        }
+        return min(value / total, 1)
+    }
+
+    /// The stage the label names: the active one, else the
+    /// failed one, else the next pending, else the last.
+    private var currentStage: PlaylistValidationService.Stage {
+        orderedStages.first { state(of: $0) == .active }
+            ?? orderedStages.first { state(of: $0) == .failed }
+            ?? orderedStages.first { state(of: $0) == .pending }
+            ?? orderedStages.last!
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
+            // Slim progress bar across the top.
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(AppTheme.surface)
+                        .frame(height: 5)
+                    Capsule()
+                        .fill(AppTheme.accent)
+                        .frame(width: proxy.size.width * progressFraction, height: 5)
+                }
+            }
+            .frame(height: 5)
+            .animation(.easeInOut(duration: 0.35), value: progressFraction)
+
             Text(L("addplaylist.progress.title"))
                 .font(.headline)
-            ForEach(PlaylistValidationService.Stage.allCases, id: \.rawValue) { stage in
-                HStack(spacing: 10) {
-                    stageIcon(stages[stage] ?? .pending)
-                    Text(L(stage.titleKey))
-                        .font(.subheadline)
-                        .foregroundStyle(stages[stage] == .pending ? .secondary : .primary)
-                    Spacer()
+
+            // Step dots: done filled, active ringed, failed
+            // orange, pending hollow.
+            HStack(spacing: 0) {
+                ForEach(orderedStages, id: \.rawValue) { stage in
+                    stepDot(state(of: stage))
+                    if stage != orderedStages.last {
+                        Spacer(minLength: 8)
+                    }
                 }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(L(stage.titleKey))
-                .accessibilityValue(accessibilityValue(for: stages[stage] ?? .pending))
             }
+            .accessibilityHidden(true)
+
+            // Current step label.
+            HStack(spacing: 8) {
+                if state(of: currentStage) == .active {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(AppTheme.accent)
+                }
+                Text(L(currentStage.titleKey))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(state(of: currentStage) == .failed ? .orange : .primary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(L(currentStage.titleKey))
+            .accessibilityValue(accessibilityValue(for: state(of: currentStage)))
+
             Button(L("common.cancel")) { onCancel() }
                 .font(.subheadline.weight(.semibold))
                 .foregroundColor(AppTheme.accent)
@@ -49,28 +120,19 @@ struct AddPlaylistProgressView: View {
     }
 
     @ViewBuilder
-    private func stageIcon(_ state: PlaylistValidationService.StageState) -> some View {
-        // Decorative: the row's combined accessibility element
-        // already announces the stage + state (Q24).
-        Group { stageIconBody(state) }
-            .accessibilityHidden(true)
-    }
-
-    @ViewBuilder
-    private func stageIconBody(_ state: PlaylistValidationService.StageState) -> some View {
+    private func stepDot(_ state: PlaylistValidationService.StageState) -> some View {
         switch state {
-        case .pending:
-            Image(systemName: "circle")
-                .foregroundStyle(.secondary)
-        case .active:
-            ProgressView()
-                .frame(width: 20, height: 20)
         case .done:
-            // X7 (B7): drawn animated check on stage completion.
-            AnimatedCheckView(size: 20)
+            Circle().fill(AppTheme.accent).frame(width: 12, height: 12)
+        case .active:
+            ZStack {
+                Circle().stroke(AppTheme.accent, lineWidth: 2).frame(width: 14, height: 14)
+                Circle().fill(AppTheme.accent).frame(width: 6, height: 6)
+            }
         case .failed:
-            Image(systemName: "exclamationmark.circle.fill")
-                .foregroundStyle(.orange)
+            Circle().fill(.orange).frame(width: 12, height: 12)
+        case .pending:
+            Circle().stroke(Color.secondary.opacity(0.5), lineWidth: 1.5).frame(width: 12, height: 12)
         }
     }
 
@@ -126,11 +188,14 @@ struct AddPlaylistSummaryView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                countRow(icon: "tv", text: L("addplaylist.summary.live", summary.liveCount))
+            // Build 63 (Style 2): the big-number treatment from
+            // the picked mockup lives HERE, where the counts are
+            // real (read back from the database at summary time).
+            VStack(alignment: .leading, spacing: 6) {
+                bigCountRow(icon: "tv", text: L("addplaylist.summary.live", summary.liveCount))
                 if summary.playlist.kind == .xtream {
-                    countRow(icon: "film", text: L("addplaylist.summary.movies", summary.movieCount))
-                    countRow(icon: "rectangle.stack", text: L("addplaylist.summary.series", summary.seriesCount))
+                    bigCountRow(icon: "film", text: L("addplaylist.summary.movies", summary.movieCount))
+                    bigCountRow(icon: "rectangle.stack", text: L("addplaylist.summary.series", summary.seriesCount))
                 }
             }
 
@@ -196,13 +261,14 @@ struct AddPlaylistSummaryView: View {
         .shadow(radius: 20)
     }
 
-    private func countRow(icon: String, text: String) -> some View {
-        HStack(spacing: 8) {
+    private func bigCountRow(icon: String, text: String) -> some View {
+        HStack(spacing: 10) {
             Image(systemName: icon)
-                .foregroundStyle(.secondary)
-                .frame(width: 20)
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 22)
             Text(text)
-                .font(.subheadline)
+                .font(.title3.weight(.black))
+                .monospacedDigit()
         }
         .accessibilityElement(children: .combine)
     }

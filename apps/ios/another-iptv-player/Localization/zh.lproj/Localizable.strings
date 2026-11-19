@@ -1166,3 +1166,28 @@
 "audioonly.default.title" = "默认纯音频";
 "audioonly.off" = "关闭纯音频";
 "audioonly.on" = "开启纯音频";
+
+// Build 63: matches detail / follow / extras (items 8b-12)
+"matches.detail.timeline" = "比赛进程";
+"matches.detail.top_performers" = "最佳球员";
+"matches.detail.team_stats" = "球队数据";
+"matches.detail.no_details" = "本场比赛暂无详细信息。";
+"matches.follow" = "关注";
+"matches.following" = "已关注";
+"matches.notify.title" = "通知";
+"matches.notify.goals" = "进球";
+"matches.notify.kickoff" = "开球";
+"matches.notify.fulltime" = "全场结果";
+"matches.standings" = "积分榜";
+"matches.scorers" = "射手榜";
+"matches.watch.title" = "在你的频道观看";
+"matches.watch.none" = "在你的播放列表中未找到";
+"matches.myteams" = "我的球队";
+"matches.lineups" = "阵容";
+"matches.reminder.title" = "比赛提醒";
+"matches.reminder.body" = "比赛将在15分钟后开始";
+"matches.goal" = "进球！";
+"matches.team.next" = "接下来比赛";
+"matches.team.recent" = "最近战绩";
+"matches.team.squad" = "球员名单";
+"matches.search.placeholder" = "搜索球队";

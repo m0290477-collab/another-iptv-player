@@ -1166,3 +1166,28 @@
 "audioonly.default.title" = "الصوت فقط افتراضيًا";
 "audioonly.off" = "إيقاف الصوت فقط";
 "audioonly.on" = "تشغيل الصوت فقط";
+
+// Build 63: matches detail / follow / extras (items 8b-12)
+"matches.detail.timeline" = "الأحداث";
+"matches.detail.top_performers" = "أفضل اللاعبين";
+"matches.detail.team_stats" = "إحصائيات الفريقين";
+"matches.detail.no_details" = "لا توجد تفاصيل متاحة لهذه المباراة بعد.";
+"matches.follow" = "متابعة";
+"matches.following" = "تتم متابعته";
+"matches.notify.title" = "الإشعارات";
+"matches.notify.goals" = "الأهداف";
+"matches.notify.kickoff" = "بداية المباراة";
+"matches.notify.fulltime" = "النتيجة النهائية";
+"matches.standings" = "الترتيب";
+"matches.scorers" = "الهدافون";
+"matches.watch.title" = "شاهد على قنواتك";
+"matches.watch.none" = "غير موجود في قوائم التشغيل لديك";
+"matches.myteams" = "فرقي";
+"matches.lineups" = "التشكيلات";
+"matches.reminder.title" = "تذكير بالمباراة";
+"matches.reminder.body" = "بداية المباراة بعد 15 دقيقة";
+"matches.goal" = "هدف!";
+"matches.team.next" = "المباريات القادمة";
+"matches.team.recent" = "النتائج الأخيرة";
+"matches.team.squad" = "التشكيلة";
+"matches.search.placeholder" = "ابحث عن الفرق";

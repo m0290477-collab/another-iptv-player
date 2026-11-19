@@ -74,6 +74,38 @@ enum PlaylistValidationService {
         case pending, active, done, failed
     }
 
+    // MARK: - Build 63: bounded stages + background guide
+
+    /// Thrown by `withStageTimeout` when a stage overruns its
+    /// budget. Call sites map it onto their existing failure
+    /// surface (a probe/content timeout reads as `.unreachable`;
+    /// a guide timeout is the L3 partial-success failure).
+    struct StageTimeoutError: Error {}
+
+    /// Races `operation` against a hard deadline. The loser is
+    /// cancelled; a stage can therefore never hold the add flow
+    /// open indefinitely (build 62: the guide stage awaited a full
+    /// XMLTV download + parse inline and stalled the checklist on
+    /// large providers — the Xtream client's resource timeout
+    /// alone is 300 s and the parse is unbounded).
+    static func withStageTimeout<T: Sendable>(
+        _ seconds: TimeInterval,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw StageTimeoutError()
+            }
+            guard let result = try await group.next() else {
+                throw StageTimeoutError()
+            }
+            group.cancelAll()
+            return result
+        }
+    }
+
     /// L2/L3 outcome of a completed (or partially completed) add.
     struct AddSummary: Equatable {
         let playlist: Playlist
@@ -248,7 +280,14 @@ enum PlaylistValidationService {
         await onStage(.connecting, .active)
         let probed: (playlist: Playlist, response: XtreamAuthResponse, client: XtreamAPIClient)
         do {
-            probed = try await probeXtream(playlist: playlist)
+            // Build 63: bounded probe (the API client's resource
+            // timeout alone would allow a 300 s stall here).
+            probed = try await withStageTimeout(45) {
+                try await probeXtream(playlist: playlist)
+            }
+        } catch is StageTimeoutError {
+            await onStage(.connecting, .failed)
+            throw ValidationFailure.unreachable
         } catch {
             await onStage(.connecting, .failed)
             throw error
@@ -257,9 +296,19 @@ enum PlaylistValidationService {
         await onStage(.verifying, .done)
 
         await onStage(.loadingChannels, .active)
-        try await PlaylistSaveService.syncXtream(
-            playlist: probed.playlist, client: probed.client
-        ) { _ in }
+        // Build 63: the content import gets a generous but BOUNDED
+        // budget (huge catalogs legitimately take minutes; an
+        // unbounded await is what hung build 62's checklist).
+        do {
+            try await withStageTimeout(600) {
+                try await PlaylistSaveService.syncXtream(
+                    playlist: probed.playlist, client: probed.client
+                ) { _ in }
+            }
+        } catch is StageTimeoutError {
+            await onStage(.loadingChannels, .failed)
+            throw ValidationFailure.unreachable
+        }
         try Task.checkCancellation()
         await onStage(.loadingChannels, .done)
         await onStage(.loadingMoviesSeries, .done)
@@ -267,15 +316,29 @@ enum PlaylistValidationService {
         ProviderExpiryStore.record(playlistId: probed.playlist.id, expDate: probed.response.userInfo?.expDate)
 
         let counts = await importedCounts(playlistId: probed.playlist.id, kind: .xtream)
-        // Z1: compatibility probe AFTER the catalog load.
+        // Z1: compatibility probe AFTER the catalog load (capped
+        // internally — it can no longer hold the flow open either).
         let compatibility = await probeCompatibility(playlist: probed.playlist)
         if Task.isCancelled { throw CancellationError() }
-        let guideFailed = await runGuideStage(playlist: probed.playlist, onStage: onStage)
+        // Build 63 (owner report, build 62): the guide stage NO
+        // LONGER awaits the XMLTV download + parse inline — on a
+        // large provider that was minutes of dead checklist. The
+        // playlist is fully saved at this point; the guide load is
+        // handed to GuideBackgroundLoader (own 240 s budget, its
+        // progress/bookkeeping lands on the playlist's EPG source
+        // record, exactly like every other refresh) and the stage
+        // completes at handoff. A guide failure can therefore
+        // never block or fail an add again.
+        await onStage(.loadingGuide, .active)
+        if probed.playlist.epgEnabled {
+            GuideBackgroundLoader.start(playlist: probed.playlist)
+        }
+        await onStage(.loadingGuide, .done)
         return AddSummary(
             playlist: probed.playlist,
             expiryDate: ProviderExpiryStore.parseExpiryDate(probed.response.userInfo?.expDate),
             liveCount: counts.live, movieCount: counts.movies, seriesCount: counts.series,
-            failedStage: guideFailed ? .loadingGuide : nil,
+            failedStage: nil,
             compatibility: compatibility
         )
     }
@@ -297,7 +360,13 @@ enum PlaylistValidationService {
         await onStage(.connecting, .active)
         let probed: (content: String, parsed: ParsedM3UPlaylist, usedBackup: Bool)
         do {
-            probed = try await probeM3U(playlist: playlist, localContent: localContent)
+            // Build 63: bounded probe, same rule as Xtream.
+            probed = try await withStageTimeout(45) {
+                try await probeM3U(playlist: playlist, localContent: localContent)
+            }
+        } catch is StageTimeoutError {
+            await onStage(.connecting, .failed)
+            throw ValidationFailure.unreachable
         } catch {
             await onStage(.connecting, .failed)
             throw error
@@ -318,13 +387,15 @@ enum PlaylistValidationService {
         var saved = playlist
         saved.m3uEpgURL = probed.parsed.epgURL
         if localContent != nil { saved.serverURL = "" }
-        let guideFailed: Bool
-        if saved.effectiveEPGURL != nil {
-            guideFailed = await runGuideStage(playlist: saved, onStage: onStage)
-        } else {
-            await onStage(.loadingGuide, .done)
-            guideFailed = false
+        // Build 63: same guide rule as the Xtream path — the add
+        // completes once content is stored; the guide (when the
+        // source carries one) loads in the background under
+        // GuideBackgroundLoader and can never block completion.
+        await onStage(.loadingGuide, .active)
+        if saved.effectiveEPGURL != nil, saved.epgEnabled {
+            GuideBackgroundLoader.start(playlist: saved)
         }
+        await onStage(.loadingGuide, .done)
         // Z1: compatibility probe AFTER the catalog load.
         let compatibility = await probeCompatibility(playlist: saved)
         if Task.isCancelled { throw CancellationError() }
@@ -332,7 +403,7 @@ enum PlaylistValidationService {
             playlist: saved,
             expiryDate: nil,
             liveCount: probed.parsed.channels.count, movieCount: 0, seriesCount: 0,
-            failedStage: guideFailed ? .loadingGuide : nil,
+            failedStage: nil,
             compatibility: compatibility
         )
     }
@@ -354,6 +425,22 @@ enum PlaylistValidationService {
     /// with the add task; a cancelled probe returns nil (no ratio
     /// is shown) rather than a partial count presented as complete.
     static func probeCompatibility(playlist: Playlist) async -> CompatibilityResult? {
+        // Build 63: hard overall cap. The uncapped probe is up to
+        // 10 sequential first-bytes checks (≈8 s each worst case ≈
+        // 80 s) and in build 62 it ran BETWEEN the content stages
+        // and the guide with no stage active — an invisible stall
+        // at the end of the checklist. Overrunning the cap (or any
+        // failure) yields nil: no ratio shown, never a block.
+        do {
+            return try await withStageTimeout(25) {
+                await probeCompatibilityCapped(playlist: playlist)
+            }
+        } catch {
+            return nil
+        }
+    }
+
+    private static func probeCompatibilityCapped(playlist: Playlist) async -> CompatibilityResult? {
         let targets = await sampleTargets(playlist: playlist)
         guard !targets.isEmpty else { return nil }
         let config = URLSessionConfiguration.ephemeral
@@ -475,7 +562,12 @@ enum PlaylistValidationService {
             return false
         }
         do {
-            _ = try await EPGRefreshCoordinator().refresh(playlist: playlist) { _ in }
+            // Build 63: even the explicitly-awaited retry path is
+            // bounded now (180 s) — a timeout is the honest L3
+            // failure, not an endless spinner.
+            _ = try await withStageTimeout(180) {
+                try await EPGRefreshCoordinator().refresh(playlist: playlist) { _ in }
+            }
             await onStage(.loadingGuide, .done)
             return false
         } catch {
@@ -502,6 +594,36 @@ enum PlaylistValidationService {
             }
         }
         return counts.map { (live: $0.0, movies: $0.1, series: $0.2) } ?? (0, 0, 0)
+    }
+}
+
+// MARK: - Build 63: background guide loading
+
+/// Owns the post-add guide load. The add flow hands the playlist
+/// here once its content is stored and completes immediately; the
+/// refresh itself runs detached with a hard 240 s budget through
+/// the SAME `EPGRefreshCoordinator` every other refresh uses, so
+/// its progress and outcome land in the playlist's EPG source
+/// bookkeeping (attempt / success / error) and the guide UI's
+/// existing refresh state reflects it. One in-flight load per
+/// playlist — a re-add or a retry replaces the previous task.
+/// Errors are deliberately swallowed here: the coordinator has
+/// already recorded them on the playlist, which is where the
+/// user-facing surface reads them from.
+enum GuideBackgroundLoader {
+    private static let lock = NSLock()
+    private static var tasks: [UUID: Task<Void, Never>] = [:]
+
+    static func start(playlist: Playlist) {
+        lock.lock()
+        tasks[playlist.id]?.cancel()
+        let task = Task.detached {
+            _ = try? await PlaylistValidationService.withStageTimeout(240) {
+                try await EPGRefreshCoordinator().refresh(playlist: playlist) { _ in }
+            }
+        }
+        tasks[playlist.id] = task
+        lock.unlock()
     }
 }
 

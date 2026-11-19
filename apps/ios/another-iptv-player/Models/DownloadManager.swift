@@ -608,6 +608,27 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     /// The local file URL of a completed download (for playback).
+    /// Build 63 (owner, item 6): bounded variant for the detail
+    /// pages' Play path. Movie/series Play awaited this lookup
+    /// before presenting the player; if the await stalls (busy
+    /// database/download layer), the tap dies SILENTLY — no
+    /// player, no error. The bounded form races the lookup
+    /// against a deadline and falls back to the remote URL, so
+    /// Play can never be held hostage by it. Other callers keep
+    /// the unbounded form (they need the definitive answer).
+    func localURL(forId id: String, timeout: TimeInterval) async -> URL? {
+        await withTaskGroup(of: URL?.self) { group in
+            group.addTask { await self.localURL(forId: id) }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
     func localURL(forId id: String) async -> URL? {
         do {
             let row: DBDownloadedItem? = try await AppDatabase.shared.read { db in

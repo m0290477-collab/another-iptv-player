@@ -15,11 +15,37 @@ enum PlayerOverlayMode: Equatable {
 }
 
 final class PlayerOverlayController: ObservableObject {
-    @Published var presentation: PlayerOverlayPresentation?
+    /// Build 63 (item 12d, owner rule): cross-instance view of
+    /// player presentation for alert suppression. While ANY
+    /// player presentation is active the in-app goal celebration
+    /// is dropped; while one is FULLSCREEN, foreground push
+    /// presentation is suppressed entirely (no banner, no sound)
+    /// — "while watching, nothing may appear". Maintained from
+    /// `presentation`/`mode` below; read by PushNotificationService
+    /// and GoalAlertPresenter.
+    static private(set) var presentationActiveCount = 0
+    static private(set) var fullscreenPresented = false
+
+    @Published var presentation: PlayerOverlayPresentation? {
+        didSet {
+            if presentation != nil, oldValue == nil {
+                Self.presentationActiveCount += 1
+            } else if presentation == nil, oldValue != nil {
+                Self.presentationActiveCount = max(0, Self.presentationActiveCount - 1)
+            }
+            Self.fullscreenPresented = presentation != nil && mode == .fullscreen
+        }
+    }
     /// The pending presentation held for the confirmation alert shown while there is an active download.
     @Published var pendingPresentation: PlayerOverlayPresentation?
     /// Fullscreen vs. floating mini player. Reset to `.fullscreen` on every new presentation.
-    @Published var mode: PlayerOverlayMode = .fullscreen
+    @Published var mode: PlayerOverlayMode = .fullscreen {
+        didSet {
+            // Item 12d: mini ↔ fullscreen transitions update the
+            // suppression snapshot too.
+            Self.fullscreenPresented = presentation != nil && mode == .fullscreen
+        }
+    }
 
     /// If there is an active download on the same playlist, it asks the user for confirmation (so the server connection limits don't collide).
     /// Another playlist's download has no effect.

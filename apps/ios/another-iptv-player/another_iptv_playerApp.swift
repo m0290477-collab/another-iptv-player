@@ -1,5 +1,6 @@
 import SwiftUI
 import Nuke
+import UserNotifications
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     /// Round 9 (owner recording, build 45): the browse/tab interface is
@@ -87,6 +88,13 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // same launch-callback pattern; payloads (if any) land in
         // MetricKitService and surface only in Support diagnostics.
         MetricKitService.register()
+        // Build 63 (item 9): push-tap routing needs the delegate
+        // in place before a notification response can arrive.
+        // This is a plain object ASSIGNMENT only — no
+        // authorization request, no registration, no network, no
+        // observers (hard launch rule; registration happens when
+        // the user first follows a team).
+        UNUserNotificationCenter.current().delegate = PushNotificationService.shared
         // C2 (Round 15): memory-warning response — trim the IMAGE
         // memory cache only; the catalog and all DB state stay. (The
         // pipeline itself lives in CachedImage.swift, which is not the
@@ -98,6 +106,20 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             ImagePipeline.shared.cache.removeAll()
         }
         return true
+    }
+
+    /// Build 63 (item 9): APNs token delivery — a system callback
+    /// that can only fire after the user granted authorization in
+    /// the follow-a-team flow. Forwarded to the push service,
+    /// which stores the token and uploads the registration.
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        PushNotificationService.shared.didRegister(deviceToken: deviceToken)
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        PushNotificationService.shared.didFailToRegister()
     }
 
     /// The system calls it for background URLSession events. We forward the completion handler to DownloadManager;

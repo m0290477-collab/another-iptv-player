@@ -424,15 +424,13 @@ struct HomeView: View {
                 selectRecentlyAdded(entry)
             }
         case .matches:
-            // ── B12 (build 61, M1): Today's Matches entry — the
-            // LAST Home section per O1; Matches hangs off Home, it
-            // is NOT a tab (O2). Coordinator integration: F6 gate —
-            // hidden when the user hid the Matches section (B13's
-            // SectionVisibility key `sections.hidden.matches`).
-            if !UserDefaults.standard.bool(forKey: "sections.hidden.matches") {
-                matchesEntryRow
-                    .padding(.horizontal, 16)
-            }
+            // Build 63 (owner, item 7): the bottom-of-Home Matches
+            // entry is REMOVED — the sports moved to shortcut tiles
+            // at the top, beside the big category cards (see
+            // `sportTileRow`). The order store no longer emits this
+            // kind; the case stays only so persisted order arrays
+            // from earlier builds still parse.
+            EmptyView()
         }
     }
 
@@ -1220,6 +1218,52 @@ struct HomeView: View {
     // MARK: - Category tiles
 
     private var categoryTiles: some View {
+        VStack(spacing: 12) {
+            categoryTileRow
+            // Build 63 (owner, item 7): the three sports live HERE,
+            // at the top with the big category cards — one shortcut
+            // tile per sport in the same visual language (tinted
+            // icon disc + label + sublabel), each landing on its
+            // own Matches tab. The old bottom-of-Home Matches entry
+            // row is gone (HomeRowKind.matches no longer renders).
+            // Same F6 gate the bottom entry had: hidden when the
+            // user hid the Matches section.
+            if !UserDefaults.standard.bool(forKey: "sections.hidden.matches") {
+                sportTileRow
+            }
+        }
+    }
+
+    private var sportTileRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            HomeSportTile(
+                title: L("matches.tab.soccer"),
+                subtitle: L("matches.subtitle"),
+                tint: AppTheme.accent,
+                iconName: "soccerball",
+                sport: .soccer
+            )
+            HomeSportTile(
+                title: L("matches.tab.nfl"),
+                subtitle: L("matches.subtitle"),
+                tint: AppTheme.live,
+                iconName: "football.fill",
+                sport: .nfl
+            )
+            HomeSportTile(
+                title: L("matches.tab.nba"),
+                subtitle: L("matches.subtitle"),
+                tint: SectionTheme.series,
+                iconName: "basketball.fill",
+                sport: .nba
+            )
+        }
+        .padding(.horizontal, 16)
+        .frame(maxWidth: 560)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var categoryTileRow: some View {
         HStack(alignment: .top, spacing: 12) {
             // Round 10 (owner, build 46): STRONG-style icon cards —
             // a colored circular glyph + the section name + the REAL
@@ -1270,51 +1314,9 @@ struct HomeView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // ── B12 (build 61, M1) BEGIN: Today's Matches entry row ──
-    // One entry into MatchesView (live scores + results only, M-pack).
-    // NOTE for B7/coordinator: B13's F6 SectionVisibility store has not
-    // merged into this tree yet and no `sections.hidden.*` key exists
-    // here, so this row is not yet gated on the Matches visibility
-    // flag — wire it where the other Home sections consume that store.
-    private var matchesEntryRow: some View {
-        NavigationLink {
-            MatchesView()
-        } label: {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(AppTheme.accent.opacity(0.16))
-                        .frame(width: 40, height: 40)
-                    Image(systemName: "soccerball")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(AppTheme.accent)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L("matches.title"))
-                        .font(AppTheme.fontCardTitle)
-                        .foregroundStyle(.primary)
-                    Text(L("matches.subtitle"))
-                        .font(AppTheme.fontMetadata)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(AppTheme.fontBadge)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: AppTheme.cornerRadius)
-                    .fill(AppTheme.elevated)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppTheme.cornerRadius)
-                            .stroke(AppTheme.cardBorderColor, lineWidth: 1)
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-    }
-    // ── B12 (build 61, M1) END ──
+    // Build 63 (item 7): the B12 bottom Matches entry row was
+    // removed — sports are top shortcut tiles now (`sportTileRow`).
+
 
     // MARK: - Shelves
 
@@ -2635,6 +2637,50 @@ private struct HomeCategoryTile: View {
                     // catalog totals change.
                     .contentTransition(.numericText())
                     .animation(Motion.animate(.easeOut(duration: 0.35)), value: countText)
+            }
+            .padding(.vertical, 14)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity)
+            .background(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous).fill(AppTheme.surface))
+            .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
+        }
+        .buttonStyle(PressScaleButtonStyle())
+    }
+}
+
+/// Build 63 (owner, item 7): a sport shortcut tile in the exact
+/// visual language of `HomeCategoryTile` (tinted icon disc + bold
+/// label + secondary sublabel on the shared surface card), but as
+/// a NavigationLink — each sport lands on its own Matches tab.
+private struct HomeSportTile: View {
+    let title: String
+    let subtitle: String
+    let tint: Color
+    let iconName: String
+    let sport: MatchSport
+
+    var body: some View {
+        NavigationLink {
+            MatchesView(initialSport: sport)
+        } label: {
+            VStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(tint)
+                    Image(systemName: iconName)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 46, height: 46)
+
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             .padding(.vertical, 14)
             .padding(.horizontal, 8)

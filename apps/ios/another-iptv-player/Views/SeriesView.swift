@@ -1724,8 +1724,12 @@ struct SeriesDetailView: View {
 
     private func presentEpisodeOverlay(ep: DBEpisode, history: DBWatchHistory?) {
         Task {
+            // Build 63 (item 6): bounded lookup, same rule as the
+            // movie Play path — the tap can never die silently
+            // inside this await again.
             let localURL = await DownloadManager.shared.localURL(
-                forId: DownloadManager.idFor(episode: playlist.id, episodeId: ep.episodeId ?? ep.id)
+                forId: DownloadManager.idFor(episode: playlist.id, episodeId: ep.episodeId ?? ep.id),
+                timeout: 1.5
             )
             await MainActor.run {
                 presentEpisodeOverlay(ep: ep, history: history, localOverrideURL: localURL)

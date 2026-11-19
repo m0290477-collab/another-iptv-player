@@ -1184,3 +1184,28 @@
 "audioonly.default.title" = "Varsayılan Olarak Yalnızca Ses";
 "audioonly.off" = "Yalnızca Sesi Kapat";
 "audioonly.on" = "Yalnızca Sesi Aç";
+
+// Build 63: matches detail / follow / extras (items 8b-12)
+"matches.detail.timeline" = "Maç Akışı";
+"matches.detail.top_performers" = "Öne Çıkanlar";
+"matches.detail.team_stats" = "Takım İstatistikleri";
+"matches.detail.no_details" = "Bu maç için henüz detay yok.";
+"matches.follow" = "Takip Et";
+"matches.following" = "Takip Ediliyor";
+"matches.notify.title" = "Bildirimler";
+"matches.notify.goals" = "Goller";
+"matches.notify.kickoff" = "Maç Başlangıcı";
+"matches.notify.fulltime" = "Maç Sonucu";
+"matches.standings" = "Puan Durumu";
+"matches.scorers" = "Gol Kralları";
+"matches.watch.title" = "Kanallarında İzle";
+"matches.watch.none" = "Playlistlerinde bulunamadı";
+"matches.myteams" = "Takımlarım";
+"matches.lineups" = "Kadrolar";
+"matches.reminder.title" = "Maç Hatırlatıcısı";
+"matches.reminder.body" = "Maç 15 dakika içinde başlıyor";
+"matches.goal" = "Gol!";
+"matches.team.next" = "Sıradaki Maçlar";
+"matches.team.recent" = "Son Maçlar";
+"matches.team.squad" = "Kadro";
+"matches.search.placeholder" = "Takım Ara";

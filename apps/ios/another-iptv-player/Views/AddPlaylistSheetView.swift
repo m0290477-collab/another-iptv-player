@@ -447,13 +447,19 @@ struct AddPlaylistSheetView: View {
         resetStages()
         setStage(.connecting, .active)
         do {
-            let probed = try await PlaylistValidationService.probeXtream(playlist: newPlaylist)
+            // Build 63: bounded probe + bounded import, same
+            // budgets as the service path.
+            let probed = try await PlaylistValidationService.withStageTimeout(45) {
+                try await PlaylistValidationService.probeXtream(playlist: newPlaylist)
+            }
             setStage(.connecting, .done)
             setStage(.verifying, .done)
             setStage(.loadingChannels, .active)
             do {
-                try await PlaylistSaveService.syncXtream(playlist: probed.playlist, client: probed.client) { message in
-                    self.progressMessage = message
+                try await PlaylistValidationService.withStageTimeout(600) {
+                    try await PlaylistSaveService.syncXtream(playlist: probed.playlist, client: probed.client) { message in
+                        self.progressMessage = message
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -468,6 +474,14 @@ struct AddPlaylistSheetView: View {
             setStage(.loadingChannels, .done)
             setStage(.loadingMoviesSeries, .done)
             ProviderExpiryStore.record(playlistId: probed.playlist.id, expDate: probed.response.userInfo?.expDate)
+            // Build 63: guide loads in the background (this sheet
+            // never blocked on it; now it also doesn't wait for
+            // the dashboard's staleness check to fetch it).
+            setStage(.loadingGuide, .active)
+            if probed.playlist.epgEnabled {
+                GuideBackgroundLoader.start(playlist: probed.playlist)
+            }
+            setStage(.loadingGuide, .done)
             await MainActor.run {
                 self.isLoading = false
                 self.progressMessage = nil
@@ -477,6 +491,15 @@ struct AddPlaylistSheetView: View {
         } catch let failure as PlaylistValidationService.ValidationFailure {
             await MainActor.run {
                 self.errorMessage = failure.errorDescription
+                self.showError = true
+                self.isLoading = false
+                self.progressMessage = nil
+                self.addStages = [:]
+            }
+        } catch is PlaylistValidationService.StageTimeoutError {
+            // Build 63: a stage timeout reads as unreachable.
+            await MainActor.run {
+                self.errorMessage = PlaylistValidationService.ValidationFailure.unreachable.errorDescription
                 self.showError = true
                 self.isLoading = false
                 self.progressMessage = nil

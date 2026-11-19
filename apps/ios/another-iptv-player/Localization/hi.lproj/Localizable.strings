@@ -1166,3 +1166,28 @@
 "audioonly.default.title" = "डिफ़ॉल्ट रूप से केवल ऑडियो";
 "audioonly.off" = "केवल ऑडियो बंद करें";
 "audioonly.on" = "केवल ऑडियो चालू करें";
+
+// Build 63: matches detail / follow / extras (items 8b-12)
+"matches.detail.timeline" = "टाइमलाइन";
+"matches.detail.top_performers" = "शीर्ष प्रदर्शनकर्ता";
+"matches.detail.team_stats" = "टीम आँकड़े";
+"matches.detail.no_details" = "इस मैच के लिए अभी कोई विवरण उपलब्ध नहीं है।";
+"matches.follow" = "फ़ॉलो करें";
+"matches.following" = "फ़ॉलो किया गया";
+"matches.notify.title" = "सूचनाएँ";
+"matches.notify.goals" = "गोल";
+"matches.notify.kickoff" = "मैच शुरू";
+"matches.notify.fulltime" = "अंतिम परिणाम";
+"matches.standings" = "स्टैंडिंग";
+"matches.scorers" = "शीर्ष स्कोरर";
+"matches.watch.title" = "अपने चैनलों पर देखें";
+"matches.watch.none" = "आपकी प्लेलिस्ट में नहीं मिला";
+"matches.myteams" = "मेरी टीमें";
+"matches.lineups" = "लाइनअप";
+"matches.reminder.title" = "मैच रिमाइंडर";
+"matches.reminder.body" = "15 मिनट में मैच शुरू";
+"matches.goal" = "गोल!";
+"matches.team.next" = "आगामी मैच";
+"matches.team.recent" = "हाल के परिणाम";
+"matches.team.squad" = "दस्ता";
+"matches.search.placeholder" = "टीमें खोजें";
