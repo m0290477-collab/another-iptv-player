@@ -28,14 +28,15 @@ struct FollowedTeam: Codable, Equatable, Identifiable {
     var notifyFullTime: Bool = false
 }
 
-final class FollowedTeamsStore: ObservableObject {
+final class FollowedTeamsStore: NSObject, ObservableObject {
     static let shared = FollowedTeamsStore()
 
     private static let defaultsKey = "matches.followedTeams.v1"
 
     @Published private(set) var teams: [FollowedTeam] = []
 
-    private init() {
+    private override init() {
+        super.init()
         teams = Self.loadLocal()
         // iCloud KVS mirror: pull a newer synced set in when the
         // store changes externally (another device). Registered

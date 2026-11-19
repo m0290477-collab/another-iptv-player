@@ -376,7 +376,14 @@ struct MatchDetailView: View {
                 guard let playlist = resolved?.0, let stream = resolved?.1 else { return }
                 await MainActor.run {
                     playerOverlay.present(playlistId: playlist.id) {
-                        LivePlayerShell(playlist: playlist, stream: stream)
+                        LivePlayerShell(
+                            playlist: playlist,
+                            queue: [stream],
+                            sections: [],
+                            initialStream: stream,
+                            initialHistory: nil,
+                            subtitle: nil
+                        )
                     }
                 }
             }
