@@ -257,15 +257,8 @@ struct LiveStreamsView: View {
         .task(id: channelOrderStore.version) { await recomputeFilter() }
         .task(id: favoritesOnly) { await recomputeFilter() }
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                NavigationLink {
-                    EPGGuideView(source: .xtream(playlist))
-                } label: {
-                    Image(systemName: "calendar.day.timeline.left")
-                        .font(.body.weight(.semibold))
-                }
-                .accessibilityLabel(L("epg.guide.title"))
-            }
+            // Build 68 (owner order): the TV Guide / EPG feature is
+            // REMOVED entirely — this toolbar's guide entry is gone.
             // === B5 (build 61) Item 11: Multiview entry — wave-2 (B8) preserve this item ===
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -1237,7 +1230,15 @@ struct LiveCategoryContent: View, Equatable {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: posterMetrics.gridRowSpacing) {
                         ForEach(Array(displayItems.prefix(visibleCount).enumerated()), id: \.element.stream.streamId) { index, item in
-                            LiveStreamCard(
+                            // Build 68 (W-B, Live TV interior —
+                            // owner pick "Channel Tiles"): the grid
+                            // renders TILES (big centered logo, name,
+                            // logo + channel name ONLY — no
+                            // programme lines; the TV Guide / EPG
+                            // feature is removed, owner order). The
+                            // shelf/list presentation
+                            // keeps the build-66 LiveStreamCard.
+                            ChannelTileCard(
                                 playlistId: playlist.id,
                                 stream: item.stream,
                                 width: posterMetrics.liveGridIconSize,

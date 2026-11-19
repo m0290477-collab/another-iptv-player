@@ -216,6 +216,22 @@ struct SeriesView: View {
                                 categorySortHeader(for: category)
                                 categoryGrid(for: category)
                             } else {
+                            // Build 68 (W-B, Series interior —
+                            // owner pick "Progress Grid"): the
+                            // Continue Watching row of wide cards
+                            // sits at the TOP of the landing (it
+                            // replaces the ContinueWatchingRow that
+                            // used to sit below the rails — one
+                            // History surface, no duplication). It
+                            // renders only when real in-progress
+                            // series state exists.
+                            SeriesProgressContinueRow(
+                                playlist: playlist,
+                                progressBySeriesId: progressBySeriesId
+                            ) { item in
+                                presentSeriesHistoryItem(item)
+                            }
+
                             // Build 65 (inside-sections design): the
                             // Series featured hero (the Movies tab's
                             // B7 hero is the model), now under the
@@ -246,18 +262,12 @@ struct SeriesView: View {
                                 yearShelf(year: group.year, items: group.items)
                             }
 
-                            ContinueWatchingRow(
-                                playlist: playlist,
-                                typeFilter: "series",
-                                destination: {
-                                    WatchHistoryListView(playlist: playlist, typeFilter: "series") { item in
-                                        presentSeriesHistoryItem(item)
-                                    }
-                                },
-                                onPlay: { item in
-                                    presentSeriesHistoryItem(item)
-                                }
-                            )
+                            // Build 68 (W-B): the landing's Continue
+                            // Watching surface is the
+                            // SeriesProgressContinueRow at the top
+                            // (see above) — the old mid-list
+                            // ContinueWatchingRow call is removed so
+                            // the data appears exactly once.
 
                             // Build 61 (B8, C2): series Watch Later shelf.
                             if !watchlistSeries.isEmpty {

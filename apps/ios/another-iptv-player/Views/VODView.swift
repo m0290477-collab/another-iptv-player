@@ -238,9 +238,18 @@ struct VODView: View {
                                 MovieCollectionsShelf(playlist: playlist, groups: franchiseGroups)
                             }
 
+                            // Build 68 (W-B, Movies interior —
+                            // owner pick "Cinema Rows"): in the
+                            // all-categories context each category is
+                            // a horizontal rail of WIDE cards under
+                            // its heading row; "See all ›" opens that
+                            // category's existing full grid
+                            // (VODCategoryDetailView). The poster
+                            // shelf row remains in use on other
+                            // surfaces; only this landing swaps.
                             LazyVStack(spacing: 0) {
                                 ForEach(displayCategories) { category in
-                                    VODCategoryShelfRow(
+                                    VODCinemaCategoryRow(
                                         playlist: playlist,
                                         category: category,
                                         items: displayItemsByCategory[category.id] ?? [],
