@@ -623,7 +623,7 @@ struct LiveStreamsView: View {
             return builder.movieURL(streamId: Int(item.streamId) ?? 0, containerExtension: nil)
         case "series":
             // EpisodeId might be an integer or string in different IPTV setups
-            return builder.seriesURL(streamId: item.streamId, containerExtension: nil)
+            return builder.seriesURL(streamId: item.streamId, containerExtension: item.containerExtension)
         default:
             return nil
         }
