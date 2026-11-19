@@ -23,6 +23,7 @@ struct LiveStreamsView: View {
     // Build 61 (B9, Q10): dead-channel markings (hide-dead filter).
     @ObservedObject private var channelHealth = ChannelHealthStore.shared
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
+    @Environment(\.epgSnapshot) private var epgSnapshot
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.posterMetrics) private var posterMetrics
     @State private var heroScrollVisible = false
@@ -40,24 +41,13 @@ struct LiveStreamsView: View {
     @State private var gridItems: [LiveStreamWithCategory] = []
     /// Build 65 (inside-sections): the grid mode's category chip
     /// selection — nil = every visible channel; a category id
-    /// filters the SAME grid.
+    /// filters the SAME grid (cards already carry their real EPG
+    /// now/next lines via `EPGNowNextLine`).
     @State private var selectedCategoryId: String? = nil
 
     private var filteredGridItems: [LiveStreamWithCategory] {
         guard let selectedCategoryId else { return gridItems }
         return gridItems.filter { $0.stream.categoryId == selectedCategoryId }
-    }
-
-    /// Build 67 (W6, S8): the grid tiles' data — the REAL display
-    /// categories with their REAL bucket counts.
-    private var categoryTileItems: [SectionCategoryTileItem] {
-        displayCategories.map { category in
-            SectionCategoryTileItem(
-                id: category.id,
-                name: category.name,
-                count: displayItemsByCategory[category.id]?.count ?? 0
-            )
-        }
     }
     // Build 61 (B8, Z6): recompute when the empty-category toggle flips.
     @AppStorage(EmptyCategoryVisibility.defaultsKey) private var showEmptyCategories = false
@@ -162,6 +152,13 @@ struct LiveStreamsView: View {
         return item
     }
 
+    /// The hero subtitle is the channel's REAL current EPG programme title;
+    /// nil when the guide has nothing for the channel (subtitle omitted).
+    private func heroNowTitle(for stream: DBLiveStream) -> String? {
+        guard let snapshot = epgSnapshot else { return nil }
+        return snapshot[EPGChannelKey.forXtream(stream)]?.now?.title
+    }
+
     /// The hero's live preview may run only while the hero is actually on
     /// screen and nothing covers the tab: hero inside the scroll viewport,
     /// app in the foreground (also pre-empts any automatic PiP hand-off of
@@ -248,8 +245,15 @@ struct LiveStreamsView: View {
         .task(id: channelOrderStore.version) { await recomputeFilter() }
         .task(id: favoritesOnly) { await recomputeFilter() }
         .toolbar {
-            // Build 68 (owner order): the TV Guide / EPG feature is
-            // REMOVED entirely — this toolbar's guide entry is gone.
+            ToolbarItem(placement: .navigationBarTrailing) {
+                NavigationLink {
+                    EPGGuideView(source: .xtream(playlist))
+                } label: {
+                    Image(systemName: "calendar.day.timeline.left")
+                        .font(.body.weight(.semibold))
+                }
+                .accessibilityLabel(L("epg.guide.title"))
+            }
             // === B5 (build 61) Item 11: Multiview entry — wave-2 (B8) preserve this item ===
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -433,6 +437,7 @@ struct LiveStreamsView: View {
             if let hero = heroStream {
                 LiveHeroCard(
                     stream: hero,
+                    nowProgramTitle: heroNowTitle(for: hero),
                     previewURL: PlaybackURLBuilder(playlist: playlist).liveURL(streamId: hero.streamId),
                     previewActive: heroPreviewActive,
                     userAgent: playlist.trimmedUserAgent
@@ -489,17 +494,14 @@ struct LiveStreamsView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 4)
-            // Build 67 (W6, S8 — Categories First): glass category
-            // TILES above the channel grid — the REAL provider
-            // categories with their REAL channel counts, filtering
-            // the grid in place via the same selection state the
-            // build-65 chips used (this row replaces the chips as
-            // the grid's ONE category selector, O6). The in-grid
-            // search above keeps its build-63 behavior across the
-            // full catalog.
+            // Build 65 (inside-sections design): category chips
+            // above the channel grid — the REAL provider
+            // categories, filtering the grid in place (the
+            // in-grid search above keeps its build-63 behavior
+            // across the full catalog).
             if displayCategories.count > 1 {
-                SectionCategoryTilesRow(
-                    items: categoryTileItems,
+                SectionCategoryChips(
+                    categories: displayCategories,
                     selectedCategoryId: $selectedCategoryId
                 )
                 .padding(.vertical, 6)
@@ -620,10 +622,10 @@ struct LiveStreamsView: View {
             return builder.liveURL(streamId: Int(item.streamId) ?? 0)
         case "vod":
             // MovieDetailView stores streamId as string, builder needs int
-            return builder.movieURL(streamId: Int(item.streamId) ?? 0, containerExtension: item.containerExtension)
+            return builder.movieURL(streamId: Int(item.streamId) ?? 0, containerExtension: nil)
         case "series":
             // EpisodeId might be an integer or string in different IPTV setups
-            return builder.seriesURL(streamId: item.streamId, containerExtension: item.containerExtension)
+            return builder.seriesURL(streamId: item.streamId, containerExtension: nil)
         default:
             return nil
         }
@@ -867,6 +869,7 @@ struct LiveStreamCard: View {
     var imageLoadProfile: ImageLoadProfile = .standard
     var onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil
 
+    @Environment(\.epgSnapshot) private var epgSnapshot
     // Build 61 (B8): R2 NEW badge + C10 pin indicator, read from the
     // stores at render (cards are cheap; the stores bump `version`).
     @ObservedObject private var firstSeenStore = FirstSeenStore.shared
@@ -934,6 +937,10 @@ struct LiveStreamCard: View {
                         .lineLimit(1)
                 }
 
+                if let snapshot = epgSnapshot {
+                    EPGNowNextLine(nowNext: snapshot[EPGChannelKey.forXtream(stream)],
+                                   width: width, reserveSpace: true)
+                }
             }
         }
         .buttonStyle(.plain)
@@ -1215,15 +1222,7 @@ struct LiveCategoryContent: View, Equatable {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: posterMetrics.gridRowSpacing) {
                         ForEach(Array(displayItems.prefix(visibleCount).enumerated()), id: \.element.stream.streamId) { index, item in
-                            // Build 68 (W-B, Live TV interior —
-                            // owner pick "Channel Tiles"): the grid
-                            // renders TILES (big centered logo, name,
-                            // logo + channel name ONLY — no
-                            // programme lines; the TV Guide / EPG
-                            // feature is removed, owner order). The
-                            // shelf/list presentation
-                            // keeps the build-66 LiveStreamCard.
-                            ChannelTileCard(
+                            LiveStreamCard(
                                 playlistId: playlist.id,
                                 stream: item.stream,
                                 width: posterMetrics.liveGridIconSize,
@@ -1286,10 +1285,18 @@ struct LiveCategoryContent: View, Equatable {
                     ) { sortOption = option }
                 },
                 filterTitle: L("filter.title"),
-                // Build 68: the catch-up and has-guide filter rows are
-                // gone with the TV Guide / catch-up removal — the sheet
-                // hides its filter section when no rows remain.
-                filterRows: [],
+                filterRows: [
+                    SortFilterSheet.Row(
+                        id: "catchup",
+                        title: L("filter.catchup"),
+                        isSelected: filter.contains(.catchup)
+                    ) { filter.formSymmetricDifference(.catchup) },
+                    SortFilterSheet.Row(
+                        id: "hasEPG",
+                        title: L("filter.has_epg"),
+                        isSelected: filter.contains(.hasEPG)
+                    ) { filter.formSymmetricDifference(.hasEPG) }
+                ],
                 // B1 (Round 14): Clear resets the FILTERS and the
                 // SORT together — the old clear left a non-default
                 // sort silently in force.
@@ -1476,6 +1483,7 @@ struct LivePlayerShell: View {
                     // Build 61 (FA, F-2/G2): the playlist's custom
                     // headers reach playback alongside the UA.
                     customHeaders: playlist.customHeaders,
+                    epgChannelKey: EPGChannelKey.forXtream(session.stream),
                     canGoToPreviousChannel: (currentIndex ?? 0) > 0,
                     canGoToNextChannel: {
                         guard let index = currentIndex else { return false }

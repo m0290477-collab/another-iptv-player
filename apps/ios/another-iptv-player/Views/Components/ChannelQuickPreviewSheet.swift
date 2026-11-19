@@ -1,19 +1,25 @@
 import SwiftUI
 
 /// Build 61 (B8, C8): channel quick preview — presented from the
-/// channel card/row long-press menu. Shows the channel and a Play
-/// button. (Build 68: the NOW/NEXT programme lines went with the
-/// TV Guide removal — the app is a player, it has no guide.)
+/// channel card/row long-press menu. Shows the channel, its NOW and
+/// NEXT programmes from the already-loaded EPG snapshot (no fetch —
+/// absent EPG simply omits the programme lines), and a Play button.
 ///
 /// Play uses the EXISTING player path only: the full Xtream live
 /// queue via `LiveChannelCategorySection.xtreamLiveQueue()` into
-/// `LivePlayerShell`. No player file is touched.
+/// `LivePlayerShell`, exactly as `EPGProgrammeDetailSheet.playLiveChannel`
+/// does. No player file is touched.
 struct ChannelQuickPreviewSheet: View {
     let playlist: Playlist
     let stream: DBLiveStream
 
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
+    @Environment(\.epgSnapshot) private var epgSnapshot
     @Environment(\.dismiss) private var dismiss
+
+    private var nowNext: EPGNowNext? {
+        epgSnapshot?[EPGChannelKey.forXtream(stream)]
+    }
 
     var body: some View {
         NavigationStack {
@@ -38,6 +44,13 @@ struct ChannelQuickPreviewSheet: View {
                     Spacer(minLength: 0)
                 }
 
+                if let now = nowNext?.now {
+                    programmeLine(label: L("channels.preview.now"), programme: now)
+                }
+                if let next = nowNext?.next {
+                    programmeLine(label: L("channels.preview.next"), programme: next)
+                }
+
                 Button {
                     dismiss()
                     play()
@@ -58,6 +71,20 @@ struct ChannelQuickPreviewSheet: View {
                     Button(L("common.close")) { dismiss() }
                 }
             }
+        }
+    }
+
+    private func programmeLine(label: String, programme: EPGProgramme) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.accent)
+            Text(programme.title)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(2)
+            Text(EPGTimeFormat.range(programme.start, programme.stop))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

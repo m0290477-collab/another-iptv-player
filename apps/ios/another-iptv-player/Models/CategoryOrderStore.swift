@@ -56,18 +56,6 @@ final class CategoryOrderStore: ObservableObject {
             .map(\.element)
     }
 
-    /// Build 68 (W-C): applies imported category orders (backup
-    /// restore). An order is ONE authoritative list per playlist +
-    /// type, so the imported list REPLACES the local one for every
-    /// type the backup carries — exactly `setOrder`'s own
-    /// semantics (which also bumps `version` per change). Types
-    /// absent from the import are untouched.
-    func applyImportedOrders(_ ordersByType: [String: [String]], playlistId: UUID) {
-        for (type, ids) in ordersByType {
-            setOrder(ids, playlistId: playlistId, type: type)
-        }
-    }
-
     /// Called when a playlist is deleted — removes this playlist's saved
     /// order for every content type.
     func removeAll(playlistId: UUID) {

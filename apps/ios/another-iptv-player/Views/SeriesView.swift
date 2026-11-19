@@ -69,24 +69,6 @@ struct SeriesView: View {
     // is the HomeSearchBar in the header, opening the global SearchView.
     @State private var homeSearchText = ""
     @State private var showSearchSheet = false
-    /// Build 68: the landing sort sheet's presentation state — the
-    /// sheet is attached to the category sort header itself (see
-    /// `categorySortHeader`), not stacked on the tab root. Build
-    /// 67's single item-driven root sheet was its F3 search fix;
-    /// that fix is NOT ported, so the tab root keeps build 66's
-    /// two `.sheet(isPresented:)` attachments exactly.
-    @State private var showSortSheet = false
-
-    /// Build 67 (W6, S8): the landing sort — the SAME persisted C1
-    /// option (`SeriesSortOption.storageKey`) the category screens
-    /// use, so a sort chosen here and there is one choice.
-    /// `.defaultOrder` keeps the O7 bucket order; an explicit sort
-    /// reorders the category grid below.
-    @AppStorage(SeriesSortOption.storageKey) private var sortOption: SeriesSortOption = .defaultOrder
-    /// Build 67 (W6, S8): By Year rails — the visible catalog grouped
-    /// by REAL release year (records without a parseable year are
-    /// excluded, never guessed), computed in `recomputeFilter()`.
-    @State private var yearGroups: [(year: Int, items: [DBSeries])] = []
 
     // Round 5: unified content pattern — filter chips.
     // Round 8 (D-4/D-5): the Favorites and History chips were removed —
@@ -191,51 +173,13 @@ struct SeriesView: View {
                         // the shelves; Newest renders its grid.
                         switch selectedChip {
                         case .all:
-                            // Build 67 (W6, S8 — Categories First,
-                            // owner pick): category TILES come FIRST
-                            // on the landing — the REAL categories of
-                            // the synced catalog with their REAL item
-                            // counts. Tapping a tile filters the tab
-                            // to that category (the sort header + poster
-                            // grid below); "All" restores the landing.
-                            // This replaces the build-65 chips row as
-                            // the tab's ONE category selector (O6).
-                            if displayCategories.count > 1 {
-                                SectionCategoryTilesGrid(
-                                    items: categoryTileItems,
-                                    totalCount: totalSeriesCount,
-                                    systemImage: "play.tv",
-                                    selectedCategoryId: $selectedCategoryId
-                                )
-                                .padding(.top, 2)
-                                .padding(.bottom, 6)
-                            }
-
-                            if let selectedCategoryId,
-                               let category = displayCategories.first(where: { $0.id == selectedCategoryId }) {
-                                categorySortHeader(for: category)
-                                categoryGrid(for: category)
-                            } else {
-                            // Build 68 (W-B, Series interior —
-                            // owner pick "Progress Grid"): the
-                            // Continue Watching row of wide cards
-                            // sits at the TOP of the landing (it
-                            // replaces the ContinueWatchingRow that
-                            // used to sit below the rails — one
-                            // History surface, no duplication). It
-                            // renders only when real in-progress
-                            // series state exists.
-                            SeriesProgressContinueRow(
-                                playlist: playlist,
-                                progressBySeriesId: progressBySeriesId
-                            ) { item in
-                                presentSeriesHistoryItem(item)
-                            }
-
-                            // Build 65 (inside-sections design): the
-                            // Series featured hero (the Movies tab's
-                            // B7 hero is the model), now under the
-                            // category tiles (build 67 order).
+                            // Build 65 (inside-sections design):
+                            // the Series tab gains the featured
+                            // hero it never had (the Movies tab's
+                            // B7 hero is the model), then the
+                            // category chips; a chip selection
+                            // swaps the shelves for that category's
+                            // poster grid.
                             if let featured = featuredSeries {
                                 SeriesFeaturedHero(playlist: playlist, series: featured) {
                                     pendingSeriesDetail = featured
@@ -244,30 +188,38 @@ struct SeriesView: View {
                                 }
                             }
 
-                            // Build 67 (W6, S8): the catalog rails,
-                            // built ONLY from real provider data, in
-                            // the owner's order — New, Top Rated,
-                            // By Year. A rail whose data is absent is
-                            // omitted entirely; nothing is curated,
-                            // recommended or invented.
-                            if !recentlyAddedSeries.isEmpty {
-                                RecentlyAddedSeriesShelf(playlist: playlist, items: recentlyAddedSeries, progressBySeriesId: progressBySeriesId, watchedPercentBySeriesId: watchedPercentBySeriesId)
+                            if displayCategories.count > 1 {
+                                SectionCategoryChips(
+                                    categories: displayCategories,
+                                    selectedCategoryId: $selectedCategoryId
+                                )
+                                .padding(.bottom, 4)
                             }
+
+                            if let selectedCategoryId,
+                               let category = displayCategories.first(where: { $0.id == selectedCategoryId }) {
+                                categoryGrid(for: category)
+                            } else {
+                            ContinueWatchingRow(
+                                playlist: playlist,
+                                typeFilter: "series",
+                                destination: {
+                                    WatchHistoryListView(playlist: playlist, typeFilter: "series") { item in
+                                        presentSeriesHistoryItem(item)
+                                    }
+                                },
+                                onPlay: { item in
+                                    presentSeriesHistoryItem(item)
+                                }
+                            )
 
                             if topRatedSeries.count >= 3 {
                                 PopularSeriesShelf(playlist: playlist, items: topRatedSeries, progressBySeriesId: progressBySeriesId, watchedPercentBySeriesId: watchedPercentBySeriesId, replayToken: shelfReplayToken)
                             }
 
-                            ForEach(yearGroups, id: \.year) { group in
-                                yearShelf(year: group.year, items: group.items)
+                            if !recentlyAddedSeries.isEmpty {
+                                RecentlyAddedSeriesShelf(playlist: playlist, items: recentlyAddedSeries, progressBySeriesId: progressBySeriesId, watchedPercentBySeriesId: watchedPercentBySeriesId)
                             }
-
-                            // Build 68 (W-B): the landing's Continue
-                            // Watching surface is the
-                            // SeriesProgressContinueRow at the top
-                            // (see above) — the old mid-list
-                            // ContinueWatchingRow call is removed so
-                            // the data appears exactly once.
 
                             // Build 61 (B8, C2): series Watch Later shelf.
                             if !watchlistSeries.isEmpty {
@@ -373,7 +325,6 @@ struct SeriesView: View {
         )) { await recomputeFilter() }
         .onAppear { shelfReplayToken += 1 }
         .onChange(of: selectedCategoryId) { _, _ in categoryVisibleCount = 90 }
-        .onChange(of: sortOption) { _, _ in categoryVisibleCount = 90 }
         .transaction { $0.animation = nil }
         .navigationDestination(item: $pendingSeriesDetail) { series in
             SeriesDetailView(playlist: playlist, series: series)
@@ -500,116 +451,8 @@ struct SeriesView: View {
     /// Build 65 (inside-sections): the poster grid for a selected
     /// category chip — the category's own bucket, paginated like
     /// the Newest grid, cells identical to it.
-    /// Build 67 (W6, S8): the landing tiles' data — the REAL display
-    /// categories with their REAL bucket counts.
-    private var categoryTileItems: [SectionCategoryTileItem] {
-        displayCategories.map { category in
-            SectionCategoryTileItem(
-                id: category.id,
-                name: category.name,
-                count: displayItemsByCategory[category.id]?.count ?? 0
-            )
-        }
-    }
-
-    /// The REAL visible series total (the same sum the header count
-    /// line renders).
-    private var totalSeriesCount: Int {
-        displayCategories.reduce(0) { $0 + (displayItemsByCategory[$1.id]?.count ?? 0) }
-    }
-
-    /// Build 67 (W6, S8): the header shown above a selected
-    /// category's grid — the category's name + real count and the
-    /// sort button (the C1 sort sheet; build 68 presents it from
-    /// the header itself — see the `showSortSheet` note at the
-    /// state declarations).
-    private func categorySortHeader(for category: DBCategory) -> some View {
-        HStack(spacing: 8) {
-            Text(category.name)
-                .font(.headline)
-                .lineLimit(1)
-            Text(CatalogCountFormatter.string(displayItemsByCategory[category.id]?.count ?? 0))
-                .font(AppTheme.fontBadge)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 2)
-                .background(Capsule().fill(AppTheme.accent))
-            Spacer()
-            Button {
-                showSortSheet = true
-            } label: {
-                Image(systemName: sortOption == .defaultOrder
-                    ? "line.3.horizontal.decrease.circle"
-                    : "line.3.horizontal.decrease.circle.fill")
-                    .font(.body.weight(.semibold))
-            }
-            .accessibilityLabel(L("sort.title"))
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 4)
-        .sheet(isPresented: $showSortSheet) {
-            // Build 67 (W6, S8): the landing sort — the C1 option
-            // set, applied to the category grid below.
-            SortFilterSheet(
-                sortRows: SeriesSortOption.allCases.map { option in
-                    SortFilterSheet.Row(
-                        id: option.rawValue,
-                        title: L(option.titleKey),
-                        systemImage: option.systemImage,
-                        isSelected: sortOption == option
-                    ) { sortOption = option }
-                },
-                onClearFilters: sortOption == .defaultOrder ? nil : {
-                    sortOption = .defaultOrder
-                }
-            )
-        }
-    }
-
-    /// Build 67 (W6, S8): one By Year rail — a year's REAL series
-    /// (records carrying a parseable release year only), in the
-    /// shelf language of the Recently Added rail.
-    private func yearShelf(year: Int, items: [DBSeries]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionYearHeader(year: year)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(items) { series in
-                        NavigationLink {
-                            SeriesDetailView(playlist: playlist, series: series)
-                        } label: {
-                            SeriesCard(
-                                playlistId: playlist.id,
-                                stream: series,
-                                posterWidth: posterMetrics.shelfPosterWidth,
-                                posterHeight: posterMetrics.shelfPosterHeight,
-                                imageLoadProfile: .shelf,
-                                watchProgress: progressBySeriesId[String(series.seriesId)]?.progress,
-                                seasonEpisodeCounts: contentStore.seriesSeasonEpisodeCounts[series.seriesId],
-                                positionText: progressBySeriesId[String(series.seriesId)]?.positionText,
-                                watchedPercent: watchedPercentBySeriesId[String(series.seriesId)]
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-            .frame(height: posterMetrics.shelfRowTotalHeight)
-            .shelfEdgeFade()
-        }
-        .padding(.vertical, 6)
-    }
-
     private func categoryGrid(for category: DBCategory) -> some View {
-        // Build 67 (W6, S8): an explicitly chosen sort (the C1
-        // `SeriesSortOption`, shared with the category screens)
-        // reorders the grid; `.defaultOrder` is the identity, so the
-        // O7 bucket order stands until the user picks a sort. Rating
-        // sort ranks only real ratings — unrated items sink
-        // (CatalogRatingValue), never a faked rating.
-        let items = sortOption.apply(to: displayItemsByCategory[category.id] ?? [])
+        let items = displayItemsByCategory[category.id] ?? []
         return Group {
             if items.isEmpty {
                 ContentUnavailableView(
@@ -712,7 +555,7 @@ struct SeriesView: View {
     /// (the same simplification Live got in round 3).
     private func recomputeFilter() async {
         guard playlist.id == contentStore.activePlaylistId else {
-            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedSeries = []; newestSeries = []; topRatedSeries = []; newestAll = []; progressBySeriesId = [:]; yearGroups = []; return
+            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedSeries = []; newestSeries = []; topRatedSeries = []; newestAll = []; progressBySeriesId = [:]; return
         }
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")
         let allCats = orderStore.applyOrder(
@@ -755,27 +598,6 @@ struct SeriesView: View {
         guard !Task.isCancelled else { return }
         newestAll = byModifiedDesc
         newestVisibleCount = min(Self.newestPageSize, byModifiedDesc.count)
-
-        // Build 67 (W6, S8): By Year groups — visible series grouped
-        // by their REAL release year. Years with fewer than 3 titles
-        // don't earn a rail; the three most recent years win; each
-        // rail caps at 20 posters (the full year stays reachable
-        // through its category grids and search).
-        let years = await Task.detached(priority: .utility) { () -> [(year: Int, items: [DBSeries])] in
-            var byYear: [Int: [DBSeries]] = [:]
-            for item in allSeries where visibleCatIds.contains(item.series.categoryId ?? "") {
-                if let year = DetailFormatting.releaseYear(from: item.series.releaseDate) {
-                    byYear[year, default: []].append(item.series)
-                }
-            }
-            return byYear
-                .filter { $0.value.count >= 3 }
-                .sorted { $0.key > $1.key }
-                .prefix(3)
-                .map { (year: $0.key, items: Array($0.value.prefix(20))) }
-        }.value
-        guard !Task.isCancelled else { return }
-        yearGroups = years
 
         await loadProgressBySeries()
     }

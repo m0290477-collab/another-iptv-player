@@ -155,6 +155,7 @@ enum AccountDataDeletion {
         // In-memory catalogs.
         await PlaylistContentStore.shared.unload()
         await M3UContentStore.shared.unload()
+        await EPGStore.shared.setActivePlaylist(nil)
 
         return succeeded
     }

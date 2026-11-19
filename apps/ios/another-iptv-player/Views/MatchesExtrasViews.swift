@@ -310,14 +310,12 @@ struct LineupsView: View {
     }
 
     private func playerRow(_ player: MatchLineupPlayer) -> some View {
-        // Build 67 (S9): lineup list rows take the same glass
-        // language as the squad cards.
-        HStack(spacing: 12) {
-            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 40)
+        HStack(spacing: 10) {
+            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 32)
             Text(player.name)
                 .font(AppTheme.fontCardTitle)
                 .lineLimit(1)
-            Spacer(minLength: 0)
+            Spacer()
             if let position = player.positionName {
                 Text(position)
                     .font(AppTheme.fontMetadata)
@@ -325,19 +323,6 @@ struct LineupsView: View {
                     .lineLimit(1)
             }
         }
-        .padding(10)
-        .background {
-            ZStack {
-                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                    .fill(AppTheme.elevated.opacity(0.55))
-            }
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                .stroke(AppTheme.cardBorderColor, lineWidth: 1)
-        )
     }
 }
 
@@ -499,39 +484,19 @@ struct TeamPageView: View {
             if !squad.isEmpty {
                 Section {
                     ForEach(squad) { player in
-                        // Build 67 (S9): squad rows take the
-                        // performers' glass-card language — a
-                        // frosted card with a bigger photo.
-                        HStack(spacing: 12) {
-                            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 44)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(player.name)
-                                    .font(AppTheme.fontCardTitle)
+                        HStack(spacing: 10) {
+                            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 32)
+                            Text(player.name)
+                                .font(AppTheme.fontCardTitle)
+                                .lineLimit(1)
+                            Spacer()
+                            if let position = player.positionName {
+                                Text(position)
+                                    .font(AppTheme.fontMetadata)
+                                    .foregroundStyle(.secondary)
                                     .lineLimit(1)
-                                if let position = player.positionName {
-                                    Text(position)
-                                        .font(AppTheme.fontMetadata)
-                                        .foregroundStyle(AppTheme.accent)
-                                        .lineLimit(1)
-                                }
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        .padding(10)
-                        .background {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                                    .fill(.ultraThinMaterial)
-                                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                                    .fill(AppTheme.elevated.opacity(0.55))
                             }
                         }
-                        .overlay(
-                            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                                .stroke(AppTheme.cardBorderColor, lineWidth: 1)
-                        )
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
                     }
                 } header: { extrasSectionHeader(L("matches.team.squad")) }
                 .listRowBackground(AppTheme.surface)

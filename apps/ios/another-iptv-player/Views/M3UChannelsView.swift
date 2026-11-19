@@ -16,11 +16,6 @@ struct M3UChannelsView: View {
     @State private var debouncedQuery = ""
     @State private var debounceTask: Task<Void, Never>?
     @State private var isSearchActive = false
-    /// Build 67 (W6, S8): the Categories-First group tile selection —
-    /// nil shows every group shelf; a group name narrows the shelves
-    /// to that group only (the M3U analog of the Xtream sections'
-    /// category filter). Ignored while a search query is active.
-    @State private var selectedGroup: String? = nil
 
     /// The groups filtered after a search.
     @State private var displayGroups: [String] = []
@@ -29,41 +24,14 @@ struct M3UChannelsView: View {
     /// Category jump: whether the picker sheet is open, and the most recently requested group (for scrollTo).
     @State private var showingCategoryPicker = false
     @State private var pendingScrollTarget: String? = nil
-    /// Build 69 (F3): the visible Play failure for a channel
-    /// whose stored URL fails sanitization.
-    @State private var showPlayFailure = false
 
     /// The groups to show in the shelf list (hidden ones removed). The picker sees all groups.
     private var visibleShelfGroups: [String] {
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: Self.hiddenCategoryType)
-        let ordered = orderStore.applyOrder(
-            displayGroups.filter { !hidden.contains($0) },
-            playlistId: playlist.id, type: Self.hiddenCategoryType
-        ) { $0 }
-        // Build 67 (W6, S8): a selected group tile narrows the
-        // shelves to that group (only outside search, where the
-        // query already defines the visible set).
-        if debouncedQuery.isEmpty, let selectedGroup, ordered.contains(selectedGroup) {
-            return [selectedGroup]
-        }
-        return ordered
-    }
-
-    /// Build 67 (W6, S8): the group tiles' data — every group the
-    /// shelves can show (hidden ones removed, saved order applied)
-    /// with its REAL channel count.
-    private var groupTileItems: [SectionCategoryTileItem] {
-        let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: Self.hiddenCategoryType)
         return orderStore.applyOrder(
             displayGroups.filter { !hidden.contains($0) },
             playlistId: playlist.id, type: Self.hiddenCategoryType
-        ) { $0 }.map { group in
-            SectionCategoryTileItem(
-                id: group,
-                name: M3UContentStore.displayName(forGroup: group),
-                count: displayChannelsByGroup[group]?.count ?? 0
-            )
-        }
+        ) { $0 }
     }
 
     var body: some View {
@@ -100,8 +68,15 @@ struct M3UChannelsView: View {
             }
         }
         .toolbar {
-            // Build 68 (owner order): the TV Guide / EPG feature is
-            // REMOVED entirely — this toolbar's guide entry is gone.
+            ToolbarItem(placement: .navigationBarTrailing) {
+                NavigationLink {
+                    EPGGuideView(source: .m3u(playlist))
+                } label: {
+                    Image(systemName: "calendar.day.timeline.left")
+                        .font(.body.weight(.semibold))
+                }
+                .accessibilityLabel(L("epg.guide.title"))
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 NavigationLink {
                     M3UFavoritesView(playlist: playlist)
@@ -176,11 +151,6 @@ struct M3UChannelsView: View {
         .onChange(of: hiddenChannelStore.version) { _, _ in Task { await recomputeFilter() } }
         .onAppear { applyFull() }
         .cinematicBackground()
-        // Build 69 (F3): the play-failure alert (existing
-        // playback error copy — no new strings).
-        .alert(L("playback.error.failed_to_start"), isPresented: $showPlayFailure) {
-            Button(L("common.ok")) { showPlayFailure = false }
-        }
     }
 
     /// Return to the full-list view instantly (skip the debounce).
@@ -212,19 +182,6 @@ struct M3UChannelsView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    // Build 67 (W6, S8 — Categories First): group
-                    // TILES first when browsing (hidden during
-                    // search) — the REAL groups with their REAL
-                    // channel counts; tapping one narrows the
-                    // shelves to that group, "All" restores them.
-                    if debouncedQuery.isEmpty && groupTileItems.count > 1 {
-                        SectionCategoryTilesRow(
-                            items: groupTileItems,
-                            selectedCategoryId: $selectedGroup
-                        )
-                        .padding(.vertical, 8)
-                    }
-
                     // Continue watching: at the top when there is no search.
                     if debouncedQuery.isEmpty {
                         ContinueWatchingRow(
@@ -372,12 +329,7 @@ struct M3UChannelsView: View {
     // MARK: - Playback
 
     private func present(_ channel: DBM3UChannel) {
-        // Build 69 (F3): was a silent return — the tap looked
-        // dead. Surface the plain failure instead.
-        guard M3UParser.sanitizedURL(from: channel.url) != nil else {
-            showPlayFailure = true
-            return
-        }
+        guard M3UParser.sanitizedURL(from: channel.url) != nil else { return }
         let queue = queueForChannel(channel)
         playerOverlay.present {
             M3UPlayerShell(
@@ -404,12 +356,7 @@ struct M3UChannelsView: View {
             // will be updated on the next refresh.
             return
         }
-        // Build 69 (F3): was a silent return — the tap looked
-        // dead. Surface the plain failure instead.
-        guard M3UParser.sanitizedURL(from: channel.url) != nil else {
-            showPlayFailure = true
-            return
-        }
+        guard M3UParser.sanitizedURL(from: channel.url) != nil else { return }
         let queue = queueForChannel(channel)
         playerOverlay.present {
             M3UPlayerShell(
@@ -530,6 +477,7 @@ struct M3UChannelCard: View {
     var imageLoadProfile: ImageLoadProfile = .standard
     var onChannelSelected: ((DBM3UChannel) -> Void)? = nil
 
+    @Environment(\.epgSnapshot) private var epgSnapshot
 
     var body: some View {
         Button {
@@ -563,6 +511,10 @@ struct M3UChannelCard: View {
                         .lineLimit(1)
                 }
 
+                if let snapshot = epgSnapshot {
+                    EPGNowNextLine(nowNext: snapshot[EPGChannelKey.forM3U(channel)],
+                                   width: width, reserveSpace: true)
+                }
             }
         }
         .buttonStyle(.plain)
@@ -623,9 +575,6 @@ struct M3UGroupDetailView: View {
     @State private var debouncedQuery = ""
     @State private var debounceTask: Task<Void, Never>?
     @State private var displayItems: [DBM3UChannel] = []
-    /// Build 69 (F3): the visible Play failure for a channel
-    /// whose stored URL fails sanitization.
-    @State private var showPlayFailure = false
 
     @ObservedObject private var store = M3UContentStore.shared
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
@@ -652,11 +601,6 @@ struct M3UGroupDetailView: View {
         .onDisappear { debounceTask?.cancel(); debounceTask = nil }
         .task(id: debouncedQuery) { await recomputeItems() }
         .onChange(of: store.channels) { _, _ in Task { await recomputeItems() } }
-        // Build 69 (F3): the play-failure alert (existing
-        // playback error copy — no new strings).
-        .alert(L("playback.error.failed_to_start"), isPresented: $showPlayFailure) {
-            Button(L("common.ok")) { showPlayFailure = false }
-        }
     }
 
     private func recomputeItems() async {
@@ -686,12 +630,7 @@ struct M3UGroupDetailView: View {
     }
 
     private func present(_ channel: DBM3UChannel) {
-        // Build 69 (F3): was a silent return — the tap looked
-        // dead. Surface the plain failure instead.
-        guard M3UParser.sanitizedURL(from: channel.url) != nil else {
-            showPlayFailure = true
-            return
-        }
+        guard M3UParser.sanitizedURL(from: channel.url) != nil else { return }
         // In this detail screen, the queue = all channels of this group (filtered if there is a search).
         playerOverlay.present {
             M3UPlayerShell(
@@ -744,15 +683,7 @@ struct M3UGroupGridContent: View {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: posterMetrics.gridRowSpacing) {
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, channel in
-                            // Build 68 (W-B, Live TV interior —
-                            // owner pick "Channel Tiles"): the M3U
-                            // grid renders the tile form (big
-                            // centered logo + name ONLY — no
-                            // programme lines; the TV Guide / EPG
-                            // feature is removed, owner order); the
-                            // group shelves keep the build-66
-                            // M3UChannelCard.
-                            M3UChannelTileCard(
+                            M3UChannelCard(
                                 channel: channel,
                                 width: posterMetrics.liveGridIconSize,
                                 iconSize: posterMetrics.liveGridIconSize,
@@ -859,6 +790,7 @@ struct M3UPlayerShell: View {
                     userAgent: playlist.playbackUserAgent(channelUserAgent: activeChannel.userAgent),
                     // Build 61 (FA, F-2/G2): custom headers alongside the UA.
                     customHeaders: playlist.customHeaders,
+                    epgChannelKey: classification.isLive ? EPGChannelKey.forM3U(activeChannel) : nil,
                     canGoToPreviousChannel: hasQueueNav && currentIndex > 0,
                     canGoToNextChannel: hasQueueNav && currentIndex < queue.count - 1,
                     onPreviousChannel: hasQueueNav ? { jump(offset: -1) } : nil,

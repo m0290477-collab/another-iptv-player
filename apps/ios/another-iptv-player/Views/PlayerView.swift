@@ -13,7 +13,7 @@ struct LiveChannelCategorySection: Identifiable, Equatable {
 
 extension LiveChannelCategorySection {
     /// Full live queue + per-category sections for the current Xtream playlist.
-    /// Players opened outside the main channel list
+    /// Players opened outside the main channel list (EPG guide, programme sheet)
     /// use this so prev/next channel and the channel side panel keep working instead
     /// of being disabled by a single-item queue.
     @MainActor
@@ -62,6 +62,10 @@ struct PlayerView: View {
     /// Build 61 (FA, F-2/G2): the active playlist's parsed custom
     /// headers; reaches the engine's KSOptions alongside the UA.
     var customHeaders: [String: String] = [:]
+    /// EPG lookup key for the live channel; drives the in-player now-playing strip.
+    var epgChannelKey: String? = nil
+    /// Catch-up playback must not write watch history (would overwrite the live row).
+    var suppressWatchHistory: Bool = false
 
     var canGoToPreviousEpisode: Bool = false
     var canGoToNextEpisode: Bool = false
@@ -100,6 +104,8 @@ struct PlayerView: View {
             containerExtension: containerExtension,
             userAgent: userAgent,
             customHeaders: customHeaders,
+            epgChannelKey: epgChannelKey,
+            suppressWatchHistory: suppressWatchHistory,
             isFavorite: isFavorite,
             onToggleFavorite: onToggleFavorite,
             canGoToPreviousEpisode: canGoToPreviousEpisode,
@@ -139,6 +145,8 @@ private struct PlayerViewImpl: View {
     var userAgent: String? = nil
     /// Build 61 (FA, F-2/G2): playlist custom headers (see PlayerView).
     var customHeaders: [String: String] = [:]
+    var epgChannelKey: String? = nil
+    var suppressWatchHistory: Bool = false
 
     /// Opsiyonel favori butonu — yalnız ikisi de set ise topChrome'da gösterilir.
     var isFavorite: Bool? = nil
@@ -176,6 +184,13 @@ private struct PlayerViewImpl: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.layoutDirection) private var layoutDirection
+    @Environment(\.epgSnapshot) private var epgSnapshot
+
+    /// Current programme for the live channel, if EPG data is available.
+    private var currentNowNext: EPGNowNext? {
+        guard isLiveStream, let key = epgChannelKey else { return nil }
+        return epgSnapshot?[key]
+    }
 
     @State private var showControls = true
     @State private var timer: Timer?
@@ -626,53 +641,227 @@ private struct PlayerViewImpl: View {
         }
     }
 
-    // Build 68 compile fix: extracted verbatim from body's modifier chain —
-    // the inline closures made the chain expression too complex for the
-    // type-checker (timeout reported at `player.teardown()`).
-    private func handlePlayerAppear() {
-        log.info("Opening player: \(title, privacy: .public)")
-        resetTimer()
-        player.setupAudioHandler()
-        // Defer to the next run loop: the KSPlayer surface's view setup and
-        // `play` can race within the same tick. First layout also relieves the main queue.
-        DispatchQueue.main.async {
-            applyPlaybackTransitionIfNeeded()
-            armDefaultSleepTimerIfNeeded()
-            applySelectedAspectMode(force: true)
-            applySeriesEpisodeRemoteCommands()
-            if let v = volumeBackupDuringChannelBrowser {
-                player.setVolume(v)
-                volumeBackupDuringChannelBrowser = nil
+    var body: some View {
+        GeometryReader { geo in
+            let containerSize = geo.size
+            let outerSafeAreaInsets = geo.safeAreaInsets
+            let clampedProgress = min(max(miniProgress, 0), 1)
+            let card = miniCardRect(container: containerSize, safeArea: outerSafeAreaInsets)
+            let t = miniTransform(progress: clampedProgress, card: card, container: containerSize)
+            ZStack {
+                // The whole mini-card group is repositioned by the live drag inside
+                // `MiniCardDragLayer`, which is the ONLY view that re-renders while dragging —
+                // the masked/scaled video below is evaluated once and merely re-offset, so the
+                // picture is never re-processed (which used to glitch the video mid-drag).
+                MiniCardDragLayer(model: cardDrag) {
+                    ZStack {
+                        // Card shadow, a cheap standalone rounded rect tracking the visible video
+                        // card through the whole morph. The masked video layer never carries a
+                        // shadow itself — re-shadowing that full-screen layer each frame as the
+                        // mask animates caused judder/tremble. The opaque video lands on top of
+                        // this fill; only the shadow spills out.
+                        if clampedProgress > 0.01 {
+                            let visibleCard = CGSize(width: t.maskSize.width * t.scale, height: t.maskSize.height * t.scale)
+                            RoundedRectangle(
+                                cornerRadius: MiniPlayerMetrics.cornerRadius * min(clampedProgress * 2.5, 1),
+                                style: .continuous
+                            )
+                            .fill(Color.black)
+                            .frame(width: visibleCard.width, height: visibleCard.height)
+                            .shadow(color: .black.opacity(0.38 * Double(clampedProgress)),
+                                    radius: 22 * clampedProgress, x: 0, y: 8 * clampedProgress)
+                            .position(
+                                x: containerSize.width / 2 + t.offset.width + interactiveDismissOffset.width,
+                                y: containerSize.height / 2 + t.offset.height + interactiveDismissOffset.height
+                            )
+                            .allowsHitTesting(false)
+                        }
+
+                        // Player content, transformed toward the floating mini card as
+                        // `miniProgress` grows. The mask crops the letterbox down to the card;
+                        // scale/offset land the video on the card center. View identity is stable
+                        // so playback never restarts.
+                        ZStack {
+                            Color.black
+                                .ignoresSafeArea()
+
+                            playerChromeAndVideo(outerSafeAreaInsets: outerSafeAreaInsets)
+                        }
+                        .background(Color.black)
+                        .frame(width: containerSize.width, height: containerSize.height)
+                        .mask(
+                            RoundedRectangle(cornerRadius: t.cornerRadius, style: .continuous)
+                                .frame(width: t.maskSize.width, height: t.maskSize.height)
+                        )
+                        .scaleEffect(t.scale)
+                        .offset(
+                            x: t.offset.width + interactiveDismissOffset.width,
+                            y: t.offset.height + interactiveDismissOffset.height
+                        )
+                        .opacity(edgeBackOpacity(containerSize: containerSize))
+                        .simultaneousGesture(
+                            interactiveDismissDragGesture(
+                                containerSize: containerSize,
+                                safeAreaTop: geo.safeAreaInsets.top,
+                                safeAreaBottom: geo.safeAreaInsets.bottom
+                            )
+                        )
+                        // Once docked, stop the (visually card-sized but layout-full-screen)
+                        // content from swallowing touches: SwiftUI `.mask` crops rendering only,
+                        // not the hit region. `isMiniCommitted` only flips at commit, so the
+                        // interactive pull-down morph is unaffected; card taps go to the chrome.
+                        .allowsHitTesting(!isMiniCommitted)
+
+                        // Floating mini card chrome (unscaled), tappable only once docked.
+                        if clampedProgress > 0.01 {
+                            MiniPlayerChrome(
+                                player: player,
+                                cornerRadius: MiniPlayerMetrics.cornerRadius,
+                                isLoading: isCenterTransportLoading,
+                                onExpand: { playerOverlayExpand?() },
+                                onClose: { performPlayerDismiss() },
+                                onDragChanged: { translation in
+                                    handleMiniCardDragChanged(
+                                        translation: translation,
+                                        card: card, container: containerSize
+                                    )
+                                },
+                                onDragEnded: { translation, velocity in
+                                    handleMiniCardDragEnded(
+                                        translation: translation, velocity: velocity,
+                                        container: containerSize, safeArea: outerSafeAreaInsets
+                                    )
+                                }
+                            )
+                            .frame(width: card.width, height: card.height)
+                            .position(x: card.midX, y: card.midY)
+                            .opacity(miniChromeOpacity)
+                            .allowsHitTesting(isMiniCommitted)
+                        }
+                    }
+                }
+            }
+            .frame(width: containerSize.width, height: containerSize.height)
+            // iPad / geniş yatay düzende durum çubuğunu kontrollerle aç-kapa yapmak üst güvenli alanı
+            // değiştirir; GeometryReader yüksekliği sıçrar. Telefonda (compact) eski davranış korunur.
+            // Mini kartta durum çubuğu her zaman görünür.
+            .statusBarHidden(statusBarHiddenInCurrentMode)
+        .onAppear {
+            // Build 63 (owner, item 3): the player owns the
+            // orientation lock while it is on screen (see
+            // `applyPlayerOrientation`). Nothing else in the app
+            // ever raised the browse portrait lock for the player,
+            // so rotating the phone during playback did nothing.
+            applyPlayerOrientation()
+        }
+        .onChange(of: overlayMode) { _, _ in
+            applyPlayerOrientation()
+        }
+        .onChange(of: controlsLocked) { _, _ in
+            // V2 screen lock freezes orientation too (item 3's
+            // lock rule); unlocking hands rotation back to the
+            // device.
+            applyPlayerOrientation()
+        }
+        .onAppear {
+            log.info("Opening player: \(title, privacy: .public)")
+            resetTimer()
+            player.setupAudioHandler()
+            // Defer to the next run loop: the KSPlayer surface's view setup and
+            // `play` can race within the same tick. First layout also relieves the main queue.
+            DispatchQueue.main.async {
+                applyPlaybackTransitionIfNeeded()
+                armDefaultSleepTimerIfNeeded()
+                applySelectedAspectMode(force: true)
+                applySeriesEpisodeRemoteCommands()
+                if let v = volumeBackupDuringChannelBrowser {
+                    player.setVolume(v)
+                    volumeBackupDuringChannelBrowser = nil
+                }
             }
         }
-    }
-
-    private func teardownPlayerOnDisappear() {
-        timer?.invalidate()
-        saveHistoryTimer?.invalidate()
-        // Save under the applied playback identity, not the (possibly newer)
-        // incoming props — mirrors the timer path above.
-        saveWatchHistory(tags: historySaveTags)
-        player.teardown()
-    }
-
-    var body: some View {
-        playerModeObserverRoot
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    // Build 68 (compile-fix round 2): `body` was one ~250-line
-    // GeometryReader expression carrying ~25 chained modifiers; the
-    // type-checker timed out on it twice (at the old line 815 in
-    // round 1, then at the old line 666). It is now composed from
-    // the named pieces below — every fragment moved verbatim, in
-    // the same order, with the same arguments, so each piece
-    // type-checks on its own.
-
-    /// Mini/fullscreen settle observer (the `overlayMode` switch),
-    /// on top of the state-observer root.
-    private var playerModeObserverRoot: some View {
-        playerStateObserverRoot
+        .onChange(of: playbackIdentity) { _, _ in
+            cancelAutoAdvanceCountdown(resetEndHandling: true)
+            applyPlaybackTransitionIfNeeded()
+        }
+        .onChange(of: overlayPresentationID) { _, _ in
+            // The overlay deliberately preserves PlayerView identity so an active
+            // AirPlay AVPlayer survives a source switch. Observe the host's explicit
+            // presentation revision as a reliable handoff trigger; the identity guard
+            // inside applyPlaybackTransitionIfNeeded prevents duplicate loads.
+            cancelAutoAdvanceCountdown(resetEndHandling: true)
+            applyPlaybackTransitionIfNeeded()
+        }
+        .onChange(of: videoAspectModeRaw) { _, _ in
+            applySelectedAspectMode()
+            showAspectToast()
+        }
+        .onReceive(player.$position.removeDuplicates()) { newPos in
+            guard newPos.isFinite else { return }
+            if isScrubbing { return }
+            if let locked = lockedSliderValue {
+                if abs(Double(newPos) - locked) < 0.035 {
+                    DispatchQueue.main.async {
+                        lockedSliderValue = nil
+                    }
+                }
+                return
+            }
+        }
+        .onChange(of: playbackPresentationKey) { _, _ in
+            player.setPlaybackPresentation(makePresentation())
+        }
+        .onChange(of: currentNowNext?.now?.id) { _, _ in
+            player.setPlaybackPresentation(makePresentation())
+        }
+        // Build 61 (FA, X5): the zap event bumps the sweep trigger;
+        // the sweep itself lives in the chrome layer (see
+        // playerChromeAndVideo) and never touches the load path.
+        .onReceive(NotificationCenter.default.publisher(for: .superXLiveZap)) { _ in
+            zapSweepTrigger += 1
+        }
+        .onDisappear {
+            // Build 63 (item 3): hand the browse portrait lock back.
+            restoreBrowseOrientation()
+        }
+        .onDisappear {
+            timer?.invalidate()
+            saveHistoryTimer?.invalidate()
+            // Save under the applied playback identity, not the (possibly newer)
+            // incoming props — mirrors the timer path above.
+            saveWatchHistory(tags: historySaveTags)
+            player.teardown()
+        }
+        .sheet(isPresented: $showTrackSettings) {
+            PlaybackTrackSettingsSheet(player: player, showDebugOverlay: $showDebugOverlay, streamURL: url)
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showSubtitleAppearance) {
+            SubtitleAppearanceSheet(player: player)
+                .presentationDragIndicator(.visible)
+        }
+        .onChange(of: showTrackSettings) { _, isOpen in
+            if isOpen { resetInteractiveDismissTracking() }
+        }
+        .onChange(of: showSubtitleAppearance) { _, isOpen in
+            if isOpen { resetInteractiveDismissTracking() }
+        }
+        .onChange(of: player.isSeekable) { _, _ in checkAndPerformResume() }
+        .onChange(of: player.durationMs) { _, _ in checkAndPerformResume() }
+        .onAppear { startSaveHistoryTimer() }
+        .onChange(of: seriesRemoteCommandsKey) { _, _ in
+            applySeriesEpisodeRemoteCommands()
+        }
+        .onChange(of: player.videoBitrate) { _, newValue in
+            appendBitrateSample(newValue)
+        }
+        .onChange(of: player.state) { _, newState in
+            if newState == .ended {
+                startAutoAdvanceCountdownIfEligible()
+            } else {
+                cancelAutoAdvanceCountdown(resetEndHandling: true)
+            }
+        }
         .onChange(of: overlayMode) { _, newMode in
             expandControlsGeneration &+= 1
             let gen = expandControlsGeneration
@@ -701,296 +890,8 @@ private struct PlayerViewImpl: View {
                 }
             }
         }
-    }
-
-    /// Series-remote / bitrate / player-state observers, on top of
-    /// the sheet root.
-    private var playerStateObserverRoot: some View {
-        playerSheetRoot
-        .onChange(of: seriesRemoteCommandsKey) { _, _ in
-            applySeriesEpisodeRemoteCommands()
         }
-        .onChange(of: player.videoBitrate) { _, newValue in
-            appendBitrateSample(newValue)
-        }
-        .onChange(of: player.state) { _, newState in
-            if newState == .ended {
-                startAutoAdvanceCountdownIfEligible()
-            } else {
-                cancelAutoAdvanceCountdown(resetEndHandling: true)
-            }
-        }
-    }
-
-    /// Track/subtitle sheets and the resume observers, on top of
-    /// the presentation root.
-    private var playerSheetRoot: some View {
-        playerPresentationRoot
-        .sheet(isPresented: $showTrackSettings) {
-            PlaybackTrackSettingsSheet(player: player, showDebugOverlay: $showDebugOverlay, streamURL: url)
-                .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $showSubtitleAppearance) {
-            SubtitleAppearanceSheet(player: player)
-                .presentationDragIndicator(.visible)
-        }
-        .onChange(of: showTrackSettings) { _, isOpen in
-            if isOpen { resetInteractiveDismissTracking() }
-        }
-        .onChange(of: showSubtitleAppearance) { _, isOpen in
-            if isOpen { resetInteractiveDismissTracking() }
-        }
-        .onChange(of: player.isSeekable) { _, _ in checkAndPerformResume() }
-        .onChange(of: player.durationMs) { _, _ in checkAndPerformResume() }
-        .onAppear { startSaveHistoryTimer() }
-    }
-
-    /// Position / presentation / zap observers and the disappear
-    /// handlers, on top of the lifecycle root.
-    private var playerPresentationRoot: some View {
-        playerLifecycleRoot
-        .onReceive(player.$position.removeDuplicates()) { newPos in
-            guard newPos.isFinite else { return }
-            if isScrubbing { return }
-            if let locked = lockedSliderValue {
-                if abs(Double(newPos) - locked) < 0.035 {
-                    DispatchQueue.main.async {
-                        lockedSliderValue = nil
-                    }
-                }
-                return
-            }
-        }
-        .onChange(of: playbackPresentationKey) { _, _ in
-            player.setPlaybackPresentation(makePresentation())
-        }
-        // Build 61 (FA, X5): the zap event bumps the sweep trigger;
-        // the sweep itself lives in the chrome layer (see
-        // playerChromeAndVideo) and never touches the load path.
-        .onReceive(NotificationCenter.default.publisher(for: .superXLiveZap)) { _ in
-            zapSweepTrigger += 1
-        }
-        .onDisappear {
-            // Build 63 (item 3): hand the browse portrait lock back.
-            restoreBrowseOrientation()
-        }
-        .onDisappear {
-            teardownPlayerOnDisappear()
-        }
-    }
-
-    /// Orientation, appear and playback-identity observers, on top
-    /// of the geometry content.
-    private var playerLifecycleRoot: some View {
-        playerGeometryRoot
-        .onAppear {
-            // Build 63 (owner, item 3): the player owns the
-            // orientation lock while it is on screen (see
-            // `applyPlayerOrientation`). Nothing else in the app
-            // ever raised the browse portrait lock for the player,
-            // so rotating the phone during playback did nothing.
-            applyPlayerOrientation()
-        }
-        .onChange(of: overlayMode) { _, _ in
-            applyPlayerOrientation()
-        }
-        .onChange(of: controlsLocked) { _, _ in
-            // V2 screen lock freezes orientation too (item 3's
-            // lock rule); unlocking hands rotation back to the
-            // device.
-            applyPlayerOrientation()
-        }
-        .onAppear {
-            handlePlayerAppear()
-        }
-        .onChange(of: playbackIdentity) { _, _ in
-            cancelAutoAdvanceCountdown(resetEndHandling: true)
-            applyPlaybackTransitionIfNeeded()
-        }
-        .onChange(of: overlayPresentationID) { _, _ in
-            // The overlay deliberately preserves PlayerView identity so an active
-            // AirPlay AVPlayer survives a source switch. Observe the host's explicit
-            // presentation revision as a reliable handoff trigger; the identity guard
-            // inside applyPlaybackTransitionIfNeeded prevents duplicate loads.
-            cancelAutoAdvanceCountdown(resetEndHandling: true)
-            applyPlaybackTransitionIfNeeded()
-        }
-        .onChange(of: videoAspectModeRaw) { _, _ in
-            applySelectedAspectMode()
-            showAspectToast()
-        }
-    }
-
-    /// The GeometryReader that sizes the mini-card scene.
-    private var playerGeometryRoot: some View {
-        GeometryReader { geo in
-            let containerSize = geo.size
-            let outerSafeAreaInsets = geo.safeAreaInsets
-            let clampedProgress = min(max(miniProgress, 0), 1)
-            let card = miniCardRect(container: containerSize, safeArea: outerSafeAreaInsets)
-            let t = miniTransform(progress: clampedProgress, card: card, container: containerSize)
-            miniCardScene(
-                containerSize: containerSize,
-                outerSafeAreaInsets: outerSafeAreaInsets,
-                clampedProgress: clampedProgress,
-                card: card,
-                t: t,
-                geo: geo
-            )
-            .frame(width: containerSize.width, height: containerSize.height)
-            // iPad / geniş yatay düzende durum çubuğunu kontrollerle aç-kapa yapmak üst güvenli alanı
-            // değiştirir; GeometryReader yüksekliği sıçrar. Telefonda (compact) eski davranış korunur.
-            // Mini kartta durum çubuğu her zaman görünür.
-            .statusBarHidden(statusBarHiddenInCurrentMode)
-        }
-    }
-
-    /// The mini-card morph scene: the drag layer wrapping the card
-    /// shadow, the player surface and the floating mini chrome.
-    private func miniCardScene(
-        containerSize: CGSize,
-        outerSafeAreaInsets: EdgeInsets,
-        clampedProgress: CGFloat,
-        card: CGRect,
-        t: (scale: CGFloat, offset: CGSize, maskSize: CGSize, cornerRadius: CGFloat),
-        geo: GeometryProxy
-    ) -> some View {
-        ZStack {
-            // The whole mini-card group is repositioned by the live drag inside
-            // `MiniCardDragLayer`, which is the ONLY view that re-renders while dragging —
-            // the masked/scaled video below is evaluated once and merely re-offset, so the
-            // picture is never re-processed (which used to glitch the video mid-drag).
-            MiniCardDragLayer(model: cardDrag) {
-                ZStack {
-                    miniCardShadowLayer(clampedProgress: clampedProgress, t: t, containerSize: containerSize)
-
-                    playerSurfaceLayer(
-                        containerSize: containerSize,
-                        outerSafeAreaInsets: outerSafeAreaInsets,
-                        t: t,
-                        geo: geo
-                    )
-
-                    miniCardChromeLayer(
-                        clampedProgress: clampedProgress,
-                        card: card,
-                        containerSize: containerSize,
-                        outerSafeAreaInsets: outerSafeAreaInsets
-                    )
-                }
-            }
-        }
-    }
-
-    /// The mini card's drop shadow, tracking the visible video
-    /// card through the morph.
-    @ViewBuilder
-    private func miniCardShadowLayer(
-        clampedProgress: CGFloat,
-        t: (scale: CGFloat, offset: CGSize, maskSize: CGSize, cornerRadius: CGFloat),
-        containerSize: CGSize
-    ) -> some View {
-        // Card shadow, a cheap standalone rounded rect tracking the visible video
-        // card through the whole morph. The masked video layer never carries a
-        // shadow itself — re-shadowing that full-screen layer each frame as the
-        // mask animates caused judder/tremble. The opaque video lands on top of
-        // this fill; only the shadow spills out.
-        if clampedProgress > 0.01 {
-            let visibleCard = CGSize(width: t.maskSize.width * t.scale, height: t.maskSize.height * t.scale)
-            RoundedRectangle(
-                cornerRadius: MiniPlayerMetrics.cornerRadius * min(clampedProgress * 2.5, 1),
-                style: .continuous
-            )
-            .fill(Color.black)
-            .frame(width: visibleCard.width, height: visibleCard.height)
-            .shadow(color: .black.opacity(0.38 * Double(clampedProgress)),
-                    radius: 22 * clampedProgress, x: 0, y: 8 * clampedProgress)
-            .position(
-                x: containerSize.width / 2 + t.offset.width + interactiveDismissOffset.width,
-                y: containerSize.height / 2 + t.offset.height + interactiveDismissOffset.height
-            )
-            .allowsHitTesting(false)
-        }
-    }
-
-    /// The masked/scaled player surface inside the morph.
-    private func playerSurfaceLayer(
-        containerSize: CGSize,
-        outerSafeAreaInsets: EdgeInsets,
-        t: (scale: CGFloat, offset: CGSize, maskSize: CGSize, cornerRadius: CGFloat),
-        geo: GeometryProxy
-    ) -> some View {
-        // Player content, transformed toward the floating mini card as
-        // `miniProgress` grows. The mask crops the letterbox down to the card;
-        // scale/offset land the video on the card center. View identity is stable
-        // so playback never restarts.
-        ZStack {
-            Color.black
-                .ignoresSafeArea()
-
-            playerChromeAndVideo(outerSafeAreaInsets: outerSafeAreaInsets)
-        }
-        .background(Color.black)
-        .frame(width: containerSize.width, height: containerSize.height)
-        .mask(
-            RoundedRectangle(cornerRadius: t.cornerRadius, style: .continuous)
-                .frame(width: t.maskSize.width, height: t.maskSize.height)
-        )
-        .scaleEffect(t.scale)
-        .offset(
-            x: t.offset.width + interactiveDismissOffset.width,
-            y: t.offset.height + interactiveDismissOffset.height
-        )
-        .opacity(edgeBackOpacity(containerSize: containerSize))
-        .simultaneousGesture(
-            interactiveDismissDragGesture(
-                containerSize: containerSize,
-                safeAreaTop: geo.safeAreaInsets.top,
-                safeAreaBottom: geo.safeAreaInsets.bottom
-            )
-        )
-        // Once docked, stop the (visually card-sized but layout-full-screen)
-        // content from swallowing touches: SwiftUI `.mask` crops rendering only,
-        // not the hit region. `isMiniCommitted` only flips at commit, so the
-        // interactive pull-down morph is unaffected; card taps go to the chrome.
-        .allowsHitTesting(!isMiniCommitted)
-    }
-
-    /// The floating mini card chrome (expand / close / drag),
-    /// tappable only once docked.
-    @ViewBuilder
-    private func miniCardChromeLayer(
-        clampedProgress: CGFloat,
-        card: CGRect,
-        containerSize: CGSize,
-        outerSafeAreaInsets: EdgeInsets
-    ) -> some View {
-        // Floating mini card chrome (unscaled), tappable only once docked.
-        if clampedProgress > 0.01 {
-            MiniPlayerChrome(
-                player: player,
-                cornerRadius: MiniPlayerMetrics.cornerRadius,
-                isLoading: isCenterTransportLoading,
-                onExpand: { playerOverlayExpand?() },
-                onClose: { performPlayerDismiss() },
-                onDragChanged: { translation in
-                    handleMiniCardDragChanged(
-                        translation: translation,
-                        card: card, container: containerSize
-                    )
-                },
-                onDragEnded: { translation, velocity in
-                    handleMiniCardDragEnded(
-                        translation: translation, velocity: velocity,
-                        container: containerSize, safeArea: outerSafeAreaInsets
-                    )
-                }
-            )
-            .frame(width: card.width, height: card.height)
-            .position(x: card.midX, y: card.midY)
-            .opacity(miniChromeOpacity)
-            .allowsHitTesting(isMiniCommitted)
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// Otomatik geçiş yalnız dizilerde ve gerçekten gidilecek bir sonraki bölüm varken.
@@ -1694,31 +1595,461 @@ private struct PlayerViewImpl: View {
     private func playerChromeAndVideo(outerSafeAreaInsets: EdgeInsets) -> some View {
         GeometryReader { geo in
             let fittedSize = fittedVideoSize(in: geo.size)
-            // Build 67 (W4, F4): edge-slider metrics, computed once
-            // here so the rendered sliders and the touch overlay's
-            // edge-drag zones always agree. Portrait phone gets the
-            // smaller, fully on-screen capsule; in landscape every
-            // value resolves to the exact build-66 numbers.
-            let isPortraitPlayer = geo.size.height > geo.size.width
-            let edgeSliderIsPortraitPhone = isCompactWidth && isPortraitPlayer
-            let edgeSliderTrackWidth: CGFloat = edgeSliderIsPortraitPhone ? 44 : (isCompactWidth ? 52 : 64)
-            let edgeSliderTrackHeight: CGFloat = edgeSliderIsPortraitPhone ? 132 : (isCompactWidth ? 160 : 180)
-            let edgeSliderEdgeInset: CGFloat = edgeSliderIsPortraitPhone ? 8 : 16
             ZStack {
-                chromeSystemLayers(fittedSize: fittedSize, geo: geo)
+                MPVolumeViewHost(bridge: systemVolumeBridge)
+                    .frame(width: 120, height: 48)
+                    .opacity(0.001)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                    .zIndex(-10)
 
-                chromeTouchLayer(
-                    edgeSliderTrackWidth: edgeSliderTrackWidth,
-                    edgeSliderTrackHeight: edgeSliderTrackHeight,
-                    edgeSliderEdgeInset: edgeSliderEdgeInset,
-                    outerSafeAreaInsets: outerSafeAreaInsets
+                HiddenAirPlayRoutePicker(trigger: airPlayPickerSignal)
+                    .frame(width: 44, height: 44)
+                    .opacity(0.001)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                    .zIndex(-10)
+
+                ZStack {
+                    VideoZoomPanLayer(
+                        model: videoZoomPan,
+                        pinchBase: videoPinchBase,
+                        zoomMax: videoZoomMax,
+                        panCommitted: videoPanCommitted,
+                        aspectFillScale: videoAspectFillScale,
+                        viewportSize: videoViewportSize,
+                        containerSize: videoContainerSize,
+                        pinchAnchor: pinchAnchorState
+                    ) {
+                        ZStack {
+                            if let cast = player.castController {
+                                KSPlayerVideoSurface(
+                                    engine: player.engine,
+                                    cast: cast,
+                                    manualPiPTrigger: pipManualSignal,
+                                    pipEnabled: pipEnabled,
+                                    continuePlayingInBackground: continuePlayingInBackground
+                                )
+                                .id("KSPlaybackSurface")
+                            }
+                        }
+                        .frame(width: fittedSize.width, height: fittedSize.height)
+                    }
+                }
+                // Clip to the screen so the `.fill` crop never bleeds past the viewport into
+                // the chrome. Only Fill overflows, so the clip (an offscreen compositing pass
+                // that was adding jank on open / pull-down) is skipped in fit/center.
+                .frame(width: geo.size.width, height: geo.size.height)
+                .modifier(ConditionalClip(active: selectedAspectMode == .fill))
+                .allowsHitTesting(false)  // tüm touch UIKit overlay'de; video katmanı hit-test almaz
+                .zIndex(0)
+
+                // Tap/pinch/pan UIKit overlay'inde. Pinch midpoint callback ile zoom anchor
+                // offset hesaplanır; pan yalnızca zoomluyken enabled.
+                PlayerMediaKitStyleTouchOverlay(
+                    showControls: $showControls,
+                    isSeekDisabled: isCenterTransportLoading,
+                    videoZoomScale: videoZoomScale,
+                    isSpeedHoldActive: isFastForwarding,
+                    isSpeedHoldEnabled: speedUpOnLongPress
+                        && player.isPlaying
+                        && !controlsLocked
+                        && interactiveDismissAxis == nil,
+                    edgeSliderTrackSize: CGSize(
+                        width: isCompactWidth ? 52 : 64,
+                        height: isCompactWidth ? 160 : 180
+                    ),
+                    edgeSliderLeadingInset: 16 + outerSafeAreaInsets.leading,
+                    edgeSliderTrailingInset: 16 + outerSafeAreaInsets.trailing,
+                    interactionEnabled: miniProgress < 0.02,
+                    onResetTimer: { resetTimer() },
+                    onInvalidateTimer: { timer?.invalidate() },
+                    onSpeedHoldBegan: { applySpeedHoldBegan() },
+                    onSpeedHoldEnded: { applySpeedHoldEnded() },
+                    onVideoPinchBegan: { location, containerBounds in
+                        handleVideoPinchBegan(at: location, containerSize: containerBounds)
+                    },
+                    onVideoPinchChanged: { videoZoomPan.pinchLive = $0 },
+                    onVideoPinchEnded: { handleVideoPinchGestureEnded() },
+                    onVideoPanChanged: { translation in
+                        videoZoomPan.panLive = translation
+                    },
+                    onVideoPanEnded: { translation in
+                        handleVideoPanEnded(translation: translation)
+                    },
+                    onVideoSurfaceTap: { onVideoSurfaceTap?() },
+                    // Build 61 (B14, V3): additive swipes — disabled while
+                    // locked, zoomed, or mid-dismiss so pristine gestures win.
+                    swipeGesturesEnabled: !controlsLocked
+                        && videoZoomScale <= 1.02
+                        && interactiveDismissAxis == nil,
+                    onSurfacePanBegan: { location, container in
+                        handleSurfacePanBegan(location: location, container: container)
+                    },
+                    onSurfacePanChanged: { translation, location, container in
+                        handleSurfacePanChanged(
+                            translation: translation, location: location, container: container
+                        )
+                    },
+                    onSurfacePanEnded: { translation in
+                        handleSurfacePanEnded(translation: translation)
+                    }
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .zIndex(1)
 
-                chromeControlsLayers(outerSafeAreaInsets: outerSafeAreaInsets, isPortraitPlayer: isPortraitPlayer)
+                if showControls {
+                    // iOS native player gibi okunabilirlik için üst/alt koyu gradient.
+                    VStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [
+                                Color.black.opacity(0.55),
+                                Color.black.opacity(0.0)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 160)
+                        Spacer(minLength: 0)
+                        LinearGradient(
+                            colors: [
+                                Color.black.opacity(0.0),
+                                Color.black.opacity(0.65)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 220)
+                    }
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                    .opacity(fullChromeOpacity)
+                    .zIndex(29)
 
-                chromeStatusLayers(outerSafeAreaInsets: outerSafeAreaInsets)
+                    // Build 61 (B14, V2): while locked, the ONLY chrome is the
+                    // unlock capsule — every other control is unrendered (inert).
+                    if controlsLocked {
+                        lockedControlsChrome
+                            .opacity(fullChromeOpacity)
+                            .allowsHitTesting(miniProgress < 0.02)
+                            .zIndex(30)
+                    } else {
+                    VStack(spacing: 0) {
+                        topChrome
+                        Spacer()
+                        centerTransport
+                        Spacer()
+                        bottomTransportChrome
+                    }
+                    .padding(.leading, 12 + outerSafeAreaInsets.leading)
+                    .padding(.trailing, 12 + outerSafeAreaInsets.trailing)
+                    .padding(.top, outerSafeAreaInsets.top)
+                    .padding(.bottom, 12 + outerSafeAreaInsets.bottom)
+                    // Build 70: pin the chrome stack to the actual container width.
+                    // Unpinned, a too-wide child (the slim bar on portrait phones)
+                    // widens the whole stack past the screen and the enclosing
+                    // ZStack centers the overflow, pushing the top bar, the edge
+                    // sliders and the bar itself off both screen edges.
+                    .frame(width: geo.size.width)
+                    // Kontroller güvenli alanın dışına çıkmasın — home indicator / app switcher
+                    // jest bölgesinde scrub bar yanlışlıkla seek tetiklemesin diye alt safe area korunur.
+                    .opacity(fullChromeOpacity)
+                    // Invisible (opacity ~0) but still-hittable fullscreen chrome must not
+                    // intercept taps during the minimize/expand morph — otherwise a stray tap
+                    // on the scaled-down invisible close/play button could tear down or pause.
+                    // Only interactive when essentially fullscreen.
+                    .allowsHitTesting(miniProgress < 0.02)
+                    .zIndex(30)
 
-                chromeTopLayers(outerSafeAreaInsets: outerSafeAreaInsets, geo: geo)
+                    // Build 65 (Player style 2 'Rich Bar'): the
+                    // standalone bottom-left programme strip is
+                    // GONE — its content (programme title, time
+                    // range, progress) now lives inside the frosted
+                    // rich bar's identity row in
+                    // `bottomTransportChrome`, exactly once.
+
+                    PlayerControlCenterStyleEdgeSliders(
+                        player: player,
+                        systemVolume: systemVolumeBridge,
+                        safeAreaInsets: outerSafeAreaInsets,
+                        isCompactWidth: isCompactWidth
+                    ) {
+                        resetTimer()
+                    }
+                    .opacity(fullChromeOpacity)
+                    .allowsHitTesting(miniProgress < 0.02)
+                    .zIndex(32)
+                    } // end B14 V2 unlocked chrome
+                }
+
+                // Build 61 (B14, V4): stream-info overlay — REAL engine-reported
+                // values only, reusing the debug panel's existing formatters
+                // (resolution / bitrate / network / buffer / fps / codec).
+                if showControls && !controlsLocked && showStreamInfo {
+                    VStack {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                streamInfoRow(label: L("player.info.resolution"), value: playbackDebugResolutionText)
+                                streamInfoRow(label: L("player.info.bitrate"), value: playbackDebugBitrateText)
+                                streamInfoRow(label: L("player.info.network"), value: playbackDebugNetText)
+                                streamInfoRow(label: L("player.info.buffer"), value: playbackDebugCacheText)
+                                streamInfoRow(label: "FPS", value: playbackDebugFpsText)
+                                streamInfoRow(label: "Codec", value: playbackDebugCodecText)
+                            }
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            Spacer()
+                        }
+                        .padding(.top, 78 + outerSafeAreaInsets.top)
+                        .padding(.leading, 16 + outerSafeAreaInsets.leading)
+                        Spacer()
+                    }
+                    .allowsHitTesting(false)
+                    .opacity(fullChromeOpacity)
+                    .zIndex(34)
+                }
+
+                // Build 61 (B14, V3): minimal swipe indicator (seek preview /
+                // brightness / volume), visible only mid-gesture.
+                if let target = swipeSeekTargetMs {
+                    swipeIndicatorCapsule {
+                        HStack(spacing: 6) {
+                            Image(systemName: target >= swipeStartTimeMs ? "goforward.10" : "gobackward.10")
+                                .accessibilityHidden(true)
+                            Text(formatMs(Int(target)))
+                                .monospacedDigit()
+                        }
+                    }
+                    .zIndex(35)
+                } else if let level = swipeLevelValue, let kind = swipeKind {
+                    swipeIndicatorCapsule {
+                        HStack(spacing: 6) {
+                            Image(systemName: kind == .brightness ? "sun.max.fill" : "speaker.wave.2.fill")
+                                .accessibilityHidden(true)
+                            Text("\(Int((level * 100).rounded()))%")
+                                .monospacedDigit()
+                        }
+                    }
+                    .zIndex(35)
+                }
+
+                // Kontroller gizliyken de yükleme/buffering geri bildirimi: yavaş panel
+                // açılışında 5 sn sonra kontroller kaybolunca kullanıcı simsiyah ekranla
+                // baş başa kalıyordu. Kontroller açıkken ortadaki buton zaten spinner
+                // gösterdiği için burada yalnızca !showControls durumunda çizilir.
+                if isCenterTransportLoading && !showControls {
+                    // X6 (B7): branded loader VIEW swap only — the
+                    // buffering/loading logic and this condition are
+                    // untouched; only the spinner's appearance changed.
+                    BrandedLoader(size: 38)
+                        .padding(18)
+                        .background(.black.opacity(0.35), in: Circle())
+                        .allowsHitTesting(false)
+                        .opacity(fullChromeOpacity)
+                        .zIndex(25)
+                }
+
+                // Build 64 (A3-iii): a fresh load spending the
+                // reconnect ladder shows WHAT it is doing — the
+                // build-63 silent ~12 s absorption read as a dead
+                // tap. Status only (no controls, no hit testing);
+                // raised solely before establishment, so nothing
+                // ever appears over established playback (item 12d).
+                if player.isRetryingConnection {
+                    VStack {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .accessibilityHidden(true)
+                            Text(L("player.reconnecting"))
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.55), in: Capsule())
+                        Spacer()
+                    }
+                    .padding(.top, 60)
+                    .allowsHitTesting(false)
+                    .zIndex(26)
+                }
+
+                if showControls && showDebugOverlay {
+                    // Debug panel top-trailing, volume slider'ın ÜSTÜNDE render edilir
+                    // (zIndex slider'dan yüksek). topChrome'un altında, sağda ses slider'ını
+                    // kaplar.
+                    VStack {
+                        HStack {
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text("RES \(playbackDebugResolutionText)")
+                                Text("FPS \(playbackDebugFpsText)")
+                                Text("BR \(playbackDebugBitrateText)")
+                                Text(playbackDebugFramesText)
+                                Text(playbackDebugCacheText)
+                                Text(playbackDebugAvSyncText)
+                                Text(playbackDebugNetText)
+                                Text(playbackDebugCodecText)
+                                Text(playbackDebugSeekText)
+                            }
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .padding(.top, 78 + outerSafeAreaInsets.top)
+                        .padding(.trailing, 16 + outerSafeAreaInsets.trailing)
+                        Spacer()
+                    }
+                    .allowsHitTesting(false)
+                    .opacity(fullChromeOpacity)
+                    .zIndex(33)
+                }
+
+                // Build 61 (FA, X5): zap sweep — a thin red-orange
+                // sweep along the TOP chrome edge on live channel
+                // change. Presentation only: 3pt tall, hit-testing
+                // off, under 200ms, gated by EffectsGate inside the
+                // view; it is NOT a full-screen overlay and cannot
+                // delay or cover the video's first frame.
+                VStack(spacing: 0) {
+                    ZapSweepView(trigger: zapSweepTrigger)
+                    Spacer(minLength: 0)
+                }
+                .ignoresSafeArea(edges: .top)
+                .allowsHitTesting(false)
+                .zIndex(36)
+
+                if let aspectToastText {
+                    VStack {
+                        HStack(spacing: 8) {
+                            Image(systemName: selectedAspectMode.iconName)
+                                .font(.footnote.weight(.semibold))
+                            Text(aspectToastText)
+                                .font(.footnote.weight(.semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.5))
+                        .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
+                        .padding(.top, 64)
+                        Spacer()
+                    }
+                    .transition(
+                        .opacity
+                            .combined(with: .scale(scale: 0.92, anchor: .top))
+                            .combined(with: .move(edge: .top))
+                    )
+                    .opacity(fullChromeOpacity)
+                    .zIndex(40)
+                    .allowsHitTesting(false)
+                }
+
+                if let seconds = autoAdvanceSecondsRemaining {
+                    HStack(spacing: 10) {
+                        Button {
+                            cancelAutoAdvanceCountdown()
+                        } label: {
+                            Text(L("common.cancel"))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                                .background(.ultraThinMaterial, in: Capsule())
+                                .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.5))
+                        }
+
+                        Button {
+                            triggerAutoAdvance()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "play.fill")
+                                    .font(.footnote.weight(.bold))
+                                Text(L("player.autonext.countdown", seconds))
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(.white, in: Capsule())
+                        }
+                    }
+                    .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, 16 + outerSafeAreaInsets.trailing)
+                    .padding(.bottom, (showControls ? 92 : 16) + outerSafeAreaInsets.bottom)
+                    // Krom görünürlüğü animasyonsuz (Transaction.disablesAnimations)
+                    // değişebildiği için padding'i kendi animasyonuyla sür — kullanıcı
+                    // "İptal"e uzanırken butonlar 76pt ışınlanıyordu.
+                    .animation(.easeInOut(duration: 0.2), value: showControls)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .opacity(fullChromeOpacity)
+                    .zIndex(41)
+                }
+
+                // Not: PiP placeholder UI kaldırıldı — sistem `AVPictureInPictureController`
+                // kendi "playing in picture in picture" mesajını otomatik gösteriyor.
+
+                if isFastForwarding {
+                    VStack {
+                        HStack(spacing: 6) {
+                            Text("2x")
+                            Image(systemName: "forward.fill")
+                        }
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial.opacity(0.8), in: Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 0.5))
+                        .shadow(color: .black.opacity(0.15), radius: 10, y: 5)
+                        .padding(.top, 64)
+                        Spacer()
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .opacity(fullChromeOpacity)
+                    .zIndex(10)
+                }
+
+                // Hata banner'ı krom görünürlüğünden bağımsız: 5 sn auto-hide sonrası
+                // patlayan yayında kullanıcı sessiz siyah ekranla kalmasın.
+                if hasPlaybackFailure, let msg = player.playbackFailureMessage {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "wifi.exclamationmark")
+                            .font(.caption.weight(.bold))
+                            .accessibilityHidden(true)
+                        Text(msg)
+                            .font(.caption2.weight(.semibold))
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: max(0, min(geo.size.width - 24, 280)), alignment: .leading)
+                    .background(
+                        Color(red: 0.72, green: 0.12, blue: 0.14).opacity(0.94),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding(.leading, 12)
+                    .padding(.bottom, (showControls ? 92 : 12) + outerSafeAreaInsets.bottom)
+                    .allowsHitTesting(false)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(L("player.playback_error"))
+                    .accessibilityValue(msg)
+                    .opacity(fullChromeOpacity)
+                    .zIndex(25)
+                }
+
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .onAppear { syncVideoLayout(container: geo.size) }
@@ -1730,487 +2061,6 @@ private struct PlayerViewImpl: View {
         // Video yüzeyi ekranın kenarlarına kadar uzansın. Kontroller ayrıca `outerSafeAreaInsets`
         // kullanarak güvenli alana saygı gösterir (aşağıda controls VStack padding'i).
         .ignoresSafeArea()
-    }
-
-    // Build 68 (compile-fix round 2): `playerChromeAndVideo` was a
-    // single ~470-line GeometryReader/ZStack expression of the same
-    // shape that timed out the type-checker in `body` above; its
-    // layers are grouped into the verbatim pieces below, in the
-    // original z-order.
-
-    /// Hidden system layers (volume bridge, AirPlay picker) and
-    /// the video surface itself.
-    @ViewBuilder
-    private func chromeSystemLayers(fittedSize: CGSize, geo: GeometryProxy) -> some View {
-        MPVolumeViewHost(bridge: systemVolumeBridge)
-            .frame(width: 120, height: 48)
-            .opacity(0.001)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-            .zIndex(-10)
-
-        HiddenAirPlayRoutePicker(trigger: airPlayPickerSignal)
-            .frame(width: 44, height: 44)
-            .opacity(0.001)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-            .zIndex(-10)
-
-        ZStack {
-            VideoZoomPanLayer(
-                model: videoZoomPan,
-                pinchBase: videoPinchBase,
-                zoomMax: videoZoomMax,
-                panCommitted: videoPanCommitted,
-                aspectFillScale: videoAspectFillScale,
-                viewportSize: videoViewportSize,
-                containerSize: videoContainerSize,
-                pinchAnchor: pinchAnchorState
-            ) {
-                ZStack {
-                    if let cast = player.castController {
-                        KSPlayerVideoSurface(
-                            engine: player.engine,
-                            cast: cast,
-                            manualPiPTrigger: pipManualSignal,
-                            pipEnabled: pipEnabled,
-                            continuePlayingInBackground: continuePlayingInBackground
-                        )
-                        .id("KSPlaybackSurface")
-                    }
-                }
-                .frame(width: fittedSize.width, height: fittedSize.height)
-            }
-        }
-        // Clip to the screen so the `.fill` crop never bleeds past the viewport into
-        // the chrome. Only Fill overflows, so the clip (an offscreen compositing pass
-        // that was adding jank on open / pull-down) is skipped in fit/center.
-        .frame(width: geo.size.width, height: geo.size.height)
-        .modifier(ConditionalClip(active: selectedAspectMode == .fill))
-        .allowsHitTesting(false)  // tüm touch UIKit overlay'de; video katmanı hit-test almaz
-        .zIndex(0)
-    }
-
-    /// The UIKit touch overlay (tap / pinch / pan / edge sliders).
-    private func chromeTouchLayer(
-        edgeSliderTrackWidth: CGFloat,
-        edgeSliderTrackHeight: CGFloat,
-        edgeSliderEdgeInset: CGFloat,
-        outerSafeAreaInsets: EdgeInsets
-    ) -> some View {
-        // Tap/pinch/pan UIKit overlay'inde. Pinch midpoint callback ile zoom anchor
-        // offset hesaplanır; pan yalnızca zoomluyken enabled.
-        PlayerMediaKitStyleTouchOverlay(
-            showControls: $showControls,
-            isSeekDisabled: isCenterTransportLoading,
-            videoZoomScale: videoZoomScale,
-            isSpeedHoldActive: isFastForwarding,
-            isSpeedHoldEnabled: speedUpOnLongPress
-                && player.isPlaying
-                && !controlsLocked
-                && interactiveDismissAxis == nil,
-            edgeSliderTrackSize: CGSize(
-                width: edgeSliderTrackWidth,
-                height: edgeSliderTrackHeight
-            ),
-            edgeSliderLeadingInset: edgeSliderEdgeInset + outerSafeAreaInsets.leading,
-            edgeSliderTrailingInset: edgeSliderEdgeInset + outerSafeAreaInsets.trailing,
-            interactionEnabled: miniProgress < 0.02,
-            onResetTimer: { resetTimer() },
-            onInvalidateTimer: { timer?.invalidate() },
-            onSpeedHoldBegan: { applySpeedHoldBegan() },
-            onSpeedHoldEnded: { applySpeedHoldEnded() },
-            onVideoPinchBegan: { location, containerBounds in
-                handleVideoPinchBegan(at: location, containerSize: containerBounds)
-            },
-            onVideoPinchChanged: { videoZoomPan.pinchLive = $0 },
-            onVideoPinchEnded: { handleVideoPinchGestureEnded() },
-            onVideoPanChanged: { translation in
-                videoZoomPan.panLive = translation
-            },
-            onVideoPanEnded: { translation in
-                handleVideoPanEnded(translation: translation)
-            },
-            onVideoSurfaceTap: { onVideoSurfaceTap?() },
-            // Build 61 (B14, V3): additive swipes — disabled while
-            // locked, zoomed, or mid-dismiss so pristine gestures win.
-            swipeGesturesEnabled: !controlsLocked
-                && videoZoomScale <= 1.02
-                && interactiveDismissAxis == nil,
-            onSurfacePanBegan: { location, container in
-                handleSurfacePanBegan(location: location, container: container)
-            },
-            onSurfacePanChanged: { translation, location, container in
-                handleSurfacePanChanged(
-                    translation: translation, location: location, container: container
-                )
-            },
-            onSurfacePanEnded: { translation in
-                handleSurfacePanEnded(translation: translation)
-            }
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .zIndex(1)
-    }
-
-    /// The fullscreen control chrome and the stream-info overlay.
-    @ViewBuilder
-    private func chromeControlsLayers(outerSafeAreaInsets: EdgeInsets, isPortraitPlayer: Bool) -> some View {
-        if showControls {
-            // iOS native player gibi okunabilirlik için üst/alt koyu gradient.
-            VStack(spacing: 0) {
-                LinearGradient(
-                    colors: [
-                        Color.black.opacity(0.55),
-                        Color.black.opacity(0.0)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 160)
-                Spacer(minLength: 0)
-                LinearGradient(
-                    colors: [
-                        Color.black.opacity(0.0),
-                        Color.black.opacity(0.65)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 220)
-            }
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-            .transition(.opacity)
-            .opacity(fullChromeOpacity)
-            .zIndex(29)
-
-            // Build 61 (B14, V2): while locked, the ONLY chrome is the
-            // unlock capsule — every other control is unrendered (inert).
-            if controlsLocked {
-                lockedControlsChrome
-                    .opacity(fullChromeOpacity)
-                    .allowsHitTesting(miniProgress < 0.02)
-                    .zIndex(30)
-            } else {
-            VStack(spacing: 0) {
-                topChrome
-                Spacer()
-                centerTransport
-                Spacer()
-                bottomTransportChrome
-            }
-            .padding(.leading, 12 + outerSafeAreaInsets.leading)
-            .padding(.trailing, 12 + outerSafeAreaInsets.trailing)
-            .padding(.top, outerSafeAreaInsets.top)
-            .padding(.bottom, 12 + outerSafeAreaInsets.bottom)
-            // Kontroller güvenli alanın dışına çıkmasın — home indicator / app switcher
-            // jest bölgesinde scrub bar yanlışlıkla seek tetiklemesin diye alt safe area korunur.
-            .opacity(fullChromeOpacity)
-            // Invisible (opacity ~0) but still-hittable fullscreen chrome must not
-            // intercept taps during the minimize/expand morph — otherwise a stray tap
-            // on the scaled-down invisible close/play button could tear down or pause.
-            // Only interactive when essentially fullscreen.
-            .allowsHitTesting(miniProgress < 0.02)
-            .zIndex(30)
-
-            // Build 65 (Player style 2 'Rich Bar'): the
-            // standalone bottom-left programme strip is
-            // GONE — its content (programme title, time
-            // range, progress) now lives inside the frosted
-            // rich bar's identity row in
-            // `bottomTransportChrome`, exactly once.
-
-            PlayerControlCenterStyleEdgeSliders(
-                player: player,
-                systemVolume: systemVolumeBridge,
-                safeAreaInsets: outerSafeAreaInsets,
-                isCompactWidth: isCompactWidth,
-                isPortrait: isPortraitPlayer
-            ) {
-                resetTimer()
-            }
-            .opacity(fullChromeOpacity)
-            .allowsHitTesting(miniProgress < 0.02)
-            .zIndex(32)
-            } // end B14 V2 unlocked chrome
-        }
-
-        // Build 61 (B14, V4): stream-info overlay — REAL engine-reported
-        // values only, reusing the debug panel's existing formatters
-        // (resolution / bitrate / network / buffer / fps / codec).
-        if showControls && !controlsLocked && showStreamInfo {
-            VStack {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        streamInfoRow(label: L("player.info.resolution"), value: playbackDebugResolutionText)
-                        streamInfoRow(label: L("player.info.bitrate"), value: playbackDebugBitrateText)
-                        streamInfoRow(label: L("player.info.network"), value: playbackDebugNetText)
-                        streamInfoRow(label: L("player.info.buffer"), value: playbackDebugCacheText)
-                        streamInfoRow(label: "FPS", value: playbackDebugFpsText)
-                        streamInfoRow(label: "Codec", value: playbackDebugCodecText)
-                    }
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    Spacer()
-                }
-                .padding(.top, 78 + outerSafeAreaInsets.top)
-                .padding(.leading, 16 + outerSafeAreaInsets.leading)
-                Spacer()
-            }
-            .allowsHitTesting(false)
-            .opacity(fullChromeOpacity)
-            .zIndex(34)
-        }
-    }
-
-    /// Swipe / loading / reconnect / debug status overlays.
-    @ViewBuilder
-    private func chromeStatusLayers(outerSafeAreaInsets: EdgeInsets) -> some View {
-        // Build 61 (B14, V3): minimal swipe indicator (seek preview /
-        // brightness / volume), visible only mid-gesture.
-        if let target = swipeSeekTargetMs {
-            swipeIndicatorCapsule {
-                HStack(spacing: 6) {
-                    Image(systemName: target >= swipeStartTimeMs ? "goforward.10" : "gobackward.10")
-                        .accessibilityHidden(true)
-                    Text(formatMs(Int(target)))
-                        .monospacedDigit()
-                }
-            }
-            .zIndex(35)
-        } else if let level = swipeLevelValue, let kind = swipeKind {
-            swipeIndicatorCapsule {
-                HStack(spacing: 6) {
-                    Image(systemName: kind == .brightness ? "sun.max.fill" : "speaker.wave.2.fill")
-                        .accessibilityHidden(true)
-                    Text("\(Int((level * 100).rounded()))%")
-                        .monospacedDigit()
-                }
-            }
-            .zIndex(35)
-        }
-
-        // Kontroller gizliyken de yükleme/buffering geri bildirimi: yavaş panel
-        // açılışında 5 sn sonra kontroller kaybolunca kullanıcı simsiyah ekranla
-        // baş başa kalıyordu. Kontroller açıkken ortadaki buton zaten spinner
-        // gösterdiği için burada yalnızca !showControls durumunda çizilir.
-        if isCenterTransportLoading && !showControls {
-            // X6 (B7): branded loader VIEW swap only — the
-            // buffering/loading logic and this condition are
-            // untouched; only the spinner's appearance changed.
-            BrandedLoader(size: 38)
-                .padding(18)
-                .background(.black.opacity(0.35), in: Circle())
-                .allowsHitTesting(false)
-                .opacity(fullChromeOpacity)
-                .zIndex(25)
-        }
-
-        // Build 64 (A3-iii): a fresh load spending the
-        // reconnect ladder shows WHAT it is doing — the
-        // build-63 silent ~12 s absorption read as a dead
-        // tap. Status only (no controls, no hit testing);
-        // raised solely before establishment, so nothing
-        // ever appears over established playback (item 12d).
-        if player.isRetryingConnection {
-            VStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .accessibilityHidden(true)
-                    Text(L("player.reconnecting"))
-                }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(.black.opacity(0.55), in: Capsule())
-                Spacer()
-            }
-            .padding(.top, 60)
-            .allowsHitTesting(false)
-            .zIndex(26)
-        }
-
-        if showControls && showDebugOverlay {
-            // Debug panel top-trailing, volume slider'ın ÜSTÜNDE render edilir
-            // (zIndex slider'dan yüksek). topChrome'un altında, sağda ses slider'ını
-            // kaplar.
-            VStack {
-                HStack {
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("RES \(playbackDebugResolutionText)")
-                        Text("FPS \(playbackDebugFpsText)")
-                        Text("BR \(playbackDebugBitrateText)")
-                        Text(playbackDebugFramesText)
-                        Text(playbackDebugCacheText)
-                        Text(playbackDebugAvSyncText)
-                        Text(playbackDebugNetText)
-                        Text(playbackDebugCodecText)
-                        Text(playbackDebugSeekText)
-                    }
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
-                .padding(.top, 78 + outerSafeAreaInsets.top)
-                .padding(.trailing, 16 + outerSafeAreaInsets.trailing)
-                Spacer()
-            }
-            .allowsHitTesting(false)
-            .opacity(fullChromeOpacity)
-            .zIndex(33)
-        }
-    }
-
-    /// Zap sweep, aspect toast, auto-advance, fast-forward and
-    /// failure-banner overlays (top of the z-order).
-    @ViewBuilder
-    private func chromeTopLayers(outerSafeAreaInsets: EdgeInsets, geo: GeometryProxy) -> some View {
-        // Build 61 (FA, X5): zap sweep — a thin red-orange
-        // sweep along the TOP chrome edge on live channel
-        // change. Presentation only: 3pt tall, hit-testing
-        // off, under 200ms, gated by EffectsGate inside the
-        // view; it is NOT a full-screen overlay and cannot
-        // delay or cover the video's first frame.
-        VStack(spacing: 0) {
-            ZapSweepView(trigger: zapSweepTrigger)
-            Spacer(minLength: 0)
-        }
-        .ignoresSafeArea(edges: .top)
-        .allowsHitTesting(false)
-        .zIndex(36)
-
-        if let aspectToastText {
-            VStack {
-                HStack(spacing: 8) {
-                    Image(systemName: selectedAspectMode.iconName)
-                        .font(.footnote.weight(.semibold))
-                    Text(aspectToastText)
-                        .font(.footnote.weight(.semibold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.5))
-                .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
-                .padding(.top, 64)
-                Spacer()
-            }
-            .transition(
-                .opacity
-                    .combined(with: .scale(scale: 0.92, anchor: .top))
-                    .combined(with: .move(edge: .top))
-            )
-            .opacity(fullChromeOpacity)
-            .zIndex(40)
-            .allowsHitTesting(false)
-        }
-
-        if let seconds = autoAdvanceSecondsRemaining {
-            HStack(spacing: 10) {
-                Button {
-                    cancelAutoAdvanceCountdown()
-                } label: {
-                    Text(L("common.cancel"))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.5))
-                }
-
-                Button {
-                    triggerAutoAdvance()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "play.fill")
-                            .font(.footnote.weight(.bold))
-                        Text(L("player.autonext.countdown", seconds))
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(.white, in: Capsule())
-                }
-            }
-            .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-            .padding(.trailing, 16 + outerSafeAreaInsets.trailing)
-            .padding(.bottom, (showControls ? 92 : 16) + outerSafeAreaInsets.bottom)
-            // Krom görünürlüğü animasyonsuz (Transaction.disablesAnimations)
-            // değişebildiği için padding'i kendi animasyonuyla sür — kullanıcı
-            // "İptal"e uzanırken butonlar 76pt ışınlanıyordu.
-            .animation(.easeInOut(duration: 0.2), value: showControls)
-            .transition(.opacity.combined(with: .move(edge: .bottom)))
-            .opacity(fullChromeOpacity)
-            .zIndex(41)
-        }
-
-        // Not: PiP placeholder UI kaldırıldı — sistem `AVPictureInPictureController`
-        // kendi "playing in picture in picture" mesajını otomatik gösteriyor.
-
-        if isFastForwarding {
-            VStack {
-                HStack(spacing: 6) {
-                    Text("2x")
-                    Image(systemName: "forward.fill")
-                }
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial.opacity(0.8), in: Capsule())
-                .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 0.5))
-                .shadow(color: .black.opacity(0.15), radius: 10, y: 5)
-                .padding(.top, 64)
-                Spacer()
-            }
-            .transition(.move(edge: .top).combined(with: .opacity))
-            .opacity(fullChromeOpacity)
-            .zIndex(10)
-        }
-
-        // Hata banner'ı krom görünürlüğünden bağımsız: 5 sn auto-hide sonrası
-        // patlayan yayında kullanıcı sessiz siyah ekranla kalmasın.
-        if hasPlaybackFailure, let msg = player.playbackFailureMessage {
-            HStack(alignment: .top, spacing: 6) {
-                Image(systemName: "wifi.exclamationmark")
-                    .font(.caption.weight(.bold))
-                    .accessibilityHidden(true)
-                Text(msg)
-                    .font(.caption2.weight(.semibold))
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .frame(maxWidth: max(0, min(geo.size.width - 24, 280)), alignment: .leading)
-            .background(
-                Color(red: 0.72, green: 0.12, blue: 0.14).opacity(0.94),
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-            .padding(.leading, 12)
-            .padding(.bottom, (showControls ? 92 : 12) + outerSafeAreaInsets.bottom)
-            .allowsHitTesting(false)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(L("player.playback_error"))
-            .accessibilityValue(msg)
-            .opacity(fullChromeOpacity)
-            .zIndex(25)
-        }
     }
 
     private func handleVideoPinchBegan(at location: CGPoint, containerSize: CGSize) {
@@ -2274,20 +2124,25 @@ private struct PlayerViewImpl: View {
         commitVideoPanClamp()
     }
 
-    /// Builds the Now Playing presentation from the channel /
-    /// content's own metadata only. Build 68: no EPG programme
-    /// is folded in — the guide is removed and the player is a
-    /// pure player.
+    /// Builds the Now Playing presentation, folding in the current EPG programme
+    /// (used as the Now Playing title on live channels).
     private func makePresentation() -> PlaybackPresentation {
+        let programme = currentNowNext?.now
         return PlaybackPresentation(
             title: title,
             subtitle: subtitle,
             artworkURL: artworkURL,
-            isLive: isLiveStream
+            isLive: isLiveStream,
+            programmeTitle: programme?.title,
+            programmeInterval: programme.map { DateInterval(start: $0.start, end: max($0.start, $0.stop)) }
         )
     }
 
     private func saveWatchHistory(tags: WatchHistoryTags? = nil) {
+        // Catch-up (timeshift) sessions must not persist history: the key would
+        // collide with the channel's live row and its resume time is meaningless
+        // once the archive window rolls past.
+        if suppressWatchHistory { return }
         let resolvedTags = tags ?? WatchHistoryTags(
             playlistId: playlistId,
             streamId: streamId,
@@ -2353,17 +2208,7 @@ private struct PlayerViewImpl: View {
                 }
             }
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-            // Build 67 (W4, F4): in portrait the title must NOT win
-            // layout priority over the fixed-size trailing capsule —
-            // with priority 1 a long title claimed its full intrinsic
-            // width, the HStack overflowed the screen and SwiftUI
-            // centered the overflow, clipping the close button at the
-            // leading edge and the "…" menu at the trailing edge.
-            // Portrait: the capsule keeps its size and the flexible
-            // center title truncates inside the remaining safe width.
-            // Landscape keeps the build-66 priority (space is ample
-            // there, so the rendered result is unchanged).
-            .layoutPriority(isPortraitPhoneLayout ? 0 : 1)
+            .layoutPriority(1)
             // Long channel metadata must never push trailing controls off-screen.
             .clipped()
             .contentShape(Rectangle())
@@ -2612,15 +2457,6 @@ private struct PlayerViewImpl: View {
     /// Compact horizontal size class'ta (iPhone) daha sıkı yerleşim — edge slider'lar için
     /// yatayda boşluk bırakır. Regular'da (iPad) geniş orijinal düzen.
     private var isCompactWidth: Bool { horizontalSizeClass == .compact }
-
-    /// Build 67 (W4, F4): portrait phone layout — compact width with a
-    /// regular vertical size class. iPhone landscape reports a compact
-    /// vertical size class and iPad reports a regular horizontal size
-    /// class, so this is false in both, and every portrait-only layout
-    /// branch keyed on it is an identity transform in landscape.
-    private var isPortraitPhoneLayout: Bool {
-        isCompactWidth && verticalSizeClass == .regular
-    }
     private var transportSpacing: CGFloat { isCompactWidth ? 22 : 56 }
     private var transportSkipHit: CGFloat { isCompactWidth ? 52 : 64 }
     private var transportSkipSymbol: CGFloat { isCompactWidth ? 30 : 36 }
@@ -2753,26 +2589,59 @@ private struct PlayerViewImpl: View {
     /// closure, same accessibility label; only its visual position
     /// within the chrome changed.
     private var bottomTransportChrome: some View {
-        // Build 67 (W4, S3): the series-episode and VOD-queue
-        // prev/next rows that build 66 floated in their own
-        // trailing rows ABOVE the bar now live INSIDE
-        // `slimPlayerBar` as its transport cluster (see
-        // `slimBarTransportCluster`) — same closures, same
-        // can-go bindings, same accessibility labels; only their
-        // visual position changed, so they can never crowd or
-        // overlap the edge sliders.
-        //
-        // Build 66 (W6, item 11): the Build 65 Rich Bar's
-        // stacked rows (identity row + control row + VOD seek
-        // card, plus the standalone B14 V5 Up Next strip above
-        // it) are restyled into ONE slim blurred bar. (Build 68:
-        // the Up Next / programme content the identity segment
-        // once folded in is REMOVED with the TV Guide — the bar
-        // is identity + transport + settings only.) Every
-        // control keeps its exact action, menu and gesture
-        // behavior, and the bar rides the same show/hide
-        // chrome as before.
-        slimPlayerBar
+        VStack(alignment: .trailing, spacing: 10) {
+
+            if showSeriesEpisodeSkip {
+                HStack(spacing: 8) {
+                    Spacer(minLength: 0)
+                    glassIconButton(systemName: "backward.end.fill", size: 44, symbolSize: 17) {
+                        onPreviousEpisode?()
+                    }
+                    .accessibilityLabel(L("player.a11y.previous_episode"))
+                    .disabled(!canGoToPreviousEpisode)
+                    .opacity(canGoToPreviousEpisode ? 1 : 0.38)
+
+                    glassIconButton(systemName: "forward.end.fill", size: 44, symbolSize: 17) {
+                        onNextEpisode?()
+                    }
+                    .accessibilityLabel(L("player.a11y.next_episode"))
+                    .disabled(!canGoToNextEpisode)
+                    .opacity(canGoToNextEpisode ? 1 : 0.38)
+                }
+                .padding(.horizontal, 12)
+            }
+
+            if showVODQueueSkip {
+                HStack(spacing: 8) {
+                    Spacer(minLength: 0)
+                    glassIconButton(systemName: "backward.end.fill", size: 44, symbolSize: 17) {
+                        onPreviousChannel?()
+                    }
+                    .accessibilityLabel(L("player.a11y.previous_item"))
+                    .disabled(!canGoToPreviousChannel)
+                    .opacity(canGoToPreviousChannel ? 1 : 0.38)
+
+                    glassIconButton(systemName: "forward.end.fill", size: 44, symbolSize: 17) {
+                        onNextChannel?()
+                    }
+                    .accessibilityLabel(L("player.a11y.next_item"))
+                    .disabled(!canGoToNextChannel)
+                    .opacity(canGoToNextChannel ? 1 : 0.38)
+                }
+                .padding(.horizontal, 12)
+            }
+
+            // Build 66 (W6, item 11): the Build 65 Rich Bar's
+            // stacked rows (identity row + control row + VOD seek
+            // card, plus the standalone B14 V5 Up Next strip above
+            // it) are restyled into ONE slim blurred bar. The Up
+            // Next programme is folded into the bar's identity
+            // segment (title only, same EPG snapshot); every
+            // control keeps its exact action, menu and gesture
+            // behavior, and the bar rides the same show/hide
+            // chrome as before.
+            slimPlayerBar
+        }
     }
 
     // MARK: - Build 66 (W6, item 11) slim blurred player bar
@@ -2784,55 +2653,78 @@ private struct PlayerViewImpl: View {
     /// video stays clearly visible through it. The thin red-orange
     /// progress line sits at the bar's TOP edge (see
     /// `slimBarProgressLine`).
-    /// Build 67 (W4, S3): rebuilt to the owner-picked Style 1 —
-    /// ICONS ONLY (no text labels on any bar control), prev /
-    /// play-pause / next inside the bar as one transport cluster.
-    /// Build 67 (W4, F4): portrait phone width stacks the same
-    /// controls into two rows inside the same card (see the
-    /// portrait branch below); landscape keeps the single row.
+    /// Build 70: on a portrait phone the bar's single row (identity
+    /// segment + play/pause + the five fixed 48pt control columns)
+    /// is wider than the screen and cannot compress — the identity
+    /// texts are the only compressible part and they are already at
+    /// their minimum. In that layout the SAME bar stacks: identity
+    /// row on top, the unchanged control row centered below it.
+    /// Landscape and iPad keep the single row exactly as before.
+    private var useStackedPlayerBar: Bool {
+        horizontalSizeClass == .compact && verticalSizeClass == .regular
+    }
+
+    /// The bar's identity row: identity segment, play/pause and the
+    /// live channel-list button — the leading portion of the single
+    /// row, and the top row of the stacked portrait layout.
+    private var slimBarIdentityRow: some View {
+        HStack(spacing: 10) {
+            slimBarIdentitySegment
+            Spacer(minLength: 8)
+            slimBarPlayPauseButton
+            if showLiveChannelListButton, let toggle = onToggleLiveChannelSidePanel {
+                glassIconButton(
+                    systemName: isLiveChannelSidePanelVisible ? "rectangle.bottomthird.inset.filled" : "rectangle.grid.1x2",
+                    size: 40,
+                    symbolSize: 16
+                ) {
+                    toggle()
+                }
+                .accessibilityLabel(L("list.channel_list"))
+            }
+        }
+    }
+
     private var slimPlayerBar: some View {
         Group {
-            if isPortraitPhoneLayout {
-                // Build 67 (W4, F4): portrait phone width (~390pt)
-                // cannot fit identity + transport cluster + guide +
-                // the five setting controls in one 52pt row without
-                // squeezing the identity title to nothing, so the
-                // portrait bar stacks two slim rows inside the same
-                // frosted card: identity + prev/play/next on top,
-                // guide + setting icons below. Every control keeps
-                // its exact action and binding; landscape never
-                // takes this branch.
-                VStack(spacing: 2) {
-                    HStack(spacing: 8) {
-                        slimBarIdentitySegment
-                        Spacer(minLength: 6)
-                        slimBarTransportCluster
-                    }
-                    HStack(spacing: 8) {
-                        slimBarGuideButton
-                        Spacer(minLength: 6)
-                        // Build 61 (B14, V1): the ONE bottom control
-                        // row — Speed · Subtitles · Audio · Sleep ·
-                        // Aspect — kept whole (see `bottomRowLabel`).
+            if useStackedPlayerBar {
+                VStack(spacing: 6) {
+                    slimBarIdentityRow
+                    HStack(spacing: 10) {
+                        Spacer(minLength: 0)
+                        // Build 61 (B14, V1): the ONE bottom control row —
+                        // Speed · Subtitles · Audio · Sleep · Aspect — kept
+                        // whole; only its labels render compact (see
+                        // `bottomRowLabel`).
                         bottomControlRow
+                        Spacer(minLength: 0)
                     }
                 }
-                .padding(.vertical, 6)
             } else {
                 HStack(spacing: 10) {
                     slimBarIdentitySegment
                     Spacer(minLength: 8)
-                    slimBarTransportCluster
-                    slimBarGuideButton
+                    slimBarPlayPauseButton
+                    if showLiveChannelListButton, let toggle = onToggleLiveChannelSidePanel {
+                        glassIconButton(
+                            systemName: isLiveChannelSidePanelVisible ? "rectangle.bottomthird.inset.filled" : "rectangle.grid.1x2",
+                            size: 40,
+                            symbolSize: 16
+                        ) {
+                            toggle()
+                        }
+                        .accessibilityLabel(L("list.channel_list"))
+                    }
                     // Build 61 (B14, V1): the ONE bottom control row —
                     // Speed · Subtitles · Audio · Sleep · Aspect — kept
-                    // whole (see `bottomRowLabel`).
+                    // whole; only its labels render compact (see
+                    // `bottomRowLabel`).
                     bottomControlRow
                 }
-                .frame(height: 52)
             }
         }
         .padding(.horizontal, 12)
+        .frame(height: useStackedPlayerBar ? 102 : 52)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -2883,90 +2775,31 @@ private struct PlayerViewImpl: View {
         }
     }
 
-    /// Build 67 (W4, S3): the bar's transport cluster — prev /
-    /// play-pause / next INSIDE the bar, as the owner-picked
-    /// Style 1 mockup lays them out. The prev/next buttons are the
-    /// EXACT controls build 66 floated in rows above the bar (see
-    /// `bottomTransportChrome`): series episodes drive
-    /// `onPreviousEpisode` / `onNextEpisode` gated by
-    /// `canGoToPreviousEpisode` / `canGoToNextEpisode`; VOD queue
-    /// items drive `onPreviousChannel` / `onNextChannel` gated by
-    /// `canGoToPreviousChannel` / `canGoToNextChannel` — same
-    /// closures, same disabled/opacity behavior, same
-    /// accessibility labels. Only the button slot shrank (44 → 40)
-    /// to fit the bar's 52pt row. When neither skip kind applies
-    /// (live, plain movies) the cluster is the play/pause button
-    /// alone — live channel prev/next stays in the center cluster,
-    /// untouched. Because the cluster lives inside the bar's own
-    /// HStack/VStack, it can never overlap the edge sliders.
-    @ViewBuilder
-    private var slimBarTransportCluster: some View {
-        HStack(spacing: 6) {
-            if showSeriesEpisodeSkip {
-                glassIconButton(systemName: "backward.end.fill", size: 40, symbolSize: 16) {
-                    onPreviousEpisode?()
-                }
-                .accessibilityLabel(L("player.a11y.previous_episode"))
-                .disabled(!canGoToPreviousEpisode)
-                .opacity(canGoToPreviousEpisode ? 1 : 0.38)
-
-                slimBarPlayPauseButton
-
-                glassIconButton(systemName: "forward.end.fill", size: 40, symbolSize: 16) {
-                    onNextEpisode?()
-                }
-                .accessibilityLabel(L("player.a11y.next_episode"))
-                .disabled(!canGoToNextEpisode)
-                .opacity(canGoToNextEpisode ? 1 : 0.38)
-            } else if showVODQueueSkip {
-                glassIconButton(systemName: "backward.end.fill", size: 40, symbolSize: 16) {
-                    onPreviousChannel?()
-                }
-                .accessibilityLabel(L("player.a11y.previous_item"))
-                .disabled(!canGoToPreviousChannel)
-                .opacity(canGoToPreviousChannel ? 1 : 0.38)
-
-                slimBarPlayPauseButton
-
-                glassIconButton(systemName: "forward.end.fill", size: 40, symbolSize: 16) {
-                    onNextChannel?()
-                }
-                .accessibilityLabel(L("player.a11y.next_item"))
-                .disabled(!canGoToNextChannel)
-                .opacity(canGoToNextChannel ? 1 : 0.38)
-            } else {
-                slimBarPlayPauseButton
-            }
-        }
-    }
-
-    /// Build 67 (W4, S3): the bar's channel-list (guide) button —
-    /// the exact build-66 control (same `glassIconButton`, same
-    /// `onToggleLiveChannelSidePanel` toggle closure, same icon
-    /// swap on `isLiveChannelSidePanelVisible`, same accessibility
-    /// label), factored out so both bar layouts share it.
-    @ViewBuilder
-    private var slimBarGuideButton: some View {
-        if showLiveChannelListButton, let toggle = onToggleLiveChannelSidePanel {
-            glassIconButton(
-                systemName: isLiveChannelSidePanelVisible ? "rectangle.bottomthird.inset.filled" : "rectangle.grid.1x2",
-                size: 40,
-                symbolSize: 16
-            ) {
-                toggle()
-            }
-            .accessibilityLabel(L("list.channel_list"))
-        }
-    }
-
     /// The thin (3pt) red-orange line at the bar's TOP edge.
-    /// VOD: this IS the seek bar (see `slimBarSeekLine`). Live:
-    /// no line — build 68 removed the EPG programme-progress
-    /// line with the TV Guide; a live stream has no seek
-    /// position and the pure player shows none.
+    /// Live: programme progress from the same EPG snapshot the
+    /// Rich Bar's identity capsule read — non-interactive, exactly
+    /// as before. VOD: this IS the seek bar (see `slimBarSeekLine`).
     @ViewBuilder
     private var slimBarProgressLine: some View {
-        if !isLiveStream {
+        if isLiveStream {
+            if let now = currentNowNext?.now,
+               let fraction = now.progress(at: EPGOffsetStore.lookupNow()) {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.white.opacity(0.22)).frame(height: 3)
+                        Capsule().fill(AppTheme.accentStart)
+                            .frame(
+                                width: proxy.size.width * CGFloat(min(max(fraction, 0), 1)),
+                                height: 3
+                            )
+                    }
+                    .frame(height: 3)
+                }
+                .frame(height: 3)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+        } else {
             slimBarSeekLine
         }
     }
@@ -3052,26 +2885,19 @@ private struct PlayerViewImpl: View {
 
     /// Build 66 (W6, item 11): the slim bar's identity segment —
     /// artwork thumbnail + channel/content name on the first
-    /// line, plus the small LIVE badge (the existing live logic:
+    /// line; for live, the CURRENT programme title with its time
+    /// range and the NEXT programme (title only) after it, all
+    /// from the same EPG snapshot (`currentNowNext`) the Rich Bar
+    /// read, plus the small LIVE badge (the existing live logic:
     /// `isLiveStream` + `L("player.live_badge")`, with the red dot
-    /// the Rich Bar identity row already used). Build 68: the
-    /// live second line no longer shows any EPG programme title,
-    /// time range or Up Next — the guide is removed and the bar
-    /// carries the channel's own name/badge only (a real subtitle
-    /// still shows when the caller supplied one). VOD shows its
-    /// real subtitle line when present, and the current / total
-    /// time — the exact labels the old scrub card rendered
+    /// the Rich Bar identity row already used). Programme progress
+    /// moved to the bar's top-edge line. VOD shows its real
+    /// subtitle line when present, and the current / total time —
+    /// the exact labels the old scrub card rendered
     /// (`formatMs` / `totalDurationLabel`).
     private var slimBarIdentitySegment: some View {
         HStack(spacing: 10) {
-            // Build 67 (W4, F4): in portrait-compact width the
-            // thumbnail is dropped rather than squeezing the title
-            // to nothing (build 66 truncated it to 'Love L…'); the
-            // title stays flexible with tail truncation, and the
-            // time labels below keep their fixed size so the time
-            // is always placed in full. Landscape keeps the
-            // thumbnail exactly as build 66 rendered it.
-            if let artworkURL, !isPortraitPhoneLayout {
+            if let artworkURL {
                 CachedImage(
                     url: artworkURL,
                     width: 34,
@@ -3102,7 +2928,29 @@ private struct PlayerViewImpl: View {
                         .fixedSize(horizontal: true, vertical: false)
                     }
                 }
-                if !isLiveStream {
+                if isLiveStream, let now = currentNowNext?.now {
+                    HStack(spacing: 6) {
+                        Text(now.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .lineLimit(1)
+                        Text(EPGTimeFormat.range(now.start, now.stop))
+                            .font(.caption2.weight(.medium))
+                            .monospacedDigit()
+                            .foregroundStyle(.white.opacity(0.65))
+                            .fixedSize(horizontal: true, vertical: false)
+                        if let next = currentNowNext?.next {
+                            Text(L("player.upnext"))
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.white.opacity(0.6))
+                                .fixedSize(horizontal: true, vertical: false)
+                            Text(next.title)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.8))
+                                .lineLimit(1)
+                        }
+                    }
+                } else if !isLiveStream {
                     HStack(spacing: 6) {
                         if let subtitle, !subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text(subtitle)
@@ -3257,30 +3105,24 @@ private struct PlayerViewImpl: View {
         return L("player.sleep_timer.short")
     }
 
-    /// One bottom-row control: SF Symbol ONLY.
+    /// One bottom-row control: SF Symbol over a small caption.
     /// Build 66 (W6, item 11): compact fixed width (was
     /// `maxWidth: .infinity`, sharing a full-width row) so the five
     /// controls fit the slim bar's single row beside the identity
     /// segment; same icon, same caption text, same 44pt minimum
     /// hit height.
-    /// Build 67 (W4, S3): the owner-picked Style 1 bar is
-    /// ICONS ONLY — the caption Text is gone (build 66's
-    /// 'Subtit…' truncation and the crowded icon+label row were
-    /// the owner's complaint). The `caption` parameter is kept so
-    /// every call site is unchanged; each control's meaning stays
-    /// announced through the accessibility label its call site
-    /// already sets, and state (rate, sleep arm, aspect mode)
-    /// stays visible in the menus / the aspect icon itself,
-    /// exactly as the menus rendered it before. Same 44pt hit
-    /// height; width narrows 48 → 40 now that no caption needs
-    /// the room.
     private func bottomRowLabel(systemName: String, caption: String) -> some View {
-        Image(systemName: systemName)
-            .font(.system(size: 18, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.96))
-            .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
-            .frame(width: 40, height: 44)
-            .contentShape(Rectangle())
+        VStack(spacing: 2) {
+            Image(systemName: systemName)
+                .font(.system(size: 17, weight: .semibold))
+            Text(caption)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(.white.opacity(0.96))
+        .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+        .frame(width: 48, height: 44)
+        .contentShape(Rectangle())
     }
 
     private func streamInfoRow(label: String, value: String) -> some View {

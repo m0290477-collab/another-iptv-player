@@ -21,9 +21,7 @@ struct HomeView: View {
 
     @ObservedObject private var contentStore = PlaylistContentStore.shared
     @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
-    // Build 68 (W-E): Home no longer holds an EPGStore — the TV
-    // Guide / EPG feature is removed from the app entirely, and
-    // nothing on Home reads guide data anymore (see live rail).
+    @ObservedObject private var epgStore = EPGStore.shared
     /// B3 (Round 14): quick playlist switcher — wired by the dashboard
     /// to ContentView's existing switch mechanism. Optional so this
     /// view's existing call site compiles unchanged; when nil the
@@ -67,16 +65,14 @@ struct HomeView: View {
     @State private var topRatedSeries: [DBSeries] = []
     @State private var newMovies: [DBVODStream] = []
     @State private var newSeries: [DBSeries] = []
-    // Round 14/15 (B6/C6) extra shelves, all from real store/history data.
+    // Round 14/15 (B6/C6) extra shelves, all from real store/EPG/history data.
     // Build 66 (W3): the "Because you watched" rail and the Home
     // "New episodes" shelf are REMOVED (Critic kills — the rail was
     // the cut "For You" recommendation engine; the shelf was
     // cut-adjacent to the removed new-episode alerts). No state,
     // no shelf, no recompute for either remains.
     @State private var newSinceVisit: [FeaturedEntry] = []
-    // Build 68 (W-E): the C6 "Tonight" shelf state is gone with
-    // the EPG feature — it was built entirely from guide
-    // programmes for a 19:00-23:00 window.
+    @State private var tonightEntries: [TonightEntry] = []
     // Round 10: the category tiles are icon cards now — the tile-art
     // state rounds 5–9 maintained for them is gone with the photos.
 
@@ -117,19 +113,11 @@ struct HomeView: View {
     @ObservedObject private var sectionVisibility = SectionVisibilityStore.shared
     @ObservedObject private var updateService = AppUpdateService.shared
     @State private var showOfflineAlert = false
-    // Build 69 (F2): Continue Watching's visible Play failure —
-    // the same alert the detail paths use.
-    @State private var showPlayFailure = false
 
-    // Build 68 (W-E, Home Style 3 'Focus Rows'): the J3
-    // reorderable-rows assembly is GONE from Home — the owner
-    // picked a FIXED rail order (hero → sports → Continue
-    // Watching → Live Channels → Movies → Series, nothing else),
-    // so there is no Edit/Customize mode on this screen anymore.
-    // Build 68 (W-G): the Customize Home store itself is now
-    // deleted too (owner order: it "doesn't work properly,
-    // pointless") — no live code anywhere reads a stored Home
-    // row order.
+    // Build 61 (B7): J3 Home row order (persisted, O1 default) +
+    // Edit-mode state for the content rows.
+    @ObservedObject private var homeOrderStore = HomeSectionOrderStore.shared
+    @State private var editingHomeRows = false
 
     // Build 61 fixer (Z12, M-pack variant): the first LIVE
     // match found in the real MatchesService data for today, plus
@@ -155,16 +143,16 @@ struct HomeView: View {
     private var vodHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod") }
     private var seriesHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "series") }
 
-    // MARK: - Live rail lead + Matches probes
+    // MARK: - Build 61 (B7): Z12 hero + O1/J3 rows
 
-    /// The Live Channels rail's lead channel — the first live
-    /// channel in the catalog. Build 68 (W-E): this used to prefer
-    /// the first channel with a programme on air right now (the
-    /// EPG On-now set); with the TV Guide / EPG removed, the rail
-    /// is catalog-ordered and carries no programme data at all.
-    /// Nil only when the playlist carries no live channels at all.
+    /// Z12: the featured live channel — the first channel with a
+    /// programme on air right now (the On-now set), else the first
+    /// live channel in the catalog. Build 66 (W3): no longer the
+    /// hero; it is the first channel of the "Live now" rail below
+    /// the Cinematic Hero. Nil only when the playlist carries no
+    /// live channels at all.
     private var heroLiveStream: DBLiveStream? {
-        contentStore.liveStreams.first?.stream
+        onNowEntries.first?.stream ?? contentStore.liveStreams.first?.stream
     }
 
     /// Z12 (fixer): one MatchesService pass for the live match —
@@ -281,16 +269,14 @@ struct HomeView: View {
     //   already in row 1's set; finished-with-next series join here).
     // - Recent Channels (row 3): live history deduped by channel,
     //   resolved against the catalog, cap 15 — the row's algorithm.
-    // The Live rail, the Movies/Series discovery shelves and
+    // The Live shelf, the Movies/Series discovery shelves and
     // Recently Added then exclude these IDs (see
-    // `applyCrossRowDedupe`, `recentlyAddedExclusionKeys`).
-    // Priority follows the canonical O1 order. The hero and the
-    // banners are NOT rows and are unaffected; the Favorites
-    // shelf (user-curated) is not a catalog shelf and keeps its
-    // own contents. Build 68 (W-E): the Focus Rows screen no
-    // longer renders the Recent Channels / Recently Added rows,
-    // but their ID sets still seed this dedupe exactly as
-    // before, so the rendered rails dedupe identically.
+    // `applyCrossRowDedupe`, `onNowShelfEntries`,
+    // `recentlyAddedExclusionKeys`). Priority follows the canonical
+    // O1 order, not the user's J3 rearrangement. The hero and the
+    // banners are NOT rows and are unaffected; the Favorites shelf
+    // (user-curated) and Tonight (programme items, not channels)
+    // are not catalog shelves and keep their own contents.
 
     /// Row 1's display items, replicated from
     /// `ContinueWatchingRow.displayItems` over this view's identical
@@ -377,21 +363,20 @@ struct HomeView: View {
                 newSeries = newSeries.filter { seenSeries.insert($0.seriesId).inserted }
             case .newSinceVisit:
                 newSinceVisit = dedupeEntries(newSinceVisit, seenMovies: &seenMovies, seenSeries: &seenSeries)
-            case .favorites:
-                // Not a catalog shelf: Favorites is the user's own
-                // curated set.
+            case .favorites, .tonight:
+                // Not catalog shelves: Favorites is the user's own
+                // curated set; Tonight's items are programmes on
+                // already-watched channels, not channel entries.
                 break
             }
         }
     }
 
-    /// The Live Channels rail's channels after dedupe (the rail
-    /// drops channels the earlier history rows already showed).
-    /// Build 68 (W-E): this was the EPG On-now shelf's entry set;
-    /// with the guide removed it is the rail's own catalog set
-    /// (`liveRailChannels`) filtered by the same seen set.
-    private var liveRailDedupedChannels: [DBLiveStream] {
-        liveRailChannels.filter { !homeSeenLiveIDs.contains($0.streamId) }
+    /// The Live shelf's entries after dedupe (row 4 drops channels
+    /// row 3 already showed). The HERO keeps reading the raw
+    /// `onNowEntries` — banners/hero are outside the dedupe.
+    private var onNowShelfEntries: [OnNowEntry] {
+        onNowEntries.filter { !homeSeenLiveIDs.contains($0.stream.streamId) }
     }
 
     /// Recently Added (row 6) exclusions, in the resolver's key
@@ -414,7 +399,7 @@ struct HomeView: View {
         }
         for id in homeSeenSeriesIDs { keys.insert("series:\(id)") }
         for id in homeSeenLiveIDs { keys.insert("live:\(id)") }
-        for stream in liveRailDedupedChannels { keys.insert("live:\(stream.streamId)") }
+        for entry in onNowShelfEntries { keys.insert("live:\(entry.stream.streamId)") }
         for movie in topRatedMovies + newMovies { keys.insert("vod:\(movie.streamId)") }
         for series in topRatedSeries + newSeries { keys.insert("series:\(series.seriesId)") }
         for entry in newSinceVisit {
@@ -424,6 +409,121 @@ struct HomeView: View {
             }
         }
         return keys
+    }
+
+    /// One J3 content row, wrapped with Edit-mode move controls
+    /// while editing. Rows render NOTHING when their content is
+    /// empty (O1: empty sections are hidden, never rendered empty).
+    @ViewBuilder
+    private func homeRow(_ kind: HomeRowKind) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if editingHomeRows {
+                HStack(spacing: 16) {
+                    Button {
+                        homeOrderStore.move(kind, by: -1)
+                    } label: {
+                        Image(systemName: "chevron.up")
+                            .font(.subheadline.weight(.bold))
+                    }
+                    .accessibilityLabel(L("b7.home.move_up"))
+                    Button {
+                        homeOrderStore.move(kind, by: 1)
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.subheadline.weight(.bold))
+                    }
+                    .accessibilityLabel(L("b7.home.move_down"))
+                    Spacer()
+                }
+                .foregroundStyle(AppTheme.accent)
+                .padding(.horizontal, 16)
+            }
+            homeRowContent(kind)
+        }
+    }
+
+    @ViewBuilder
+    private func homeRowContent(_ kind: HomeRowKind) -> some View {
+        switch kind {
+        case .continueWatching:
+            // B6: Continue Watching ABOVE the category tiles (O1
+            // position 1 until the user reorders).
+            ContinueWatchingRow(
+                playlist: playlist,
+                typeFilter: nil,
+                destination: {
+                    WatchHistoryListView(playlist: playlist, typeFilter: nil) { item in
+                        presentHistoryItem(item)
+                    }
+                },
+                onPlay: { item in
+                    presentHistoryItem(item)
+                }
+            )
+        case .continueSeries:
+            // B8 (C7) component, wired by B7 per O1 position 2.
+            ContinueSeriesRow(playlist: playlist) { item in
+                presentHistoryItem(item)
+            }
+        case .recentChannels:
+            // B8 (C9) component, wired by B7 per O1 position 3.
+            RecentChannelsRow(playlist: playlist) { stream in
+                presentLiveSelectionFromHome(stream)
+            }
+        case .live:
+            // B6: "On now on your channels" — real EPG now-titles.
+            // F-3 (fixer): the shelf renders the DEDUPED entries
+            // (Recent Channels, row 3, wins); the hero above keeps
+            // the raw set.
+            if !onNowShelfEntries.isEmpty {
+                onNowShelf
+            }
+        case .discovery:
+            // The Movies/Series discovery block: category tiles +
+            // the C6 time-bucket shelves (F6-gated inside shelfView).
+            VStack(alignment: .leading, spacing: 26) {
+                categoryTiles
+                ForEach(shelfOrder, id: \.self) { shelfKind in
+                    shelfView(shelfKind)
+                }
+            }
+        case .recentlyAdded:
+            // B8 (R3) component, wired by B7 per amended O1 (after
+            // Series, before Today's Matches); hidden when empty.
+            // F-3 (fixer): rows 1–5 win — their IDs are excluded here.
+            RecentlyAddedRow(playlist: playlist, excludingKeys: recentlyAddedExclusionKeys) { entry in
+                selectRecentlyAdded(entry)
+            }
+        case .matches:
+            // Build 63 (owner, item 7): the bottom-of-Home Matches
+            // entry is REMOVED — the sports moved to shortcut tiles
+            // at the top, beside the big category cards (see
+            // `sportTileRow`). The order store no longer emits this
+            // kind; the case stays only so persisted order arrays
+            // from earlier builds still parse.
+            EmptyView()
+        }
+    }
+
+    /// Routes a Recently Added tap through Home's EXISTING paths:
+    /// live → the live player shell, movie/series → the same detail
+    /// state the shelves use. Opening clears the NEW badge (R2).
+    private func selectRecentlyAdded(_ entry: RecentlyAddedEntry) {
+        FirstSeenStore.shared.markOpened(playlistId: playlist.id, itemKey: entry.key)
+        let rawId = entry.key.split(separator: ":").last.flatMap { Int($0) }
+        switch entry.kind {
+        case .live:
+            guard let streamId = rawId,
+                  let stream = contentStore.liveStreamById[streamId]
+            else { return }
+            presentLiveSelectionFromHome(stream)
+        case .vod:
+            guard let streamId = rawId else { return }
+            pendingMovieDetail = contentStore.vodStreamById[streamId]
+        case .series:
+            guard let seriesId = rawId else { return }
+            pendingSeriesDetail = contentStore.seriesById[seriesId]
+        }
     }
 
     /// Round 7 (landscape fix): the card width used to derive from the
@@ -448,32 +548,23 @@ struct HomeView: View {
                 emptyState
             } else {
                 ScrollView(showsIndicators: false) {
-                    // Build 68 (W-E, Home Style 3 'Focus Rows'):
-                    // GENEROUS fixed spacing between the six rails
-                    // — the picked style is calm and uncluttered.
-                    // The Display density preference still scales
-                    // it (comfortable 26 + 10 = 36, compact 16 + 10
-                    // = 26), so the preference keeps a real effect
-                    // while every density reads generous.
-                    VStack(alignment: .leading, spacing: HomeDensityPreference.current.shelfSpacing + 10) {
-                        // Minimal top bar (Focus Rows): flame mark
-                        // + SUPER X wordmark on one side, the search
-                        // action on the other — the existing
-                        // `homeTopBar`, whose remaining square
-                        // buttons are all REAL destinations
-                        // (Favorites / Refresh / Downloads /
-                        // Notifications). No profile button is
-                        // added: the app has no profile destination
-                        // on Home (account lives in the Settings
-                        // tab), and a dead profile icon would be
-                        // fake UI.
+                    // Build 65: the row spacing is the Display
+                    // screen's Home-density preference (default
+                    // comfortable = the long-standing 26).
+                    VStack(alignment: .leading, spacing: HomeDensityPreference.current.shelfSpacing) {
+                        // Round 10 (owner, build 46): the STRONG-style
+                        // top bar — wordmark on one side, tidy square
+                        // icon buttons on the other (Favorites star,
+                        // Refresh with confirm, Search, Downloads,
+                        // Notifications). It replaces the round-7
+                        // search bar on this tab only; the other tabs
+                        // keep theirs.
                         homeTopBar
                             .padding(.horizontal, 16)
 
                         // Build 61 (S4): subscription-expiry banner —
                         // real ProviderExpiryStore data for the ACTIVE
-                        // playlist only. A banner, not a rail: it
-                        // keeps its place above the hero.
+                        // playlist only.
                         if let expiryBanner = expiryBannerModel {
                             expiryBannerView(expiryBanner)
                                 .padding(.horizontal, 16)
@@ -482,31 +573,44 @@ struct HomeView: View {
                         // Build 61 (F7, B13): new-version banner —
                         // only when the iTunes lookup found a newer
                         // store version that was not dismissed.
-                        // A banner, not a rail: above the hero.
                         if let update = updateService.availableUpdate {
                             updateBannerView(update)
                                 .padding(.horizontal, 16)
                         }
 
+                        // Round 18 (R18-4): the "Back to the last
+                        // thing" pill is REMOVED. It duplicated the
+                        // same most-recent title two more times on
+                        // this one screen (Featured hero + first
+                        // Continue Watching card) — the no-duplication
+                        // defect the owner circled. Resume itself is
+                        // unchanged: Continue Watching below resumes
+                        // the same item through the same handler.
+
                         // Build 61 (B8, R4): what's-new banner — one
                         // per refresh batch, real counts, never
-                        // stacked; a BANNER (not a rail), so it
-                        // stays above the hero exactly as before.
+                        // stacked; a BANNER (not a J3 row), so it
+                        // stays above the content rows.
                         WhatsNewBanner(playlist: playlist)
                             .padding(.horizontal, 16)
 
-                        // FOCUS ROWS — the owner's picked order,
-                        // fixed, with NOTHING else between or after
-                        // the rails (no category tiles, no Top 10 /
-                        // Trending strip, no Favorites / Tonight /
-                        // New-since-visit / Recently Added /
-                        // Recent Channels rows, and no recommended
-                        // or "Because you watched" rail — the last
-                        // two stay CUT, as in build 66).
+                        // Build 65 (Home v2 style 1 'Cinematic
+                        // Hero'): the hero leads the screen again —
+                        // the build-64 sports dashboard block moves
+                        // BELOW it as a compact sports strip (see
+                        // after the hero). Same F6 gate as before.
 
-                        // Rail 1 — Hero (medium height; see
-                        // `heroHeight`). Same featured-carousel
-                        // data and selection logic as build 66.
+                        // Build 66 (W3, Home-2): the owner-picked
+                        // Cinematic Hero is now the DEFAULT and
+                        // PRIMARY hero — the tall featured carousel
+                        // leads whenever it has entries (on any real
+                        // playlist it does). Build 61's live-first
+                        // priority (live match → live channel →
+                        // carousel) is inverted: live content no
+                        // longer outranks the picked hero; it lives
+                        // in the "Live now" rail directly below
+                        // (`liveNowRail`). The hero is NOT a
+                        // J3-reorderable row.
                         if !featured.isEmpty {
                             featuredCarousel
                         } else if !contentStore.streamsLoaded {
@@ -515,11 +619,20 @@ struct HomeView: View {
                             SkeletonShelf()
                         }
 
-                        // Rail 2 — Live Sports score tiles: the
-                        // Matches sports strip that already lived
-                        // on Home (real ESPN data via
-                        // `sportHighlights` / MatchesService), with
-                        // the same F6 Matches gate as before.
+                        // Build 66 (W3): the "Live now" rail —
+                        // the demoted live hero content at rail
+                        // size, directly below the hero: the live
+                        // match card first (when a match is live),
+                        // then the live channels (the old hero
+                        // channel first, then the on-now set).
+                        // Renders nothing when nothing is live.
+                        liveNowRail
+
+                        // Build 65 (Home v2 style 1): the compact
+                        // sports strip sits directly under the hero
+                        // (the Matches system stays one tap away,
+                        // with its real live scores). Same tiles,
+                        // same F6 gate as build 64's top block.
                         if !UserDefaults.standard.bool(forKey: "sections.hidden.matches") {
                             VStack(alignment: .leading, spacing: 12) {
                                 CinematicSectionHeader(title: L("home.sports_dashboard")) {
@@ -529,47 +642,39 @@ struct HomeView: View {
                             }
                         }
 
-                        // Rail 3 — Continue Watching: the existing
-                        // Continue Watching row, with Continue
-                        // Series directly under it (both rows keep
-                        // their own history data sources, headers,
-                        // destinations and `presentHistoryItem`
-                        // routing, exactly as the old O1 rows 1–2).
-                        ContinueWatchingRow(
-                            playlist: playlist,
-                            typeFilter: nil,
-                            destination: {
-                                WatchHistoryListView(playlist: playlist, typeFilter: nil) { item in
-                                    presentHistoryItem(item)
-                                }
-                            },
-                            onPlay: { item in
-                                presentHistoryItem(item)
-                            }
-                        )
-                        ContinueSeriesRow(playlist: playlist) { item in
-                            presentHistoryItem(item)
+                        // Build 65 (Home v2 style 1, landscape):
+                        // in landscape the cinematic layout pairs
+                        // the hero with a "Trending Now" list (the
+                        // mockup's right column) — the store's
+                        // shared top-rated movies, real scores
+                        // only, tap → the same detail path as the
+                        // shelves. Portrait keeps the Top 10 rail
+                        // in the rows below instead.
+                        if UIScreen.main.bounds.width > UIScreen.main.bounds.height,
+                           !topRatedMovies.isEmpty {
+                            landscapeTrendingStrip
                         }
 
-                        // Rail 4 — Live Channels: the existing
-                        // live-now rail (`liveNowRail`) — the live
-                        // match card first when a match is live,
-                        // then the catalog live channels, parental
-                        // filtering and first-channel preview
-                        // unchanged. Renders nothing when nothing
-                        // is live.
-                        liveNowRail
+                        // Build 61 (B7, J3): Edit-mode toggle for
+                        // the CONTENT rows below (persisted order,
+                        // O1 by default). Banners and the hero are
+                        // not rows and never move.
+                        HStack {
+                            Spacer()
+                            Button(editingHomeRows ? L("common.done") : L("b7.home.customize")) {
+                                editingHomeRows.toggle()
+                                Haptics.selection()
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AppTheme.accent)
+                        }
+                        .padding(.horizontal, 16)
 
-                        // Rail 5 — Movies: the existing Movies
-                        // shelves (Top 10 Today, then New Movies),
-                        // F6-gated, deduped and parental-filtered
-                        // by the unchanged recompute pass.
-                        focusMoviesRails
-
-                        // Rail 6 — Series: the existing Series
-                        // shelves (Top Rated Series, then New
-                        // Series), same gates and data as Movies.
-                        focusSeriesRails
+                        // Build 61 (B7, O1/J3): the content rows in
+                        // the user's persisted order (O1 default).
+                        ForEach(homeOrderStore.order, id: \.self) { kind in
+                            homeRow(kind)
+                        }
 
                         // B6 per-type loading: a type that has not
                         // landed yet shows a skeleton while the others
@@ -689,11 +794,6 @@ struct HomeView: View {
         } message: {
             Text(L("offline.message"))
         }
-        // Build 69 (F2): the play-failure alert (existing
-        // playback error copy — no new strings).
-        .alert(L("playback.error.failed_to_start"), isPresented: $showPlayFailure) {
-            Button(L("common.ok")) { showPlayFailure = false }
-        }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("superx.downloadCompleted"))) { _ in
             AppSound.play(.downloadComplete)
             withAnimation(Motion.animate(.easeOut(duration: 0.25))) { showDownloadToast = true }
@@ -768,9 +868,8 @@ struct HomeView: View {
                 }
             }
         }
-        // Build 68 (W-E): the C6 Tonight task is gone — it
-        // rebuilt an EPG-programme shelf on every guide snapshot
-        // change, and the guide feature is removed entirely.
+        // C6 Tonight row: rebuild when the EPG snapshot changes.
+        .task(id: epgStore.snapshot?.version ?? 0) { await recomputeTonight() }
         .onDisappear {
             // C6: stamp the visit AFTER the shelves computed against
             // the previous stamp (New-since-last-visit baseline).
@@ -1104,23 +1203,83 @@ struct HomeView: View {
 
     // MARK: - Featured carousel
 
-    /// Build 68 (W-E, Home Style 3 'Focus Rows'): the hero is
-    /// MEDIUM height — the picked panel's single wide banner, not
-    /// build 65/66's tall Cinematic Hero (which filled roughly the
-    /// top half of the screen at `cardWidth * 1.08`, capped at 52%
-    /// of the screen height). Portrait is now ~0.68× the card
-    /// width, capped at 36% of the screen height (≈243 pt on a
-    /// 390×844 phone, down from ≈387 pt); the slide's title, meta
-    /// and Play/Details block still fit inside it. Landscape keeps
-    /// the 16:9 cinematic frame (the height-capped `cardWidth`
-    /// already bounds it there). Same carousel, same slides, same
-    /// featured-selection logic — only the frame height changed.
+    /// Build 65 (Home v2 style 1 'Cinematic Hero'): the hero is
+    /// TALL in portrait — the mockup's backdrop fills roughly the
+    /// top half of the screen (poster art center-crops into the
+    /// taller frame; slides with true 16:9 backdrops crop the same
+    /// way the mockup's own art does). Landscape keeps the 16:9
+    /// cinematic frame (the height-capped `cardWidth` already
+    /// bounds it there).
     private var heroHeight: CGFloat {
         let bounds = UIScreen.main.bounds
         if bounds.width > bounds.height {
             return cardWidth * 9 / 16
         }
-        return min(cardWidth * 0.68, bounds.height * 0.36)
+        return min(cardWidth * 1.08, bounds.height * 0.52)
+    }
+
+    /// Build 65: the landscape hero's companion column (mockup:
+    /// "Trending Now" list beside the hero) rendered as a wide-card
+    /// strip under the hero in the landscape scroll — same data
+    /// and detail path as the Top 10 rail.
+    private var landscapeTrendingStrip: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            CinematicSectionHeader(title: L("search.trending")) {
+                AllVODView(playlist: playlist)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 14) {
+                    ForEach(topRatedMovies.prefix(6).indices, id: \.self) { index in
+                        let movie = topRatedMovies[index]
+                        Button {
+                            pendingMovieDetail = movie
+                        } label: {
+                            HStack(spacing: 12) {
+                                CachedImage(
+                                    url: moviePosterURL(movie),
+                                    width: 62,
+                                    height: 92,
+                                    cornerRadius: AppTheme.smallCornerRadius,
+                                    iconName: "film"
+                                )
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(movie.name)
+                                        .font(AppTheme.fontCardTitle)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.leading)
+                                    if let meta = cardMetaLine(year: DetailFormatting.year(from: movie.releaseDate), genre: movie.genre) {
+                                        Text(meta)
+                                            .font(AppTheme.fontMetadata)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    if let rating = ContentRating.normalizedDisplayText(rating: movie.rating, rating5Based: movie.rating5Based) {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "star.fill")
+                                                .font(.caption2.weight(.semibold))
+                                                .foregroundStyle(AppTheme.ratingGold)
+                                            Text(rating)
+                                                .font(AppTheme.fontMetadata.weight(.bold))
+                                                .foregroundStyle(.primary)
+                                        }
+                                    }
+                                }
+                                .frame(width: 150, alignment: .leading)
+                            }
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                                    .fill(AppTheme.surface)
+                            )
+                        }
+                        .buttonStyle(PressScaleButtonStyle())
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .scrollClipDisabled()
+        }
     }
 
     private var featuredCarousel: some View {
@@ -1199,21 +1358,15 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Live Channels rail (Build 66 W3; Build 68 W-E)
+    // MARK: - Live now rail (Build 66, W3)
 
-    /// The rail's live channels: the catalog's live channels in
-    /// catalog order (the lead channel first), deduped, capped at
-    /// 8. Parental-blocked live categories are excluded here too
-    /// (item 17): a locked channel must not surface in the rail
-    /// even though the player path also gates it. Session-unlocked
-    /// categories pass, per the store verdict.
-    ///
-    /// Build 68 (W-E, EPG removal): this set used to be the EPG
-    /// On-now set — channels with a programme on air, in guide
-    /// order, each card carrying its current programme title.
-    /// The TV Guide / EPG is removed from the app entirely, so
-    /// the rail is now catalog-ordered and its cards show logo +
-    /// name + LIVE badge only — no now/next programme lines.
+    /// The rail's live channels: the old hero lead channel first
+    /// (first channel with a programme on air right now, else the
+    /// first live channel), then the rest of the on-now set in EPG
+    /// order, deduped, capped at 8. Parental-blocked live categories
+    /// are excluded here too (item 17): a locked channel must not
+    /// surface in the rail even though the player path also gates
+    /// it. Session-unlocked categories pass, per the store verdict.
     private var liveRailChannels: [DBLiveStream] {
         var channels: [DBLiveStream] = []
         var seen = Set<Int>()
@@ -1224,17 +1377,31 @@ struct HomeView: View {
             channels.append(stream)
         }
         if let hero = heroLiveStream { appendIfAllowed(hero) }
-        for item in contentStore.liveStreams { appendIfAllowed(item.stream) }
+        for entry in onNowEntries { appendIfAllowed(entry.stream) }
+        if channels.isEmpty {
+            // No on-air channel survived (e.g. the lead is
+            // parental-blocked and the guide is empty): fall back
+            // to the first unblocked live channel in the catalog.
+            for item in contentStore.liveStreams {
+                appendIfAllowed(item.stream)
+                if !channels.isEmpty { break }
+            }
+        }
         return Array(channels.prefix(8))
     }
 
-    /// Build 68 (W-E): Focus Rows rail 4 — the "Live now" rail
-    /// from build 66 (W3), kept with its tap behaviour unchanged:
-    /// the live match card first when a match is live (tap →
-    /// MatchesView; ESPN data, not guide data), then the live
+    private func liveRailNowTitle(for stream: DBLiveStream) -> String? {
+        onNowEntries.first(where: { $0.stream.streamId == stream.streamId })?.nowTitle
+    }
+
+    /// Build 66 (W3): the "Live now" rail directly below the
+    /// Cinematic Hero — build 61's hero content (live match, live
+    /// channels) demoted to rail size with its tap behaviour
+    /// unchanged: match card first (tap → MatchesView), then live
     /// channels (tap → the live player via the same Home path).
-    /// Renders nothing when nothing is live. The cards carry NO
-    /// guide-derived text anymore (see `liveRailChannels`).
+    /// Renders nothing when nothing is live. This replaces nothing:
+    /// the sports tiles strip and the On-now row further down stay
+    /// exactly where they were.
     @ViewBuilder
     private var liveNowRail: some View {
         let channels = liveRailChannels
@@ -1257,10 +1424,7 @@ struct HomeView: View {
                         ForEach(channels, id: \.streamId) { stream in
                             LiveHeroCard(
                                 stream: stream,
-                                // No `nowProgramTitle`: the card's
-                                // programme line was EPG-derived and
-                                // is dropped with the guide removal;
-                                // the card shows logo + name + LIVE.
+                                nowProgramTitle: liveRailNowTitle(for: stream),
                                 previewURL: PlaybackURLBuilder(playlist: playlist).liveURL(streamId: stream.streamId),
                                 // Home-8 safety: the live preview
                                 // decodes ONLY while no player is
@@ -1320,8 +1484,18 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Sports tiles (Focus Rows rail 2)
+    // MARK: - Category tiles
 
+    private var categoryTiles: some View {
+        // Build 64 (B1): the sport tiles moved OUT of this row to
+        // the top sports-dashboard block (see body); only the three
+        // big category tiles remain here.
+        categoryTileRow
+    }
+
+    /// Build 63 (item 7) created these tiles; build 64 (B1) moves
+    /// the row to the top dashboard block and gives each tile its
+    /// real live-score / next-fixture line from `sportHighlights`.
     private var sportTileRow: some View {
         HStack(alignment: .top, spacing: 12) {
             HomeSportTile(
@@ -1356,6 +1530,61 @@ struct HomeView: View {
         .frame(maxWidth: 560)
         .frame(maxWidth: .infinity)
     }
+
+    private var categoryTileRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            // Round 10 (owner, build 46): STRONG-style icon cards —
+            // a colored circular glyph + the section name + the REAL
+            // count beneath. The photo tiles (round 9's single
+            // representative image) are gone entirely. Hues stay
+            // inside the blue-led palette: the LIVE red is the
+            // design's reserved live color, Movies takes the accent,
+            // Series the violet preset.
+            HomeCategoryTile(
+                title: L("dashboard.live"),
+                countText: L("home.count_channels", CatalogCountFormatter.string(contentStore.liveStreams.count)),
+                tint: AppTheme.live,
+                iconName: "tv",
+                action: onOpenLive
+            )
+            // F6 (B13): the Movies/Series tiles follow the ONE
+            // section-visibility store, same as their tabs.
+            if sectionVisibility.isVisible(.movies) {
+                HomeCategoryTile(
+                    title: L("dashboard.movies"),
+                    countText: L("home.count_movies", CatalogCountFormatter.string(contentStore.vodStreams.count)),
+                    tint: AppTheme.accent,
+                    iconName: "film",
+                    action: onOpenMovies
+                )
+            }
+            if sectionVisibility.isVisible(.series) {
+                HomeCategoryTile(
+                    title: L("dashboard.series"),
+                    countText: L("home.count_series", CatalogCountFormatter.string(contentStore.seriesItems.count)),
+                    // Build 61: the Series tile follows the shared
+                    // SectionTheme (a hue-shifted sibling of the CURRENT
+                    // accent) instead of a hard-coded violet preset, so
+                    // the tile family stays inside the Design-4 system
+                    // for every accent choice.
+                    tint: SectionTheme.series,
+                    iconName: "play.tv",
+                    action: onOpenSeries
+                )
+            }
+        }
+        .padding(.horizontal, 16)
+        // Round 8 (audit E3): cap the row at 560 pt like the Live hero —
+        // in landscape the three tiles otherwise split the full ~820 pt
+        // width and stretch into wide strips. The second frame
+        // re-expands to full width so the capped row stays centered.
+        .frame(maxWidth: 560)
+        .frame(maxWidth: .infinity)
+    }
+
+    // Build 63 (item 7): the B12 bottom Matches entry row was
+    // removed — sports are top shortcut tiles now (`sportTileRow`).
+
 
     // MARK: - Shelves
 
@@ -1617,20 +1846,13 @@ struct HomeView: View {
 
     private enum HomeShelfKind: Hashable {
         case topMovies, topSeries, newMovies, newSeries
-        case favorites, newSinceVisit
+        case favorites, tonight, newSinceVisit
     }
 
     /// C6: shelf order varies by time-of-day bucket DERIVED FROM
     /// WATCH-HISTORY TIMESTAMPS: the modal bucket of the user's own
     /// `lastWatchedAt` hours (morning 5-11, afternoon 11-17, evening
     /// 17-23, night 23-5). No history -> the current hour's bucket.
-    /// Build 68 (W-E): this order no longer drives RENDERING —
-    /// Focus Rows renders the Movies rail then the Series rail in
-    /// a fixed order (`focusMoviesRails` / `focusSeriesRails`).
-    /// It survives as the cross-row dedupe's priority order only
-    /// (`applyCrossRowDedupe`), unchanged, so dedupe outcomes are
-    /// identical to build 66. (The .tonight case is gone with the
-    /// EPG removal — its shelf was guide programmes.)
     private var shelfOrder: [HomeShelfKind] {
         var bucketCounts: [Int: Int] = [:]
         let cal = Calendar.current
@@ -1641,10 +1863,10 @@ struct HomeView: View {
         }
         let bucket = bucketCounts.max(by: { $0.value < $1.value })?.key
             ?? { let h = cal.component(.hour, from: Date()); return h < 5 ? 3 : (h < 11 ? 0 : (h < 17 ? 1 : (h < 23 ? 2 : 3))) }()
-        let discovery: [HomeShelfKind] = [.topMovies, .topSeries, .newMovies, .newSeries, .favorites, .newSinceVisit]
-        let veteran: [HomeShelfKind] = [.favorites, .topMovies, .topSeries, .newMovies, .newSeries, .newSinceVisit]
-        let evening: [HomeShelfKind] = [.favorites, .topMovies, .newSeries, .topSeries, .newMovies, .newSinceVisit]
-        let morning: [HomeShelfKind] = [.newMovies, .newSeries, .newSinceVisit, .topMovies, .topSeries, .favorites]
+        let discovery: [HomeShelfKind] = [.topMovies, .topSeries, .newMovies, .newSeries, .tonight, .favorites, .newSinceVisit]
+        let veteran: [HomeShelfKind] = [.favorites, .tonight, .topMovies, .topSeries, .newMovies, .newSeries, .newSinceVisit]
+        let evening: [HomeShelfKind] = [.tonight, .favorites, .topMovies, .newSeries, .topSeries, .newMovies, .newSinceVisit]
+        let morning: [HomeShelfKind] = [.newMovies, .newSeries, .newSinceVisit, .topMovies, .topSeries, .tonight, .favorites]
         if !isVeteranHome { return discovery }
         switch bucket {
         case 0: return morning
@@ -1653,33 +1875,68 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Focus Rows rails 5-6 (Build 68, W-E)
-
-    /// Rail 5 — Movies: the existing Movies shelves in fixed
-    /// order (Top 10 Today, then New Movies), with the SAME F6
-    /// visibility gates and emptiness rules the old shelf dispatch
-    /// applied. Each shelf keeps its own header, destination,
-    /// cards and context menus.
     @ViewBuilder
-    private var focusMoviesRails: some View {
-        if sectionVisibility.isVisible(.movies) {
-            VStack(alignment: .leading, spacing: 26) {
-                if topRatedMovies.count >= 3 { topRatedMoviesShelf }
-                if !newMovies.isEmpty { newMoviesShelf }
-            }
+    private func shelfView(_ kind: HomeShelfKind) -> some View {
+        switch kind {
+        // F6 (B13): the Movies/Series shelves and the Library
+        // (favorites) shelf follow the ONE visibility store.
+        case .topMovies:
+            if sectionVisibility.isVisible(.movies), topRatedMovies.count >= 3 { topRatedMoviesShelf }
+        case .topSeries:
+            if sectionVisibility.isVisible(.series), topRatedSeries.count >= 3 { topRatedSeriesShelf }
+        case .newMovies:
+            if sectionVisibility.isVisible(.movies), !newMovies.isEmpty { newMoviesShelf }
+        case .newSeries:
+            if sectionVisibility.isVisible(.series), !newSeries.isEmpty { newSeriesShelf }
+        case .favorites:
+            if sectionVisibility.isVisible(.library), !favoriteLive.isEmpty || !favoriteVODs.isEmpty || !favoriteSeries.isEmpty { favoritesShelf }
+        case .tonight:
+            if !tonightEntries.isEmpty { tonightShelf }
+        case .newSinceVisit:
+            if !newSinceVisit.isEmpty { newSinceVisitShelf }
         }
     }
 
-    /// Rail 6 — Series: the existing Series shelves in fixed
-    /// order (Top Rated Series, then New Series), same F6 gates
-    /// and emptiness rules as the old dispatch.
-    @ViewBuilder
-    private var focusSeriesRails: some View {
-        if sectionVisibility.isVisible(.series) {
-            VStack(alignment: .leading, spacing: 26) {
-                if topRatedSeries.count >= 3 { topRatedSeriesShelf }
-                if !newSeries.isEmpty { newSeriesShelf }
+    // MARK: On now (B6)
+
+    private struct OnNowEntry: Identifiable {
+        let stream: DBLiveStream
+        let nowTitle: String
+        let progress: Double?
+        var id: Int { stream.streamId }
+    }
+
+    private var onNowEntries: [OnNowEntry] {
+        guard let snapshot = epgStore.snapshot else { return [] }
+        var out: [OnNowEntry] = []
+        for item in contentStore.liveStreams where !liveHiddenIds.contains(item.stream.categoryId ?? "") {
+            let stream = item.stream
+            guard let nn = snapshot[EPGChannelKey.forXtream(stream)], let now = nn.now else { continue }
+            // F1 (B13): progress against the offset-shifted "now",
+            // matching the snapshot's own offset-aware current pick.
+            out.append(OnNowEntry(stream: stream, nowTitle: now.title, progress: now.progress(at: EPGOffsetStore.lookupNow(epgStore.nowDate))))
+            if out.count == 15 { break }
+        }
+        return out
+    }
+
+    private var onNowShelf: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            CinematicSectionHeader(title: L("home.on_now")) {
+                AllLiveView(playlist: playlist)
             }
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(onNowShelfEntries) { entry in
+                        LiveHeroMiniCard(stream: entry.stream, nowTitle: entry.nowTitle, progress: entry.progress) {
+                            presentLiveSelectionFromHome(entry.stream)
+                        }
+                    }
+                }
+                .padding(.horizontal, AppTheme.spacingScreenMargin)
+            }
+            .scrollClipDisabled()
+            .shelfEdgeFade()
         }
     }
 
@@ -1690,14 +1947,162 @@ struct HomeView: View {
         }
     }
 
-    // Build 68 (W-E): the Tonight shelf (C6, EPG programmes),
-    // the New-since-visit shelf and the Favorites shelf that used
-    // to render in the old discovery block are NOT part of Focus
-    // Rows (rails are hero / sports / Continue / Live / Movies /
-    // Series only), so their renderers are removed. Their DATA
-    // still exists where other logic needs it: favorites feed the
-    // top-bar Favorites entry and the shelves' context menus, and
-    // `newSinceVisit` still participates in the cross-row dedupe.
+    // MARK: Tonight (C6)
+
+    private struct TonightEntry: Identifiable {
+        let stream: DBLiveStream
+        let programme: EPGProgramme
+        var id: String { "\(stream.streamId)|\(programme.id)" }
+    }
+
+    private func recomputeTonight() async {
+        // Most-watched channels = the live channels appearing in real
+        // watch history, most recent first, deduped, capped at 8.
+        var seen: [Int] = []
+        for item in recentHistory where item.type == "live" {
+            if let sid = Int(item.streamId), !seen.contains(sid) { seen.append(sid) }
+            if seen.count == 8 { break }
+        }
+        guard !seen.isEmpty else { tonightEntries = []; return }
+        let streams = seen.compactMap { sid in homeLiveQueue.first(where: { $0.streamId == sid }) }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        // F1 (B13): "tonight" is a DISPLAY window (19:00–23:00 as
+        // shown), so the raw programme window shifts by −offset.
+        guard let displayWindowStart = cal.date(bySettingHour: 19, minute: 0, second: 0, of: today),
+              let displayWindowEnd = cal.date(bySettingHour: 23, minute: 0, second: 0, of: today) else { return }
+        let windowStart = displayWindowStart.addingTimeInterval(-EPGOffsetStore.offsetSeconds)
+        let windowEnd = displayWindowEnd.addingTimeInterval(-EPGOffsetStore.offsetSeconds)
+        var entries: [TonightEntry] = []
+        for stream in streams {
+            guard let key = epgStore.storedKey(idKey: stream.epgChannelId, nameKey: stream.name) else { continue }
+            let programmes = (try? await epgStore.programmes(playlistId: playlist.id, channelKey: key, from: windowStart, to: windowEnd)) ?? []
+            for programme in programmes where programme.start >= windowStart && programme.start < windowEnd {
+                entries.append(TonightEntry(stream: stream, programme: programme))
+            }
+        }
+        tonightEntries = Array(entries.sorted { $0.programme.start < $1.programme.start }.prefix(12))
+    }
+
+    private var tonightShelf: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            CinematicSectionHeader(title: L("home.tonight")) {
+                AllLiveView(playlist: playlist)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(tonightEntries) { entry in
+                        LiveHeroMiniCard(stream: entry.stream, nowTitle: entry.programme.title,
+                                         progress: nil, timeText: EPGTimeFormat.time(entry.programme.start)) {
+                            presentLiveSelectionFromHome(entry.stream)
+                        }
+                    }
+                }
+                .padding(.horizontal, AppTheme.spacingScreenMargin)
+            }
+            .scrollClipDisabled()
+            .shelfEdgeFade()
+        }
+    }
+
+    // MARK: New since visit (C6)
+    // Build 66 (W3): the Because-you-watched shelf and the Home
+    // New-episodes shelf that used to live here are deleted
+    // outright (Critic kills) — not renamed, not replaced.
+
+    private var newSinceVisitShelf: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            CinematicSectionHeader(title: L("home.new_since_visit")) {
+                AllVODView(playlist: playlist)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(newSinceVisit.indices, id: \.self) { index in
+                        entryPosterLink(newSinceVisit[index], queue: newSinceVisit.compactMap { if case .movie(let m) = $0 { return m } else { return nil } })
+                            .shelfEntrance(index: index)
+                    }
+                }
+                .padding(.horizontal, AppTheme.spacingScreenMargin)
+            }
+            .scrollClipDisabled()
+            .shelfEdgeFade()
+        }
+    }
+
+    @ViewBuilder
+    private func entryPosterLink(_ entry: FeaturedEntry, queue: [DBVODStream] = []) -> some View {
+        switch entry {
+        case .movie(let movie):
+            NavigationLink {
+                // B1: detail opened from a Home shelf carries THAT
+                // shelf's queue as its playlist context (prev/next).
+                MovieDetailView(playlist: playlist, movie: movie, queue: queue.isEmpty ? [movie] : queue)
+            } label: {
+                VODStreamCard(playlistId: playlist.id, stream: movie,
+                              posterWidth: posterMetrics.shelfPosterWidth,
+                              posterHeight: posterMetrics.shelfPosterHeight,
+                              imageLoadProfile: .shelf)
+            }
+            .buttonStyle(PressScaleButtonStyle())
+        case .series(let series):
+            NavigationLink {
+                SeriesDetailView(playlist: playlist, series: series)
+            } label: {
+                SeriesCard(playlistId: playlist.id, stream: series,
+                           posterWidth: posterMetrics.shelfPosterWidth,
+                           posterHeight: posterMetrics.shelfPosterHeight,
+                           imageLoadProfile: .shelf)
+            }
+            .buttonStyle(PressScaleButtonStyle())
+        }
+    }
+
+    // MARK: Favorites row (B6)
+
+    private var favoritesShelf: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            CinematicSectionHeader(title: L("favorites.title")) {
+                FavoritesView(playlist: playlist, initialType: "live")
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(favoriteLive.prefix(8)) { item in
+                        LiveStreamCard(
+                            playlistId: playlist.id, stream: item.stream,
+                            width: posterMetrics.liveShelfLabelWidth,
+                            iconSize: posterMetrics.liveShelfIcon,
+                            imageLoadProfile: .shelf
+                        ) { stream, _ in presentLiveSelectionFromHome(stream) }
+                    }
+                    ForEach(favoriteVODs.prefix(8)) { item in
+                        NavigationLink {
+                            MovieDetailView(playlist: playlist, movie: item.stream, queue: favoriteVODs.map(\.stream))
+                        } label: {
+                            VODStreamCard(playlistId: playlist.id, stream: item.stream,
+                                          posterWidth: posterMetrics.shelfPosterWidth,
+                                          posterHeight: posterMetrics.shelfPosterHeight,
+                                          imageLoadProfile: .shelf)
+                        }
+                        .buttonStyle(PressScaleButtonStyle())
+                    }
+                    ForEach(favoriteSeries.prefix(8)) { item in
+                        NavigationLink {
+                            SeriesDetailView(playlist: playlist, series: item.series)
+                        } label: {
+                            SeriesCard(playlistId: playlist.id, stream: item.series,
+                                       posterWidth: posterMetrics.shelfPosterWidth,
+                                       posterHeight: posterMetrics.shelfPosterHeight,
+                                       imageLoadProfile: .shelf)
+                        }
+                        .buttonStyle(PressScaleButtonStyle())
+                    }
+                }
+                .padding(.horizontal, AppTheme.spacingScreenMargin)
+            }
+            .scrollClipDisabled()
+            .shelfEdgeFade()
+        }
+    }
 
     // MARK: - B3 favorite toggle (context menus / cards)
 
@@ -1754,13 +2159,7 @@ struct HomeView: View {
     private var homeLiveQueue: [DBLiveStream] { homeLiveSections.flatMap(\.streams) }
 
     private func presentHistoryItem(_ item: DBWatchHistory) {
-        // Build 69 (F2): was a silent return — a Continue
-        // Watching tap whose URL failed to build looked dead.
-        // Surface the plain failure instead.
-        guard let url = historyURL(for: item) else {
-            showPlayFailure = true
-            return
-        }
+        guard let url = historyURL(for: item) else { return }
         if item.type == "series" {
             playerOverlay.present(playlistId: playlist.id) {
                 HistorySeriesPlayerShell(playlist: playlist, history: item, url: url)
@@ -1808,16 +2207,9 @@ struct HomeView: View {
         case "live":
             return builder.liveURL(streamId: Int(item.streamId) ?? 0)
         case "vod":
-            // Build 69 (F2): the history record's REAL container
-            // extension — nil here forced .mp4, so non-mp4 movies
-            // resumed against a wrong-extension URL.
-            return builder.movieURL(streamId: Int(item.streamId) ?? 0, containerExtension: item.containerExtension)
+            return builder.movieURL(streamId: Int(item.streamId) ?? 0, containerExtension: nil)
         case "series":
-            // Build 69 (amendment): the same F2 correction as the
-            // VOD branch above — the record's REAL container
-            // extension, matching every other history series path
-            // (DashboardView, SeriesView). Nil forced .mp4.
-            return builder.seriesURL(streamId: item.streamId, containerExtension: item.containerExtension)
+            return builder.seriesURL(streamId: item.streamId, containerExtension: nil)
         default:
             return nil
         }
@@ -1982,7 +2374,7 @@ struct HomeView: View {
         // shared store's) only ever contain items with a real
         // normalized rating; nothing unrated is merged in to fill
         // the rail. When fewer than 3 rated items remain, the
-        // rail gates in the Focus rails (count >= 3) hide it —
+        // shelf gates in `shelfView` (count >= 3) hide the rail —
         // an honest short rail is never padded with unrated picks.
 
         let finishedMovieIds = Set(recentHistory.filter {
@@ -2470,11 +2862,59 @@ private struct FeaturedSlide: View {
 }
 
 
-/// Build 63 (owner, item 7): a sport shortcut tile — tinted icon
-/// disc + bold label + secondary sublabel on the shared surface
-/// card (the visual language of the old category tiles, which
-/// Build 68 W-E removed with the Focus Rows rebuild), as a
-/// NavigationLink — each sport lands on its own Matches tab.
+// MARK: - Category tile
+
+/// Round 10: STRONG-style clean card — a colored circular icon, the
+/// section name and the REAL count beneath, on the standard surface.
+/// (Rounds 5–9 rendered catalog art here — a 2×2 collage, then one
+/// representative image; the owner replaced the whole treatment with
+/// this icon-card model on the build-46 list.)
+private struct HomeCategoryTile: View {
+    let title: String
+    let countText: String
+    let tint: Color
+    let iconName: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(tint)
+                    Image(systemName: iconName)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 46, height: 46)
+
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(countText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    // C12: counts animate with numericText when the
+                    // catalog totals change.
+                    .contentTransition(.numericText())
+                    .animation(Motion.animate(.easeOut(duration: 0.35)), value: countText)
+            }
+            .padding(.vertical, 14)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity)
+            .background(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous).fill(AppTheme.surface))
+            .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
+        }
+        .buttonStyle(PressScaleButtonStyle())
+    }
+}
+
+/// Build 63 (owner, item 7): a sport shortcut tile in the exact
+/// visual language of `HomeCategoryTile` (tinted icon disc + bold
+/// label + secondary sublabel on the shared surface card), but as
+/// a NavigationLink — each sport lands on its own Matches tab.
 private struct HomeSportTile: View {
     let title: String
     let subtitle: String

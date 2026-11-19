@@ -156,18 +156,41 @@ struct PlaylistGateView: View {
 
     private var hasLocalFile: Bool { localContent != nil }
 
-    // Build 68 (W-H, owner order): the gate is SIMPLIFIED — the
-    // build-65 blurred-flame backdrop (two oversized blurred flame
-    // glyphs over a warm gradient) and the frosted-glass card that
-    // wrapped header + form are REMOVED. The gate now sits flat on
-    // the plain charcoal AppTheme.background with tight, even
-    // spacing: logo, wordmark, subtitle, segmented switch, form,
-    // primary button. Presentation only — every field, binding,
-    // validation and save pipeline below is unchanged.
+    /// Build 65 (Login gate style 2 'Cinematic Card'): the blurred
+    /// cinematic backdrop behind the gate — the brand flame blown
+    /// up, blurred and dimmed over a warm charcoal gradient (brand
+    /// art only; the gate has no catalog to borrow posters from,
+    /// and none are invented).
+    private var gateBackdrop: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.13, green: 0.06, blue: 0.045),
+                    AppTheme.background,
+                    AppTheme.background
+                ],
+                startPoint: .top, endPoint: .bottom
+            )
+            Image(systemName: "flame.fill")
+                .font(.system(size: 430, weight: .bold))
+                .foregroundStyle(AppTheme.brandGradient)
+                .blur(radius: 95)
+                .opacity(0.32)
+                .offset(y: -190)
+            // A second, cooler ember low in the frame for depth.
+            Image(systemName: "flame.fill")
+                .font(.system(size: 300, weight: .bold))
+                .foregroundStyle(AppTheme.brandGradient)
+                .blur(radius: 110)
+                .opacity(0.14)
+                .offset(x: 130, y: 330)
+        }
+        .ignoresSafeArea()
+    }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(spacing: 22) {
                 // Round 15 (C13): "All subscriptions expired" —
                 // an explicit line instead of blind-entering a
                 // dead playlist; the add form below stays ready.
@@ -175,17 +198,36 @@ struct PlaylistGateView: View {
                     allExpiredCard
                 }
 
-                // Build 68 (W-H): header + form sit directly on
-                // the background — no wrapping card, no glass, no
-                // border, no shadow. Every field, the segmented
-                // switch and all logic are the existing views,
-                // unchanged.
-                header
-                addSection
+                // Build 65 (style 2 'Cinematic Card'): header +
+                // form live inside ONE frosted-glass card over the
+                // blurred backdrop — the mockup's composition.
+                // Every field, the segmented switch and all logic
+                // are the existing views, unchanged.
+                VStack(spacing: 22) {
+                    header
+                    addSection
+                }
+                .padding(20)
+                .background {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                        RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .fill(AppTheme.surface.opacity(0.55))
+                    }
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .stroke(Color.white.opacity(0.13), lineWidth: 1)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .shadow(color: .black.opacity(0.45), radius: 24, y: 12)
 
                 // Round 15 (C13): after an explicit sign-out, one
                 // discreet row back into the last playlist (name
                 // only — tapping re-enters that saved record).
+                // Build 65: it sits UNDER the card, where the
+                // mockup puts its saved-playlist chips.
                 if let last = continueWithPlaylist {
                     continueWithRow(last)
                 }
@@ -193,20 +235,24 @@ struct PlaylistGateView: View {
                 helpLine
             }
             .padding(.horizontal, 20)
-            .padding(.top, 16)
-            .padding(.bottom, 24)
+            .padding(.top, 24)
+            .padding(.bottom, 32)
             // While a verify/import runs, the gate is inert — the analog
             // of the Add sheets' `interactiveDismissDisabled(isLoading)`.
             .disabled(isLoading)
         }
-        // Build 68 (W-H): plain charcoal background only — the
-        // blurred cinematic backdrop is gone.
-        .cinematicBackground()
+        // Build 65 (Cinematic Card): the blurred backdrop behind
+        // the scroll content (ContentView's flat cinematic
+        // background sits behind this).
+        .background(gateBackdrop)
         .overlay {
             if let summary = addSummary {
                 // Build 61 (B10, L2/L3): the end-of-add summary.
                 AddPlaylistSummaryView(
                     summary: summary,
+                    onRetryFailedStage: summary.failedStage == nil ? nil : {
+                        Task { await retryGuideStage() }
+                    },
                     onStartWatching: {
                         addSummary = nil
                         addStages = [:]
@@ -300,7 +346,7 @@ struct PlaylistGateView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             // Build 61 (Design-4, panel 4): the centered flame mark
             // over the wordmark — the mockup's flame-X treatment,
             // rendered with the system flame glyph in the fixed
@@ -308,10 +354,11 @@ struct PlaylistGateView: View {
             // opaque blue-on-black raster, so it cannot carry the
             // treatment; the app icon itself is unchanged and still
             // shows everywhere the system shows it).
-            // Build 68 (W-H): modest size, no glow shadow.
             Image(systemName: "flame.fill")
-                .font(.system(size: 44, weight: .bold))
+                .font(.system(size: 54, weight: .bold))
                 .foregroundStyle(AppTheme.brandGradient)
+                .shadow(color: AppTheme.accentStart.opacity(0.45), radius: 14, x: 0, y: 6)
+                .padding(.bottom, 2)
 
             // Typographic wordmark — no invented logo artwork: "Super"
             // in white, the X in the brand gradient (the mockup's
@@ -328,7 +375,7 @@ struct PlaylistGateView: View {
                 Text("Pro Max")
                     .foregroundStyle(.white)
             }
-            .font(.system(size: 30, weight: .black))
+            .font(.system(size: 32, weight: .black))
             .tracking(-0.5)
 
             // Design-4 subtitle ("IPTV • Playlist Login" in the
@@ -400,6 +447,27 @@ struct PlaylistGateView: View {
         addStages = Dictionary(uniqueKeysWithValues: PlaylistValidationService.Stage.allCases.map { ($0, .pending) })
     }
 
+    /// L3 retry: re-runs ONLY the guide stage for the summarized
+    /// playlist; success clears the summary's failed-stage mark.
+    private func retryGuideStage() async {
+        guard let summary = addSummary else { return }
+        let failed = await PlaylistValidationService.runGuideStage(playlist: summary.playlist) { stage, state in
+            if state == .done || state == .failed {
+                self.addSummary = PlaylistValidationService.AddSummary(
+                    playlist: summary.playlist,
+                    expiryDate: summary.expiryDate,
+                    liveCount: summary.liveCount,
+                    movieCount: summary.movieCount,
+                    seriesCount: summary.seriesCount,
+                    failedStage: state == .done ? nil : .loadingGuide,
+                    compatibility: summary.compatibility
+                )
+            }
+            _ = stage
+        }
+        _ = failed
+    }
+
     /// Build 61 (B10): the optional connection-fields group shared
     /// by both gate forms (Q18 backup URL, G4 custom EPG URL,
     /// G2 User-Agent + custom headers).
@@ -462,6 +530,9 @@ struct PlaylistGateView: View {
         }
         .padding(4)
         .background(Capsule().fill(AppTheme.surface))
+        .overlay(
+            Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
     }
 
     private func segmentButton(kind: FormKind, title: String) -> some View {
@@ -611,8 +682,12 @@ struct PlaylistGateView: View {
                 importTask = Task { await saveXtream() }
             }
         }
-        // Build 68 (W-H): no card fill / gradient / border around
-        // the form — fields sit directly on the background.
+        .padding(16)
+        .background(AppTheme.cardGradient, in: RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+        )
     }
 
     private var m3uForm: some View {
@@ -712,8 +787,12 @@ struct PlaylistGateView: View {
                 importTask = Task { await saveM3U() }
             }
         }
-        // Build 68 (W-H): no card fill / gradient / border around
-        // the form — fields sit directly on the background.
+        .padding(16)
+        .background(AppTheme.cardGradient, in: RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+        )
     }
 
     private func submitButton(title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
@@ -775,6 +854,10 @@ struct PlaylistGateView: View {
         }
         .padding(14)
         .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+        )
         .contentShape(Rectangle())
         .onTapGesture { onSelect(playlist) }
         .contextMenu {
@@ -1140,10 +1223,9 @@ struct PlaylistGateView: View {
 
     private func syncAndSaveXtream(newPlaylist: Playlist, client: XtreamAPIClient) async {
         // Build 61 (B10, L1): the content stages run with the real
-        // importer; the Z1 probe follows, then the L2 summary
-        // (Start Watching enters the app — the round-11
-        // direct-entry rule now lands via the summary). Build 68:
-        // no guide stage — the TV Guide is removed.
+        // importer; the guide stage and the Z1 probe follow, then
+        // the L2 summary (Start Watching enters the app — the
+        // round-11 direct-entry rule now lands via the summary).
         if addStages.isEmpty { resetStages(); setStage(.connecting, .done); setStage(.verifying, .done) }
         setStage(.loadingChannels, .active)
         do {
@@ -1171,6 +1253,15 @@ struct PlaylistGateView: View {
             setStage(.loadingMoviesSeries, .done)
 
             let compatibility = await PlaylistValidationService.probeCompatibility(playlist: newPlaylist)
+            // Build 63: the guide no longer blocks the add here
+            // either — background handoff, stage completes at once
+            // (see PlaylistValidationService.importXtream).
+            self.setStage(.loadingGuide, .active)
+            if newPlaylist.epgEnabled {
+                GuideBackgroundLoader.start(playlist: newPlaylist)
+            }
+            self.setStage(.loadingGuide, .done)
+            let guideFailed = false
             let counts = await PlaylistValidationService.importedCounts(playlistId: newPlaylist.id, kind: .xtream)
             let expiry = ProviderExpiryStore.expiryDate(playlistId: newPlaylist.id)
 
@@ -1182,7 +1273,7 @@ struct PlaylistGateView: View {
                     playlist: newPlaylist,
                     expiryDate: expiry,
                     liveCount: counts.live, movieCount: counts.movies, seriesCount: counts.series,
-                    failedStage: nil,
+                    failedStage: guideFailed ? .loadingGuide : nil,
                     compatibility: compatibility
                 )
             }
@@ -1254,7 +1345,7 @@ struct PlaylistGateView: View {
 
         // Build 61 (B10, Q17 + L1/L2/L3): the staged validation
         // service — probe (fetch + parse) BEFORE anything is
-        // saved, the shared importer, the Z1
+        // saved, the shared importer, the guide stage, the Z1
         // probe, then the summary. A failed probe saves nothing.
         resetStages()
         do {
@@ -1356,7 +1447,8 @@ struct PlaylistGateView: View {
         }
 
         // Build 61 (B10): the staged finisher (content stages →
-        // Z1 → L2 summary) — the same end-of-add as the Xtream form. A sync failure surfaces the error instead
+        // guide → Z1 → L2 summary) — the same end-of-add as the
+        // Xtream form. A sync failure surfaces the error instead
         // of falling back, since get.php is likely blocked on
         // such panels anyway (syncAndSaveXtream shows it).
         await syncAndSaveXtream(newPlaylist: playlist, client: client)

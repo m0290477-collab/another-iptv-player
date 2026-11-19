@@ -571,13 +571,6 @@ struct SuperXBackupFile: Codable {
     /// (`BackupService`). Optional: files written before build 61
     /// have no library and import exactly as before.
     var library: BackupService.LibraryDTO?
-    /// Build 68 (W-C): per-playlist organization data (hidden
-    /// channels/categories, category + channel order, pinned
-    /// channels — `BackupService.OrganizationDTO`). Optional,
-    /// same additive pattern as `library`: files written before
-    /// build 68 have none and import exactly as before; older
-    /// readers ignore it.
-    var organization: BackupService.OrganizationDTO?
 
     static func make(playlists: [Playlist], includeCredentials: Bool) -> SuperXBackupFile {
         var settings: [String: BackupValue] = [:]
@@ -992,6 +985,48 @@ struct AppLockSection: View {
 
 // MARK: - New feature settings (C5)
 
+/// Build 66 (W1): the reminders half of the former
+/// Advanced section, moved to the hub's Notifications
+/// page. Keys are the exact ones the reminder engine reads:
+/// "reminders.enabled" (separate from the expiry-alerts toggle)
+/// + "reminders.leadTimeMinutes" (5/10/15/30). The section's old
+/// Zapping and Next-episode-card controls are DELETED in build
+/// 66 — they persisted keys no player code ever read.
+struct RemindersSettingsSection: View {
+    @AppStorage("reminders.enabled") private var remindersEnabled = true
+    @AppStorage("reminders.leadTimeMinutes") private var reminderLeadTimeMinutes = 10
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("reminders.enabled.title"), thisPlaylist: false)) {
+            Toggle(isOn: $remindersEnabled) {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemImage: "bell.badge.fill", tint: AppTheme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("reminders.enabled.title"))
+                        Text(L("reminders.enabled.desc"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            SettingsPickerRow(
+                systemImage: "timer",
+                tint: AppTheme.accent,
+                title: L("reminders.lead_time"),
+                selection: $reminderLeadTimeMinutes
+            ) {
+                ForEach([5, 10, 15, 30], id: \.self) { minutes in
+                    Text(L("player.sleep_timer.minutes", minutes)).tag(minutes)
+                }
+            }
+            .disabled(!remindersEnabled)
+            .opacity(remindersEnabled ? 1 : 0.45)
+        }
+        .settingsCardRows()
+    }
+}
+
 /// Build 66 (W1): the motion + UI-sounds half of the former
 /// Advanced section, moved to the hub's Display page.
 /// Keys: "motion.intensity" ("full"/"reduced"/"off") and
@@ -1231,17 +1266,12 @@ struct BackupSettingsSection: View {
         // Build 61 (B3, S5): the export also carries the library —
         // favorites (both stores) + watch-later lists.
         file.library = await BackupService.collectLibrary(playlistIds: playlists.map(\.id))
-        // Build 68 (W-C): …and the organization data (hidden /
-        // order / pinned, per playlist).
-        file.organization = await BackupService.collectOrganization(playlistIds: playlists.map(\.id))
         settingsExportURL = writeTempFile(file, name: "superx-settings.json")
     }
 
     private func prepareFullExport() async {
         var file = SuperXBackupFile.make(playlists: playlists, includeCredentials: true)
         file.library = await BackupService.collectLibrary(playlistIds: playlists.map(\.id))
-        // Build 68 (W-C): organization data, as on the C5 export.
-        file.organization = await BackupService.collectOrganization(playlistIds: playlists.map(\.id))
         fullExportURL = writeTempFile(file, name: "superx-full-backup.json")
     }
 
@@ -1306,7 +1336,6 @@ struct BackupSettingsSection: View {
         }
         if needsPassword.isEmpty {
             let libraryResult = await applyPendingLibrary(file)
-            await applyPendingOrganization(file)
             importMessage = libraryResult != nil
                 ? L("backup.import.done_library_format", importedCount,
                     libraryResult!.favoritesImported, libraryResult!.watchlistImported)
@@ -1346,15 +1375,6 @@ struct BackupSettingsSection: View {
     private func applyPendingLibrary(_ file: SuperXBackupFile) async -> BackupService.ApplyResult? {
         guard let library = file.library else { return nil }
         return await BackupService.applyLibrary(library, playlistIdMap: libraryIdMap)
-    }
-
-    /// Build 68 (W-C): applies the file's organization data
-    /// (hidden / order / pinned) through the same id map as the
-    /// library, at the same two import completion points; a file
-    /// without organization data is a no-op.
-    private func applyPendingOrganization(_ file: SuperXBackupFile) async {
-        guard let organization = file.organization else { return }
-        _ = await BackupService.applyOrganization(organization, playlistIdMap: libraryIdMap)
     }
 
     /// Saves one imported playlist unless an identical record
@@ -1438,7 +1458,6 @@ struct BackupSettingsSection: View {
                             var libraryResult: BackupService.ApplyResult?
                             if let file = pendingLibraryFile {
                                 libraryResult = await applyPendingLibrary(file)
-                                await applyPendingOrganization(file)
                                 pendingLibraryFile = nil
                             }
                             showPasswordPrompt = false
@@ -1581,6 +1600,45 @@ struct PlaybackSettingsSection: View {
         .settingsCardRows()
     }
 
+}
+
+/// Build 66 (W1): the EPG time-offset stepper, MOVED out of
+/// PlaybackSettingsSection into the hub's Guide page (team review
+/// Settings-S6: the offset belongs with the guide controls). F1
+/// (B13): the ONE EPG time offset store — guide display,
+/// programme details and reminder fire dates all read it
+/// (`epg.timeOffsetHours`, −12…+12 h in 0.5 h steps, per-APP).
+struct EPGOffsetSettingsSection: View {
+    @ObservedObject private var epgOffset = EPGOffsetStore.shared
+
+    var body: some View {
+        Section(header: ScopedSectionHeader(title: L("epgoffset.title"), thisPlaylist: false)) {
+            HStack(spacing: 12) {
+                SettingsIconTile(systemImage: "clock.arrow.2.circlepath", tint: AppTheme.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("epgoffset.title"))
+                    Text(L("epgoffset.desc"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(epgOffsetValueText)
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                Stepper("", value: $epgOffset.offsetHours, in: -12...12, step: 0.5)
+                    .labelsHidden()
+            }
+        }
+        .settingsCardRows()
+    }
+
+    /// "+1.5 h" / "-0.5 h" / "0 h" — the stepper's current value.
+    private var epgOffsetValueText: String {
+        let value = epgOffset.offsetHours
+        let number = value == 0 ? "0" : String(format: "%+.1f", value)
+        return L("epgoffset.value_format", number)
+    }
 }
 
 /// APPEARANCE leftovers (item 7a), shown on the hub's Display
@@ -2425,6 +2483,7 @@ struct DangerZoneSection: View {
         }
         await PlaylistContentStore.shared.unload()
         await M3UContentStore.shared.unload()
+        await EPGStore.shared.setActivePlaylist(nil)
         isWorking = false
         if succeeded {
             onExitToGate()

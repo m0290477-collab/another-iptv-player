@@ -30,9 +30,6 @@ struct VODView: View {
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
 
     @State private var pendingMovieDetail: DBVODStream?
-    /// Build 69 (amendment): the VOD history path's play-failure
-    /// surface — its URL-build guard used to return silently.
-    @State private var showPlayFailure = false
     /// Round 15 (C12): bumped on every tab appearance so the identity
     /// shelves replay the LIGHT entrance on tab return (the shared
     /// ShelfEntranceModifier's replay token).
@@ -70,24 +67,6 @@ struct VODView: View {
     // search fields.
     @State private var homeSearchText = ""
     @State private var showSearchSheet = false
-    /// Build 68: the landing sort sheet's presentation state — the
-    /// sheet is attached to the category sort header itself (see
-    /// `categorySortHeader`), not stacked on the tab root. Build
-    /// 67's single item-driven root sheet was its F3 search fix;
-    /// that fix is NOT ported, so the tab root keeps build 66's
-    /// two `.sheet(isPresented:)` attachments exactly.
-    @State private var showSortSheet = false
-
-    /// Build 67 (W6, S8): the landing sort — the SAME persisted C1
-    /// option (`VODSortOption.storageKey`) the category screens use,
-    /// so a sort chosen here and there is one choice. `.defaultOrder`
-    /// keeps the O7 bucket order; an explicit sort reorders the
-    /// category grid below.
-    @AppStorage(VODSortOption.storageKey) private var sortOption: VODSortOption = .defaultOrder
-    /// Build 67 (W6, S8): By Year rails — the visible catalog grouped
-    /// by REAL release year (records without a parseable year are
-    /// excluded, never guessed), computed in `recomputeFilter()`.
-    @State private var yearGroups: [(year: Int, items: [DBVODStream])] = []
 
     // Round 5: unified content pattern — filter chips.
     // Round 8 (D-4/D-5): the Favorites and History chips were removed —
@@ -166,34 +145,9 @@ struct VODView: View {
                         // the shelves; Newest renders its grid.
                         switch selectedChip {
                         case .all:
-                            // Build 67 (W6, S8 — Categories First,
-                            // owner pick): category TILES come FIRST
-                            // on the landing — the REAL categories of
-                            // the synced catalog with their REAL item
-                            // counts. Tapping a tile filters the tab
-                            // to that category (the sort header + poster
-                            // grid below); "All" restores the landing.
-                            // This replaces the build-65 chips row as
-                            // the tab's ONE category selector (O6).
-                            if displayCategories.count > 1 {
-                                SectionCategoryTilesGrid(
-                                    items: categoryTileItems,
-                                    totalCount: totalMovieCount,
-                                    systemImage: "film",
-                                    selectedCategoryId: $selectedCategoryId
-                                )
-                                .padding(.top, 2)
-                                .padding(.bottom, 6)
-                            }
-
-                            if let selectedCategoryId,
-                               let category = displayCategories.first(where: { $0.id == selectedCategoryId }) {
-                                categorySortHeader(for: category)
-                                categoryGrid(for: category)
-                            } else {
                             // Round 14 (B7): the Movies identity —
-                            // the featured movie hero, now under the
-                            // category tiles (build 67 order).
+                            // a featured movie hero at the very top
+                            // of the tab.
                             if let featured = featuredMovie {
                                 MovieFeaturedHero(playlist: playlist, movie: featured) {
                                     pendingMovieDetail = featured
@@ -202,24 +156,24 @@ struct VODView: View {
                                 }
                             }
 
-                            // Build 67 (W6, S8): the catalog rails,
-                            // built ONLY from real provider data, in
-                            // the owner's order — New, Top Rated,
-                            // By Year. A rail whose data is absent is
-                            // omitted entirely; nothing is curated,
-                            // recommended or invented.
-                            if !recentlyAddedVODs.isEmpty {
-                                RecentlyAddedVODShelf(playlist: playlist, items: recentlyAddedVODs)
+                            // Build 65 (inside-sections design):
+                            // category chips under the hero — the
+                            // REAL provider categories. A selection
+                            // swaps the shelves for that category's
+                            // poster grid (see below); All restores
+                            // them.
+                            if displayCategories.count > 1 {
+                                SectionCategoryChips(
+                                    categories: displayCategories,
+                                    selectedCategoryId: $selectedCategoryId
+                                )
+                                .padding(.bottom, 4)
                             }
 
-                            if topRatedVODs.count >= 3 {
-                                TopMoviesShelf(playlist: playlist, items: topRatedVODs, replayToken: shelfReplayToken)
-                            }
-
-                            ForEach(yearGroups, id: \.year) { group in
-                                yearShelf(year: group.year, items: group.items)
-                            }
-
+                            if let selectedCategoryId,
+                               let category = displayCategories.first(where: { $0.id == selectedCategoryId }) {
+                                categoryGrid(for: category)
+                            } else {
                             ContinueWatchingRow(
                                 playlist: playlist,
                                 typeFilter: "vod",
@@ -233,6 +187,14 @@ struct VODView: View {
                                 }
                             )
 
+                            if topRatedVODs.count >= 3 {
+                                TopMoviesShelf(playlist: playlist, items: topRatedVODs, replayToken: shelfReplayToken)
+                            }
+
+                            if !recentlyAddedVODs.isEmpty {
+                                RecentlyAddedVODShelf(playlist: playlist, items: recentlyAddedVODs)
+                            }
+
                             if !watchlistMovies.isEmpty {
                                 WatchlistShelf(playlist: playlist, items: watchlistMovies)
                             }
@@ -241,18 +203,9 @@ struct VODView: View {
                                 MovieCollectionsShelf(playlist: playlist, groups: franchiseGroups)
                             }
 
-                            // Build 68 (W-B, Movies interior —
-                            // owner pick "Cinema Rows"): in the
-                            // all-categories context each category is
-                            // a horizontal rail of WIDE cards under
-                            // its heading row; "See all ›" opens that
-                            // category's existing full grid
-                            // (VODCategoryDetailView). The poster
-                            // shelf row remains in use on other
-                            // surfaces; only this landing swaps.
                             LazyVStack(spacing: 0) {
                                 ForEach(displayCategories) { category in
-                                    VODCinemaCategoryRow(
+                                    VODCategoryShelfRow(
                                         playlist: playlist,
                                         category: category,
                                         items: displayItemsByCategory[category.id] ?? [],
@@ -336,11 +289,6 @@ struct VODView: View {
                 SearchView(playlist: playlist, searchText: $homeSearchText, initialFilter: .movies)
             }
         }
-        // Build 69 (amendment): the play-failure alert (existing
-        // playback error copy — no new strings).
-        .alert(L("playback.error.failed_to_start"), isPresented: $showPlayFailure) {
-            Button(L("common.ok")) { showPlayFailure = false }
-        }
         // Round 8 (audit A2): ONE recompute trigger — the same combined
         // token round 7 gave Home. The two separate `.task(id:)` modifiers
         // that used to sit here (streamsLoaded + the hidden set) fired
@@ -359,7 +307,6 @@ struct VODView: View {
         )) { await recomputeFilter() }
         .onAppear { shelfReplayToken += 1 }
         .onChange(of: selectedCategoryId) { _, _ in categoryVisibleCount = 90 }
-        .onChange(of: sortOption) { _, _ in categoryVisibleCount = 90 }
         .transaction { $0.animation = nil }
         .navigationDestination(item: $pendingMovieDetail) { movie in
             MovieDetailView(playlist: playlist, movie: movie)
@@ -462,112 +409,8 @@ struct VODView: View {
     /// in the tab's grid language, paginated like the Newest grid.
     /// In-section search behavior is untouched (the tab's search
     /// sheet still searches the full catalog, build 63/64).
-    /// Build 67 (W6, S8): the landing tiles' data — the REAL display
-    /// categories with their REAL bucket counts.
-    private var categoryTileItems: [SectionCategoryTileItem] {
-        displayCategories.map { category in
-            SectionCategoryTileItem(
-                id: category.id,
-                name: category.name,
-                count: displayItemsByCategory[category.id]?.count ?? 0
-            )
-        }
-    }
-
-    /// The REAL visible movie total (the same sum the header count
-    /// line renders).
-    private var totalMovieCount: Int {
-        displayCategories.reduce(0) { $0 + (displayItemsByCategory[$1.id]?.count ?? 0) }
-    }
-
-    /// Build 67 (W6, S8): the header shown above a selected
-    /// category's grid — the category's name + real count and the
-    /// sort button (the C1 sort sheet; build 68 presents it from
-    /// the header itself — see the `showSortSheet` note at the
-    /// state declarations).
-    private func categorySortHeader(for category: DBCategory) -> some View {
-        HStack(spacing: 8) {
-            Text(category.name)
-                .font(.headline)
-                .lineLimit(1)
-            Text(CatalogCountFormatter.string(displayItemsByCategory[category.id]?.count ?? 0))
-                .font(AppTheme.fontBadge)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 2)
-                .background(Capsule().fill(AppTheme.accent))
-            Spacer()
-            Button {
-                showSortSheet = true
-            } label: {
-                Image(systemName: sortOption == .defaultOrder
-                    ? "line.3.horizontal.decrease.circle"
-                    : "line.3.horizontal.decrease.circle.fill")
-                    .font(.body.weight(.semibold))
-            }
-            .accessibilityLabel(L("sort.title"))
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 4)
-        .sheet(isPresented: $showSortSheet) {
-            // Build 67 (W6, S8): the landing sort — the C1 option
-            // set, applied to the category grid below.
-            SortFilterSheet(
-                sortRows: VODSortOption.allCases.map { option in
-                    SortFilterSheet.Row(
-                        id: option.rawValue,
-                        title: L(option.titleKey),
-                        systemImage: option.systemImage,
-                        isSelected: sortOption == option
-                    ) { sortOption = option }
-                },
-                onClearFilters: sortOption == .defaultOrder ? nil : {
-                    sortOption = .defaultOrder
-                }
-            )
-        }
-    }
-
-    /// Build 67 (W6, S8): one By Year rail — a year's REAL movies
-    /// (records carrying a parseable release year only), in the
-    /// shelf language of the Recently Added rail.
-    private func yearShelf(year: Int, items: [DBVODStream]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionYearHeader(year: year)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(items) { stream in
-                        NavigationLink {
-                            MovieDetailView(playlist: playlist, movie: stream, queue: items)
-                        } label: {
-                            VODStreamCard(
-                                playlistId: playlist.id,
-                                stream: stream,
-                                posterWidth: posterMetrics.shelfPosterWidth,
-                                posterHeight: posterMetrics.shelfPosterHeight,
-                                imageLoadProfile: .shelf
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-            .frame(height: posterMetrics.shelfRowTotalHeight)
-            .shelfEdgeFade()
-        }
-        .padding(.vertical, 6)
-    }
-
     private func categoryGrid(for category: DBCategory) -> some View {
-        // Build 67 (W6, S8): an explicitly chosen sort (the C1
-        // `VODSortOption`, shared with the category screens) reorders
-        // the grid; `.defaultOrder` is the identity, so the O7 bucket
-        // order stands until the user picks a sort. Rating sort ranks
-        // only real ratings — unrated items sink (CatalogRatingValue),
-        // never a faked rating.
-        let items = sortOption.apply(to: displayItemsByCategory[category.id] ?? [])
+        let items = displayItemsByCategory[category.id] ?? []
         let queue = items.map(\.stream)
         return Group {
             if items.isEmpty {
@@ -652,7 +495,7 @@ struct VODView: View {
     /// (the same simplification Live got in round 3).
     private func recomputeFilter() async {
         guard playlist.id == contentStore.activePlaylistId else {
-            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedVODs = []; newestVODs = []; topRatedVODs = []; newestAll = []; franchiseGroups = []; yearGroups = []; return
+            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedVODs = []; newestVODs = []; topRatedVODs = []; newestAll = []; franchiseGroups = []; return
         }
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod")
         let allCats = orderStore.applyOrder(
@@ -694,27 +537,6 @@ struct VODView: View {
         guard !Task.isCancelled else { return }
         newestAll = byAddedDesc
         newestVisibleCount = min(Self.newestPageSize, byAddedDesc.count)
-
-        // Build 67 (W6, S8): By Year groups — visible movies grouped
-        // by their REAL release year. Years with fewer than 3 titles
-        // don't earn a rail; the three most recent years win; each
-        // rail caps at 20 posters (the full year stays reachable
-        // through its category grids and search).
-        let years = await Task.detached(priority: .utility) { () -> [(year: Int, items: [DBVODStream])] in
-            var byYear: [Int: [DBVODStream]] = [:]
-            for vod in allVODs where visibleCatIds.contains(vod.stream.categoryId ?? "") {
-                if let year = DetailFormatting.releaseYear(from: vod.stream.releaseDate) {
-                    byYear[year, default: []].append(vod.stream)
-                }
-            }
-            return byYear
-                .filter { $0.value.count >= 3 }
-                .sorted { $0.key > $1.key }
-                .prefix(3)
-                .map { (year: $0.key, items: Array($0.value.prefix(20))) }
-        }.value
-        guard !Task.isCancelled else { return }
-        yearGroups = years
 
         // Round 15 (C7): franchise groups. Two cheap passes — first
         // the bases that a marked title (number/roman/"part"/colon)
@@ -813,13 +635,7 @@ struct VODView: View {
         }
 
         let url: URL? = localOverrideURL ?? buildURL(for: item)
-        // Build 69 (amendment): was a silent return — a history
-        // tap whose URL failed to build looked dead. Surface the
-        // plain failure instead (same alert as the round's fixes).
-        guard let url else {
-            showPlayFailure = true
-            return
-        }
+        guard let url else { return }
         playerOverlay.present(skipDownloadCheck: localOverrideURL != nil, playlistId: playlist.id) {
             PlayerView(
                 url: url,
@@ -1651,9 +1467,7 @@ struct VODPlayerShell: View {
 
     @State private var currentMovie: DBVODStream
     @State private var resumeMs: Int?
-    @State private var showPlayFailure = false
     @Environment(\.playerOverlayPresentationID) private var overlayPresentationID
-    @Environment(\.playerOverlayDismiss) private var overlayDismiss
 
     init(
         playlist: Playlist,
@@ -1709,23 +1523,6 @@ struct VODPlayerShell: View {
             .onChange(of: overlayPresentationID) { _, _ in
                 applyInitialSelectionIfNeeded()
             }
-        } else {
-            // Build 69 (F1): this was the app's last silent
-            // playback death — a failed movie URL build rendered
-            // NOTHING inside the presented overlay: no player, no
-            // error, no way out (the owner's dead Watch Now tap).
-            // It now surfaces the same play-failure alert the
-            // queue-less movie path uses (MovieDetailView), and
-            // OK also dismisses the overlay, so no empty
-            // presentation is left standing.
-            Color.clear
-                .onAppear { showPlayFailure = true }
-                .alert(L("playback.error.failed_to_start"), isPresented: $showPlayFailure) {
-                    Button(L("common.ok")) {
-                        showPlayFailure = false
-                        overlayDismiss?()
-                    }
-                }
         }
     }
 

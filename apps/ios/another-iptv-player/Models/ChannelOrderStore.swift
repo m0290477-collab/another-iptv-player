@@ -64,34 +64,6 @@ final class ChannelOrderStore: ObservableObject {
             .map(\.element)
     }
 
-    /// Build 68 (W-C): every saved (categoryId → ordered channel
-    /// ids) pair for a playlist, for backup export. Category ids
-    /// are not known ahead of time, so the playlist's key prefix
-    /// is scanned — the same scan `removeAll` performs.
-    func allOrders(playlistId: UUID) -> [String: [String]] {
-        let prefix = "channel_order.\(playlistId.uuidString)."
-        var result: [String: [String]] = [:]
-        for key in UserDefaults.standard.dictionaryRepresentation().keys where key.hasPrefix(prefix) {
-            let ids = UserDefaults.standard.stringArray(forKey: key) ?? []
-            if !ids.isEmpty {
-                result[String(key.dropFirst(prefix.count))] = ids
-            }
-        }
-        return result
-    }
-
-    /// Build 68 (W-C): applies imported channel orders (backup
-    /// restore). Like `CategoryOrderStore`, an order is one
-    /// authoritative list per category, so the imported list
-    /// REPLACES the local one for every category the backup
-    /// carries, through `setOrder` (which bumps `version` per
-    /// change). Categories absent from the import are untouched.
-    func applyImportedOrders(_ ordersByCategory: [String: [String]], playlistId: UUID) {
-        for (categoryId, ids) in ordersByCategory {
-            setOrder(ids, playlistId: playlistId, categoryId: categoryId)
-        }
-    }
-
     /// Called when a playlist is deleted — removes every saved
     /// channel order belonging to it (category ids are not known
     /// ahead of time, so the playlist's key prefix is scanned).

@@ -477,8 +477,14 @@ struct AddPlaylistSheetView: View {
             setStage(.loadingChannels, .done)
             setStage(.loadingMoviesSeries, .done)
             ProviderExpiryStore.record(playlistId: probed.playlist.id, expDate: probed.response.userInfo?.expDate)
-            // Build 68: no guide stage follows the content stages
-            // — the TV Guide is removed, so the add completes here.
+            // Build 63: guide loads in the background (this sheet
+            // never blocked on it; now it also doesn't wait for
+            // the dashboard's staleness check to fetch it).
+            setStage(.loadingGuide, .active)
+            if probed.playlist.epgEnabled {
+                GuideBackgroundLoader.start(playlist: probed.playlist)
+            }
+            setStage(.loadingGuide, .done)
             await MainActor.run {
                 self.isLoading = false
                 self.progressMessage = nil
@@ -559,7 +565,7 @@ struct AddPlaylistSheetView: View {
         )
 
         // Build 61 (B10, Q17 + L1): the staged validation service
-        // (probe → import), then Add & Activate as before.
+        // (probe → import → guide), then Add & Activate as before.
         resetStages()
         do {
             let summary = try await PlaylistValidationService.importM3U(

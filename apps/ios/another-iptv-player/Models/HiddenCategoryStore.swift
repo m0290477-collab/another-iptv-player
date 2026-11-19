@@ -42,22 +42,6 @@ final class HiddenCategoryStore: ObservableObject {
         setHidden(!isCurrentlyHidden, playlistId: playlistId, type: type, categoryId: categoryId)
     }
 
-    /// Build 68 (W-C): union-merges imported hidden category ids,
-    /// per content type (backup restore) — the same union rule as
-    /// `HiddenChannelStore.mergeImported`: an import can only add
-    /// hides, never un-hide. Bumps `version` once on any change.
-    func mergeImported(hiddenByType: [String: Set<String>], playlistId: UUID) {
-        var changed = false
-        for (type, ids) in hiddenByType where !ids.isEmpty {
-            let current = hiddenIds(playlistId: playlistId, type: type)
-            let merged = current.union(ids)
-            guard merged != current else { continue }
-            UserDefaults.standard.set(Array(merged), forKey: Self.storageKey(playlistId: playlistId, type: type))
-            changed = true
-        }
-        if changed { version &+= 1 }
-    }
-
     /// Called when a playlist is deleted — removes all hidden-category records for this playlist.
     func removeAll(playlistId: UUID) {
         var changed = false

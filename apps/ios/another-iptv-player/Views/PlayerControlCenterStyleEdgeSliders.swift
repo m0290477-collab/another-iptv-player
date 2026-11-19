@@ -5,28 +5,15 @@ import SwiftUI
 /// Yerleşim: sol/sağ kenarlarda dikey ortada. `safeAreaInsets` ile çentik alanından uzak tutulur.
 /// Compact horizontal size class'ta (iPhone) slider daraltılıp (52pt) portrait'te centerTransport
 /// ile yatayda çakışması önlenir; regular size class'ta (iPad) normal genişlik.
-/// Build 67 (W4, F4): portrait telefonda ayrıca 44pt genişlik / 132pt yükseklik / 8pt kenar
-/// boşluğu uygulanır (bkz. `isPortraitPhone`); landscape değerleri build 66 ile aynıdır.
 struct PlayerControlCenterStyleEdgeSliders: View {
   @ObservedObject var player: VideoPlayerController
   @ObservedObject var systemVolume: SystemVolumeBridge
   var safeAreaInsets: EdgeInsets
   var isCompactWidth: Bool
-  /// Build 67 (W4, F4): true when the player surface is portrait
-  /// (height > width), supplied by the caller's GeometryReader.
-  var isPortrait: Bool = false
   var onInteraction: () -> Void
 
-  /// Portrait phone: build 66's 52×160 compact sliders rendered
-  /// oversized and half off-screen at ~390pt width. The portrait
-  /// branch shrinks the capsule (44×132) and pulls its edge inset
-  /// in (16 → 8) so the whole capsule sits fully on-screen.
-  /// Landscape (isPortrait == false) resolves to the exact
-  /// build-66 values, so landscape rendering is unchanged.
-  private var isPortraitPhone: Bool { isCompactWidth && isPortrait }
-  private var trackWidth: CGFloat { isPortraitPhone ? 44 : (isCompactWidth ? 52 : 64) }
-  private var trackHeight: CGFloat { isPortraitPhone ? 132 : (isCompactWidth ? 160 : 180) }
-  private var edgeInset: CGFloat { isPortraitPhone ? 8 : 16 }
+  private var trackWidth: CGFloat { isCompactWidth ? 52 : 64 }
+  private var trackHeight: CGFloat { isCompactWidth ? 160 : 180 }
 
   var body: some View {
     ZStack {
@@ -42,7 +29,7 @@ struct PlayerControlCenterStyleEdgeSliders: View {
         trackHeight: trackHeight,
         onInteraction: onInteraction
       )
-      .padding(.leading, edgeInset + safeAreaInsets.leading)
+      .padding(.leading, 16 + safeAreaInsets.leading)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
 
       PlayerCCVerticalSlider(
@@ -57,7 +44,7 @@ struct PlayerControlCenterStyleEdgeSliders: View {
         trackHeight: trackHeight,
         onInteraction: onInteraction
       )
-      .padding(.trailing, edgeInset + safeAreaInsets.trailing)
+      .padding(.trailing, 16 + safeAreaInsets.trailing)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
     }
   }

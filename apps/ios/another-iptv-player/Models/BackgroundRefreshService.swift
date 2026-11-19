@@ -3,7 +3,7 @@ import BackgroundTasks
 import GRDB
 
 /// Build 61 (B1, S3): `BGAppRefreshTask` plumbing that keeps the
-/// catalog fresh while the app is backgrounded.
+/// catalog and the guide fresh while the app is backgrounded.
 ///
 /// The task identifier is `com.irqus.superx.refresh`, declared in
 /// `App-Info.plist` under `BGTaskSchedulerPermittedIdentifiers`,
@@ -20,6 +20,7 @@ import GRDB
 ///  - M3U playlists: remote re-download + `M3UImporter.replace`
 ///    (the My Playlists refresh pipeline), or a local reload for
 ///    file-imported playlists with no source URL;
+///  - EPG: `EPGStore.forceRefresh` per playlist;
 ///  - expiry alerts are re-scheduled from the refreshed records
 ///    through `NotificationScheduler` (its existing path).
 ///
@@ -72,7 +73,7 @@ enum BackgroundRefreshService {
         }
     }
 
-    /// Refreshes every saved playlist's catalog through the
+    /// Refreshes every saved playlist's catalog + EPG through the
     /// existing paths, in stored order. Cancellation (the system's
     /// expiration handler) stops between playlists.
     @MainActor
@@ -82,7 +83,7 @@ enum BackgroundRefreshService {
         }) ?? []
         // === Build 61 (B9, P6): data saver — while the toggle is
         // on and the device is on cellular, the network-heavy
-        // catalog refresh is skipped; only the local
+        // catalog + EPG refresh is skipped; only the local
         // expiry-alert rescheduling (no network of its own beyond
         // already-recorded dates) still runs. ===
         if DataSaverService.isActive {
@@ -110,6 +111,7 @@ enum BackgroundRefreshService {
                 await PlaylistContentStore.shared.refreshFromNetwork(playlist: playlist)
             }
             if Task.isCancelled { return }
+            await EPGStore.shared.forceRefresh(playlist: playlist)
             await NotificationScheduler.scheduleExpiryAlerts(for: [playlist])
         }
     }
