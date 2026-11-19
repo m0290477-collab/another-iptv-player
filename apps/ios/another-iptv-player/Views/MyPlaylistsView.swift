@@ -36,6 +36,7 @@ struct MyPlaylistsView: View {
     @Environment(\.appDatabase) private var appDatabase
 
     @State private var playlistToEdit: Playlist?
+    @State private var playlistToOrganize: Playlist?
     @State private var playlistToDelete: Playlist?
     @State private var showAddSheet = false
     @State private var isRefreshing = false
@@ -127,6 +128,9 @@ struct MyPlaylistsView: View {
                 showAddSheet = false
                 activate(created)
             }
+        }
+        .sheet(item: $playlistToOrganize) { playlist in
+            OrganizeView(playlist: playlist)
         }
         .sheet(item: $playlistToEdit) { playlist in
             if playlist.kind == .m3u {
@@ -304,6 +308,14 @@ struct MyPlaylistsView: View {
                     playlistToEdit = playlist
                 } label: {
                     Label(L("common.edit"), systemImage: "pencil")
+                }
+                // Build 68 (W-D): the one organization surface for
+                // this playlist (hidden/pinned channels & categories,
+                // category + channel order, favorite groups).
+                Button {
+                    playlistToOrganize = playlist
+                } label: {
+                    Label(L("organize.title"), systemImage: "slider.horizontal.3")
                 }
                 Button(role: .destructive) {
                     playlistToDelete = playlist
