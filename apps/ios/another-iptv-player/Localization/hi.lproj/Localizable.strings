@@ -1103,3 +1103,11 @@
 "matches.explainer.nba.stats.detail" = "हर खेल के पीछे के आँकड़े";
 "matches.explainer.nba.follow.title" = "अपनी टीमों को फ़ॉलो करें";
 "matches.explainer.nba.follow.detail" = "करीबी अंत वाले मैचों में नोटिफ़िकेशन";
+"settings.hub.section_general" = "सामान्य";
+"settings.hub.section_media" = "मीडिया";
+"settings.hub.section_security_data" = "सुरक्षा और डेटा";
+"settings.hub.subtitles_audio" = "उपशीर्षक और ऑडियो";
+"settings.hub.backup_restore" = "बैकअप और पुनर्स्थापना";
+"settings.hub.playlist_count_one" = "1 प्लेलिस्ट";
+"settings.hub.playlists_count_format" = "%d प्लेलिस्ट";
+"settings.hub.active_until_format" = "%@ तक सक्रिय";

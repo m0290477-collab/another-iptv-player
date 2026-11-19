@@ -1103,3 +1103,11 @@
 "matches.explainer.nba.stats.detail" = "每场比赛背后的数据";
 "matches.explainer.nba.follow.title" = "关注你的球队";
 "matches.explainer.nba.follow.detail" = "胶着比赛结尾时的通知";
+"settings.hub.section_general" = "通用";
+"settings.hub.section_media" = "媒体";
+"settings.hub.section_security_data" = "安全与数据";
+"settings.hub.subtitles_audio" = "字幕与音频";
+"settings.hub.backup_restore" = "备份与恢复";
+"settings.hub.playlist_count_one" = "1 个播放列表";
+"settings.hub.playlists_count_format" = "%d 个播放列表";
+"settings.hub.active_until_format" = "有效期至 %@";

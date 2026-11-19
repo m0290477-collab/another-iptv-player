@@ -2,18 +2,37 @@ import GRDB
 import GRDBQuery
 import SwiftUI
 
-/// Build 66 (W1): the Settings end state — the hub IS the whole
-/// of Settings. Exactly 12 cards (Playlists, Account, Playback,
+/// The Settings hub IS the whole of Settings (build 66 end
+/// state): exactly 12 destinations (Playlists, Account, Playback,
 /// Display, Guide, Downloads, Notifications, Parental & Locks,
 /// Storage, Backup & Data, Support, About), every setting that
 /// existed in the retired legacy forms reachable exactly once
-/// through them, ONE PIN gate at this root, and settings search
-/// on this root (reusing the legacy forms' `settingsSearchMatches`
-/// keyword data, moved here with the cards). The legacy
-/// legacy per-kind settings forms and the "All Settings" card
-/// are deleted in this build; the fake activation section is
-/// deleted with them (no card, no destination). Tile tints come only from AppTheme tokens
-/// (charcoal surfaces, red-orange accent) — no rainbow literals.
+/// through them, and ONE PIN gate at this root. The legacy
+/// per-kind settings forms and the "All Settings" card are
+/// deleted; the fake activation section is deleted with them
+/// (no card, no destination).
+///
+/// Build 71: the hub home surface is restyled to the owner's
+/// picked "Profile Header" (Style 3) — ONE profile header card
+/// on top (circular monogram avatar from the ACTIVE playlist's
+/// real name, its real playlist count and provider expiry as
+/// the subtitle — never any premium/subscription-for-Super-X
+/// copy, the app is free; the identity/state lives ONLY in
+/// this header, no row repeats it), then the SAME 12
+/// destinations grouped into three titled sections (GENERAL /
+/// MEDIA / SECURITY & DATA) as plain navigation rows — icon
+/// chip, title, chevron, NO row values. The settings search
+/// field stays REMOVED (owner's order since build 68). The
+/// "Subtitles & Audio" row has no standalone destination in
+/// build 70 — its controls (subtitle appearance, audio delay)
+/// live inside the Player section of the Playback page — so it
+/// navigates to that same Playback page; nothing is duplicated
+/// and nothing is dropped. Colors on this surface are the
+/// FIXED Design-4 tokens (brand gradient, accentStart,
+/// charcoal surfaces) so the hub renders near-black charcoal +
+/// red-orange regardless of the user's saved accent preset.
+/// Destinations and sub-screens are byte-for-byte the build-70
+/// ones; only this home surface changed.
 struct SettingsHubView: View {
     let playlist: Playlist
     let onDismiss: () -> Void
@@ -21,8 +40,6 @@ struct SettingsHubView: View {
 
     @Query<PlaylistRequest> private var allPlaylists: [Playlist]?
     @State private var pinUnlocked = false
-    @State private var settingsSearch = ""
-    @AppStorage("app.appearance") private var appearance = "dark"
 
     init(playlist: Playlist, onDismiss: @escaping () -> Void, onSwitchPlaylist: @escaping (Playlist) -> Void) {
         self.playlist = playlist
@@ -52,304 +69,123 @@ struct SettingsHubView: View {
 
     private var hub: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 22) {
                 headerCard
 
-                searchField
-
-                LazyVGrid(
-                    columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)],
-                    spacing: 14
-                ) {
-                    hubCard(
+                hubSection(title: L("settings.hub.section_general")) {
+                    hubRow(
                         icon: "list.bullet.rectangle.portrait.fill",
-                        tint: AppTheme.accent,
-                        title: L("playlists.title"),
-                        value: playlist.name,
-                        keywords: "playlists my playlists switch content data refresh epg guide history clear counts m3u file"
+                        title: L("settings.my_playlists")
                     ) {
-                        List {
-                            Section {
-                                NavigationLink {
-                                    MyPlaylistsView(
-                                        activePlaylistId: playlist.id,
-                                        onActivate: onSwitchPlaylist,
-                                        onExitToGate: onDismiss
-                                    )
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        SettingsIconTile(systemImage: "list.bullet.rectangle", tint: AppTheme.accent)
-                                        Text(L("settings.my_playlists"))
-                                        Spacer()
-                                        if let count = allPlaylists?.count {
-                                            Text("\(count)")
-                                                .foregroundColor(.secondary)
-                                        }
-                                    }
-                                }
-                            }
-                            .settingsCardRows()
-                            if isM3U {
-                                M3UContentSettingsSection(playlist: playlist)
-                            } else {
-                                XtreamContentSettingsSection(playlist: playlist)
-                            }
-                        }
-                        .listStyle(.insetGrouped)
-                        .listSectionSpacing(16)
-                        .cinematicScrollBackground()
-                        .navigationTitle(L("playlists.title"))
-                        .navigationBarTitleDisplayMode(.inline)
+                        playlistsDestination
                     }
 
-                    hubCard(
-                        icon: "person.crop.circle.fill",
-                        tint: AppTheme.accent,
-                        title: L("settings.hub.account"),
-                        value: playlist.name,
-                        keywords: "account subscription playlist username password expiry connection test edit sign out provider"
-                    ) {
-                        List {
-                            if isM3U {
-                                M3UAccountSettingsSection(playlist: playlist, onDismiss: onDismiss)
-                            } else {
-                                XtreamAccountSettingsSection(playlist: playlist, onDismiss: onDismiss)
-                            }
-                            SubscriptionSettingsSection(playlists: allPlaylists ?? [])
-                        }
-                        .listStyle(.insetGrouped)
-                        .listSectionSpacing(16)
-                        .cinematicScrollBackground()
-                        .navigationTitle(L("settings.hub.account"))
-                        .navigationBarTitleDisplayMode(.inline)
-                    }
+                    rowDivider
 
-                    hubCard(
-                        icon: "play.rectangle.fill",
-                        tint: AppTheme.live,
-                        title: L("settings.playback.title"),
-                        value: nil,
-                        keywords: "player auto-play pip sleep background long press video fit subtitle audio delay buffer play last channel launch playback loudness data saver dead channels audio only"
-                    ) {
-                        List {
-                            PlayerSettingsSection()
-                            PlaybackSettingsSection()
-                        }
-                        .listStyle(.insetGrouped)
-                        .listSectionSpacing(16)
-                        .cinematicScrollBackground()
-                        .navigationTitle(L("settings.playback.title"))
-                        .navigationBarTitleDisplayMode(.inline)
-                    }
-
-                    hubCard(
-                        icon: "paintbrush.pointed.fill",
-                        tint: AppTheme.accent,
-                        title: L("display.title"),
-                        value: appearanceName,
-                        keywords: "appearance theme light dark language accent reduce effects empty categories section visibility motion ui sounds poster size density display"
+                    hubRow(
+                        icon: "paintpalette.fill",
+                        title: L("settings.appearance.title")
                     ) {
                         DisplaySettingsView()
                     }
 
-                    hubCard(
+                    rowDivider
+
+                    hubRow(
+                        icon: "play.circle.fill",
+                        title: L("settings.playback.title")
+                    ) {
+                        playbackDestination
+                    }
+                }
+
+                hubSection(title: L("settings.hub.section_media")) {
+                    hubRow(
+                        icon: "captions.bubble.fill",
+                        title: L("settings.hub.subtitles_audio")
+                    ) {
+                        playbackDestination
+                    }
+
+                    rowDivider
+
+                    hubRow(
+                        icon: "arrow.down.to.line",
+                        title: L("download.title")
+                    ) {
+                        downloadsDestination
+                    }
+
+                    rowDivider
+
+                    hubRow(
+                        icon: "bell.fill",
+                        title: L("notifications.title")
+                    ) {
+                        notificationsDestination
+                    }
+
+                    rowDivider
+
+                    hubRow(
                         icon: "calendar.badge.clock",
-                        tint: AppTheme.accent,
-                        title: L("epg.settings.section_title"),
-                        value: nil,
-                        keywords: "epg guide tv time offset refresh url"
+                        title: L("epg.settings.section_title")
                     ) {
-                        List {
-                            Section {
-                                if isM3U {
-                                    M3UEPGSettingsRows(playlist: playlist)
-                                    Text(L("epg.settings.url_footer"))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    XtreamEPGSettingsRows(playlist: playlist)
-                                }
-                            }
-                            .settingsCardRows()
-                            EPGOffsetSettingsSection()
-                        }
-                        .listStyle(.insetGrouped)
-                        .listSectionSpacing(16)
-                        .cinematicScrollBackground()
-                        .navigationTitle(L("epg.settings.section_title"))
-                        .navigationBarTitleDisplayMode(.inline)
+                        guideDestination
+                    }
+                }
+
+                hubSection(title: L("settings.hub.section_security_data")) {
+                    hubRow(
+                        icon: "person.crop.circle.fill",
+                        title: L("settings.hub.account")
+                    ) {
+                        accountDestination
                     }
 
-                    hubCard(
-                        icon: "arrow.down.circle.fill",
-                        tint: AppTheme.accent,
-                        title: L("download.title"),
-                        value: downloadsValue,
-                        keywords: "downloads wifi auto-download storage delete library cap"
+                    rowDivider
+
+                    hubRow(
+                        icon: "lock.fill",
+                        title: L("applock.title")
                     ) {
-                        List {
-                            DownloadsSettingsSection(playlist: playlist)
-                            Section {
-                                NavigationLink {
-                                    DownloadsView(playlist: playlist)
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        SettingsIconTile(systemImage: "arrow.down.circle.fill", tint: AppTheme.accent)
-                                        Text(L("download.title"))
-                                    }
-                                }
-                            }
-                            .settingsCardRows()
-                        }
-                        .listStyle(.insetGrouped)
-                        .listSectionSpacing(16)
-                        .cinematicScrollBackground()
-                        .navigationTitle(L("download.title"))
-                        .navigationBarTitleDisplayMode(.inline)
+                        parentalLocksDestination
                     }
 
-                    hubCard(
-                        icon: "bell.badge.fill",
-                        tint: AppTheme.accent,
-                        title: L("notifications.title"),
-                        value: nil,
-                        keywords: "notifications expiry alerts reminders lead time programme"
-                    ) {
-                        List {
-                            ExpiryAlertsSettingsSection()
-                            RemindersSettingsSection()
-                            Section {
-                                NavigationLink {
-                                    NotificationsView(playlist: playlist)
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        SettingsIconTile(systemImage: "bell.fill", tint: AppTheme.accent)
-                                        Text(L("notifications.title"))
-                                    }
-                                }
-                            }
-                            .settingsCardRows()
-                        }
-                        .listStyle(.insetGrouped)
-                        .listSectionSpacing(16)
-                        .cinematicScrollBackground()
-                        .navigationTitle(L("notifications.title"))
-                        .navigationBarTitleDisplayMode(.inline)
-                    }
+                    rowDivider
 
-                    hubCard(
-                        icon: "lock.shield.fill",
-                        tint: AppTheme.accent,
-                        title: L("settings.hub.parental_locks"),
-                        value: nil,
-                        keywords: "parental filter adult pin lock settings app lock face id touch id passcode locked categories"
-                    ) {
-                        List {
-                            AdultFilterSettingsSection(playlist: playlist)
-                            ParentalPINSection()
-                            AppLockSection()
-                            LockedCategoriesSection(playlist: playlist)
-                        }
-                        .listStyle(.insetGrouped)
-                        .listSectionSpacing(16)
-                        .cinematicScrollBackground()
-                        .navigationTitle(L("settings.hub.parental_locks"))
-                        .navigationBarTitleDisplayMode(.inline)
-                    }
-
-                    hubCard(
+                    hubRow(
                         icon: "internaldrive.fill",
-                        tint: AppTheme.accent,
-                        title: L("storage.title"),
-                        value: storageValue,
-                        keywords: "storage cache space clear watch search history"
+                        title: L("storage.title")
                     ) {
-                        List {
-                            StorageSettingsSection()
-                        }
-                        .listStyle(.insetGrouped)
-                        .listSectionSpacing(16)
-                        .cinematicScrollBackground()
-                        .navigationTitle(L("storage.title"))
-                        .navigationBarTitleDisplayMode(.inline)
+                        storageDestination
                     }
 
-                    hubCard(
-                        icon: "externaldrive.fill",
-                        tint: AppTheme.accent,
-                        title: L("settings.hub.backup_data"),
-                        value: nil,
-                        keywords: "backup export import reset defaults transfer danger sign out erase delete all data zone"
+                    rowDivider
+
+                    hubRow(
+                        icon: "arrow.clockwise.icloud.fill",
+                        title: L("settings.hub.backup_restore")
                     ) {
-                        List {
-                            BackupSettingsSection(playlists: allPlaylists ?? [])
-                            // Danger Zone LAST on this page.
-                            DangerZoneSection(onExitToGate: onDismiss)
-                        }
-                        .listStyle(.insetGrouped)
-                        .listSectionSpacing(16)
-                        .cinematicScrollBackground()
-                        .navigationTitle(L("settings.hub.backup_data"))
-                        .navigationBarTitleDisplayMode(.inline)
+                        backupDataDestination
                     }
 
-                    hubCard(
+                    rowDivider
+
+                    hubRow(
                         icon: "questionmark.circle.fill",
-                        tint: AppTheme.accent,
-                        title: L("support.title"),
-                        value: nil,
-                        keywords: "support faq help diagnostics speed test"
+                        title: L("support.title")
                     ) {
-                        List {
-                            SupportSettingsSection(playlists: allPlaylists ?? [])
-                        }
-                        .listStyle(.insetGrouped)
-                        .listSectionSpacing(16)
-                        .cinematicScrollBackground()
-                        .navigationTitle(L("support.title"))
-                        .navigationBarTitleDisplayMode(.inline)
+                        supportDestination
                     }
 
-                    hubCard(
+                    rowDivider
+
+                    hubRow(
                         icon: "info.circle.fill",
-                        tint: AppTheme.accent,
-                        title: L("settings.about.title"),
-                        value: appVersion,
-                        keywords: "about version licenses credits legal privacy terms"
+                        title: L("settings.about.title")
                     ) {
-                        List {
-                            Section {
-                                HStack {
-                                    Text(L("settings.about.version"))
-                                    Spacer()
-                                    Text(appVersion)
-                                        .foregroundStyle(.secondary)
-                                }
-                                NavigationLink {
-                                    LegalDocumentView(kind: .license)
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        SettingsIconTile(systemImage: "doc.text", tint: AppTheme.elevated)
-                                        Text(L("settings.about.licenses.title"))
-                                    }
-                                }
-                            }
-                            .settingsCardRows()
-                            // W10: PrivacyLegalSection's own file is
-                            // outside this pass's ownership, so its
-                            // Section gets the same row treatment
-                            // here at the instance (listRow* modifiers
-                            // reach its rows through the environment);
-                            // its plain-Text header is flagged in the
-                            // build-66 legacy-look list.
-                            PrivacyLegalSection(onExitToGate: onDismiss)
-                                .settingsCardRows()
-                        }
-                        .listStyle(.insetGrouped)
-                        .listSectionSpacing(16)
-                        .cinematicScrollBackground()
-                        .navigationTitle(L("settings.about.title"))
-                        .navigationBarTitleDisplayMode(.inline)
+                        aboutDestination
                     }
                 }
             }
@@ -360,152 +196,431 @@ struct SettingsHubView: View {
         .cinematicBackground()
     }
 
-    // MARK: - Search
-
-    /// Settings search on the hub root (build 66): filters the
-    /// 12 cards with the legacy forms' keyword matching
-    /// (`settingsSearchMatches`, moved here with the cards).
-    private var searchField: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField(L("common.search"), text: $settingsSearch)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-            if !settingsSearch.isEmpty {
-                Button {
-                    settingsSearch = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background {
-            RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius, style: .continuous)
-                .fill(AppTheme.surface)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius, style: .continuous)
-                .stroke(AppTheme.cardBorderColor, lineWidth: 1)
-        }
-    }
-
     // MARK: - Header card
 
-    /// The mockup's top card: flame mark + the ACTIVE playlist's
-    /// real name and server, nothing invented.
+    /// Build 71 profile header (Style 3): a circular monogram
+    /// avatar derived from the ACTIVE playlist's real name (the
+    /// flame brand mark when the name yields no letter — never a
+    /// fake person), the playlist's name as the title, and a
+    /// subtitle composed ONLY of real state: the real playlist
+    /// count and the provider expiry recorded in
+    /// `ProviderExpiryStore` (the same source as the account
+    /// card). Any piece with no real value is omitted; if nothing
+    /// applies, the subtitle falls back to the playlist's real
+    /// server URL, exactly what the build-66 header showed. The
+    /// thin line under the header is the subscription's
+    /// remaining-validity bar: it drains across the final year
+    /// before the recorded expiry (full at a year or more left,
+    /// empty once expired, full when no expiry is recorded).
     private var headerCard: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(AppTheme.brandGradient)
-                    .frame(width: 48, height: 48)
-                Image(systemName: "flame.fill")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.white)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(AppTheme.brandGradient)
+                        .frame(width: 64, height: 64)
+                    if headerInitial.isEmpty {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 26, weight: .bold))
+                            .foregroundStyle(.white)
+                    } else {
+                        Text(headerInitial)
+                            .font(.title.weight(.bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(headerTitle)
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(headerSubtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
             }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(playlist.name)
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(playlist.serverURL)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.10))
+                    Capsule()
+                        .fill(AppTheme.accentStart)
+                        .frame(width: geo.size.width * headerProgress)
+                }
             }
-            Spacer(minLength: 0)
+            .frame(height: 4)
         }
-        .padding(16)
+        .padding(18)
         .background {
-            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                .fill(AppTheme.cardGradient)
+            ZStack {
+                RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                    .fill(AppTheme.cardGradient)
+                // The mockup's subtle warm glow, low in the card —
+                // the FIXED Design-4 orange, never the user accent.
+                RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.clear, AppTheme.accentStart.opacity(0.16)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
         }
         .overlay {
-            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
                 .stroke(AppTheme.cardBorderColor, lineWidth: 1)
         }
     }
 
-    // MARK: - Card
+    /// The header's display name: the active playlist's real
+    /// name; the stored Xtream username when a playlist carries
+    /// no name (M3U playlists always carry one).
+    private var headerTitle: String {
+        let name = playlist.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty { return name }
+        return playlist.username.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
+    /// Monogram initial from the header title: its first letter,
+    /// uppercased (the mockup's single-letter avatar). Empty when
+    /// the title has no letters (the header then shows the flame
+    /// mark instead).
+    private var headerInitial: String {
+        guard let first = headerTitle.first(where: { $0.isLetter }) else { return "" }
+        return String(first).uppercased()
+    }
+
+    private var headerSubtitle: String {
+        var parts: [String] = []
+        if let count = allPlaylists?.count {
+            parts.append(
+                count == 1
+                    ? L("settings.hub.playlist_count_one")
+                    : L("settings.hub.playlists_count_format", count)
+            )
+        }
+        if !isM3U, let expiry = ProviderExpiryStore.expiryDate(playlistId: playlist.id) {
+            if ProviderExpiryStore.isExpired(expiryDate: expiry) {
+                parts.append(L("subscription.expired_format", formattedExpiry(expiry)))
+            } else {
+                parts.append(L("settings.hub.active_until_format", formattedExpiry(expiry)))
+            }
+        }
+        guard !parts.isEmpty else { return playlist.serverURL }
+        return parts.joined(separator: " • ")
+    }
+
+    /// Remaining-validity fraction for the header line: full
+    /// when no expiry is recorded (nothing running out) or when
+    /// a year or more remains; drains linearly across the final
+    /// year; zero once expired.
+    private var headerProgress: Double {
+        guard !isM3U, let expiry = ProviderExpiryStore.expiryDate(playlistId: playlist.id) else {
+            return 1
+        }
+        if ProviderExpiryStore.isExpired(expiryDate: expiry) { return 0 }
+        let daysRemaining = expiry.timeIntervalSinceNow / 86_400
+        return min(max(daysRemaining / 365, 0), 1)
+    }
+
+    /// Same date formatting as the account card in
+    /// SettingsComponents (medium date, no time).
+    private func formattedExpiry(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
+
+    // MARK: - Section & row
+
+    /// One Style-3 hub section: the small caps gray title above
+    /// a dark rounded card of rows.
     @ViewBuilder
-    private func hubCard<Destination: View>(
-        icon: String,
-        tint: Color,
+    private func hubSection<Content: View>(
         title: String,
-        value: String?,
-        keywords: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .padding(.leading, 4)
+            VStack(spacing: 0) {
+                content()
+            }
+            .background {
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .fill(AppTheme.cardGradient)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
+        }
+    }
+
+    /// One Style-3 hub row: a small muted icon chip (dark
+    /// rounded square, white glyph — the mockup's chips, NOT the
+    /// user accent, so this surface keeps the Design-4 look for
+    /// every preset), the title, and a chevron. NO value: the
+    /// identity/state lives only in the header card.
+    @ViewBuilder
+    private func hubRow<Destination: View>(
+        icon: String,
+        title: String,
         @ViewBuilder destination: () -> Destination
     ) -> some View {
-        if settingsSearchMatches(settingsSearch, "\(title) \(keywords)") {
-            NavigationLink(destination: destination) {
-                VStack(alignment: .leading, spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(tint)
-                            .frame(width: 44, height: 44)
-                        Image(systemName: icon)
-                            .font(.system(size: 19, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title)
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(.primary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                        if let value, !value.isEmpty {
-                            Text(value)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+        NavigationLink(destination: destination) {
+            HStack(spacing: 12) {
+                SettingsIconTile(systemImage: icon, tint: Color.white.opacity(0.09), size: 30)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Hairline between grouped rows, inset to the title edge
+    /// (14 row padding + 30 icon tile + 12 spacing).
+    private var rowDivider: some View {
+        Divider()
+            .padding(.leading, 56)
+    }
+
+    // MARK: - Destinations (build 70, unchanged)
+
+    private var playlistsDestination: some View {
+        List {
+            Section {
+                NavigationLink {
+                    MyPlaylistsView(
+                        activePlaylistId: playlist.id,
+                        onActivate: onSwitchPlaylist,
+                        onExitToGate: onDismiss
+                    )
+                } label: {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "list.bullet.rectangle", tint: AppTheme.accent)
+                        Text(L("settings.my_playlists"))
+                        Spacer()
+                        if let count = allPlaylists?.count {
+                            Text("\(count)")
+                                .foregroundColor(.secondary)
                         }
                     }
-                    Spacer(minLength: 0)
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, minHeight: 118, alignment: .leading)
-                .background {
-                    RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                        .fill(AppTheme.cardGradient)
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                        .stroke(AppTheme.cardBorderColor, lineWidth: 1)
-                }
-                .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
             }
-            .buttonStyle(PressScaleButtonStyle())
+            .settingsCardRows()
+            if isM3U {
+                M3UContentSettingsSection(playlist: playlist)
+            } else {
+                XtreamContentSettingsSection(playlist: playlist)
+            }
         }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
+        .cinematicScrollBackground()
+        .navigationTitle(L("playlists.title"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var accountDestination: some View {
+        List {
+            if isM3U {
+                M3UAccountSettingsSection(playlist: playlist, onDismiss: onDismiss)
+            } else {
+                XtreamAccountSettingsSection(playlist: playlist, onDismiss: onDismiss)
+            }
+            SubscriptionSettingsSection(playlists: allPlaylists ?? [])
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
+        .cinematicScrollBackground()
+        .navigationTitle(L("settings.hub.account"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var playbackDestination: some View {
+        List {
+            PlayerSettingsSection()
+            PlaybackSettingsSection()
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
+        .cinematicScrollBackground()
+        .navigationTitle(L("settings.playback.title"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var guideDestination: some View {
+        List {
+            Section {
+                if isM3U {
+                    M3UEPGSettingsRows(playlist: playlist)
+                    Text(L("epg.settings.url_footer"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    XtreamEPGSettingsRows(playlist: playlist)
+                }
+            }
+            .settingsCardRows()
+            EPGOffsetSettingsSection()
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
+        .cinematicScrollBackground()
+        .navigationTitle(L("epg.settings.section_title"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var downloadsDestination: some View {
+        List {
+            DownloadsSettingsSection(playlist: playlist)
+            Section {
+                NavigationLink {
+                    DownloadsView(playlist: playlist)
+                } label: {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "arrow.down.circle.fill", tint: AppTheme.accent)
+                        Text(L("download.title"))
+                    }
+                }
+            }
+            .settingsCardRows()
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
+        .cinematicScrollBackground()
+        .navigationTitle(L("download.title"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var notificationsDestination: some View {
+        List {
+            ExpiryAlertsSettingsSection()
+            RemindersSettingsSection()
+            Section {
+                NavigationLink {
+                    NotificationsView(playlist: playlist)
+                } label: {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "bell.fill", tint: AppTheme.accent)
+                        Text(L("notifications.title"))
+                    }
+                }
+            }
+            .settingsCardRows()
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
+        .cinematicScrollBackground()
+        .navigationTitle(L("notifications.title"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var parentalLocksDestination: some View {
+        List {
+            AdultFilterSettingsSection(playlist: playlist)
+            ParentalPINSection()
+            AppLockSection()
+            LockedCategoriesSection(playlist: playlist)
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
+        .cinematicScrollBackground()
+        .navigationTitle(L("settings.hub.parental_locks"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var storageDestination: some View {
+        List {
+            StorageSettingsSection()
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
+        .cinematicScrollBackground()
+        .navigationTitle(L("storage.title"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var backupDataDestination: some View {
+        List {
+            BackupSettingsSection(playlists: allPlaylists ?? [])
+            // Danger Zone LAST on this page.
+            DangerZoneSection(onExitToGate: onDismiss)
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
+        .cinematicScrollBackground()
+        .navigationTitle(L("settings.hub.backup_data"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var supportDestination: some View {
+        List {
+            SupportSettingsSection(playlists: allPlaylists ?? [])
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
+        .cinematicScrollBackground()
+        .navigationTitle(L("support.title"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var aboutDestination: some View {
+        List {
+            Section {
+                HStack {
+                    Text(L("settings.about.version"))
+                    Spacer()
+                    Text(appVersion)
+                        .foregroundStyle(.secondary)
+                }
+                NavigationLink {
+                    LegalDocumentView(kind: .license)
+                } label: {
+                    HStack(spacing: 12) {
+                        SettingsIconTile(systemImage: "doc.text", tint: AppTheme.elevated)
+                        Text(L("settings.about.licenses.title"))
+                    }
+                }
+            }
+            .settingsCardRows()
+            // W10: PrivacyLegalSection's own file is
+            // outside this pass's ownership, so its
+            // Section gets the same row treatment
+            // here at the instance (listRow* modifiers
+            // reach its rows through the environment);
+            // its plain-Text header is flagged in the
+            // build-66 legacy-look list.
+            PrivacyLegalSection(onExitToGate: onDismiss)
+                .settingsCardRows()
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
+        .cinematicScrollBackground()
+        .navigationTitle(L("settings.about.title"))
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     // MARK: - Honest current values
-
-    private var appearanceName: String {
-        switch appearance {
-        case "light": return L("settings.appearance.light")
-        case "system": return L("settings.appearance.system")
-        default: return L("settings.appearance.dark")
-        }
-    }
-
-    private var downloadsValue: String? {
-        let count = StorageService.downloadsCount()
-        guard count > 0 else { return nil }
-        return "\(count) · \(ByteCountFormatter.string(fromByteCount: StorageService.downloadsSizeBytes(), countStyle: .file))"
-    }
-
-    private var storageValue: String {
-        ByteCountFormatter.string(
-            fromByteCount: StorageService.cacheSizeBytes() + StorageService.downloadsSizeBytes(),
-            countStyle: .file
-        )
-    }
 
     private var appVersion: String {
         let info = Bundle.main.infoDictionary

@@ -1103,3 +1103,11 @@
 "matches.explainer.nba.stats.detail" = "الأرقام وراء كل مباراة";
 "matches.explainer.nba.follow.title" = "تابع فرقك";
 "matches.explainer.nba.follow.detail" = "إشعارات في النهايات المتقاربة";
+"settings.hub.section_general" = "عام";
+"settings.hub.section_media" = "الوسائط";
+"settings.hub.section_security_data" = "الأمان والبيانات";
+"settings.hub.subtitles_audio" = "الترجمة والصوت";
+"settings.hub.backup_restore" = "النسخ الاحتياطي والاستعادة";
+"settings.hub.playlist_count_one" = "قائمة تشغيل واحدة";
+"settings.hub.playlists_count_format" = "%d قوائم تشغيل";
+"settings.hub.active_until_format" = "نشط حتى %@";

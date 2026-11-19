@@ -1121,3 +1121,11 @@
 "matches.explainer.nba.stats.detail" = "Her maçın arkasındaki rakamlar";
 "matches.explainer.nba.follow.title" = "Takımlarını takip et";
 "matches.explainer.nba.follow.detail" = "Çekişmeli maç sonlarında bildirimler";
+"settings.hub.section_general" = "Genel";
+"settings.hub.section_media" = "Medya";
+"settings.hub.section_security_data" = "Güvenlik ve Veriler";
+"settings.hub.subtitles_audio" = "Altyazı ve Ses";
+"settings.hub.backup_restore" = "Yedekleme ve Geri Yükleme";
+"settings.hub.playlist_count_one" = "1 playlist";
+"settings.hub.playlists_count_format" = "%d playlist";
+"settings.hub.active_until_format" = "%@ tarihine kadar aktif";

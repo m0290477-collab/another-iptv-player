@@ -1103,3 +1103,11 @@
 "matches.explainer.nba.stats.detail" = "Цифры каждого матча";
 "matches.explainer.nba.follow.title" = "Следите за своими командами";
 "matches.explainer.nba.follow.detail" = "Уведомления в напряжённых концовках";
+"settings.hub.section_general" = "Общие";
+"settings.hub.section_media" = "Медиа";
+"settings.hub.section_security_data" = "Безопасность и данные";
+"settings.hub.subtitles_audio" = "Субтитры и звук";
+"settings.hub.backup_restore" = "Резервная копия и восстановление";
+"settings.hub.playlist_count_one" = "1 плейлист";
+"settings.hub.playlists_count_format" = "%d плейлистов";
+"settings.hub.active_until_format" = "Активно до %@";

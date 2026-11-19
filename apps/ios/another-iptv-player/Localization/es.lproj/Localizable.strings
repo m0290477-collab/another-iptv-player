@@ -1103,3 +1103,11 @@
 "matches.explainer.nba.stats.detail" = "Los números detrás de cada partido";
 "matches.explainer.nba.follow.title" = "Sigue a tus equipos";
 "matches.explainer.nba.follow.detail" = "Notificaciones en finales ajustados";
+"settings.hub.section_general" = "General";
+"settings.hub.section_media" = "Medios";
+"settings.hub.section_security_data" = "Seguridad y datos";
+"settings.hub.subtitles_audio" = "Subtítulos y audio";
+"settings.hub.backup_restore" = "Copia de seguridad y restauración";
+"settings.hub.playlist_count_one" = "1 lista de reproducción";
+"settings.hub.playlists_count_format" = "%d listas de reproducción";
+"settings.hub.active_until_format" = "Activo hasta el %@";
