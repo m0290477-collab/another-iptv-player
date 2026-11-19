@@ -349,11 +349,18 @@ struct MatchDetailView: View {
                 Toggle(isOn: Binding(
                     get: { reminderOn },
                     set: { newValue in
-                        reminderOn = newValue
-                        MatchReminderService.shared.setReminder(
-                            match: seedMatch, leaguePath: leaguePath,
-                            sport: sport, enabled: newValue
-                        )
+                        // Build 66 (item 18): NO optimistic ON —
+                        // reminderOn is set only from the CONFIRMED
+                        // state re-read after the async
+                        // authorization/scheduling completes; on
+                        // denial or a past fire date it stays false.
+                        Task {
+                            _ = await MatchReminderService.shared.setReminder(
+                                match: seedMatch, leaguePath: leaguePath,
+                                sport: sport, enabled: newValue
+                            )
+                            reminderOn = MatchReminderService.shared.isScheduled(eventId: eventId)
+                        }
                     }
                 )) {
                     Label(L("matches.reminder.title"), systemImage: "bell")

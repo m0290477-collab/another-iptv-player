@@ -112,9 +112,13 @@ struct M3UDashboardView: View {
         .environmentObject(playerOverlay)
         .environment(\.epgSnapshot, epgStore.snapshot)
         // G5 (B13): the shared offline indicator, same as the
-        // Xtream dashboard.
+        // Xtream dashboard. Build 66 (item 10): gated on no player
+        // presentation — while anything plays, nothing appears
+        // over playback.
         .overlay(alignment: .top) {
-            OfflineBannerView()
+            if playerOverlay.presentation == nil {
+                OfflineBannerView()
+            }
         }
         .task(id: playlist.id) {
             favorites.track(playlistId: playlist.id)
@@ -122,7 +126,7 @@ struct M3UDashboardView: View {
             epgStore.setActivePlaylist(playlist)
             await epgStore.refreshIfStale(playlist: playlist)
             // Build 61 (B8, B3 flag c): consume pending playback
-            // (T2 play-last-channel / Siri & Shortcuts intents) —
+            // (T2 play-last-channel launch-resume) —
             // mirrors DashboardView so M3U playlists honor it too.
             consumePendingPlayback()
         }
@@ -171,7 +175,7 @@ struct M3UDashboardView: View {
     // MARK: - Build 61 (B8, B3 flag c): pending playback (T2)
 
     /// Consumes a `PendingPlayback` queued by the T2 launch-resume
-    /// service or a Siri/Shortcuts intent and presents it through
+    /// service and presents it through
     /// the SAME `M3UPlayerShell` path channel taps use. Mirrors
     /// `DashboardView.consumePendingPlayback` (same dictionary
     /// payload, same consume-once semantics).

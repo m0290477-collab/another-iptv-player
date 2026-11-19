@@ -22,7 +22,6 @@
 		D76253C62F85052600E30229 /* Libavutil in Frameworks */ = {isa = PBXBuildFile; productRef = E8A1F0022F85000100AAA007 /* Libavutil */; };
 		D76253C72F85052600E30229 /* Libavcodec in Frameworks */ = {isa = PBXBuildFile; productRef = E8A1F0022F85000100AAA008 /* Libavcodec */; };
 		D76253C82F85052600E30229 /* Libswresample in Frameworks */ = {isa = PBXBuildFile; productRef = E8A1F0022F85000100AAA009 /* Libswresample */; };
-		E7A100000000000000000008 /* SuperXWidgets.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = E7A100000000000000000001 /* SuperXWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -40,27 +39,9 @@
 			remoteGlobalIDString = D713CDA82F82DC8A00C6BEFF;
 			remoteInfo = "another-iptv-player";
 		};
-		E7A100000000000000000009 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = D713CDA12F82DC8A00C6BEFF /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = E7A100000000000000000003;
-			remoteInfo = SuperXWidgets;
-		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		E7A100000000000000000007 /* Embed App Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				E7A100000000000000000008 /* SuperXWidgets.appex in Embed App Extensions */,
-			);
-			name = "Embed App Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -72,7 +53,6 @@
 		AAAA000000000000000000B3 /* ScreensUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScreensUITests.swift; sourceTree = "<group>"; };
 		C041D5956145665A6D10DB07 /* SnapshotHelper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SnapshotHelper.swift; sourceTree = "<group>"; };
 		D713CDA92F82DC8A00C6BEFF /* another-iptv-player.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "another-iptv-player.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		E7A100000000000000000001 /* SuperXWidgets.appex */ = {isa = PBXFileReference; explicitFileType = wrapper.app-extension; includeInIndex = 0; path = SuperXWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -86,24 +66,9 @@
 			path = "another-iptv-player";
 			sourceTree = "<group>";
 		};
-		E7A100000000000000000002 /* SuperXWidgets */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				E7A10000000000000000000E /* Exceptions for "SuperXWidgets" folder in "SuperXWidgets" target */,
-			);
-			path = SuperXWidgets;
-			sourceTree = "<group>";
-		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		E7A10000000000000000000E /* Exceptions for "SuperXWidgets" folder in "SuperXWidgets" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = E7A100000000000000000003 /* SuperXWidgets */;
-		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -139,13 +104,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		E7A100000000000000000005 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -172,7 +130,6 @@
 			isa = PBXGroup;
 			children = (
 				D713CDAB2F82DC8A00C6BEFF /* another-iptv-player */,
-				E7A100000000000000000002 /* SuperXWidgets */,
 				AAAA000000000000000000A2 /* another-iptv-playerTests */,
 				D749AE822FBFDAA600312016 /* Frameworks */,
 				D713CDAA2F82DC8A00C6BEFF /* Products */,
@@ -184,7 +141,6 @@
 			isa = PBXGroup;
 			children = (
 				D713CDA92F82DC8A00C6BEFF /* another-iptv-player.app */,
-				E7A100000000000000000001 /* SuperXWidgets.appex */,
 				AAAA000000000000000000A1 /* another-iptv-playerTests.xctest */,
 				177334D0A25775E3B29E3C9E /* another-iptv-playerUITests.xctest */,
 			);
@@ -248,12 +204,10 @@
 				D713CDA52F82DC8A00C6BEFF /* Sources */,
 				D713CDA62F82DC8A00C6BEFF /* Frameworks */,
 				D713CDA72F82DC8A00C6BEFF /* Resources */,
-				E7A100000000000000000007 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				E7A10000000000000000000A /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				D713CDAB2F82DC8A00C6BEFF /* another-iptv-player */,
@@ -270,26 +224,6 @@
 			productReference = D713CDA92F82DC8A00C6BEFF /* another-iptv-player.app */;
 			productType = "com.apple.product-type.application";
 		};
-		E7A100000000000000000003 /* SuperXWidgets */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = E7A10000000000000000000B /* Build configuration list for PBXNativeTarget "SuperXWidgets" */;
-			buildPhases = (
-				E7A100000000000000000004 /* Sources */,
-				E7A100000000000000000005 /* Frameworks */,
-				E7A100000000000000000006 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				E7A100000000000000000002 /* SuperXWidgets */,
-			);
-			name = SuperXWidgets;
-			productName = SuperXWidgets;
-			productReference = E7A100000000000000000001 /* SuperXWidgets.appex */;
-			productType = "com.apple.product-type.app-extension";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -305,9 +239,6 @@
 						TestTargetID = D713CDA82F82DC8A00C6BEFF;
 					};
 					D713CDA82F82DC8A00C6BEFF = {
-						CreatedOnToolsVersion = 26.0.1;
-					};
-					E7A100000000000000000003 = {
 						CreatedOnToolsVersion = 26.0.1;
 					};
 				};
@@ -344,7 +275,6 @@
 			projectRoot = "";
 			targets = (
 				D713CDA82F82DC8A00C6BEFF /* another-iptv-player */,
-				E7A100000000000000000003 /* SuperXWidgets */,
 				AAAA000000000000000000A3 /* another-iptv-playerTests */,
 				B1EEE1A018ACA0D1D1007839 /* another-iptv-playerUITests */,
 			);
@@ -367,13 +297,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		F54DDA11EA7141CA0F0ADFD4 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		E7A100000000000000000006 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -408,13 +331,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		E7A100000000000000000004 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -429,12 +345,6 @@
 			name = "another-iptv-player";
 			target = D713CDA82F82DC8A00C6BEFF /* another-iptv-player */;
 			targetProxy = DBB96AD8D9C8DAD35E230978 /* PBXContainerItemProxy */;
-		};
-		E7A10000000000000000000A /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			name = SuperXWidgets;
-			target = E7A100000000000000000003 /* SuperXWidgets */;
-			targetProxy = E7A100000000000000000009 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -724,57 +634,6 @@
 			};
 			name = Release;
 		};
-		E7A10000000000000000000C /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = SuperXWidgets.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 33;
-				DEVELOPMENT_TEAM = RJF8BC3HBY;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = SuperXWidgets/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 18;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 2.4.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.irqus.superx.widgets;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		E7A10000000000000000000D /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = SuperXWidgets.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 33;
-				DEVELOPMENT_TEAM = RJF8BC3HBY;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = SuperXWidgets/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 18;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 2.4.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.irqus.superx.widgets;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				VALIDATE_PRODUCT = YES;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -810,15 +669,6 @@
 			buildConfigurations = (
 				D713CDB52F82DC8B00C6BEFF /* Debug */,
 				D713CDB62F82DC8B00C6BEFF /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		E7A10000000000000000000B /* Build configuration list for PBXNativeTarget "SuperXWidgets" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				E7A10000000000000000000C /* Debug */,
-				E7A10000000000000000000D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

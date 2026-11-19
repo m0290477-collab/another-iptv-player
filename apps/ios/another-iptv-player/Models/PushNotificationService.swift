@@ -111,18 +111,20 @@ final class PushNotificationService: NSObject, UNUserNotificationCenterDelegate 
     // MARK: UNUserNotificationCenterDelegate
 
     /// Foreground arrival: present as a normal system banner —
-    /// EXCEPT while the player is fullscreen (item 12d, owner's
-    /// hard rule: while watching anything, NO notification,
-    /// banner or alert of any kind may appear). In that state
-    /// the push is fully suppressed: no banner, no list entry,
-    /// no sound. The score itself still lands in the Matches
-    /// data through the normal refresh paths.
+    /// EXCEPT while ANY player presentation is active (fullscreen
+    /// OR mini) or Multiview is active (item 12d + build 66 item
+    /// 10, owner's hard rule: while watching anything, NO
+    /// notification, banner or alert of any kind may appear). In
+    /// that state the push is fully suppressed: no banner, no
+    /// list entry, no sound, no badge. The score itself still
+    /// lands in the Matches data through the normal refresh paths.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        if PlayerOverlayController.fullscreenPresented {
+        if PlayerOverlayController.presentationActiveCount > 0
+            || PlaybackPrewarmService.shared.multiviewActive {
             completionHandler([])
         } else {
             completionHandler([.banner, .list, .sound])

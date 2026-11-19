@@ -1,7 +1,6 @@
 import Foundation
 import GRDB
 import Nuke
-import WidgetKit
 
 /// Round 17 (R17-2 + R17-5): THE one account-data deletion
 /// implementation. Both entry points — Settings ▸ Privacy & Legal
@@ -27,8 +26,8 @@ import WidgetKit
 ///   abort the remaining stores;
 /// - the per-playlist UserDefaults / file stores the old wipe
 ///   missed (watchlist, expiry, health, library order, gate
-///   session keys), the parental-PIN keychain item, the image
-///   caches and the widget snapshot are all part of the wipe.
+///   session keys), the parental-PIN keychain item and the image
+///   caches are all part of the wipe.
 enum AccountDataDeletion {
 
     /// Every app table, children before parents. Intersected with
@@ -152,13 +151,6 @@ enum AccountDataDeletion {
             )
         }
         URLCache.shared.removeAllCachedResponses()
-
-        // Widget: replace the snapshot with the honest empty state
-        // and reload timelines — the widget must not keep showing
-        // a deleted account's favorites/history. Behavior of the
-        // widget itself is untouched.
-        WidgetSnapshotStore.write(.empty)
-        WidgetCenter.shared.reloadAllTimelines()
 
         // In-memory catalogs.
         await PlaylistContentStore.shared.unload()
