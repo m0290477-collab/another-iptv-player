@@ -965,9 +965,6 @@
 "update.dismiss" = "बंद करें";
 
 /* MARK: Build 61 (b7) */
-"b7.home.customize" = "होम अनुकूलित करें";
-"b7.home.move_down" = "नीचे ले जाएँ";
-"b7.home.move_up" = "ऊपर ले जाएँ";
 "b7.loader.loading" = "लोड हो रहा है";
 
 /* MARK: Build 61 (b14) */

@@ -965,9 +965,6 @@
 "update.dismiss" = "Закрыть";
 
 /* MARK: Build 61 (b7) */
-"b7.home.customize" = "Настроить главный экран";
-"b7.home.move_down" = "Вниз";
-"b7.home.move_up" = "Вверх";
 "b7.loader.loading" = "Загрузка";
 
 /* MARK: Build 61 (b14) */

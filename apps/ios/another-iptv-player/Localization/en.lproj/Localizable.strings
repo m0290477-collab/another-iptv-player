@@ -983,9 +983,6 @@
 "update.dismiss" = "Dismiss";
 
 /* MARK: Build 61 (b7) */
-"b7.home.customize" = "Customize Home";
-"b7.home.move_down" = "Move down";
-"b7.home.move_up" = "Move up";
 "b7.loader.loading" = "Loading";
 
 /* MARK: Build 61 (b14) */
