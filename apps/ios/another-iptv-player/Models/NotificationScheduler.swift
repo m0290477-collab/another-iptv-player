@@ -7,9 +7,10 @@ import UserNotifications
 ///  - subscription-expiry alerts, scheduled from the exp_date
 ///    timestamps recorded by `ProviderExpiryStore` (the same record
 ///    the playback gate reads), gated by the EXISTING Settings
-///    expiry-alerts toggle (`notifications.expiryAlertsEnabled`);
-///  - new-episode alerts for favorite / in-progress series, gated
-///    by the programme-reminders toggle (`reminders.enabled`).
+///    expiry-alerts toggle (`notifications.expiryAlertsEnabled`).
+///    Programme reminders (below) are gated by the programme-
+///    reminders toggle (`reminders.enabled`) — that toggle gates
+///    ONLY programme reminders.
 ///
 /// EPG programme reminders ARE routed through here as of build 61
 /// (B1): `scheduleProgrammeReminder(title:channelName:startDate:id:)`
@@ -17,7 +18,7 @@ import UserNotifications
 /// previously scheduled directly on `UNUserNotificationCenter`.
 ///
 /// Authorization is requested ONLY when there is something real to
-/// schedule (a recorded expiry date, or genuinely new episodes) —
+/// schedule (a recorded expiry date, or a programme reminder) —
 /// never on a bare first launch.
 enum NotificationScheduler {
     // MARK: - Settings keys (owned by Settings; read-only here)
@@ -225,120 +226,5 @@ enum NotificationScheduler {
     static func isProgrammeReminderSet(id: String) async -> Bool {
         let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
         return pending.contains { $0.identifier == programmeReminderIdentifier(id: id) }
-    }
-
-    // MARK: - C3: new-episode alerts
-
-    /// Schedules ONE immediate local notification naming the series
-    /// and its genuinely new episodes (count + real episode titles
-    /// where the caller has them). No-ops when reminders are off,
-    /// when there is nothing new, or when authorization is denied.
-    static func scheduleNewEpisodeAlerts(forSeries seriesName: String, episodeTitles: [String]) async {
-        guard remindersEnabled, !episodeTitles.isEmpty else { return }
-        guard await requestAuthorization() else { return }
-        let content = UNMutableNotificationContent()
-        content.title = seriesName
-        content.body = episodeTitles.count == 1
-            ? episodeTitles[0]
-            : L("series.new_episodes_format", episodeTitles.count)
-        content.sound = .default
-        // Stable per (series, batch): re-running the same diff
-        // replaces rather than duplicates.
-        let digest = (seriesName + "|" + episodeTitles.joined(separator: "|")).hashValue & Int.max
-        let request = UNNotificationRequest(
-            identifier: "superx.newepisode.\(digest)",
-            content: content,
-            trigger: nil)
-        try? await UNUserNotificationCenter.current().add(request)
-    }
-
-    /// Diffs the locally stored episode IDs of every favorite and
-    /// in-progress (watched) series of this playlist against the
-    /// per-series baseline in UserDefaults
-    /// (`alerts.knownEpisodeIds.<seriesId>`).
-    ///
-    /// FIRST run per series only records the baseline — no alert.
-    /// Later runs with genuinely new episode IDs schedule one
-    /// immediate alert per series (via `scheduleNewEpisodeAlerts`)
-    /// and advance the baseline. Series whose episodes were never
-    /// loaded locally have nothing real to diff and are skipped.
-    /// This key namespace is the alerts framework's own; the
-    /// series-detail "new" badge uses a separate store.
-    static func checkNewEpisodes(playlist: Playlist) async {
-        guard remindersEnabled else { return }
-
-        struct SeriesEpisodes {
-            let seriesId: Int
-            let name: String
-            let episodeIds: [String]
-            let titlesById: [String: String]
-        }
-
-        let found: [SeriesEpisodes] = (try? await AppDatabase.shared.read { db -> [SeriesEpisodes] in
-            // Candidate series: favorites (type "series") plus
-            // series with watch history (in-progress / watched).
-            var candidateIds = Set<Int>()
-            let favorites = try DBFavorite
-                .filter(Column("playlistId") == playlist.id && Column("type") == "series")
-                .fetchAll(db)
-            candidateIds.formUnion(favorites.map(\.streamId))
-            let history = try DBWatchHistory
-                .filter(Column("playlistId") == playlist.id && Column("type") == "series")
-                .fetchAll(db)
-            for row in history {
-                if let sid = row.seriesId.flatMap(Int.init) { candidateIds.insert(sid) }
-            }
-            guard !candidateIds.isEmpty else { return [] }
-
-            var result: [SeriesEpisodes] = []
-            for seriesId in candidateIds {
-                guard let series = try DBSeries
-                    .filter(Column("seriesId") == seriesId && Column("playlistId") == playlist.id)
-                    .fetchOne(db) else { continue }
-                let seasonIds = try DBSeason
-                    .filter(Column("seriesId") == seriesId && Column("playlistId") == playlist.id)
-                    .fetchAll(db)
-                    .map(\.id)
-                guard !seasonIds.isEmpty else { continue }
-                let episodes = try DBEpisode
-                    .filter(seasonIds.contains(Column("seasonId")))
-                    .fetchAll(db)
-                guard !episodes.isEmpty else { continue }
-                var titles: [String: String] = [:]
-                var ids: [String] = []
-                for episode in episodes {
-                    let stableId = episode.episodeId ?? episode.id
-                    ids.append(stableId)
-                    if let title = episode.title, !title.isEmpty { titles[stableId] = title }
-                }
-                result.append(SeriesEpisodes(
-                    seriesId: seriesId, name: series.name,
-                    episodeIds: ids, titlesById: titles))
-            }
-            return result
-        }) ?? []
-
-        let defaults = UserDefaults.standard
-        for series in found {
-            let key = "alerts.knownEpisodeIds.\(series.seriesId)"
-            let current = Set(series.episodeIds)
-            guard let known = defaults.stringArray(forKey: key) else {
-                // First run for this series: baseline only.
-                defaults.set(series.episodeIds, forKey: key)
-                continue
-            }
-            let newIds = current.subtracting(Set(known))
-            if newIds.isEmpty {
-                // Removals only (e.g. ghost-episode cleanup):
-                // silently re-baseline, never alert.
-                if current != Set(known) { defaults.set(series.episodeIds, forKey: key) }
-                continue
-            }
-            let newTitles = newIds
-                .sorted()
-                .map { series.titlesById[$0] ?? $0 }
-            defaults.set(series.episodeIds, forKey: key)
-            await scheduleNewEpisodeAlerts(forSeries: series.name, episodeTitles: newTitles)
-        }
     }
 }

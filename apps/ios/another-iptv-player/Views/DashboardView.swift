@@ -11,8 +11,8 @@ struct DashboardView: View {
     /// F6 (B13): section visibility — hidden Movies/Series leave
     /// the tab bar (Home and Live are never hidable).
     @ObservedObject private var sectionVisibility = SectionVisibilityStore.shared
-    /// Round 15 (C3): foreground returns consume pending Siri /
-    /// App Intent requests and refresh the widget snapshot.
+    /// Build 61 (B8): foreground returns consume pending playback
+    /// requests (launch-resume).
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var playerOverlay = PlayerOverlayController()
 
@@ -204,8 +204,12 @@ struct DashboardView: View {
         .environment(\.epgSnapshot, epgStore.snapshot)
         // G5 (B13): the shared offline indicator — local content
         // (cached catalog, downloads) stays usable beneath it.
+        // Build 66 (item 10): gated on no player presentation —
+        // while anything plays, nothing appears over playback.
         .overlay(alignment: .top) {
-            OfflineBannerView()
+            if playerOverlay.presentation == nil {
+                OfflineBannerView()
+            }
         }
         // F6 (B13): if the section the user is standing in gets
         // hidden from Settings, land on Home instead of a vanished
@@ -226,23 +230,18 @@ struct DashboardView: View {
             // Runs after the catalog load so the wanted-channel set is populated.
             epgStore.setActivePlaylist(playlist)
             await epgStore.refreshIfStale(playlist: playlist)
-            // Round 15 (C11 + C3, Features): after the catalog load —
-            // schedule expiry alerts from the recorded exp_dates,
-            // diff favorite/watched series for new-episode alerts,
-            // refresh the widget snapshot from real local data, and
-            // consume any pending Siri / App Intent request. Each
-            // step is gated by its own settings toggle inside the
+            // Round 15 (C11): after the catalog load — schedule
+            // expiry alerts from the recorded exp_dates and consume
+            // any pending playback request. The scheduler step is
+            // gated by its own settings toggle inside the
             // scheduler; authorization is only requested when there
             // is something real to schedule.
             await NotificationScheduler.scheduleExpiryAlerts(for: [playlist])
-            await NotificationScheduler.checkNewEpisodes(playlist: playlist)
-            await WidgetSnapshotStore.refresh(playlist: playlist)
             consumePendingPlayback()
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             consumePendingPlayback()
-            Task { await WidgetSnapshotStore.refresh(playlist: playlist) }
         }
         .alert(L("loading.error.title"), isPresented: Binding(
             get: {
@@ -311,10 +310,11 @@ struct DashboardView: View {
     /// Build 63 (item 9): push deep-link router (shared).
     @ObservedObject private var matchDeepLink = MatchDeepLinkRouter.shared
 
-    // MARK: - Round 15 (C3): pending Siri / App Intent playback
+    // MARK: - Pending playback (launch-resume)
 
-    /// Consumes a pending request stored by `PlayChannelIntent` /
-    /// `ResumeWatchingIntent` (`Models/SuperXIntents.swift`) and
+    /// Consumes a pending request stored in `PendingPlayback`
+    /// (`Models/PendingPlayback.swift`, queued by
+    /// `LaunchResumeService`) and
     /// presents playback through the SAME overlay path the Home
     /// history rows use. Requests for another playlist, or while a
     /// player is already up, are dropped (consume-once).

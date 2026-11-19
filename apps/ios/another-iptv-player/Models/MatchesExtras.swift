@@ -314,40 +314,53 @@ final class MatchReminderService {
         set { UserDefaults.standard.set(Array(newValue), forKey: defaultsKey) }
     }
 
-    func setReminder(match: MatchEvent, leaguePath: String, sport: MatchSport, enabled: Bool) {
+    /// Build 66 (item 18): reports its CONFIRMED outcome — the
+    /// returned Bool is the post-operation `isScheduled(eventId:)`
+    /// state, never an optimistic claim. Enabling returns false
+    /// (and records nothing) when there is no start date, when
+    /// the fire date has already passed, when authorization is
+    /// denied, or when the system refuses the request; the id is
+    /// recorded only after the request was actually accepted.
+    @discardableResult
+    func setReminder(match: MatchEvent, leaguePath: String, sport: MatchSport, enabled: Bool) async -> Bool {
         let center = UNUserNotificationCenter.current()
         if enabled {
-            guard let start = match.startDate else { return }
+            guard let start = match.startDate else { return isScheduled(eventId: match.id) }
             let fireDate = start.addingTimeInterval(-15 * 60)
-            guard fireDate > Date() else { return }
-            center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-                guard granted else { return }
-                let content = UNMutableNotificationContent()
-                let home = match.home.name ?? ""
-                let away = match.away.name ?? ""
-                content.title = "\(home) – \(away)"
-                content.body = L("matches.reminder.body")
-                content.sound = .default
-                content.userInfo = [
-                    "eventId": match.id, "leaguePath": leaguePath, "sport": sport.rawValue
-                ]
-                let comps = Calendar.current.dateComponents(
-                    [.year, .month, .day, .hour, .minute], from: fireDate
-                )
-                let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
-                let request = UNNotificationRequest(
-                    identifier: "match-reminder-\(match.id)", content: content, trigger: trigger
-                )
-                center.add(request) { _ in }
-                var ids = self.scheduledIds
-                ids.insert(match.id)
-                self.scheduledIds = ids
+            guard fireDate > Date() else { return isScheduled(eventId: match.id) }
+            let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+            guard granted else { return isScheduled(eventId: match.id) }
+            let content = UNMutableNotificationContent()
+            let home = match.home.name ?? ""
+            let away = match.away.name ?? ""
+            content.title = "\(home) – \(away)"
+            content.body = L("matches.reminder.body")
+            content.sound = .default
+            content.userInfo = [
+                "eventId": match.id, "leaguePath": leaguePath, "sport": sport.rawValue
+            ]
+            let comps = Calendar.current.dateComponents(
+                [.year, .month, .day, .hour, .minute], from: fireDate
+            )
+            let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+            let request = UNNotificationRequest(
+                identifier: "match-reminder-\(match.id)", content: content, trigger: trigger
+            )
+            do {
+                try await center.add(request)
+            } catch {
+                return isScheduled(eventId: match.id)
             }
+            var ids = scheduledIds
+            ids.insert(match.id)
+            scheduledIds = ids
+            return isScheduled(eventId: match.id)
         } else {
             center.removePendingNotificationRequests(withIdentifiers: ["match-reminder-\(match.id)"])
             var ids = scheduledIds
             ids.remove(match.id)
             scheduledIds = ids
+            return isScheduled(eventId: match.id)
         }
     }
 }
