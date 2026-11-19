@@ -121,35 +121,35 @@ private struct ESPNLeague: Decodable {
     let name: String?
 }
 
-private struct ESPNEvent: Decodable {
+struct ESPNEvent: Decodable {
     let id: String?
     let date: String?
     let status: ESPNStatus?
     let competitions: [ESPNCompetition]?
 }
 
-private struct ESPNStatus: Decodable {
+struct ESPNStatus: Decodable {
     let displayClock: String?
     let period: Int?
     let type: ESPNStatusType?
 }
 
-private struct ESPNStatusType: Decodable {
+struct ESPNStatusType: Decodable {
     let state: String?
     let completed: Bool?
 }
 
-private struct ESPNCompetition: Decodable {
+struct ESPNCompetition: Decodable {
     let competitors: [ESPNCompetitor]?
 }
 
-private struct ESPNCompetitor: Decodable {
+struct ESPNCompetitor: Decodable {
     let homeAway: String?
     let score: String?
     let team: ESPNTeam?
 }
 
-private struct ESPNTeam: Decodable {
+struct ESPNTeam: Decodable {
     let id: String?
     let displayName: String?
     let logo: String?
@@ -317,7 +317,7 @@ enum MatchesService {
     /// and the in-app goal poller read through the same per-day
     /// cache as the sport screens.
     static func matches(sport: MatchSport, leaguePath: String, day: Date) async -> [MatchEvent] {
-        (try? await fetchLeague(sport: sport, leaguePath: leaguePath, day: day)) ?? []
+        (try? await fetchLeague(path: leaguePath, dateParameter: dayParameter(for: day)))?.matches ?? []
     }
 
     /// Today only, for the goal poller.
@@ -570,14 +570,14 @@ private struct ESPNParticipant: Decodable {
     let athlete: ESPNAthlete?
 }
 
-private struct ESPNAthlete: Decodable {
+struct ESPNAthlete: Decodable {
     let id: String?
     let displayName: String?
     let shortName: String?
     let headshot: ESPNHeadshot?
 }
 
-private struct ESPNHeadshot: Decodable {
+struct ESPNHeadshot: Decodable {
     let href: String?
 }
 
@@ -667,7 +667,7 @@ extension MatchesService {
     /// VIEW decides whether the formation can be laid out on a
     /// pitch or must fall back to the grouped list.
     private static func mapLineups(_ summary: ESPNSummary, sport: MatchSport) -> [MatchLineupSide] {
-        (summary.rosters ?? []).compactMap { side in
+        (summary.rosters ?? []).compactMap { side -> MatchLineupSide? in
             let players = (side.roster ?? []).compactMap { entry -> MatchLineupPlayer? in
                 guard let athlete = entry.athlete,
                       let name = athlete.displayName ?? athlete.shortName,
@@ -684,8 +684,8 @@ extension MatchesService {
             guard !players.isEmpty else { return nil }
             return MatchLineupSide(
                 teamId: side.team?.id,
-                teamName: side.team?.displayName ?? side.team?.name,
-                logoURL: logoURL(side.team),
+                teamName: side.team?.displayName,
+                logoURL: side.team?.logo.flatMap { URL(string: $0) },
                 formation: side.formation,
                 players: players
             )

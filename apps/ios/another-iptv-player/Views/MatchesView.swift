@@ -268,7 +268,7 @@ struct MatchesView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.cornerRadius)
-                .stroke(AppTheme.border, lineWidth: 1)
+                .stroke(AppTheme.cardBorderColor, lineWidth: 1)
         )
     }
 

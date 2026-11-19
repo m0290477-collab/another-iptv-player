@@ -1,3 +1,4 @@
+import GRDB
 import SwiftUI
 
 /// Build 63 (owner, items 8b/8c/9): the match detail screen.
@@ -351,10 +352,12 @@ struct MatchDetailView: View {
             playerOverlay.present(playlistId: hit.playlistId) {
                 PlayerView(
                     url: url,
-                    isLiveStream: true,
                     title: name,
-                    posterURL: logoURL,
+                    artworkURL: logoURL,
+                    isLiveStream: true,
                     playlistId: hit.playlistId,
+                    streamId: url.absoluteString,
+                    type: "live",
                     isFavorite: false,
                     onToggleFavorite: nil
                 )

@@ -303,7 +303,7 @@ struct LineupsView: View {
                 }
             }
             if !side.bench.isEmpty {
-                Divider().background(AppTheme.border)
+                Divider().background(AppTheme.cardBorderColor)
                 ForEach(side.bench) { playerRow($0) }
             }
         }

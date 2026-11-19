@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import GRDB
 import UserNotifications
@@ -55,7 +56,7 @@ enum MatchesStandingsService {
     /// family (the site/v2 path 404s): children carry conference
     /// / division / overall groups as the feed defines them.
     static func fetch(sport: MatchSport, leaguePath: String) async -> [StandingGroup] {
-        let path = "\(sport.espnPath)/\(leaguePath)"
+        let path = leaguePath
         guard let url = URL(string: "https://site.api.espn.com/apis/v2/sports/\(path)/standings") else { return [] }
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
@@ -403,7 +404,7 @@ enum TeamService {
     static func allTeams(sport: MatchSport) async -> [TeamRef] {
         var out: [TeamRef] = []
         for leaguePath in sport.leaguePaths {
-            let path = "\(sport.espnPath)/\(leaguePath)"
+            let path = leaguePath
             guard let url = URL(string: "https://site.api.espn.com/apis/site/v2/sports/\(path)/teams"),
                   let (data, _) = try? await URLSession.shared.data(from: url),
                   let wire = try? JSONDecoder().decode(TeamsWire.self, from: data) else { continue }
@@ -422,7 +423,7 @@ enum TeamService {
     /// 12a: the team's fixtures + results (the schedule endpoint
     /// returns the season's events in the scoreboard shape).
     static func schedule(sport: MatchSport, leaguePath: String, teamId: String) async -> [MatchEvent] {
-        let path = "\(sport.espnPath)/\(leaguePath)"
+        let path = leaguePath
         guard let url = URL(string: "https://site.api.espn.com/apis/site/v2/sports/\(path)/teams/\(teamId)/schedule"),
               let (data, _) = try? await URLSession.shared.data(from: url),
               let wire = try? JSONDecoder().decode(ScheduleWire.self, from: data) else { return [] }
@@ -433,7 +434,7 @@ enum TeamService {
     /// 12a: the squad as the feed lists it (photos via payload
     /// headshot or the 8c CDN pattern).
     static func squad(sport: MatchSport, leaguePath: String, teamId: String) async -> [SquadPlayer] {
-        let path = "\(sport.espnPath)/\(leaguePath)"
+        let path = leaguePath
         guard let url = URL(string: "https://site.api.espn.com/apis/site/v2/sports/\(path)/teams/\(teamId)/roster"),
               let (data, _) = try? await URLSession.shared.data(from: url),
               let wire = try? JSONDecoder().decode(RosterWire.self, from: data) else { return [] }
