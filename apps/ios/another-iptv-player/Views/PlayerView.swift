@@ -2310,8 +2310,11 @@ private struct PlayerViewImpl: View {
             if player.needsAirPlayPreparation {
                 // UHF akışı: önce remux hazırlanır (loading), sonra seçici açılır.
                 if isPreparingAirPlay {
-                    ProgressView()
-                        .tint(.white)
+                    // Build 66 (W6, item 13): branded loader VIEW swap
+                    // only — same condition, same 40x34 slot in the
+                    // top-chrome capsule; the AirPlay prepare/picker
+                    // flow (`prepareAndPresentAirPlay`) is untouched.
+                    BrandedLoader(size: 24)
                         .frame(width: 40, height: 34)
                 } else {
                     groupedCapsuleButton(systemName: "airplay.video") {
@@ -2572,27 +2575,14 @@ private struct PlayerViewImpl: View {
         .buttonStyle(.plain)
     }
 
-    /// Bölüm atlama ayrı; zaman çubuğu yalnızca `scrubTimelineCard` içinde.
+    /// Bölüm atlama ayrı; zaman çubuğu yalnızca alt çubuk içinde.
+    /// Build 66 (W6, item 11): the channel-list (guide) button that
+    /// used to sit in its own row above the bar now lives INSIDE
+    /// `slimPlayerBar` — same `glassIconButton`, same toggle
+    /// closure, same accessibility label; only its visual position
+    /// within the chrome changed.
     private var bottomTransportChrome: some View {
         VStack(alignment: .trailing, spacing: 10) {
-            // Build 61 (B14, V1): live prev/next moved to the center cluster;
-            // this row now carries only the channel-list button.
-            if showLiveChannelListButton {
-                HStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    if showLiveChannelListButton, let toggle = onToggleLiveChannelSidePanel {
-                        glassIconButton(
-                            systemName: isLiveChannelSidePanelVisible ? "rectangle.bottomthird.inset.filled" : "rectangle.grid.1x2",
-                            size: 44,
-                            symbolSize: 17
-                        ) {
-                            toggle()
-                        }
-                        .accessibilityLabel(L("list.channel_list"))
-                    }
-                }
-                .padding(.horizontal, 12)
-            }
 
             if showSeriesEpisodeSkip {
                 HStack(spacing: 8) {
@@ -2634,77 +2624,256 @@ private struct PlayerViewImpl: View {
                 .padding(.horizontal, 12)
             }
 
-            // Build 61 (B14, V5): live Up Next strip — next programme from the
-            // loaded EPG snapshot; absent entirely without EPG data.
-            if isLiveStream, let next = currentNowNext?.next {
-                upNextStrip(next: next)
-            }
-
-            // Build 65 (Player style 2 'Rich Bar'): identity row
-            // + the ONE bottom control row + the VOD seek bar,
-            // composed as ONE frosted-glass bar (the mockup's
-            // form). VISUAL ONLY — every control inside keeps its
-            // exact action, menu and gesture behavior; the bar
-            // rides the same show/hide chrome as before.
-            VStack(spacing: 2) {
-                richBarIdentityRow
-                // Build 61 (B14, V1): the ONE bottom control row,
-                // directly above the progress bar: Speed ·
-                // Subtitles · Audio · Sleep · Aspect.
-                bottomControlRow
-
-                if !isLiveStream {
-                    scrubTimelineCard
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .fill(Color.black.opacity(0.22))
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
-            )
-            .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
-            .padding(.horizontal, 4)
+            // Build 66 (W6, item 11): the Build 65 Rich Bar's
+            // stacked rows (identity row + control row + VOD seek
+            // card, plus the standalone B14 V5 Up Next strip above
+            // it) are restyled into ONE slim blurred bar. The Up
+            // Next programme is folded into the bar's identity
+            // segment (title only, same EPG snapshot); every
+            // control keeps its exact action, menu and gesture
+            // behavior, and the bar rides the same show/hide
+            // chrome as before.
+            slimPlayerBar
         }
     }
 
-    /// Build 65 (Rich Bar): the bar's identity row — channel /
-    /// content artwork + title, and for live the CURRENT
-    /// programme (red live dot, title, time range, progress
-    /// capsule) — the exact information the removed standalone
-    /// `PlayerProgrammeStrip` carried, from the same EPG
-    /// snapshot. VOD shows its real subtitle line when present.
-    private var richBarIdentityRow: some View {
+    // MARK: - Build 66 (W6, item 11) slim blurred player bar
+
+    /// The slim bar: ONE row, ~12% of screen height in landscape —
+    /// identity segment on the leading side, the existing controls
+    /// on the trailing side — over the same heavily blurred
+    /// `.ultraThinMaterial` + black wash the Rich Bar used, so the
+    /// video stays clearly visible through it. The thin red-orange
+    /// progress line sits at the bar's TOP edge (see
+    /// `slimBarProgressLine`).
+    private var slimPlayerBar: some View {
+        HStack(spacing: 10) {
+            slimBarIdentitySegment
+            Spacer(minLength: 8)
+            slimBarPlayPauseButton
+            if showLiveChannelListButton, let toggle = onToggleLiveChannelSidePanel {
+                glassIconButton(
+                    systemName: isLiveChannelSidePanelVisible ? "rectangle.bottomthird.inset.filled" : "rectangle.grid.1x2",
+                    size: 40,
+                    symbolSize: 16
+                ) {
+                    toggle()
+                }
+                .accessibilityLabel(L("list.channel_list"))
+            }
+            // Build 61 (B14, V1): the ONE bottom control row —
+            // Speed · Subtitles · Audio · Sleep · Aspect — kept
+            // whole; only its labels render compact (see
+            // `bottomRowLabel`).
+            bottomControlRow
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 52)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color.black.opacity(0.22))
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
+        )
+        .overlay(alignment: .top) {
+            slimBarProgressLine
+                .padding(.horizontal, 16)
+        }
+        .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
+        .padding(.horizontal, 4)
+    }
+
+    /// The bar's play/pause control — the SAME control the center
+    /// cluster carries (`centerPlayPauseOrLoadingButton`): while
+    /// the center transport is loading it shows the branded loader
+    /// in the same 40pt slot; otherwise a plain button driving
+    /// `player.togglePlayPause()` through the existing
+    /// `transparentTransportButton` helper (which applies the same
+    /// `resetTimer()`), with the center button's exact
+    /// accessibility label, hint, disabled and opacity behavior.
+    /// The center cluster itself is untouched.
+    @ViewBuilder
+    private var slimBarPlayPauseButton: some View {
+        if isCenterTransportLoading {
+            BrandedLoader(size: 24)
+                .frame(width: 40, height: 40)
+                .allowsHitTesting(false)
+        } else {
+            transparentTransportButton(
+                systemName: player.isPlaying ? "pause.fill" : "play.fill",
+                symbolSize: 20,
+                hitFrame: 40
+            ) {
+                player.togglePlayPause()
+            }
+            .accessibilityLabel(player.isPlaying ? L("player.a11y.pause") : L("player.a11y.play"))
+            .accessibilityHint(L("player.a11y.play_pause.hint"))
+            .disabled(hasPlaybackFailure)
+            .opacity(hasPlaybackFailure ? 0.4 : 1)
+        }
+    }
+
+    /// The thin (3pt) red-orange line at the bar's TOP edge.
+    /// Live: programme progress from the same EPG snapshot the
+    /// Rich Bar's identity capsule read — non-interactive, exactly
+    /// as before. VOD: this IS the seek bar (see `slimBarSeekLine`).
+    @ViewBuilder
+    private var slimBarProgressLine: some View {
+        if isLiveStream {
+            if let now = currentNowNext?.now,
+               let fraction = now.progress(at: EPGOffsetStore.lookupNow()) {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.white.opacity(0.22)).frame(height: 3)
+                        Capsule().fill(AppTheme.accentStart)
+                            .frame(
+                                width: proxy.size.width * CGFloat(min(max(fraction, 0), 1)),
+                                height: 3
+                            )
+                    }
+                    .frame(height: 3)
+                }
+                .frame(height: 3)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+        } else {
+            slimBarSeekLine
+        }
+    }
+
+    /// The VOD seek bar, rendered thin at the bar's top edge. It
+    /// drives the EXACT state and calls the old `scrubTimelineCard`
+    /// drove through `PlayerTimeline`: the drag updates
+    /// `scrubValue` live (so `displayedSliderPosition` follows the
+    /// finger), and on release it locks the slider value, calls
+    /// `player.seek(to:)`, clears `isScrubbing`, re-arms the
+    /// auto-hide timer and schedules the same 2.8 s lock release
+    /// guarded by `sliderUnlockGeneration`. The VoiceOver
+    /// adjustable action (±10 s jumps) and its label/value are the
+    /// old timeline's, unchanged.
+    private var slimBarSeekLine: some View {
+        GeometryReader { proxy in
+            let width = max(proxy.size.width, 1)
+            // Same binding the old timeline read: `sliderBinding`
+            // (get = `displayedSliderPosition`).
+            let fraction = CGFloat(min(max(sliderBinding.wrappedValue, 0), 1))
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.25))
+                    .frame(height: 3)
+                Capsule()
+                    .fill(AppTheme.accentStart)
+                    .frame(width: width * fraction, height: 3)
+                Circle()
+                    .fill(AppTheme.accentStart)
+                    .frame(width: 10, height: 10)
+                    .offset(x: width * fraction - 5)
+            }
+            .frame(height: 14)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { gesture in
+                        guard effectiveSeekable else { return }
+                        if !isScrubbing {
+                            if isFastForwarding { applySpeedHoldEnded() }
+                            resetTimer()
+                            isScrubbing = true
+                            scrubValue = displayedSliderPosition
+                        }
+                        scrubValue = Double(min(max(gesture.location.x, 0), width) / width)
+                        // Each drag tick postpones auto-hide, as the
+                        // old timeline's onDragValue did.
+                        resetTimer()
+                    }
+                    .onEnded { gesture in
+                        guard effectiveSeekable else { return }
+                        let target = Double(min(max(gesture.location.x, 0), width) / width)
+                        scrubValue = target
+                        lockedSliderValue = target
+                        player.seek(to: Float(target))
+                        isScrubbing = false
+                        resetTimer()
+                        sliderUnlockGeneration += 1
+                        let gen = sliderUnlockGeneration
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 2_800_000_000)
+                            guard gen == sliderUnlockGeneration else { return }
+                            lockedSliderValue = nil
+                        }
+                    }
+            )
+        }
+        .frame(height: 14)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(L("player.a11y.playback_position"))
+        .accessibilityValue("\(formatMs(Int(player.timeMs))) / \(totalDurationLabel)")
+        .accessibilityAdjustableAction { direction in
+            guard effectiveSeekable else { return }
+            resetTimer()
+            switch direction {
+            // Build 61 (B14, V1): step matches the center cluster's ±10s.
+            case .increment: player.jump(seconds: 10)
+            case .decrement: player.jump(seconds: -10)
+            @unknown default: break
+            }
+        }
+    }
+
+    /// Build 66 (W6, item 11): the slim bar's identity segment —
+    /// artwork thumbnail + channel/content name on the first
+    /// line; for live, the CURRENT programme title with its time
+    /// range and the NEXT programme (title only) after it, all
+    /// from the same EPG snapshot (`currentNowNext`) the Rich Bar
+    /// read, plus the small LIVE badge (the existing live logic:
+    /// `isLiveStream` + `L("player.live_badge")`, with the red dot
+    /// the Rich Bar identity row already used). Programme progress
+    /// moved to the bar's top-edge line. VOD shows its real
+    /// subtitle line when present, and the current / total time —
+    /// the exact labels the old scrub card rendered
+    /// (`formatMs` / `totalDurationLabel`).
+    private var slimBarIdentitySegment: some View {
         HStack(spacing: 10) {
             if let artworkURL {
                 CachedImage(
                     url: artworkURL,
-                    width: 38,
-                    height: 38,
+                    width: 34,
+                    height: 34,
                     cornerRadius: 9,
                     contentMode: .fit,
                     iconName: "tv"
                 )
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(title)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    if isLiveStream {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 6, height: 6)
+                            Text(L("player.live_badge"))
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.red.opacity(0.28), in: Capsule())
+                        .fixedSize(horizontal: true, vertical: false)
+                    }
+                }
                 if isLiveStream, let now = currentNowNext?.now {
                     HStack(spacing: 6) {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 6, height: 6)
                         Text(now.title)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.92))
@@ -2713,6 +2882,31 @@ private struct PlayerViewImpl: View {
                             .font(.caption2.weight(.medium))
                             .monospacedDigit()
                             .foregroundStyle(.white.opacity(0.65))
+                            .fixedSize(horizontal: true, vertical: false)
+                        if let next = currentNowNext?.next {
+                            Text(L("player.upnext"))
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.white.opacity(0.6))
+                                .fixedSize(horizontal: true, vertical: false)
+                            Text(next.title)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.8))
+                                .lineLimit(1)
+                        }
+                    }
+                } else if !isLiveStream {
+                    HStack(spacing: 6) {
+                        if let subtitle, !subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(subtitle)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.75))
+                                .lineLimit(1)
+                        }
+                        Text("\(isScrubbing ? formatMs(Int(scrubValue * Double(player.durationMs))) : formatMs(Int(player.timeMs))) / \(totalDurationLabel)")
+                            .font(.caption2.weight(.medium))
+                            .monospacedDigit()
+                            .foregroundStyle(.white.opacity(0.65))
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 } else if let subtitle, !subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(subtitle)
@@ -2721,40 +2915,11 @@ private struct PlayerViewImpl: View {
                         .lineLimit(1)
                 }
             }
-            Spacer(minLength: 0)
-            if isLiveStream, let now = currentNowNext?.now,
-               let fraction = now.progress(at: EPGOffsetStore.lookupNow()) {
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.22)).frame(width: 64, height: 3)
-                    Capsule().fill(AppTheme.accent).frame(width: max(0, 64 * fraction), height: 3)
-                }
-                .frame(width: 64, height: 3)
-            }
         }
-        .padding(.horizontal, 12)
         .accessibilityElement(children: .combine)
     }
 
     // MARK: - Build 61 (B14, V-pack) control row / strips / lock / info
-
-    private func upNextStrip(next: EPGProgramme) -> some View {
-        HStack(spacing: 8) {
-            Text(L("player.upnext"))
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.white.opacity(0.72))
-            Text(next.title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-            Text(EPGTimeFormat.time(next.start))
-                .font(.caption2.weight(.medium))
-                .monospacedDigit()
-                .foregroundStyle(.white.opacity(0.72))
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 18)
-        .accessibilityElement(children: .combine)
-    }
 
     private var bottomControlRow: some View {
         HStack(spacing: 0) {
@@ -2862,7 +3027,9 @@ private struct PlayerViewImpl: View {
             .buttonStyle(.plain)
             .accessibilityLabel(selectedAspectMode.accessibilityLabel)
         }
-        .padding(.horizontal, 18)
+        // Build 66 (W6, item 11): no horizontal padding — the row
+        // now sits inside the slim bar next to the identity
+        // segment and the play/pause + guide controls.
     }
 
     private static let speedRateOptions: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
@@ -2882,19 +3049,23 @@ private struct PlayerViewImpl: View {
         return L("player.sleep_timer.short")
     }
 
-    /// One bottom-row control: SF Symbol over a small caption, equal width so
-    /// the five controls share the row evenly.
+    /// One bottom-row control: SF Symbol over a small caption.
+    /// Build 66 (W6, item 11): compact fixed width (was
+    /// `maxWidth: .infinity`, sharing a full-width row) so the five
+    /// controls fit the slim bar's single row beside the identity
+    /// segment; same icon, same caption text, same 44pt minimum
+    /// hit height.
     private func bottomRowLabel(systemName: String, caption: String) -> some View {
-        VStack(spacing: 3) {
+        VStack(spacing: 2) {
             Image(systemName: systemName)
-                .font(.system(size: 19, weight: .semibold))
+                .font(.system(size: 17, weight: .semibold))
             Text(caption)
                 .font(.caption2.weight(.semibold))
                 .lineLimit(1)
         }
         .foregroundStyle(.white.opacity(0.96))
         .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
-        .frame(maxWidth: .infinity, minHeight: 44)
+        .frame(width: 48, minHeight: 44)
         .contentShape(Rectangle())
     }
 
@@ -3036,74 +3207,6 @@ private struct PlayerViewImpl: View {
         resetTimer()
     }
 
-    /// iOS native player stili: kartsız, düz düzen; okunabilirlik alt gradient'ten gelir.
-    private var scrubTimelineCard: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Text(isScrubbing ? formatMs(Int(scrubValue * Double(player.durationMs))) : formatMs(Int(player.timeMs)))
-                .font(.footnote.monospacedDigit().weight(.semibold))
-                .foregroundStyle(.white.opacity(0.95))
-                .shadow(color: .black.opacity(0.35), radius: 2, y: 0.5)
-                .frame(minWidth: 52, alignment: .leading)
-
-            PlayerTimeline(
-                value: sliderBinding,
-                isSeekable: effectiveSeekable,
-                onEditingChanged: { editing in
-                    if editing {
-                        if isFastForwarding { applySpeedHoldEnded() }
-                        resetTimer()
-                        isScrubbing = true
-                        scrubValue = displayedSliderPosition
-                    } else {
-                        let target = scrubValue
-                        lockedSliderValue = target
-                        player.seek(to: Float(target))
-                        isScrubbing = false
-                        resetTimer()
-                        sliderUnlockGeneration += 1
-                        let gen = sliderUnlockGeneration
-                        Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 2_800_000_000)
-                            guard gen == sliderUnlockGeneration else { return }
-                            lockedSliderValue = nil
-                        }
-                    }
-                },
-                onDragValue: { dragVal in
-                    scrubValue = dragVal
-                    // Each drag tick postpones auto-hide; otherwise a >5 s scrub would
-                    // remove the timeline mid-gesture (drag cancelled, seek lost).
-                    resetTimer()
-                }
-            )
-            .layoutPriority(1)
-            // DragGesture VoiceOver altında erişilemez; kaydırıcıyı ayarlanabilir öğe
-            // olarak sun (yan parlaklık/ses slider'larıyla aynı desen). ±15 sn adım,
-            // mevcut goforward/gobackward.15 butonlarıyla tutarlı.
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(L("player.a11y.playback_position"))
-            .accessibilityValue("\(formatMs(Int(player.timeMs))) / \(totalDurationLabel)")
-            .accessibilityAdjustableAction { direction in
-                guard effectiveSeekable else { return }
-                resetTimer()
-                switch direction {
-                // Build 61 (B14, V1): step matches the center cluster's ±10s.
-                case .increment: player.jump(seconds: 10)
-                case .decrement: player.jump(seconds: -10)
-                @unknown default: break
-                }
-            }
-
-            Text(totalDurationLabel)
-                .font(.footnote.monospacedDigit().weight(.semibold))
-                .foregroundStyle(.white.opacity(0.95))
-                .shadow(color: .black.opacity(0.35), radius: 2, y: 0.5)
-                .frame(minWidth: 52, alignment: .trailing)
-        }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 6)
-    }
-
     private var totalDurationLabel: String {
         if isLiveStream { return L("player.live_badge") }
         if player.durationMs > 500 { return formatMs(Int(player.durationMs)) }
@@ -3207,214 +3310,6 @@ private struct ConditionalClip: ViewModifier {
     let active: Bool
     @ViewBuilder func body(content: Content) -> some View {
         if active { content.clipped() } else { content }
-    }
-}
-
-struct LiveChannelBrowserScreen: View {
-    let sections: [LiveChannelCategorySection]
-    let currentStreamId: Int?
-    let onSelectChannel: (DBLiveStream) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var selectedCategoryId: String
-    @State private var highlightedStreamId: Int
-
-    init(
-        sections: [LiveChannelCategorySection],
-        currentStreamId: Int?,
-        onSelectChannel: @escaping (DBLiveStream) -> Void
-    ) {
-        self.sections = sections
-        self.currentStreamId = currentStreamId
-        self.onSelectChannel = onSelectChannel
-        let firstSectionId = sections.first?.id ?? "all"
-        let categoryIdForCurrentStream: String? = {
-            guard let sid = currentStreamId else { return nil }
-            return sections.first(where: { $0.streams.contains(where: { $0.streamId == sid }) })?.id
-        }()
-        let initialCategoryId = categoryIdForCurrentStream ?? firstSectionId
-        let initialStreamId = currentStreamId
-            ?? sections.first(where: { $0.id == initialCategoryId })?.streams.first?.streamId
-            ?? sections.first?.streams.first?.streamId
-            ?? 0
-        _selectedCategoryId = State(initialValue: initialCategoryId)
-        _highlightedStreamId = State(initialValue: initialStreamId)
-    }
-
-    private var activeSection: LiveChannelCategorySection? {
-        sections.first(where: { $0.id == selectedCategoryId }) ?? sections.first
-    }
-
-    private var currentStreams: [DBLiveStream] {
-        activeSection?.streams ?? []
-    }
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                categoryHorizontalBar
-                channelListColumn
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .navigationTitle(L("dashboard.channels"))
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(true)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbarBackground(Color.black, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.backward")
-                        .font(.body.weight(.semibold))
-                }
-                .tint(.white)
-                .buttonStyle(.plain)
-                .accessibilityLabel(L("common.back"))
-            }
-        }
-        .onAppear {
-            AppDelegate.orientationLock = .landscape
-            requestLandscapeGeometryUpdateIfPossible()
-            syncSelectionToCurrentStreamIfPossible()
-        }
-        .onDisappear {
-            AppDelegate.orientationLock = .allButUpsideDown
-        }
-    }
-
-    /// Seçili kanal `currentStreams` içindeyse listeyle hizala (ilk açılış ve kategori değişimi).
-    private func scrollChannelListToHighlightedItem(proxy: ScrollViewProxy) {
-        guard let stream = currentStreams.first(where: { $0.streamId == highlightedStreamId }) else { return }
-        Task { @MainActor in
-            // LazyVStack ölçümü için kısa gecikme; aksi halde scrollTo bazen etkisiz kalıyor.
-            try? await Task.sleep(nanoseconds: 100_000_000)
-            withAnimation(.easeOut(duration: 0.25)) {
-                proxy.scrollTo(stream.id, anchor: .center)
-            }
-        }
-    }
-
-    private func requestLandscapeGeometryUpdateIfPossible() {
-        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
-        let prefs = UIWindowScene.GeometryPreferences.iOS(
-            interfaceOrientations: UIInterfaceOrientationMask.landscape
-        )
-        scene.requestGeometryUpdate(prefs) { _ in }
-    }
-
-    private func syncSelectionToCurrentStreamIfPossible() {
-        guard let sid = currentStreamId else { return }
-        guard let section = sections.first(where: { $0.streams.contains(where: { $0.streamId == sid }) }) else { return }
-        if selectedCategoryId != section.id {
-            selectedCategoryId = section.id
-        }
-        if highlightedStreamId != sid {
-            highlightedStreamId = sid
-        }
-    }
-
-    /// Başlığın altında yatay kaydırmalı kategoriler. Yatay ScrollView dikeyde şişmemesi için `fixedSize` kullanılır.
-    private var categoryHorizontalBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: 9) {
-                ForEach(sections) { section in
-                    Button {
-                        selectedCategoryId = section.id
-                    } label: {
-                        Text(section.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(selectedCategoryId == section.id ? Color.accentColor : Color.white.opacity(0.12))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .background(Color.white.opacity(0.06))
-    }
-
-    private var channelListColumn: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 6) {
-                    ForEach(currentStreams) { stream in
-                        channelListRow(stream: stream)
-                            .id(stream.id)
-                    }
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 8)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.white.opacity(0.06))
-            .onAppear {
-                scrollChannelListToHighlightedItem(proxy: proxy)
-            }
-            .onChange(of: selectedCategoryId) { _, _ in
-                scrollChannelListToHighlightedItem(proxy: proxy)
-            }
-            .onChange(of: highlightedStreamId) { _, _ in
-                scrollChannelListToHighlightedItem(proxy: proxy)
-            }
-        }
-    }
-
-    private func channelListRow(stream: DBLiveStream) -> some View {
-        let isSelected = stream.streamId == highlightedStreamId
-        let isCurrent = stream.streamId == currentStreamId
-        return Button {
-            highlightedStreamId = stream.streamId
-            onSelectChannel(stream)
-        } label: {
-            HStack(spacing: 8) {
-                CachedImage(
-                    url: stream.streamIcon.flatMap { URL(string: $0) },
-                    width: 30,
-                    height: 30,
-                    cornerRadius: 7,
-                    iconName: "tv",
-                    loadProfile: .standard
-                )
-                Text(stream.name)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                if isCurrent {
-                    Text(L("player.live_on_air"))
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.accentColor, in: Capsule())
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(channelRowBackground(isSelected: isSelected))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func channelRowBackground(isSelected: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(isSelected ? Color.white.opacity(0.18) : Color.white.opacity(0.08))
     }
 }
 

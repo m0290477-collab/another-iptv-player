@@ -201,9 +201,11 @@ struct MiniPlayerChrome: View {
                 HStack(alignment: .top) {
                     Group {
                         if isLoading {
-                            ProgressView()
-                                .progressViewStyle(.circular)
-                                .tint(.white)
+                            // Build 66 (W6, item 13): branded loader
+                            // VIEW swap only — same `isLoading`
+                            // condition, same 32x32 slot; the mini
+                            // player's loading logic is untouched.
+                            BrandedLoader(size: 20)
                                 .frame(width: 32, height: 32)
                         } else {
                             Button {
