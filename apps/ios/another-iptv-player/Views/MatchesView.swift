@@ -132,6 +132,21 @@ struct MatchesView: View {
 
     /// Item 12c: team search sheet.
     @State private var showTeamSearch = false
+
+    /// Build 66 (item 12): sports-section first-entry explainer —
+    /// shown ONCE per sport. The literal keys are
+    /// `SportsExplainerFlag.key(for:)` ("explainer.seen." + the
+    /// sport's raw value); @AppStorage needs literals, so the two
+    /// must stay in step.
+    @AppStorage("explainer.seen.soccer") private var explainerSeenSoccer = false
+    @AppStorage("explainer.seen.nfl") private var explainerSeenNFL = false
+    @AppStorage("explainer.seen.nba") private var explainerSeenNBA = false
+    /// The sport whose explainer sheet is currently presented.
+    @State private var explainerSport: MatchSport?
+    /// The last sport the explainer was presented for — by the
+    /// time a sheet's `onDismiss` runs the item binding is already
+    /// nil, so a swipe dismissal recovers its sport from here.
+    @State private var lastExplainerSport: MatchSport?
     /// Item 10d: the My Teams strip data.
     @State private var myTeams: [MyTeamEntry] = []
     @ObservedObject private var followStore = FollowedTeamsStore.shared
@@ -174,6 +189,27 @@ struct MatchesView: View {
         .sheet(isPresented: $showTeamSearch) {
             NavigationStack { TeamSearchView() }
         }
+        // Build 66 (item 12): the first-entry explainer sheet for
+        // the selected sport. EVERY dismissal path marks the sport
+        // seen: both buttons call `markExplainerSeen` directly, and
+        // a swipe lands in `onDismiss`, which marks the last
+        // presented sport seen (marking twice is harmless).
+        .sheet(item: $explainerSport, onDismiss: {
+            if let sport = lastExplainerSport {
+                markExplainerSeen(sport)
+            }
+        }) { sport in
+            SportsExplainerView(sport: sport) {
+                markExplainerSeen(sport)
+                explainerSport = nil
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .onAppear { presentExplainerIfNeeded(for: selectedSport) }
+        .onChange(of: selectedSport) { _, newSport in
+            presentExplainerIfNeeded(for: newSport)
+        }
         .task(id: followStore.teams) { await loadMyTeams() }
         // Auto-refresh of the VISIBLE tab only: `.task(id:)` restarts
         // when the tab changes and is cancelled when the view
@@ -185,6 +221,45 @@ struct MatchesView: View {
                 if Task.isCancelled { break }
                 await model.refresh(sport: selectedSport)
             }
+        }
+    }
+
+    // MARK: First-entry explainer (build 66, item 12)
+
+    private func explainerSeen(_ sport: MatchSport) -> Bool {
+        switch sport {
+        case .soccer: return explainerSeenSoccer
+        case .nfl: return explainerSeenNFL
+        case .nba: return explainerSeenNBA
+        }
+    }
+
+    private func markExplainerSeen(_ sport: MatchSport) {
+        switch sport {
+        case .soccer: explainerSeenSoccer = true
+        case .nfl: explainerSeenNFL = true
+        case .nba: explainerSeenNBA = true
+        }
+    }
+
+    /// Present the explainer for `sport` when it has never been
+    /// shown for that sport. Called on first appearance and on
+    /// every sport-tab switch. NEVER during playback: presentation
+    /// requires the player-overlay snapshot to be empty (the same
+    /// static count the goal-celebration suppression reads —
+    /// `PlayerOverlayController.presentationActiveCount`), checked
+    /// both now and again after the settle delay.
+    private func presentExplainerIfNeeded(for sport: MatchSport) {
+        guard !explainerSeen(sport), explainerSport == nil else { return }
+        guard PlayerOverlayController.presentationActiveCount == 0 else { return }
+        // Small delay so the screen settles first.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            guard !explainerSeen(sport), explainerSport == nil,
+                  !showTeamSearch,
+                  PlayerOverlayController.presentationActiveCount == 0
+            else { return }
+            lastExplainerSport = sport
+            explainerSport = sport
         }
     }
 
