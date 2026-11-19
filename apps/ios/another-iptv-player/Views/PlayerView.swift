@@ -13,7 +13,7 @@ struct LiveChannelCategorySection: Identifiable, Equatable {
 
 extension LiveChannelCategorySection {
     /// Full live queue + per-category sections for the current Xtream playlist.
-    /// Players opened outside the main channel list (EPG guide, programme sheet)
+    /// Players opened outside the main channel list
     /// use this so prev/next channel and the channel side panel keep working instead
     /// of being disabled by a single-item queue.
     @MainActor
@@ -62,10 +62,6 @@ struct PlayerView: View {
     /// Build 61 (FA, F-2/G2): the active playlist's parsed custom
     /// headers; reaches the engine's KSOptions alongside the UA.
     var customHeaders: [String: String] = [:]
-    /// EPG lookup key for the live channel; drives the in-player now-playing strip.
-    var epgChannelKey: String? = nil
-    /// Catch-up playback must not write watch history (would overwrite the live row).
-    var suppressWatchHistory: Bool = false
 
     var canGoToPreviousEpisode: Bool = false
     var canGoToNextEpisode: Bool = false
@@ -104,8 +100,6 @@ struct PlayerView: View {
             containerExtension: containerExtension,
             userAgent: userAgent,
             customHeaders: customHeaders,
-            epgChannelKey: epgChannelKey,
-            suppressWatchHistory: suppressWatchHistory,
             isFavorite: isFavorite,
             onToggleFavorite: onToggleFavorite,
             canGoToPreviousEpisode: canGoToPreviousEpisode,
@@ -145,8 +139,6 @@ private struct PlayerViewImpl: View {
     var userAgent: String? = nil
     /// Build 61 (FA, F-2/G2): playlist custom headers (see PlayerView).
     var customHeaders: [String: String] = [:]
-    var epgChannelKey: String? = nil
-    var suppressWatchHistory: Bool = false
 
     /// Opsiyonel favori butonu — yalnız ikisi de set ise topChrome'da gösterilir.
     var isFavorite: Bool? = nil
@@ -184,13 +176,6 @@ private struct PlayerViewImpl: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.layoutDirection) private var layoutDirection
-    @Environment(\.epgSnapshot) private var epgSnapshot
-
-    /// Current programme for the live channel, if EPG data is available.
-    private var currentNowNext: EPGNowNext? {
-        guard isLiveStream, let key = epgChannelKey else { return nil }
-        return epgSnapshot?[key]
-    }
 
     @State private var showControls = true
     @State private var timer: Timer?
@@ -809,9 +794,6 @@ private struct PlayerViewImpl: View {
             }
         }
         .onChange(of: playbackPresentationKey) { _, _ in
-            player.setPlaybackPresentation(makePresentation())
-        }
-        .onChange(of: currentNowNext?.now?.id) { _, _ in
             player.setPlaybackPresentation(makePresentation())
         }
         // Build 61 (FA, X5): the zap event bumps the sweep trigger;
@@ -2129,25 +2111,20 @@ private struct PlayerViewImpl: View {
         commitVideoPanClamp()
     }
 
-    /// Builds the Now Playing presentation, folding in the current EPG programme
-    /// (used as the Now Playing title on live channels).
+    /// Builds the Now Playing presentation from the channel /
+    /// content's own metadata only. Build 68: no EPG programme
+    /// is folded in — the guide is removed and the player is a
+    /// pure player.
     private func makePresentation() -> PlaybackPresentation {
-        let programme = currentNowNext?.now
         return PlaybackPresentation(
             title: title,
             subtitle: subtitle,
             artworkURL: artworkURL,
-            isLive: isLiveStream,
-            programmeTitle: programme?.title,
-            programmeInterval: programme.map { DateInterval(start: $0.start, end: max($0.start, $0.stop)) }
+            isLive: isLiveStream
         )
     }
 
     private func saveWatchHistory(tags: WatchHistoryTags? = nil) {
-        // Catch-up (timeshift) sessions must not persist history: the key would
-        // collide with the channel's live row and its resume time is meaningless
-        // once the archive window rolls past.
-        if suppressWatchHistory { return }
         let resolvedTags = tags ?? WatchHistoryTags(
             playlistId: playlistId,
             streamId: streamId,
@@ -2625,9 +2602,10 @@ private struct PlayerViewImpl: View {
         // Build 66 (W6, item 11): the Build 65 Rich Bar's
         // stacked rows (identity row + control row + VOD seek
         // card, plus the standalone B14 V5 Up Next strip above
-        // it) are restyled into ONE slim blurred bar. The Up
-        // Next programme is folded into the bar's identity
-        // segment (title only, same EPG snapshot); every
+        // it) are restyled into ONE slim blurred bar. (Build 68:
+        // the Up Next / programme content the identity segment
+        // once folded in is REMOVED with the TV Guide — the bar
+        // is identity + transport + settings only.) Every
         // control keeps its exact action, menu and gesture
         // behavior, and the bar rides the same show/hide
         // chrome as before.
@@ -2819,30 +2797,13 @@ private struct PlayerViewImpl: View {
     }
 
     /// The thin (3pt) red-orange line at the bar's TOP edge.
-    /// Live: programme progress from the same EPG snapshot the
-    /// Rich Bar's identity capsule read — non-interactive, exactly
-    /// as before. VOD: this IS the seek bar (see `slimBarSeekLine`).
+    /// VOD: this IS the seek bar (see `slimBarSeekLine`). Live:
+    /// no line — build 68 removed the EPG programme-progress
+    /// line with the TV Guide; a live stream has no seek
+    /// position and the pure player shows none.
     @ViewBuilder
     private var slimBarProgressLine: some View {
-        if isLiveStream {
-            if let now = currentNowNext?.now,
-               let fraction = now.progress(at: EPGOffsetStore.lookupNow()) {
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.22)).frame(height: 3)
-                        Capsule().fill(AppTheme.accentStart)
-                            .frame(
-                                width: proxy.size.width * CGFloat(min(max(fraction, 0), 1)),
-                                height: 3
-                            )
-                    }
-                    .frame(height: 3)
-                }
-                .frame(height: 3)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-            }
-        } else {
+        if !isLiveStream {
             slimBarSeekLine
         }
     }
@@ -2928,15 +2889,15 @@ private struct PlayerViewImpl: View {
 
     /// Build 66 (W6, item 11): the slim bar's identity segment —
     /// artwork thumbnail + channel/content name on the first
-    /// line; for live, the CURRENT programme title with its time
-    /// range and the NEXT programme (title only) after it, all
-    /// from the same EPG snapshot (`currentNowNext`) the Rich Bar
-    /// read, plus the small LIVE badge (the existing live logic:
+    /// line, plus the small LIVE badge (the existing live logic:
     /// `isLiveStream` + `L("player.live_badge")`, with the red dot
-    /// the Rich Bar identity row already used). Programme progress
-    /// moved to the bar's top-edge line. VOD shows its real
-    /// subtitle line when present, and the current / total time —
-    /// the exact labels the old scrub card rendered
+    /// the Rich Bar identity row already used). Build 68: the
+    /// live second line no longer shows any EPG programme title,
+    /// time range or Up Next — the guide is removed and the bar
+    /// carries the channel's own name/badge only (a real subtitle
+    /// still shows when the caller supplied one). VOD shows its
+    /// real subtitle line when present, and the current / total
+    /// time — the exact labels the old scrub card rendered
     /// (`formatMs` / `totalDurationLabel`).
     private var slimBarIdentitySegment: some View {
         HStack(spacing: 10) {
@@ -2978,29 +2939,7 @@ private struct PlayerViewImpl: View {
                         .fixedSize(horizontal: true, vertical: false)
                     }
                 }
-                if isLiveStream, let now = currentNowNext?.now {
-                    HStack(spacing: 6) {
-                        Text(now.title)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.92))
-                            .lineLimit(1)
-                        Text(EPGTimeFormat.range(now.start, now.stop))
-                            .font(.caption2.weight(.medium))
-                            .monospacedDigit()
-                            .foregroundStyle(.white.opacity(0.65))
-                            .fixedSize(horizontal: true, vertical: false)
-                        if let next = currentNowNext?.next {
-                            Text(L("player.upnext"))
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(.white.opacity(0.6))
-                                .fixedSize(horizontal: true, vertical: false)
-                            Text(next.title)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.8))
-                                .lineLimit(1)
-                        }
-                    }
-                } else if !isLiveStream {
+                if !isLiveStream {
                     HStack(spacing: 6) {
                         if let subtitle, !subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text(subtitle)

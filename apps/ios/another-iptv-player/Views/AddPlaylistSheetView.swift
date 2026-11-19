@@ -477,18 +477,8 @@ struct AddPlaylistSheetView: View {
             setStage(.loadingChannels, .done)
             setStage(.loadingMoviesSeries, .done)
             ProviderExpiryStore.record(playlistId: probed.playlist.id, expDate: probed.response.userInfo?.expDate)
-            // Build 67 (W8, F5): the same bounded guide stage the
-            // staged service runs — a real attempt capped at
-            // 30 s, never an indefinite "Loading the guide". On
-            // failure the stage shows failed and the load
-            // continues in the background; this sheet's contract
-            // is Add & Activate with no summary card, so the add
-            // completes either way and the guide's outcome lands
-            // on the playlist's EPG source record, where playlist
-            // settings surface it with a retry.
-            _ = await PlaylistValidationService.runAddFlowGuideStage(playlist: probed.playlist) { stage, state in
-                self.setStage(stage, state)
-            }
+            // Build 68: no guide stage follows the content stages
+            // — the TV Guide is removed, so the add completes here.
             await MainActor.run {
                 self.isLoading = false
                 self.progressMessage = nil
@@ -569,7 +559,7 @@ struct AddPlaylistSheetView: View {
         )
 
         // Build 61 (B10, Q17 + L1): the staged validation service
-        // (probe → import → guide), then Add & Activate as before.
+        // (probe → import), then Add & Activate as before.
         resetStages()
         do {
             let summary = try await PlaylistValidationService.importM3U(

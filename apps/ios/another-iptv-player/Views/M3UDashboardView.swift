@@ -10,7 +10,6 @@ struct M3UDashboardView: View {
 
     @ObservedObject private var store = M3UContentStore.shared
     @ObservedObject private var favorites = M3UFavoriteStore.shared
-    @ObservedObject private var epgStore = EPGStore.shared
     @StateObject private var playerOverlay = PlayerOverlayController()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -110,7 +109,6 @@ struct M3UDashboardView: View {
             .zIndex(10_000)
         }
         .environmentObject(playerOverlay)
-        .environment(\.epgSnapshot, epgStore.snapshot)
         // G5 (B13): the shared offline indicator, same as the
         // Xtream dashboard. Build 66 (item 10): gated on no player
         // presentation — while anything plays, nothing appears
@@ -123,8 +121,6 @@ struct M3UDashboardView: View {
         .task(id: playlist.id) {
             favorites.track(playlistId: playlist.id)
             await store.loadPlaylist(playlist)
-            epgStore.setActivePlaylist(playlist)
-            await epgStore.refreshIfStale(playlist: playlist)
             // Build 61 (B8, B3 flag c): consume pending playback
             // (T2 play-last-channel launch-resume) —
             // mirrors DashboardView so M3U playlists honor it too.

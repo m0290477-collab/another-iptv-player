@@ -207,9 +207,6 @@ struct PlaylistGateView: View {
                 // Build 61 (B10, L2/L3): the end-of-add summary.
                 AddPlaylistSummaryView(
                     summary: summary,
-                    onRetryFailedStage: summary.failedStage == nil ? nil : {
-                        Task { await retryGuideStage() }
-                    },
                     onStartWatching: {
                         addSummary = nil
                         addStages = [:]
@@ -401,27 +398,6 @@ struct PlaylistGateView: View {
 
     private func resetStages() {
         addStages = Dictionary(uniqueKeysWithValues: PlaylistValidationService.Stage.allCases.map { ($0, .pending) })
-    }
-
-    /// L3 retry: re-runs ONLY the guide stage for the summarized
-    /// playlist; success clears the summary's failed-stage mark.
-    private func retryGuideStage() async {
-        guard let summary = addSummary else { return }
-        let failed = await PlaylistValidationService.runGuideStage(playlist: summary.playlist) { stage, state in
-            if state == .done || state == .failed {
-                self.addSummary = PlaylistValidationService.AddSummary(
-                    playlist: summary.playlist,
-                    expiryDate: summary.expiryDate,
-                    liveCount: summary.liveCount,
-                    movieCount: summary.movieCount,
-                    seriesCount: summary.seriesCount,
-                    failedStage: state == .done ? nil : .loadingGuide,
-                    compatibility: summary.compatibility
-                )
-            }
-            _ = stage
-        }
-        _ = failed
     }
 
     /// Build 61 (B10): the optional connection-fields group shared
@@ -1164,9 +1140,10 @@ struct PlaylistGateView: View {
 
     private func syncAndSaveXtream(newPlaylist: Playlist, client: XtreamAPIClient) async {
         // Build 61 (B10, L1): the content stages run with the real
-        // importer; the guide stage and the Z1 probe follow, then
-        // the L2 summary (Start Watching enters the app — the
-        // round-11 direct-entry rule now lands via the summary).
+        // importer; the Z1 probe follows, then the L2 summary
+        // (Start Watching enters the app — the round-11
+        // direct-entry rule now lands via the summary). Build 68:
+        // no guide stage — the TV Guide is removed.
         if addStages.isEmpty { resetStages(); setStage(.connecting, .done); setStage(.verifying, .done) }
         setStage(.loadingChannels, .active)
         do {
@@ -1194,17 +1171,6 @@ struct PlaylistGateView: View {
             setStage(.loadingMoviesSeries, .done)
 
             let compatibility = await PlaylistValidationService.probeCompatibility(playlist: newPlaylist)
-            // Build 67 (coordinator, F5): the same bounded guide
-            // stage as the service path (runAddFlowGuideStage) —
-            // build 63's instant handoff marked the stage done
-            // before a byte was fetched and hard-wired
-            // guideFailed = false, so a stalled/failed guide could
-            // never reach this summary. Now a timeout/failure is
-            // the truthful L3 partial success and the load
-            // continues in the background inside the helper.
-            let guideFailed = await PlaylistValidationService.runAddFlowGuideStage(playlist: newPlaylist) { stage, state in
-                self.setStage(stage, state)
-            }
             let counts = await PlaylistValidationService.importedCounts(playlistId: newPlaylist.id, kind: .xtream)
             let expiry = ProviderExpiryStore.expiryDate(playlistId: newPlaylist.id)
 
@@ -1216,9 +1182,8 @@ struct PlaylistGateView: View {
                     playlist: newPlaylist,
                     expiryDate: expiry,
                     liveCount: counts.live, movieCount: counts.movies, seriesCount: counts.series,
-                    failedStage: guideFailed ? .loadingGuide : nil,
-                    compatibility: compatibility,
-                    guideLoadingInBackground: guideFailed
+                    failedStage: nil,
+                    compatibility: compatibility
                 )
             }
         } catch {
@@ -1289,7 +1254,7 @@ struct PlaylistGateView: View {
 
         // Build 61 (B10, Q17 + L1/L2/L3): the staged validation
         // service — probe (fetch + parse) BEFORE anything is
-        // saved, the shared importer, the guide stage, the Z1
+        // saved, the shared importer, the Z1
         // probe, then the summary. A failed probe saves nothing.
         resetStages()
         do {
@@ -1391,8 +1356,7 @@ struct PlaylistGateView: View {
         }
 
         // Build 61 (B10): the staged finisher (content stages →
-        // guide → Z1 → L2 summary) — the same end-of-add as the
-        // Xtream form. A sync failure surfaces the error instead
+        // Z1 → L2 summary) — the same end-of-add as the Xtream form. A sync failure surfaces the error instead
         // of falling back, since get.php is likely blocked on
         // such panels anyway (syncAndSaveXtream shows it).
         await syncAndSaveXtream(newPlaylist: playlist, client: client)
