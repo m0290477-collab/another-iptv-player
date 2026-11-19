@@ -22,26 +22,6 @@ struct PlaylistRequest: Queryable, Equatable {
     }
 }
 
-struct CategoriesRequest: Queryable, Equatable {
-    static var defaultValue: [DBCategory] { [] }
-    
-    let playlistId: UUID
-    let type: String
-    
-    func publisher(in appDatabase: AppDatabase) -> AnyPublisher<[DBCategory], Never> {
-        ValueObservation
-            .tracking { db in
-                try DBCategory
-                    .filter(Column("playlistId") == playlistId && Column("type") == type)
-                    .order(Column("sortIndex"))
-                    .fetchAll(db)
-            }
-            .publisher(in: appDatabase.reader)
-            .catch { _ in Just([]) }
-            .eraseToAnyPublisher()
-    }
-}
-
 struct LiveStreamsRequest: Queryable, Equatable {
     static var defaultValue: [LiveStreamWithCategory] { [] }
     

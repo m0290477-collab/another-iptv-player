@@ -81,43 +81,6 @@ struct EPGNowNextLine: View {
     }
 }
 
-// MARK: - Player programme strip (top chrome)
-
-/// Programme title stacked above its "HH:mm – HH:mm" range and a progress capsule,
-/// shown while watching a live channel.
-struct PlayerProgrammeStrip: View {
-    let programme: EPGProgramme
-    var tint: Color = .white
-
-    /// Width the progress capsule fills within the strip.
-    private let barWidth: CGFloat = 188
-
-    var body: some View {
-        // F1 (B13): offset-shifted "now", matching the displayed range.
-        let fraction = programme.progress(at: EPGOffsetStore.lookupNow()) ?? 0
-
-        VStack(alignment: .leading, spacing: 5) {
-            Text(programme.title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(.white)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Text(EPGTimeFormat.range(programme.start, programme.stop))
-                .font(.caption2.weight(.medium))
-                .monospacedDigit()
-                .foregroundColor(.white.opacity(0.72))
-
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.22)).frame(width: barWidth, height: 3)
-                Capsule().fill(tint).frame(width: max(0, barWidth * fraction), height: 3)
-            }
-            .frame(width: barWidth, height: 3)
-        }
-        .shadow(color: .black.opacity(0.55), radius: 3, y: 1)
-    }
-}
-
 // MARK: - Time formatting
 
 enum EPGTimeFormat {

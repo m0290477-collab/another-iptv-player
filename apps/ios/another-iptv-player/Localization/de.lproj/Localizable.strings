@@ -5,19 +5,15 @@
 "common.delete" = "Löschen";
 "common.close" = "Schließen";
 "common.error" = "Fehler";
-"common.yes" = "Ja";
-"common.back" = "Zurück";
 "common.search" = "Suchen";
 "common.try_again" = "Erneut versuchen";
 "common.unknown_error" = "Unbekannter Fehler.";
-"common.days_format" = "%d Tage";
 "common.loading" = "Wird geladen...";
 "common.confirm_delete_yes" = "Ja, löschen";
 "common.edit" = "Bearbeiten";
 
 // MARK: - Playlist list
 "playlists.title" = "Playlists";
-"playlists.empty.title" = "Keine Playlists gefunden";
 "playlists.empty.message" = "Füge deine erste IPTV-Playlist hinzu, um Live-TV, Filme und Serien anzusehen.";
 "playlists.empty.add_button" = "Neue Playlist hinzufügen";
 "playlists.local_file" = "Lokale Datei";
@@ -25,15 +21,11 @@
 "playlists.delete.message" = "Möchtest du diese Playlist und alle Inhalte wirklich löschen?";
 
 // MARK: - Playlist type picker
-"playlist_type.title" = "Playlist hinzufügen";
 "playlist_type.section" = "Playlist-Typ";
 "playlist_type.xtream.title" = "Xtream Code";
-"playlist_type.xtream.subtitle" = "Server-URL, Benutzername und Passwort verwenden.";
 "playlist_type.m3u.title" = "M3U / M3U8";
-"playlist_type.m3u.subtitle" = "Externe URL oder lokale .m3u / .m3u8 Datei.";
 
 // MARK: - Add playlist (Xtream)
-"add_playlist.xtream.title_new" = "Playlist hinzufügen";
 "add_playlist.xtream.title_edit" = "Playlist bearbeiten";
 "add_playlist.section.info" = "Playlist-Informationen";
 "add_playlist.section.credentials" = "Zugangsdaten";
@@ -47,14 +39,10 @@
 "add_playlist.verifying" = "Wird überprüft...";
 "add_playlist.auth_failed" = "Authentifizierung fehlgeschlagen. Zugangsdaten prüfen.";
 "add_playlist.fetching_categories" = "Kategorien werden heruntergeladen...";
-"add_playlist.fetching_live" = "Live-Streams werden heruntergeladen...";
-"add_playlist.fetching_movies" = "Filme werden heruntergeladen...";
-"add_playlist.fetching_series" = "Serien werden heruntergeladen...";
 "add_playlist.saving_db" = "Wird gespeichert... Bitte warten.";
 "add_playlist.download_save_error" = "Fehler beim Herunterladen/Speichern: %@";
 
 // MARK: - Add playlist (M3U)
-"add_m3u.title_new" = "M3U hinzufügen";
 "add_m3u.title_edit" = "M3U bearbeiten";
 "add_m3u.name_placeholder" = "Playlist-Name (z.B. Meine M3U)";
 "add_m3u.section.source" = "Quelle";
@@ -138,9 +126,7 @@
 "favorites.remove" = "Aus Favoriten entfernen";
 
 // MARK: - Settings (common)
-"settings.back_to_list" = "Zurück zu Playlists";
 "settings.refresh_all" = "Alle Inhalte neu laden";
-"settings.player.title" = "Player-Einstellungen";
 "settings.player.pip.title" = "Bild-in-Bild";
 "settings.player.pip.desc" = "Erlaubt Bild-in-Bild-Modus";
 "settings.player.background.title" = "Im Hintergrund weiterspielen";
@@ -151,9 +137,6 @@
 "settings.player.autonext.desc" = "Wenn eine Folge endet, startet die nächste automatisch";
 "player.autonext.countdown" = "Nächste Folge in %d";
 "settings.playlist.info.title" = "Playlist-Info";
-"settings.playlist.name" = "Name";
-"settings.playlist.type" = "Typ";
-"settings.playlist.server_url" = "Server-URL";
 "settings.playlist.username" = "Benutzername";
 "settings.playlist.password" = "Passwort";
 "settings.playlist.subscription" = "Restzeit";
@@ -161,26 +144,16 @@
 "settings.playlist.max_connection" = "Maximale Verbindungen";
 "settings.playlist.unlimited" = "Unbegrenzt";
 "settings.playlist.unknown" = "Unbekannt";
-"settings.playlist.unlimited_or_unknown" = "Unbegrenzt / Unbekannt";
 "settings.playlist.expired" = "Abgelaufen";
 "settings.playlist.fetching_info" = "Abonnementdaten werden geladen...";
 "settings.playlist.info_error" = "Daten konnten nicht geladen werden: %@";
 
-"settings.stats.title" = "Inhaltsstatistiken";
-"settings.stats.live_count" = "Anzahl Live-Kanäle";
-"settings.stats.movie_count" = "Anzahl Filme";
-"settings.stats.series_count" = "Anzahl Serien";
-"settings.stats.channel_count" = "Anzahl Kanäle";
 "settings.stats.group_count" = "Anzahl Gruppen";
 "settings.stats.history_count" = "Wiedergabeverlauf";
-"settings.stats.history_items_format" = "%d Einträge";
 
-"settings.server.title" = "Serverinformationen";
 "settings.server.timezone" = "Zeitzone";
 "settings.server.message" = "Servernachricht";
 
-"settings.content_management.title" = "Inhaltsverwaltung";
-"settings.filter_adult.title" = "Erwachseneninhalte filtern";
 "settings.filter_adult.xtream_desc" = "Nach Änderung müssen Inhalte neu geladen werden";
 "settings.filter_adult.m3u_desc" = "Kanäle/Gruppen mit XXX, 18+, adult im Namen werden ausgeblendet";
 
@@ -188,12 +161,8 @@
 "settings.about.version" = "Super X Pro Max · Version";
 
 // MARK: - M3U settings
-"settings.m3u.type_label" = "M3U / M3U8";
 "settings.m3u.refresh_url" = "Von URL neu laden";
 "settings.m3u.refresh_file" = "Aus Datei neu laden";
-"settings.m3u.source_url" = "Quell-URL";
-"settings.m3u.source" = "Quelle";
-"settings.m3u.epg_url" = "EPG-URL (Info)";
 "settings.m3u.parsing" = "Wird analysiert...";
 "settings.m3u.saving" = "Wird gespeichert...";
 "settings.m3u.reading_file" = "Datei wird gelesen...";
@@ -201,13 +170,9 @@
 
 // MARK: - Language
 "settings.language.title" = "App-Sprache";
-"settings.language.section" = "Sprache";
 "settings.language.system" = "Systemsprache";
 
 // MARK: - Stream types
-"stream.live" = "LIVE";
-"stream.vod" = "Film";
-"stream.series" = "Serie";
 "stream.m3u" = "M3U";
 
 // MARK: - Errors
@@ -245,8 +210,6 @@
 "download.status.queued" = "In Warteschlange";
 "download.status.failed" = "Fehlgeschlagen";
 "download.play" = "Abspielen";
-"download.size_format" = "%@ / %@";
-"download.settings" = "Downloads";
 "download.wifi_only.title" = "Nur über WLAN laden";
 "download.wifi_only.desc" = "Mobilfunkdaten werden für Downloads nicht genutzt.";
 "download.storage_used" = "Speicher belegt";
@@ -263,22 +226,14 @@
 "player.audio_delay.footer" = "Positive Werte verzögern den Ton, negative spielen ihn früher ab. Hilfreich bei Bluetooth-Kopfhörern und Soundbars.";
 
 // MARK: - Player (overlay, tracks & subtitle appearance)
-"player.all_channels" = "Alle Kanäle";
 "player.tracks.empty.video" = "Keine Videospuren";
 "player.tracks.empty.audio" = "Keine Audiospuren";
 "player.tracks.empty.subtitle" = "Keine Untertitel";
 "player.tracks.title" = "Wiedergabespuren";
 "player.tracks.video" = "Video";
 "player.tracks.audio" = "Audio";
-"player.tracks.audio_track" = "Audiospur";
-"player.guide" = "TV-Guide";
-"player.controls_lock" = "Steuerung sperren";
-"player.controls_unlock" = "Steuerung entsperren";
-"player.dock_to_mini" = "Vollbild beenden";
 "player.tracks.subtitle" = "Untertitel";
 "player.subtitle_off" = "Aus";
-"player.buffering" = "Puffern";
-"player.ended" = "Beendet";
 "playback.error.timeout" = "Der Server antwortet nicht.";
 "playback.error.forbidden" = "Zugriff verweigert (403).";
 "playback.error.unauthorized" = "Authentifizierung erforderlich (401).";
@@ -287,30 +242,21 @@
 "playback.error.cannot_reach" = "Server oder Stream nicht erreichbar.";
 "playback.error.unsupported" = "Dieser Inhalt wird auf dem Gerät nicht unterstützt.";
 "playback.error.no_playable_stream" = "Kein abspielbares Audio oder Video gefunden.";
-"playback.error.output_init_failed" = "Audio- oder Videoausgabe konnte nicht gestartet werden.";
 "playback.error.failed_check_network" = "Wiedergabe fehlgeschlagen. Prüfe deine Netzwerkverbindung.";
 "player.live_badge" = "LIVE";
-"player.pip_enter" = "PiP starten";
-"player.pip_exit" = "PiP beenden";
 "player.aspect_fit" = "Einpassen";
 "player.aspect_fill" = "Füllen";
-"player.aspect_native" = "Original";
 "subtitle.settings_title" = "Untertitel-Einstellungen";
-"subtitle.sample_text" = "Beispiel-Untertiteltext\nSo wird er aussehen";
-"subtitle.font_settings" = "Schrift";
 "subtitle.font_size" = "Schriftgröße";
 "subtitle.font_height" = "Zeilenhöhe";
 "subtitle.letter_spacing" = "Zeichenabstand";
 "subtitle.word_spacing" = "Wortabstand";
 "subtitle.padding" = "Innenabstand";
-"subtitle.colors" = "Farben";
 "subtitle.text_color" = "Textfarbe";
 "subtitle.background_color" = "Hintergrundfarbe";
 "subtitle.style" = "Stil";
 "subtitle.font_weight" = "Schriftstärke";
-"subtitle.text_align" = "Ausrichtung";
 "subtitle.reset" = "Zurücksetzen";
-"subtitle.delay" = "Verzögerung";
 "subtitle.no_delay" = "Keine Verzögerung";
 "subtitle.preview" = "Vorschau";
 "subtitle.apply" = "Anwenden";
@@ -348,16 +294,12 @@
 "player.brightness" = "Helligkeit";
 "player.volume" = "Lautstärke";
 "player.playback_error" = "Wiedergabefehler";
-"player.live_on_air" = "Auf Sendung";
-"player.preparing" = "Player wird vorbereitet…";
 
 // MARK: - Content details, search & loading phases
-"category.no_result_in_category" = "Keine Ergebnisse in dieser Kategorie.";
 "category.see_all" = "Alle anzeigen";
 "content.unnamed" = "Ohne Titel";
 "detail.episode_count_plural" = "%d Folgen";
 "detail.episode_fallback" = "Folge";
-"detail.loading_movie" = "Filminfos werden geladen...";
 "detail.loading_series" = "Serieninfos werden geladen...";
 "detail.remaining_format" = "%@ verbleibend";
 "detail.restart" = "Von vorn beginnen";
@@ -369,11 +311,6 @@
 "download.player_warning.go_to_downloads" = "Zu den Downloads";
 "download.player_warning.message" = "Ein Download läuft im Hintergrund. Wenn du die Wiedergabe startest, kann der Download wegen des Verbindungslimits des Servers pausieren. Fortfahren?";
 "download.player_warning.title" = "Download läuft";
-"favorites.empty.live" = "Noch keine Lieblingskanäle.";
-"favorites.empty.movie" = "Noch keine Lieblingsfilme.";
-"favorites.empty.series" = "Noch keine Lieblingsserien.";
-"favorites.type" = "Typ";
-"loading.takes_time_hint" = "Je nach Internetgeschwindigkeit kann das eine Weile dauern.";
 "misc.xtream.server_error" = "Serverfehler: %@";
 "movie.cast" = "Besetzung";
 "movie.director" = "Regie";
@@ -382,27 +319,17 @@
 "movie.play" = "Abspielen";
 "movie.plot" = "Handlung";
 "movie.rating" = "Bewertung";
-"movie.release_date" = "Erscheinungsdatum";
-"movie.resume" = "Fortsetzen";
-"movie.trailer" = "Trailer";
-"phase.clearing_content" = "Vorhandene Inhalte werden gelöscht...";
 "phase.fetch_categories" = "Kategorien werden heruntergeladen...";
-"phase.fetch_live" = "Live-Streams werden heruntergeladen...";
-"phase.fetch_movies" = "Filme werden heruntergeladen...";
-"phase.fetch_series" = "Serien werden heruntergeladen...";
 "phase.preparing" = "Wird vorbereitet...";
 "phase.preparing_list" = "Liste wird vorbereitet...";
 "phase.save_db" = "Wird in der Datenbank gespeichert...";
 "search.all" = "Alle";
 "search.trending" = "Gerade angesagt";
 "search.min_chars" = "Gib mindestens 2 Zeichen ein";
-"search.more_results_format" = "%d weitere Ergebnisse";
 "search.placeholder" = "Suchen...";
-"search.title" = "Suche";
 "series.empty.no_in_category" = "Keine Serien in dieser Kategorie.";
 "series.empty.no_series" = "Keine Serien gefunden.";
 "series.episode_count_format" = "%d Folgen";
-"series.episode_format" = "Folge %d";
 "series.loading_seasons" = "Staffeln werden geladen…";
 "series.no_episodes_in_season" = "Keine Folgen in dieser Staffel.";
 "series.no_seasons_info" = "Keine Staffel-Informationen verfügbar.";
@@ -426,8 +353,6 @@
 "player.airplay_active" = "Wiedergabe über AirPlay";
 "player.a11y.subtitle_appearance" = "Untertitel-Darstellung";
 "player.a11y.track_settings" = "Audio- und Untertitelspuren";
-"player.a11y.skip_back_15" = "15 Sekunden zurück";
-"player.a11y.skip_forward_15" = "15 Sekunden vor";
 "player.a11y.play" = "Wiedergabe";
 "player.a11y.pause" = "Pause";
 "player.a11y.previous_channel" = "Vorheriger Sender";
@@ -441,10 +366,6 @@
 "settings.show_password" = "Passwort anzeigen";
 "settings.hide_password" = "Passwort verbergen";
 "player.tracks.fallback_title" = "Spur %d";
-"player.tracks.channels" = "%d Kanäle";
-"player.tracks.cover_image" = "Cover / Bild";
-"player.tracks.default" = "Standard";
-"player.tracks.forced" = "Erzwungen";
 
 /* EPG (Electronic Programme Guide) */
 "epg.a11y.now_playing_format" = "Wird abgespielt: %@";
@@ -501,20 +422,17 @@
 "sort.name_desc" = "Name (Z–A)";
 "sort.rating_desc" = "Bewertung";
 "sort.recently_added" = "Kürzlich hinzugefügt";
-"filter.file_type" = "Dateityp";
 "filter.clear" = "Filter löschen";
 
 // MARK: - Browse all & filters
 "browse.all_movies" = "Alle Filme";
 "browse.all_series" = "Alle Serien";
 "browse.all_live" = "Alle Sender";
-"filter.genre" = "Genre";
 "filter.title" = "Filter";
 "filter.catchup" = "Catch-up verfügbar";
 "filter.has_epg" = "Mit EPG";
 
 // MARK: - Entry gate (round 4)
-"gate.welcome" = "Willkommen — melde dich an, um fortzufahren";
 "gate.sign_in" = "Anmelden";
 "gate.load_playlist" = "Playlist laden";
 "gate.toggle_password_visibility" = "Passwort ein- oder ausblenden";
@@ -523,14 +441,12 @@
 "dashboard.home" = "Start";
 
 // MARK: - Continue watching
-"home.trending_channels" = "Trendende Kanäle";
 "home.top_movies" = "Top-Filme";
 "home.popular_series" = "Beliebte Serien";
 "home.search_placeholder" = "Filme, Serien, Kanäle suchen...";
 "home.featured" = "Empfohlen";
 "home.play" = "Abspielen";
 "home.details" = "Details";
-"home.top_rated_movies" = "Bestbewertete Filme";
 "home.sports_dashboard" = "Sport-Dashboard";
 "home.top10_today" = "Top 10 heute";
 "home.top_rated_series" = "Bestbewertete Serien";
@@ -538,20 +454,16 @@
 "home.new_series" = "Neue Serien";
 "home.chip_all" = "Alle";
 "home.chip_newest" = "Neueste";
-"home.chip_history" = "Verlauf";
 "home.count_channels" = "%@ Kanäle";
 "home.count_movies" = "%@ Filme";
 "home.count_series" = "%@ Serien";
 
 // MARK: - Language
 "settings.group.player" = "Player";
-"settings.group.app" = "App";
 "settings.group.content_data" = "Inhalte & Daten";
-"settings.group.about_legal" = "Info & Rechtliches";
 "settings.playlist.connected" = "Verbunden";
 "settings.playlist.checking" = "Wird geprüft…";
 "settings.playlist.connection_failed" = "Verbindung fehlgeschlagen";
-"settings.accent_color" = "Akzentfarbe";
 "settings.accent.blue" = "Blau";
 "settings.accent.violet" = "Violett";
 "settings.accent.pink" = "Rosa";
@@ -572,10 +484,8 @@
 "download.keep" = "Weiter herunterladen";
 "download.delete.title" = "Download löschen?";
 "download.delete.message" = "Die heruntergeladene Datei wird von diesem Gerät entfernt.";
-"player.skip_intro" = "Intro überspringen";
 "player.speed" = "Geschwindigkeit";
 "player.sleep_timer" = "Sleep-Timer";
-"player.sleep_timer.off" = "Aus";
 "player.sleep_timer.minutes" = "%d Min.";
 
 // MARK: - Round 10
@@ -596,19 +506,15 @@
 "notifications.expiry.title" = "Dein Anbieter-Abonnement";
 "notifications.expiry.message" = "Dein Anbieter-Abonnement läuft in %d Tagen ab (%@).";
 "notifications.expiry.message_one" = "Dein Anbieter-Abonnement läuft in einem Tag ab (%@).";
-"notifications.expiry.message_today" = "Dein Anbieter-Abonnement läuft heute ab (%@).";
 "notifications.expired.title" = "Dein Anbieter-Abonnement";
 "notifications.expired.message" = "Dein Anbieter-Abonnement ist am %@ abgelaufen.";
 "player.sleep_timer.short" = "Schlaf";
-"player.tracks.more" = "Mehr Optionen";
-"detail.story" = "Handlung";
 "detail.more_like_this" = "Ähnliche Titel";
 "detail.episodes" = "Folgen";
 "detail.about" = "Info";
 "detail.continue_episode" = "Weiter • Folge %d";
 "detail.play_episode_1" = "Folge 1 abspielen";
 "common.off" = "Aus";
-"common.seconds_format" = "%d s";
 "playlists.remote_playlist" = "Remote-Playlist";
 "settings.account.provider_subscription" = "Dein Anbieter-Abonnement";
 "settings.account.until_format" = "Bis %@";
@@ -616,45 +522,21 @@
 "settings.account.day_left" = "Noch 1 Tag";
 "settings.account.days_left" = "Noch %d Tage";
 "settings.account.no_expiry" = "Kein Ablaufdatum";
-"settings.player.next_episode_timer.title" = "Timer für nächste Folge";
-"settings.player.show_skip_intro.title" = "\"Intro überspringen\" anzeigen";
-"settings.player.show_skip_intro.desc" = "Eine Schaltfläche zum Überspringen des Folgen-Intros";
-"settings.player.skip_intro_length.title" = "Länge des Intro-Skips";
 "settings.player.sleep_default.title" = "Standard-Sleep-Timer";
-"settings.player.engine.title" = "Wiedergabe-Engine";
-"settings.player.engine.automatic" = "Automatisch";
-"settings.player.engine.avplayer" = "AVPlayer";
-"settings.player.engine.ffmpeg" = "FFmpeg";
-"settings.app.notifications.title" = "Mitteilungen";
 "settings.app.notifications.desc" = "Warnungen zum Ablauf des Anbieter-Abonnements";
 "settings.parental_controls.title" = "Kindersicherung";
-"settings.group.activation" = "Aktivierung";
-"settings.activation.activated" = "Aktiviert";
-"settings.activation.device_id" = "Geräte-ID";
-"settings.activation.pin" = "PIN";
-"settings.activation.lifetime" = "Lebenslanges Abonnement";
-"settings.activation.lifetime_desc" = "Für immer gültig — kein Ablaufdatum";
-"settings.activation.copy" = "Kopieren";
 "settings.group.privacy_legal" = "Datenschutz & Rechtliches";
 "settings.legal.contact_support" = "Support kontaktieren";
 "settings.legal.privacy_policy" = "Datenschutzrichtlinie";
 "settings.legal.terms" = "Nutzungsbedingungen";
 "settings.legal.report_content" = "Anstößige Inhalte melden";
 "settings.legal.delete_account" = "Konto löschen";
-"settings.legal.delete_account_desc" = "Diese Aktion kann nicht rückgängig gemacht werden";
-"settings.legal.delete_account.title" = "Konto löschen?";
-"settings.legal.delete_account.message" = "Dadurch werden alle deine Playlists und alles gelöscht, was die App auf diesem Gerät gespeichert hat — Kataloge, Favoriten, Wiedergabeverlauf und Downloads. Dies kann nicht rückgängig gemacht werden.";
 "settings.legal.support.body" = "Super X ist eine kostenlose App. Es gibt keinen Support-Schreibtisch und keine Support-E-Mail-Adresse. Die meisten Probleme kommen von der Playlist oder dem Anbieter-Abonnement, das du hinzugefügt hast: Prüfe, ob deine Zugangsdaten genau so eingegeben sind, wie dein Anbieter sie dir gegeben hat, und ob dein Abonnement noch aktiv ist. Fragen zu deinem Abonnement, seinen Inhalten oder seiner Verlängerung kann nur dein Anbieter beantworten.";
 "settings.legal.report.body" = "Super X stellt selbst keine Kanäle, Filme oder Serien bereit. Alles, was du siehst, stammt aus der Playlist und dem Anbieter-Abonnement, die du selbst hinzugefügt hast, und wird von diesem Anbieter gehostet und bereitgestellt. Wenn ein Teil dieser Inhalte anstößig ist oder deine Rechte verletzt, ist dein Anbieter die wirksame Stelle, um dies zu melden. Auf diesem Gerät kannst du Inhalte für Erwachsene außerdem mit der Kindersicherung in den Einstellungen ausblenden, und das Entfernen der Playlist entfernt diese Inhalte von diesem Gerät.";
 "settings.legal.privacy.body" = "Datenerhebung\n\nDiese Anwendung erhebt, speichert oder übermittelt keine personenbezogenen Daten oder Nutzerinformationen.\n\nDeine Inhalte\n\n• IPTV-Playlists und Kanallisten werden nur lokal auf deinem Gerät gespeichert.\n• Die App selbst sendet keine Daten an externe Server. Wenn du einen Stream abspielst, verbindet sich dein Gerät direkt mit dem Anbieter, den du hinzugefügt hast.\n• Es werden keine Analyse- oder Tracking-Dienste verwendet.\n\nDienste Dritter\n\nDiese Anwendung integriert keine Analyse-, Werbe- oder Datenerhebungsdienste von Drittanbietern.\n\nÄnderungen\n\nWenn sich diese Richtlinie ändert, erscheint der aktualisierte Text hier in der App.";
 "settings.legal.terms.body" = "1. Die App\n\nSuper X ist ein kostenloser Media-Player. Er enthält keine eigenen Kanäle, Filme, Serien oder andere Inhalte und verkauft nichts.\n\n2. Deine Playlists und Abonnements\n\nDu fügst deine eigenen Playlists und Anbieter-Abonnements hinzu. Deine Vereinbarung mit einem Anbieter — einschließlich Preis, Ablaufdatum und Inhalte — besteht zwischen dir und diesem Anbieter. Wenn ein Anbieter-Abonnement abläuft, stoppt die Wiedergabe der Inhalte dieses Anbieters, bis du es erneuerst oder zu einer anderen Playlist wechselst.\n\n3. Deine Verantwortung\n\nDu bist dafür verantwortlich, sicherzustellen, dass du berechtigt bist, auf die Inhalte, die du zur App hinzufügst, zuzugreifen und sie anzusehen.\n\n4. Keine Gewährleistung\n\nDie App wird \"wie sie ist\" bereitgestellt, ohne Gewährleistungen jeglicher Art. Super X ist nicht verantwortlich für die Verfügbarkeit, Qualität oder Rechtmäßigkeit von Inhalten, die von Drittanbietern bereitgestellt werden.";
-"expiry.blocked.title" = "Anbieter-Abonnement abgelaufen";
-"expiry.blocked.message" = "Dein Anbieter-Abonnement ist am %@ abgelaufen. Erneuere es bei deinem Anbieter oder wechsle in den Einstellungen zu einer anderen Playlist, um weiterzuschauen.";
-"expiry.blocked.open_settings" = "Einstellungen öffnen";
 
 // MARK: - Round 14/15 finisher completion (R14-NEW-KEYS + code-referenced keys)
-"settings.group.app_appearance" = "App & Erscheinungsbild";
-"settings.activation.purpose" = "Die kostenlose, lebenslange Aktivierung dieses Geräts für Super X.";
 "settings.app.expiry_alerts.title" = "Warnungen zum Abo-Ablauf";
 "settings.player.video_fit.title" = "Standard-Videoanpassung";
 "settings.player.subtitle_appearance" = "Untertitel-Darstellung";
@@ -690,18 +572,7 @@
 "download.error.server_refused" = "Der Server hat diesen Download abgelehnt — dein Abo ist möglicherweise abgelaufen oder das Verbindungslimit wurde erreicht. Versuche es später erneut.";
 "playback.error.http_status" = "Der Server hat diesen Stream abgelehnt (HTTP %d).";
 "player.airplay" = "AirPlay";
-"player.pip_short" = "PiP";
-"player.favorite" = "Favorit";
-"player.connecting" = "Verbinde…";
 "player.reconnecting" = "Verbindung wird wiederhergestellt…";
-"player.autonext.play_next" = "Nächste Episode";
-"player.autonext.season_episode" = "Staffel %d • Episode %d";
-"player.stats.title" = "Wiedergabestatistik";
-"player.stats.resolution" = "Auflösung";
-"player.stats.bitrate" = "Bitrate";
-"player.stats.buffer" = "Puffer";
-"player.series_finished.title" = "Du hast diese Serie beendet";
-"player.series_finished.watch_again" = "Erneut ansehen";
 "settings.scope.this_playlist" = "Diese Playlist";
 "settings.scope.whole_app" = "Ganze App";
 "settings.reset.title" = "Auf Standard zurücksetzen";
@@ -720,8 +591,6 @@
 "settings.backup.import.passwords.message" = "Diese Playlists wurden ohne Passwörter importiert. Gib jedes Passwort ein, um abzuschließen.";
 "settings.backup.import.done_format" = "%d Playlist(en) importiert.";
 "settings.backup.import.failed" = "Diese Datei konnte nicht importiert werden.";
-"settings.image_cache.title" = "Bild-Cache";
-"settings.image_cache.clear" = "Leeren";
 "settings.group.advanced" = "Erweitert";
 "pin.title" = "Eltern-PIN";
 "pin.set" = "PIN festlegen";
@@ -741,30 +610,17 @@
 "reminders.enabled.title" = "Programm-Erinnerungen";
 "reminders.enabled.desc" = "Getrennt von den Warnungen zum Abo-Ablauf";
 "reminders.lead_time" = "Vorlaufzeit der Erinnerung";
-"player.zapping.enabled" = "Wischen zum Kanalwechsel";
-"player.zapping.direction" = "Zap-Richtung";
-"player.zapping.direction.up_next" = "Nach oben wischen = nächster";
-"player.zapping.direction.down_next" = "Nach unten wischen = nächster";
 "motion.intensity.title" = "Bewegungsintensität";
 "motion.intensity.full" = "Voll";
 "motion.intensity.reduced" = "Reduziert";
-"player.next_episode_card.title" = "Karte für nächste Episode";
-"player.next_episode_card.auto" = "Automatisch abspielen";
-"player.next_episode_card.ask" = "Nur fragen";
 "settings.ui_sounds.title" = "UI-Sounds";
 "settings.ui_sounds.desc" = "Kurze Sounds für Downloads, Aktualisierung und Favoriten";
-"gate.qr.scan" = "QR-Code scannen";
-"gate.qr.unavailable.title" = "Kamera nicht verfügbar";
-"gate.qr.unavailable.message" = "QR-Scannen ist auf diesem Gerät nicht verfügbar. Du kannst deine Zugangsdaten stattdessen einfügen.";
 "gate.continue_with_format" = "Weiter mit %@";
 "gate.all_expired.title" = "Alle Abos abgelaufen";
 "gate.all_expired.message" = "Jedes gespeicherte Abo ist abgelaufen. Füge unten ein neues hinzu oder verlängere ein bestehendes.";
 "playlists.make_default" = "Als Standard festlegen";
 "playlists.default_badge" = "Standard";
 "playlists.change_server" = "Serveradresse ändern";
-"playlists.qr.show" = "QR-Code anzeigen";
-"playlists.qr.title" = "Playlist-QR-Code";
-"playlists.qr.warning" = "Dieser Code enthält dein Playlist-Passwort im Klartext. Jeder, der ihn scannt, kann dein Abo nutzen.";
 "playlists.health.responds" = "Antwortet";
 "playlists.health.refused" = "Antwortet nicht";
 "playlists.health.expired" = "Abgelaufen";
@@ -783,9 +639,6 @@
 "home.switch_playlist" = "Playlist wechseln";
 "home.on_now" = "Jetzt auf deinen Kanälen";
 "home.tonight" = "Heute Abend";
-"home.because_you_watched" = "Weil du gesehen hast";
-"home.new_episodes" = "Neue Episoden";
-"home.new_episodes_badge" = "Neue Episode";
 "home.new_since_visit" = "Neu seit deinem letzten Besuch";
 "home.browse_categories" = "Kategorien durchsuchen";
 "epg.reminder.action" = "Erinnere mich";
@@ -806,15 +659,8 @@
 "movie.format" = "Format";
 "download.file_size_format" = "Dateigröße %@";
 "sort.release_year" = "Erscheinungsjahr";
-"widget.continue_watching" = "Weiter ansehen";
-"widget.favorite_channels" = "Lieblingskanäle";
-"widget.on_now" = "Jetzt läuft";
-"widget.open_superx" = "Super X öffnen";
 "settings.title" = "Einstellungen";
 "episode_count" = "%d Episoden";
-"gate.qr.hint" = "Richte die Kamera auf den QR-Code deines Anbieters.";
-"gate.qr.denied.title" = "Kamerazugriff ist aus";
-"gate.qr.denied.message" = "Super X braucht Kamerazugriff, um einen QR-Code zu scannen. Du kannst ihn für Super X in den Einstellungen aktivieren oder deine Zugangsdaten stattdessen einfügen.";
 "gate.remove_account" = "Konto entfernen";
 "gate.remove_account.title" = "Dieses Konto entfernen?";
 "gate.remove_account.message" = "Dadurch werden %@ und alles, was es auf diesem Gerät gespeichert hat, entfernt — Katalog, Favoriten, Wiedergabeverlauf und Downloads. Dies kann nicht rückgängig gemacht werden.";
@@ -896,7 +742,6 @@
 "player.sleep.off" = "Aus";
 "player.sleep.minutes" = "%d Min.";
 "player.sleep.end_of_episode" = "Ende der Episode";
-"player.sleep.remaining" = "Pausiert in %@";
 
 // MARK: - Build 61 (b5)
 "multiview.title" = "Multiview";
@@ -905,8 +750,6 @@
 "multiview.no_channels" = "Noch keine Live-Kanäle geladen. Laden Sie zuerst eine Playlist und öffnen Sie dann Multiview.";
 "multiview.select_channel" = "Kanal auswählen";
 "multiview.search_channels" = "Kanäle suchen";
-"cast.button.title" = "Cast";
-"icloud.sync.title" = "iCloud-Sync";
 
 // MARK: - Build 61 (b6)
 "gate.subtitle" = "IPTV • Playlist-Anmeldung";
@@ -1223,4 +1066,40 @@
 "favorites.shelf.movies" = "Lieblingsfilme";
 "favorites.shelf.series" = "Lieblingsserien";
 "matches.stats" = "Statistiken";
-"settings.hub.all_settings" = "Alle Einstellungen";
+
+"settings.hub.account" = "Konto";
+"settings.hub.parental_locks" = "Kindersicherung & Sperren";
+"settings.hub.backup_data" = "Sicherung & Daten";
+"home.live_now" = "Jetzt live";
+"storage.unavailable.title" = "Speicher konnte nicht geöffnet werden";
+"storage.unavailable.message" = "Super X konnte seinen Speicher nicht öffnen. Ihre gespeicherten Daten wurden nicht gelöscht. Tippen Sie auf „Erneut versuchen“, um das Öffnen noch einmal zu versuchen — wenn das Problem weiterhin besteht, kann ein Neustart der App helfen.";
+"storage.unavailable.retry_failed" = "Der Speicher konnte weiterhin nicht geöffnet werden. Ihre Daten sind weiterhin nicht gelöscht — starten Sie die App neu und versuchen Sie es erneut.";
+"matches.explainer.start" = "Jetzt entdecken";
+"matches.explainer.skip" = "Überspringen";
+"matches.explainer.soccer.title" = "Willkommen beim Fußball";
+"matches.explainer.soccer.live.title" = "Live-Ergebnisse";
+"matches.explainer.soccer.live.detail" = "Jedes Spiel, sofort aktualisiert";
+"matches.explainer.soccer.lineups.title" = "Aufstellungen & Formationen";
+"matches.explainer.soccer.lineups.detail" = "Sieh, wer spielt und wie";
+"matches.explainer.soccer.table.title" = "Tabelle & Torschützen";
+"matches.explainer.soccer.table.detail" = "Die komplette Tabelle";
+"matches.explainer.soccer.follow.title" = "Folge deinen Teams";
+"matches.explainer.soccer.follow.detail" = "Eine Benachrichtigung bei jedem Tor";
+"matches.explainer.nfl.title" = "Willkommen bei der NFL";
+"matches.explainer.nfl.live.title" = "Live-Ergebnisse";
+"matches.explainer.nfl.live.detail" = "Jedes Spiel, sofort aktualisiert";
+"matches.explainer.nfl.standings.title" = "Tabelle";
+"matches.explainer.nfl.standings.detail" = "Die komplette NFL-Tabelle";
+"matches.explainer.nfl.stats.title" = "Statistiken & Top-Performer";
+"matches.explainer.nfl.stats.detail" = "Die Zahlen hinter jedem Spiel";
+"matches.explainer.nfl.follow.title" = "Folge deinen Teams";
+"matches.explainer.nfl.follow.detail" = "Benachrichtigungen bei jedem Punkt, plus Optionen für Kickoff und Spielende";
+"matches.explainer.nba.title" = "Willkommen bei der NBA";
+"matches.explainer.nba.live.title" = "Live-Ergebnisse";
+"matches.explainer.nba.live.detail" = "Jedes Spiel, sofort aktualisiert";
+"matches.explainer.nba.standings.title" = "Tabelle";
+"matches.explainer.nba.standings.detail" = "Die komplette NBA-Tabelle";
+"matches.explainer.nba.stats.title" = "Statistiken & Top-Performer";
+"matches.explainer.nba.stats.detail" = "Die Zahlen hinter jedem Spiel";
+"matches.explainer.nba.follow.title" = "Folge deinen Teams";
+"matches.explainer.nba.follow.detail" = "Benachrichtigungen bei knappen Spielenden";

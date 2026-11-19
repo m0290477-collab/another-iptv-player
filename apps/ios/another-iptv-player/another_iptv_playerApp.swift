@@ -10,11 +10,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     /// out for landscape. Landscape now exists ONLY inside the video
     /// player: `PlayerView` raises the lock to `.allButUpsideDown`
     /// while fullscreen and restores this browse mask when it exits
-    /// or docks to the mini player. (`LiveChannelBrowserScreen` —
-    /// defined in PlayerView.swift, currently unreferenced — assigns
-    /// this same lock directly to force `.landscape` while open and
-    /// restore the player's mask on the way out, so it stays
-    /// compatible if it is ever re-wired.) iPad keeps free rotation
+    /// or docks to the mini player. (An earlier, since-removed live
+    /// channel browser screen assigned this same lock directly to
+    /// force `.landscape` while open and restore the player's mask
+    /// on the way out.) iPad keeps free rotation
     /// everywhere (its layouts are width-driven).
     static var orientationLock: UIInterfaceOrientationMask = AppDelegate.browseOrientationLock
 

@@ -127,30 +127,6 @@ enum AppTheme {
     }
 }
 
-// MARK: - Layout tokens (build 61, B7 — O3)
-
-/// O3: ONE card system. Identical corner radius, spacing and grid
-/// behaviour across Live / Movies / Series / Library come from these
-/// constants (poster pixel sizes stay in `PosterMetrics`, which is
-/// display-derived; geometry that is NOT display-derived lives here
-/// so no screen invents its own literals).
-enum LayoutTokens {
-    static let cardRadius: CGFloat = AppTheme.cornerRadius
-    static let heroRadius: CGFloat = AppTheme.heroCornerRadius
-    static let smallRadius: CGFloat = AppTheme.smallCornerRadius
-    static let screenMargin: CGFloat = AppTheme.spacingScreenMargin
-    static let shelfGap: CGFloat = AppTheme.spacingShelfGap
-    static let cardGap: CGFloat = AppTheme.spacingCardGap
-    /// ST3: the ONE bottom gradient scrim used wherever a title sits
-    /// on artwork (poster/channel cards, detail hero).
-    static let posterScrim = LinearGradient(
-        colors: [.clear, Color.black.opacity(0.55), Color.black.opacity(0.85)],
-        startPoint: .top, endPoint: .bottom
-    )
-    /// ST3: the ONE thin border on artwork cards.
-    static let posterBorder = AppTheme.cardBorderColor
-}
-
 /// ST2 (build 61, B7): the ONE signature glow token — a soft
 /// red-orange (accent) shadow used ONLY under primary buttons and
 /// the selected tab / hero actions. Do not apply it anywhere else;
@@ -197,38 +173,6 @@ enum SectionTheme {
                               saturation: s, brightness: b, alpha: a)
         return Color(uiColor: shifted)
     }
-}
-
-/// Symbol table (C9): concept → SF Symbol + weight + rendering mode.
-/// One "previous" language app-wide; the player concepts are covered
-/// first so the player agents adopt these instead of picking per-view.
-enum AppSymbols {
-    struct Spec {
-        let name: String
-        let weight: Font.Weight
-        let renderingMode: SymbolRenderingMode
-    }
-
-    static let defaultWeight: Font.Weight = .semibold
-    static let defaultRenderingMode: SymbolRenderingMode = .monochrome
-
-    static let play = Spec(name: "play.fill", weight: .semibold, renderingMode: .monochrome)
-    static let pause = Spec(name: "pause.fill", weight: .semibold, renderingMode: .monochrome)
-    static let previous = Spec(name: "backward.end.fill", weight: .semibold, renderingMode: .monochrome)
-    static let next = Spec(name: "forward.end.fill", weight: .semibold, renderingMode: .monochrome)
-    static let seekBack = Spec(name: "gobackward.15", weight: .semibold, renderingMode: .monochrome)
-    static let seekForward = Spec(name: "goforward.15", weight: .semibold, renderingMode: .monochrome)
-    static let favorite = Spec(name: "star.fill", weight: .semibold, renderingMode: .monochrome)
-    static let favoriteOff = Spec(name: "star", weight: .semibold, renderingMode: .monochrome)
-    static let pip = Spec(name: "pip.enter", weight: .semibold, renderingMode: .monochrome)
-    static let pipExit = Spec(name: "pip.exit", weight: .semibold, renderingMode: .monochrome)
-    static let airplay = Spec(name: "airplayvideo", weight: .semibold, renderingMode: .monochrome)
-    static let cast = Spec(name: "tv.badge.wifi", weight: .semibold, renderingMode: .monochrome)
-    static let close = Spec(name: "xmark", weight: .semibold, renderingMode: .monochrome)
-    static let settings = Spec(name: "gearshape.fill", weight: .semibold, renderingMode: .monochrome)
-    static let search = Spec(name: "magnifyingglass", weight: .semibold, renderingMode: .monochrome)
-    static let download = Spec(name: "arrow.down.circle", weight: .semibold, renderingMode: .monochrome)
-    static let liveBadge = Spec(name: "dot.radiowaves.left.and.right", weight: .bold, renderingMode: .monochrome)
 }
 
 // Round 16 (R5): the orphaned StyledEmptyState component is
