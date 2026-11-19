@@ -182,6 +182,7 @@ private struct PlayerViewImpl: View {
     @Environment(\.playerOverlayMinimize) private var playerOverlayMinimize
     @Environment(\.playerOverlayExpand) private var playerOverlayExpand
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.layoutDirection) private var layoutDirection
     @Environment(\.epgSnapshot) private var epgSnapshot
 
@@ -1594,6 +1595,16 @@ private struct PlayerViewImpl: View {
     private func playerChromeAndVideo(outerSafeAreaInsets: EdgeInsets) -> some View {
         GeometryReader { geo in
             let fittedSize = fittedVideoSize(in: geo.size)
+            // Build 67 (W4, F4): edge-slider metrics, computed once
+            // here so the rendered sliders and the touch overlay's
+            // edge-drag zones always agree. Portrait phone gets the
+            // smaller, fully on-screen capsule; in landscape every
+            // value resolves to the exact build-66 numbers.
+            let isPortraitPlayer = geo.size.height > geo.size.width
+            let edgeSliderIsPortraitPhone = isCompactWidth && isPortraitPlayer
+            let edgeSliderTrackWidth: CGFloat = edgeSliderIsPortraitPhone ? 44 : (isCompactWidth ? 52 : 64)
+            let edgeSliderTrackHeight: CGFloat = edgeSliderIsPortraitPhone ? 132 : (isCompactWidth ? 160 : 180)
+            let edgeSliderEdgeInset: CGFloat = edgeSliderIsPortraitPhone ? 8 : 16
             ZStack {
                 MPVolumeViewHost(bridge: systemVolumeBridge)
                     .frame(width: 120, height: 48)
@@ -1655,11 +1666,11 @@ private struct PlayerViewImpl: View {
                         && !controlsLocked
                         && interactiveDismissAxis == nil,
                     edgeSliderTrackSize: CGSize(
-                        width: isCompactWidth ? 52 : 64,
-                        height: isCompactWidth ? 160 : 180
+                        width: edgeSliderTrackWidth,
+                        height: edgeSliderTrackHeight
                     ),
-                    edgeSliderLeadingInset: 16 + outerSafeAreaInsets.leading,
-                    edgeSliderTrailingInset: 16 + outerSafeAreaInsets.trailing,
+                    edgeSliderLeadingInset: edgeSliderEdgeInset + outerSafeAreaInsets.leading,
+                    edgeSliderTrailingInset: edgeSliderEdgeInset + outerSafeAreaInsets.trailing,
                     interactionEnabled: miniProgress < 0.02,
                     onResetTimer: { resetTimer() },
                     onInvalidateTimer: { timer?.invalidate() },
@@ -1766,7 +1777,8 @@ private struct PlayerViewImpl: View {
                         player: player,
                         systemVolume: systemVolumeBridge,
                         safeAreaInsets: outerSafeAreaInsets,
-                        isCompactWidth: isCompactWidth
+                        isCompactWidth: isCompactWidth,
+                        isPortrait: isPortraitPlayer
                     ) {
                         resetTimer()
                     }
@@ -2201,7 +2213,17 @@ private struct PlayerViewImpl: View {
                 }
             }
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-            .layoutPriority(1)
+            // Build 67 (W4, F4): in portrait the title must NOT win
+            // layout priority over the fixed-size trailing capsule —
+            // with priority 1 a long title claimed its full intrinsic
+            // width, the HStack overflowed the screen and SwiftUI
+            // centered the overflow, clipping the close button at the
+            // leading edge and the "…" menu at the trailing edge.
+            // Portrait: the capsule keeps its size and the flexible
+            // center title truncates inside the remaining safe width.
+            // Landscape keeps the build-66 priority (space is ample
+            // there, so the rendered result is unchanged).
+            .layoutPriority(isPortraitPhoneLayout ? 0 : 1)
             // Long channel metadata must never push trailing controls off-screen.
             .clipped()
             .contentShape(Rectangle())
@@ -2450,6 +2472,15 @@ private struct PlayerViewImpl: View {
     /// Compact horizontal size class'ta (iPhone) daha sıkı yerleşim — edge slider'lar için
     /// yatayda boşluk bırakır. Regular'da (iPad) geniş orijinal düzen.
     private var isCompactWidth: Bool { horizontalSizeClass == .compact }
+
+    /// Build 67 (W4, F4): portrait phone layout — compact width with a
+    /// regular vertical size class. iPhone landscape reports a compact
+    /// vertical size class and iPad reports a regular horizontal size
+    /// class, so this is false in both, and every portrait-only layout
+    /// branch keyed on it is an identity transform in landscape.
+    private var isPortraitPhoneLayout: Bool {
+        isCompactWidth && verticalSizeClass == .regular
+    }
     private var transportSpacing: CGFloat { isCompactWidth ? 22 : 56 }
     private var transportSkipHit: CGFloat { isCompactWidth ? 52 : 64 }
     private var transportSkipSymbol: CGFloat { isCompactWidth ? 30 : 36 }
@@ -2582,59 +2613,25 @@ private struct PlayerViewImpl: View {
     /// closure, same accessibility label; only its visual position
     /// within the chrome changed.
     private var bottomTransportChrome: some View {
-        VStack(alignment: .trailing, spacing: 10) {
-
-            if showSeriesEpisodeSkip {
-                HStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    glassIconButton(systemName: "backward.end.fill", size: 44, symbolSize: 17) {
-                        onPreviousEpisode?()
-                    }
-                    .accessibilityLabel(L("player.a11y.previous_episode"))
-                    .disabled(!canGoToPreviousEpisode)
-                    .opacity(canGoToPreviousEpisode ? 1 : 0.38)
-
-                    glassIconButton(systemName: "forward.end.fill", size: 44, symbolSize: 17) {
-                        onNextEpisode?()
-                    }
-                    .accessibilityLabel(L("player.a11y.next_episode"))
-                    .disabled(!canGoToNextEpisode)
-                    .opacity(canGoToNextEpisode ? 1 : 0.38)
-                }
-                .padding(.horizontal, 12)
-            }
-
-            if showVODQueueSkip {
-                HStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    glassIconButton(systemName: "backward.end.fill", size: 44, symbolSize: 17) {
-                        onPreviousChannel?()
-                    }
-                    .accessibilityLabel(L("player.a11y.previous_item"))
-                    .disabled(!canGoToPreviousChannel)
-                    .opacity(canGoToPreviousChannel ? 1 : 0.38)
-
-                    glassIconButton(systemName: "forward.end.fill", size: 44, symbolSize: 17) {
-                        onNextChannel?()
-                    }
-                    .accessibilityLabel(L("player.a11y.next_item"))
-                    .disabled(!canGoToNextChannel)
-                    .opacity(canGoToNextChannel ? 1 : 0.38)
-                }
-                .padding(.horizontal, 12)
-            }
-
-            // Build 66 (W6, item 11): the Build 65 Rich Bar's
-            // stacked rows (identity row + control row + VOD seek
-            // card, plus the standalone B14 V5 Up Next strip above
-            // it) are restyled into ONE slim blurred bar. The Up
-            // Next programme is folded into the bar's identity
-            // segment (title only, same EPG snapshot); every
-            // control keeps its exact action, menu and gesture
-            // behavior, and the bar rides the same show/hide
-            // chrome as before.
-            slimPlayerBar
-        }
+        // Build 67 (W4, S3): the series-episode and VOD-queue
+        // prev/next rows that build 66 floated in their own
+        // trailing rows ABOVE the bar now live INSIDE
+        // `slimPlayerBar` as its transport cluster (see
+        // `slimBarTransportCluster`) — same closures, same
+        // can-go bindings, same accessibility labels; only their
+        // visual position changed, so they can never crowd or
+        // overlap the edge sliders.
+        //
+        // Build 66 (W6, item 11): the Build 65 Rich Bar's
+        // stacked rows (identity row + control row + VOD seek
+        // card, plus the standalone B14 V5 Up Next strip above
+        // it) are restyled into ONE slim blurred bar. The Up
+        // Next programme is folded into the bar's identity
+        // segment (title only, same EPG snapshot); every
+        // control keeps its exact action, menu and gesture
+        // behavior, and the bar rides the same show/hide
+        // chrome as before.
+        slimPlayerBar
     }
 
     // MARK: - Build 66 (W6, item 11) slim blurred player bar
@@ -2646,29 +2643,55 @@ private struct PlayerViewImpl: View {
     /// video stays clearly visible through it. The thin red-orange
     /// progress line sits at the bar's TOP edge (see
     /// `slimBarProgressLine`).
+    /// Build 67 (W4, S3): rebuilt to the owner-picked Style 1 —
+    /// ICONS ONLY (no text labels on any bar control), prev /
+    /// play-pause / next inside the bar as one transport cluster.
+    /// Build 67 (W4, F4): portrait phone width stacks the same
+    /// controls into two rows inside the same card (see the
+    /// portrait branch below); landscape keeps the single row.
     private var slimPlayerBar: some View {
-        HStack(spacing: 10) {
-            slimBarIdentitySegment
-            Spacer(minLength: 8)
-            slimBarPlayPauseButton
-            if showLiveChannelListButton, let toggle = onToggleLiveChannelSidePanel {
-                glassIconButton(
-                    systemName: isLiveChannelSidePanelVisible ? "rectangle.bottomthird.inset.filled" : "rectangle.grid.1x2",
-                    size: 40,
-                    symbolSize: 16
-                ) {
-                    toggle()
+        Group {
+            if isPortraitPhoneLayout {
+                // Build 67 (W4, F4): portrait phone width (~390pt)
+                // cannot fit identity + transport cluster + guide +
+                // the five setting controls in one 52pt row without
+                // squeezing the identity title to nothing, so the
+                // portrait bar stacks two slim rows inside the same
+                // frosted card: identity + prev/play/next on top,
+                // guide + setting icons below. Every control keeps
+                // its exact action and binding; landscape never
+                // takes this branch.
+                VStack(spacing: 2) {
+                    HStack(spacing: 8) {
+                        slimBarIdentitySegment
+                        Spacer(minLength: 6)
+                        slimBarTransportCluster
+                    }
+                    HStack(spacing: 8) {
+                        slimBarGuideButton
+                        Spacer(minLength: 6)
+                        // Build 61 (B14, V1): the ONE bottom control
+                        // row — Speed · Subtitles · Audio · Sleep ·
+                        // Aspect — kept whole (see `bottomRowLabel`).
+                        bottomControlRow
+                    }
                 }
-                .accessibilityLabel(L("list.channel_list"))
+                .padding(.vertical, 6)
+            } else {
+                HStack(spacing: 10) {
+                    slimBarIdentitySegment
+                    Spacer(minLength: 8)
+                    slimBarTransportCluster
+                    slimBarGuideButton
+                    // Build 61 (B14, V1): the ONE bottom control row —
+                    // Speed · Subtitles · Audio · Sleep · Aspect — kept
+                    // whole (see `bottomRowLabel`).
+                    bottomControlRow
+                }
+                .frame(height: 52)
             }
-            // Build 61 (B14, V1): the ONE bottom control row —
-            // Speed · Subtitles · Audio · Sleep · Aspect — kept
-            // whole; only its labels render compact (see
-            // `bottomRowLabel`).
-            bottomControlRow
         }
         .padding(.horizontal, 12)
-        .frame(height: 52)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -2716,6 +2739,82 @@ private struct PlayerViewImpl: View {
             .accessibilityHint(L("player.a11y.play_pause.hint"))
             .disabled(hasPlaybackFailure)
             .opacity(hasPlaybackFailure ? 0.4 : 1)
+        }
+    }
+
+    /// Build 67 (W4, S3): the bar's transport cluster — prev /
+    /// play-pause / next INSIDE the bar, as the owner-picked
+    /// Style 1 mockup lays them out. The prev/next buttons are the
+    /// EXACT controls build 66 floated in rows above the bar (see
+    /// `bottomTransportChrome`): series episodes drive
+    /// `onPreviousEpisode` / `onNextEpisode` gated by
+    /// `canGoToPreviousEpisode` / `canGoToNextEpisode`; VOD queue
+    /// items drive `onPreviousChannel` / `onNextChannel` gated by
+    /// `canGoToPreviousChannel` / `canGoToNextChannel` — same
+    /// closures, same disabled/opacity behavior, same
+    /// accessibility labels. Only the button slot shrank (44 → 40)
+    /// to fit the bar's 52pt row. When neither skip kind applies
+    /// (live, plain movies) the cluster is the play/pause button
+    /// alone — live channel prev/next stays in the center cluster,
+    /// untouched. Because the cluster lives inside the bar's own
+    /// HStack/VStack, it can never overlap the edge sliders.
+    @ViewBuilder
+    private var slimBarTransportCluster: some View {
+        HStack(spacing: 6) {
+            if showSeriesEpisodeSkip {
+                glassIconButton(systemName: "backward.end.fill", size: 40, symbolSize: 16) {
+                    onPreviousEpisode?()
+                }
+                .accessibilityLabel(L("player.a11y.previous_episode"))
+                .disabled(!canGoToPreviousEpisode)
+                .opacity(canGoToPreviousEpisode ? 1 : 0.38)
+
+                slimBarPlayPauseButton
+
+                glassIconButton(systemName: "forward.end.fill", size: 40, symbolSize: 16) {
+                    onNextEpisode?()
+                }
+                .accessibilityLabel(L("player.a11y.next_episode"))
+                .disabled(!canGoToNextEpisode)
+                .opacity(canGoToNextEpisode ? 1 : 0.38)
+            } else if showVODQueueSkip {
+                glassIconButton(systemName: "backward.end.fill", size: 40, symbolSize: 16) {
+                    onPreviousChannel?()
+                }
+                .accessibilityLabel(L("player.a11y.previous_item"))
+                .disabled(!canGoToPreviousChannel)
+                .opacity(canGoToPreviousChannel ? 1 : 0.38)
+
+                slimBarPlayPauseButton
+
+                glassIconButton(systemName: "forward.end.fill", size: 40, symbolSize: 16) {
+                    onNextChannel?()
+                }
+                .accessibilityLabel(L("player.a11y.next_item"))
+                .disabled(!canGoToNextChannel)
+                .opacity(canGoToNextChannel ? 1 : 0.38)
+            } else {
+                slimBarPlayPauseButton
+            }
+        }
+    }
+
+    /// Build 67 (W4, S3): the bar's channel-list (guide) button —
+    /// the exact build-66 control (same `glassIconButton`, same
+    /// `onToggleLiveChannelSidePanel` toggle closure, same icon
+    /// swap on `isLiveChannelSidePanelVisible`, same accessibility
+    /// label), factored out so both bar layouts share it.
+    @ViewBuilder
+    private var slimBarGuideButton: some View {
+        if showLiveChannelListButton, let toggle = onToggleLiveChannelSidePanel {
+            glassIconButton(
+                systemName: isLiveChannelSidePanelVisible ? "rectangle.bottomthird.inset.filled" : "rectangle.grid.1x2",
+                size: 40,
+                symbolSize: 16
+            ) {
+                toggle()
+            }
+            .accessibilityLabel(L("list.channel_list"))
         }
     }
 
@@ -2841,7 +2940,14 @@ private struct PlayerViewImpl: View {
     /// (`formatMs` / `totalDurationLabel`).
     private var slimBarIdentitySegment: some View {
         HStack(spacing: 10) {
-            if let artworkURL {
+            // Build 67 (W4, F4): in portrait-compact width the
+            // thumbnail is dropped rather than squeezing the title
+            // to nothing (build 66 truncated it to 'Love L…'); the
+            // title stays flexible with tail truncation, and the
+            // time labels below keep their fixed size so the time
+            // is always placed in full. Landscape keeps the
+            // thumbnail exactly as build 66 rendered it.
+            if let artworkURL, !isPortraitPhoneLayout {
                 CachedImage(
                     url: artworkURL,
                     width: 34,
@@ -3049,24 +3155,30 @@ private struct PlayerViewImpl: View {
         return L("player.sleep_timer.short")
     }
 
-    /// One bottom-row control: SF Symbol over a small caption.
+    /// One bottom-row control: SF Symbol ONLY.
     /// Build 66 (W6, item 11): compact fixed width (was
     /// `maxWidth: .infinity`, sharing a full-width row) so the five
     /// controls fit the slim bar's single row beside the identity
     /// segment; same icon, same caption text, same 44pt minimum
     /// hit height.
+    /// Build 67 (W4, S3): the owner-picked Style 1 bar is
+    /// ICONS ONLY — the caption Text is gone (build 66's
+    /// 'Subtit…' truncation and the crowded icon+label row were
+    /// the owner's complaint). The `caption` parameter is kept so
+    /// every call site is unchanged; each control's meaning stays
+    /// announced through the accessibility label its call site
+    /// already sets, and state (rate, sleep arm, aspect mode)
+    /// stays visible in the menus / the aspect icon itself,
+    /// exactly as the menus rendered it before. Same 44pt hit
+    /// height; width narrows 48 → 40 now that no caption needs
+    /// the room.
     private func bottomRowLabel(systemName: String, caption: String) -> some View {
-        VStack(spacing: 2) {
-            Image(systemName: systemName)
-                .font(.system(size: 17, weight: .semibold))
-            Text(caption)
-                .font(.caption2.weight(.semibold))
-                .lineLimit(1)
-        }
-        .foregroundStyle(.white.opacity(0.96))
-        .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
-        .frame(width: 48, height: 44)
-        .contentShape(Rectangle())
+        Image(systemName: systemName)
+            .font(.system(size: 18, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.96))
+            .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+            .frame(width: 40, height: 44)
+            .contentShape(Rectangle())
     }
 
     private func streamInfoRow(label: String, value: String) -> some View {
