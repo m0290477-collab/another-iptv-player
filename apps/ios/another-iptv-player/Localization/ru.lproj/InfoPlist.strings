@@ -1,3 +1,2 @@
 "NSLocalNetworkUsageDescription" = "Для воспроизведения через AirPlay видео передаётся на Apple TV по локальной сети.";
-"NSCameraUsageDescription" = "Используется для сканирования QR-кода входа вашего провайдера.";
 "NSFaceIDUsageDescription" = "Super X использует Face ID для разблокировки приложения, когда включена блокировка приложения.";

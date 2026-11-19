@@ -1,3 +1,2 @@
 "NSLocalNetworkUsageDescription" = "通过 AirPlay 播放时，视频将通过本地网络传输到 Apple TV。";
-"NSCameraUsageDescription" = "用于扫描服务商的登录二维码。";
 "NSFaceIDUsageDescription" = "启用应用锁定时，Super X 使用面容 ID 解锁应用。";

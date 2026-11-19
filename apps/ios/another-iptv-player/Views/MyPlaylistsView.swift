@@ -1,7 +1,6 @@
 import SwiftUI
 import GRDB
 import GRDBQuery
-import CoreImage
 
 // MARK: - My Playlists (round 10)
 //
@@ -19,10 +18,12 @@ import CoreImage
 // the default persist in PlaylistLibraryStore; ContentView's
 // auto-enter follows them); "Change server address" as a NAMED
 // quick action (the existing edit flow — same record, so favorites,
-// history and progress are preserved); QR generation for a saved
-// playlist's get.php link behind a plain-text-password warning,
-// shown only on deliberate tap; and a dead-playlist recovery card
-// when the active playlist's last check was refused.
+// history and progress are preserved); and a dead-playlist recovery
+// card when the active playlist's last check was refused.
+// Build 66 (W2, item 2): QR generation for a saved playlist's
+// get.php link is REMOVED (it printed the plain-text password into
+// a shareable code) — the view, its link builder and its menu
+// entry are gone.
 struct MyPlaylistsView: View {
     let activePlaylistId: UUID
     let onActivate: (Playlist) -> Void
@@ -36,7 +37,6 @@ struct MyPlaylistsView: View {
 
     @State private var playlistToEdit: Playlist?
     @State private var playlistToDelete: Playlist?
-    @State private var playlistForQR: Playlist?
     @State private var showAddSheet = false
     @State private var isRefreshing = false
     @State private var refreshError: String?
@@ -134,9 +134,6 @@ struct MyPlaylistsView: View {
             } else {
                 AddPlaylistView(editingPlaylist: playlist)
             }
-        }
-        .sheet(item: $playlistForQR) { playlist in
-            PlaylistQRView(playlist: playlist)
         }
         .alert(L("playlists.delete.title"), isPresented: Binding(
             get: { playlistToDelete != nil },
@@ -308,13 +305,6 @@ struct MyPlaylistsView: View {
                 } label: {
                     Label(L("common.edit"), systemImage: "pencil")
                 }
-                if Self.qrLink(for: playlist) != nil {
-                    Button {
-                        playlistForQR = playlist
-                    } label: {
-                        Label(L("playlists.qr.show"), systemImage: "qrcode")
-                    }
-                }
                 Button(role: .destructive) {
                     playlistToDelete = playlist
                 } label: {
@@ -359,36 +349,6 @@ struct MyPlaylistsView: View {
         case .expired: return L("playlists.health.expired")
         case .unknown: return L("playlists.health.unknown")
         }
-    }
-
-    // MARK: - QR (C13)
-
-    /// The link a QR code carries for this playlist: for Xtream,
-    /// the standard get.php link (username + password as query
-    /// items — the '+' → %2B PHP fix from PlaybackURLBuilder is
-    /// applied); for a remote M3U, its own URL. Local-file M3U
-    /// playlists have no link and get no QR action.
-    static func qrLink(for playlist: Playlist) -> String? {
-        if playlist.kind == .m3u {
-            let url = playlist.serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
-            return url.isEmpty ? nil : url
-        }
-        guard !playlist.username.isEmpty else { return nil }
-        var base = playlist.serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if base.hasSuffix("/") { base.removeLast() }
-        if base.lowercased().hasSuffix("/player_api.php") {
-            base = String(base.dropLast("/player_api.php".count))
-        }
-        guard var comps = URLComponents(string: base + "/get.php") else { return nil }
-        comps.queryItems = [
-            URLQueryItem(name: "username", value: playlist.username),
-            URLQueryItem(name: "password", value: playlist.password),
-            URLQueryItem(name: "type", value: "m3u_plus"),
-            URLQueryItem(name: "output", value: "ts")
-        ]
-        comps.percentEncodedQuery = comps.percentEncodedQuery?
-            .replacingOccurrences(of: "+", with: "%2B")
-        return comps.url?.absoluteString
     }
 
     // MARK: - Actions
@@ -465,68 +425,5 @@ struct MyPlaylistsView: View {
             refreshError = error.localizedDescription
             showRefreshError = true
         }
-    }
-}
-
-// MARK: - Playlist QR sheet (round 15, C13)
-
-/// Shows the QR for a saved playlist's get.php link — only ever
-/// reached by a deliberate tap in My Playlists, and always with the
-/// inline plain-text-password warning above the code.
-private struct PlaylistQRView: View {
-    let playlist: Playlist
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 18) {
-                Text(playlist.name)
-                    .font(.headline)
-                if playlist.kind == .xtream {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
-                        Text(L("playlists.qr.warning"))
-                            .font(.caption)
-                            .foregroundColor(.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(12)
-                    .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius))
-                }
-                if let link = MyPlaylistsView.qrLink(for: playlist),
-                   let image = Self.qrImage(from: link) {
-                    Image(uiImage: image)
-                        .interpolation(.none)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 240, height: 240)
-                        .padding(16)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: AppTheme.cornerRadius))
-                }
-                Spacer()
-            }
-            .padding(20)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(AppTheme.background.ignoresSafeArea())
-            .navigationTitle(L("playlists.qr.title"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(L("common.close")) { dismiss() }
-                }
-            }
-        }
-    }
-
-    private static func qrImage(from string: String) -> UIImage? {
-        guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
-        filter.setValue(Data(string.utf8), forKey: "inputMessage")
-        filter.setValue("M", forKey: "inputCorrectionLevel")
-        guard let output = filter.outputImage else { return nil }
-        let scaled = output.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
-        let context = CIContext()
-        guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
-        return UIImage(cgImage: cgImage)
     }
 }

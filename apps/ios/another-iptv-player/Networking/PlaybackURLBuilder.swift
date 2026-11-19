@@ -38,7 +38,8 @@ struct PlaybackURLBuilder {
         // Raw concatenation silently broke the URL for accounts containing '#'/'?'/'/'/'%'
         // (login worked because it went through query-item encoding; playback did not).
         let u = playlist.username.trimmingCharacters(in: .whitespacesAndNewlines)
-        let p = playlist.password.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Build 66 (W2, item 6): Keychain-resolved working password.
+        let p = (CredentialStore.password(for: playlist) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let eu = u.addingPercentEncoding(withAllowedCharacters: Self.pathSegmentAllowed) ?? u
         let ep = p.addingPercentEncoding(withAllowedCharacters: Self.pathSegmentAllowed) ?? p
         return "\(eu)/\(ep)"
@@ -140,7 +141,8 @@ struct PlaybackURLBuilder {
         guard var comps = URLComponents(string: cleanBaseURL + path) else { return nil }
         comps.queryItems = [
             URLQueryItem(name: "username", value: playlist.username.trimmingCharacters(in: .whitespacesAndNewlines)),
-            URLQueryItem(name: "password", value: playlist.password.trimmingCharacters(in: .whitespacesAndNewlines))
+            // Build 66 (W2, item 6): Keychain-resolved working password.
+            URLQueryItem(name: "password", value: (CredentialStore.password(for: playlist) ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
         ] + extraQuery
         comps.percentEncodedQuery = comps.percentEncodedQuery?
             .replacingOccurrences(of: "+", with: "%2B")

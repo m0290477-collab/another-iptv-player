@@ -2,6 +2,11 @@ import Foundation
 import Security
 
 /// Build 61 (B13, N-pack): automatic restore after reinstall.
+/// Build 66 (W2, item 6): INVERTED — the Keychain is now the
+/// PRIMARY working store for playlist passwords; the database
+/// `password` column is legacy and is written EMPTY on every
+/// add/edit going forward (the column itself stays for schema
+/// compatibility — no migration adds or drops it).
 ///
 /// `CredentialStore` mirrors every playlist's credential fields
 /// into the Keychain as SYNCHRONIZABLE items
@@ -17,6 +22,16 @@ import Security
 /// (`epgURLOverride`, `m3uEpgURL`). Nothing new is collected, and
 /// the credentials never touch any server of ours: the only sync
 /// channel is the user's own iCloud Keychain.
+///
+/// Every password USE in the app resolves through
+/// `password(for:)` below — the API client and the playback URL
+/// builder (the two funnels every other call site builds from),
+/// the EPG refresh coordinator's redaction parameters, the
+/// settings password row and the credential-bearing backup
+/// export. No other code reads `Playlist.password` as a working
+/// value; the only remaining reads of that property are inside
+/// this file (mirror capture + the legacy fallback/migration)
+/// and in-memory form merges, documented at those sites.
 ///
 /// Mirroring is hooked at the store layer — the two importer
 /// gateways (`XtreamImporter.syncAndSave`,
@@ -72,6 +87,9 @@ enum CredentialStore {
         }
 
         /// Recreates the local playlist record on restore. The
+        /// record carries the real password IN MEMORY (background
+        /// re-validation verifies with it); the restore service
+        /// writes a password-blanked copy to the database. The
         /// panel-derived fields (server timezone, timeshift
         /// style) are NOT credentials — they re-resolve lazily
         /// through the existing paths after restore.
@@ -99,10 +117,20 @@ enum CredentialStore {
 
     /// Creates or replaces the keychain item for one playlist.
     /// Best-effort by design: a keychain failure must never fail
-    /// the playlist save itself — the local DB stays the working
-    /// source of truth, the keychain is the restore source.
+    /// the playlist save itself.
+    ///
+    /// Build 66 guard: an incoming playlist whose password is
+    /// EMPTY never erases a stored password. Refresh and
+    /// name-only paths legitimately re-mirror database-read
+    /// records (whose column is blank by design now); without
+    /// this guard those paths would wipe the working credential.
     static func mirror(_ playlist: Playlist) {
-        let record = Record(playlist: playlist)
+        var record = Record(playlist: playlist)
+        if record.password.isEmpty,
+           let existing = record(for: playlist.id),
+           !existing.password.isEmpty {
+            record.password = existing.password
+        }
         guard let data = try? JSONEncoder().encode(record) else { return }
         let query = baseQuery(account: playlist.id.uuidString)
         SecItemDelete(query as CFDictionary)
@@ -113,6 +141,65 @@ enum CredentialStore {
         if status != errSecSuccess {
             Log.error("CredentialStore", "mirror failed for \(playlist.id): OSStatus \(status)")
         }
+    }
+
+    // MARK: - Password resolution (build 66: the single resolver)
+
+    /// The ONE mirrored record for a playlist id, if any.
+    static func record(for playlistId: UUID) -> Record? {
+        var query = baseQuery(account: playlistId.uuidString)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data else {
+            return nil
+        }
+        return try? JSONDecoder().decode(Record.self, from: data)
+    }
+
+    /// THE working password for a playlist — every use site in
+    /// the app resolves through here. The Keychain record wins.
+    /// The legacy database value is only a fallback for the two
+    /// states where no Keychain record can exist yet: a brand-new
+    /// playlist still being probed before its first mirror (the
+    /// struct carries the form-entered password in memory), and
+    /// a pre-build-66 row the launch migration has not reached.
+    static func password(for playlist: Playlist) -> String? {
+        if let record = record(for: playlist.id), !record.password.isEmpty {
+            return record.password
+        }
+        let legacy = playlist.password
+        return legacy.isEmpty ? nil : legacy
+    }
+
+    /// Build 66 one-time migration for existing installs, called
+    /// per playlist from `PlaylistRestoreService` (the launch /
+    /// restore path). When the Keychain has no usable password
+    /// for the playlist but the database row still holds one,
+    /// the row is mirrored into the Keychain; either way, when
+    /// the database row holds a password this returns a copy of
+    /// the playlist with the column blanked for the caller to
+    /// write back — or nil when there is nothing to migrate
+    /// (column already empty, or the Keychain write could not
+    /// be verified, in which case the column is left untouched
+    /// so the only copy is never destroyed).
+    static func migrateLegacyPasswordIfNeeded(_ playlist: Playlist) -> Playlist? {
+        guard !playlist.password.isEmpty else { return nil }
+        if let existing = record(for: playlist.id), !existing.password.isEmpty {
+            // The Keychain is already authoritative for this
+            // playlist — the database copy is a stale duplicate.
+            var blanked = playlist
+            blanked.password = ""
+            return blanked
+        }
+        mirror(playlist)
+        guard let stored = record(for: playlist.id), !stored.password.isEmpty else {
+            return nil
+        }
+        var blanked = playlist
+        blanked.password = ""
+        return blanked
     }
 
     // MARK: - Removal (delete / erase)

@@ -78,7 +78,10 @@ class XtreamAPIClient {
         
         comps.queryItems = [
             URLQueryItem(name: "username", value: playlist.username.trimmingCharacters(in: .whitespacesAndNewlines)),
-            URLQueryItem(name: "password", value: playlist.password.trimmingCharacters(in: .whitespacesAndNewlines))
+            // Build 66 (W2, item 6): the working password resolves
+            // from the Keychain via the single resolver — the
+            // database column is legacy and blank.
+            URLQueryItem(name: "password", value: (CredentialStore.password(for: playlist) ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
         ]
         
         return comps
