@@ -30,6 +30,9 @@ struct VODView: View {
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
 
     @State private var pendingMovieDetail: DBVODStream?
+    /// Build 69 (amendment): the VOD history path's play-failure
+    /// surface — its URL-build guard used to return silently.
+    @State private var showPlayFailure = false
     /// Round 15 (C12): bumped on every tab appearance so the identity
     /// shelves replay the LIGHT entrance on tab return (the shared
     /// ShelfEntranceModifier's replay token).
@@ -332,6 +335,11 @@ struct VODView: View {
                 // placeholder promised the section's own content.
                 SearchView(playlist: playlist, searchText: $homeSearchText, initialFilter: .movies)
             }
+        }
+        // Build 69 (amendment): the play-failure alert (existing
+        // playback error copy — no new strings).
+        .alert(L("playback.error.failed_to_start"), isPresented: $showPlayFailure) {
+            Button(L("common.ok")) { showPlayFailure = false }
         }
         // Round 8 (audit A2): ONE recompute trigger — the same combined
         // token round 7 gave Home. The two separate `.task(id:)` modifiers
@@ -805,7 +813,13 @@ struct VODView: View {
         }
 
         let url: URL? = localOverrideURL ?? buildURL(for: item)
-        guard let url else { return }
+        // Build 69 (amendment): was a silent return — a history
+        // tap whose URL failed to build looked dead. Surface the
+        // plain failure instead (same alert as the round's fixes).
+        guard let url else {
+            showPlayFailure = true
+            return
+        }
         playerOverlay.present(skipDownloadCheck: localOverrideURL != nil, playlistId: playlist.id) {
             PlayerView(
                 url: url,

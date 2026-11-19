@@ -1813,7 +1813,11 @@ struct HomeView: View {
             // resumed against a wrong-extension URL.
             return builder.movieURL(streamId: Int(item.streamId) ?? 0, containerExtension: item.containerExtension)
         case "series":
-            return builder.seriesURL(streamId: item.streamId, containerExtension: nil)
+            // Build 69 (amendment): the same F2 correction as the
+            // VOD branch above — the record's REAL container
+            // extension, matching every other history series path
+            // (DashboardView, SeriesView). Nil forced .mp4.
+            return builder.seriesURL(streamId: item.streamId, containerExtension: item.containerExtension)
         default:
             return nil
         }
