@@ -718,7 +718,7 @@ struct RecentlyAddedVODDetailView: View {
     private var displayItems: [VODWithCategory] {
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         if q.isEmpty { return wrapped }
-        return wrapped.filter { CatalogTextSearch.matches(search: q, text: $0.stream.name) }
+        return wrapped.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name) }
     }
 
     var body: some View {
@@ -1017,7 +1017,7 @@ struct VODCategoryDetailView: View {
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         if q.isEmpty { displayItems = base; return }
         let result = await Task.detached(priority: .userInitiated) {
-            let filtered = base.filter { CatalogTextSearch.matches(search: q, text: $0.stream.name) }
+            let filtered = base.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name) }
             return CatalogTextSearch.sortVODByRelevance(filtered, search: q)
         }.value
         guard !Task.isCancelled else { return }
@@ -1362,7 +1362,7 @@ struct AllVODView: View {
         let result = await Task.detached(priority: .userInitiated) {
             let base = source.filter { !hidden.contains($0.stream.categoryId ?? "") }
             if q.isEmpty { return base }
-            let filtered = base.filter { CatalogTextSearch.matches(search: q, text: $0.stream.name) }
+            let filtered = base.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name) }
             return CatalogTextSearch.sortVODByRelevance(filtered, search: q)
         }.value
         guard !Task.isCancelled else { return }

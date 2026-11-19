@@ -275,7 +275,7 @@ struct SeriesView: View {
             NavigationStack {
                 // Round 10: SearchView owns its big title — the
                 // wrapper's inline title was removed.
-                SearchView(playlist: playlist, searchText: $homeSearchText)
+                SearchView(playlist: playlist, searchText: $homeSearchText, initialFilter: .series)
             }
         }
         // Round 8 (audit A2): ONE recompute trigger — the same combined
@@ -725,7 +725,7 @@ struct RecentlyAddedSeriesDetailView: View {
     private var displayItems: [SeriesWithCategory] {
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         if q.isEmpty { return wrapped }
-        return wrapped.filter { CatalogTextSearch.matches(search: q, text: $0.series.name) }
+        return wrapped.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.series.name) }
     }
 
     var body: some View {
@@ -1053,7 +1053,7 @@ struct SeriesCategoryDetailView: View {
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         if q.isEmpty { displayItems = base; return }
         let result = await Task.detached(priority: .userInitiated) {
-            let filtered = base.filter { CatalogTextSearch.matches(search: q, text: $0.series.name) }
+            let filtered = base.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.series.name) }
             return CatalogTextSearch.sortSeriesByRelevance(filtered, search: q)
         }.value
         guard !Task.isCancelled else { return }
@@ -1349,7 +1349,7 @@ struct AllSeriesView: View {
         let result = await Task.detached(priority: .userInitiated) {
             let base = source.filter { !hidden.contains($0.series.categoryId ?? "") }
             if q.isEmpty { return base }
-            let filtered = base.filter { CatalogTextSearch.matches(search: q, text: $0.series.name) }
+            let filtered = base.filter { CatalogTextSearch.matchesFuzzy(search: q, text: $0.series.name) }
             return CatalogTextSearch.sortSeriesByRelevance(filtered, search: q)
         }.value
         guard !Task.isCancelled else { return }

@@ -314,7 +314,7 @@ struct LiveStreamsView: View {
             NavigationStack {
                 // Round 10: SearchView owns its big title — the
                 // wrapper's inline title was removed.
-                SearchView(playlist: playlist, searchText: $homeSearchText)
+                SearchView(playlist: playlist, searchText: $homeSearchText, initialFilter: .live)
             }
         }
         // === B5 (build 61) Item 11: Multiview sheet — wave-2 (B8) preserve ===
@@ -685,7 +685,7 @@ struct LiveStreamsView: View {
         let flat = displayCategories.flatMap { displayItemsByCategory[$0.id] ?? [] }
         let q = gridDebouncedQuery.trimmingCharacters(in: .whitespaces)
         gridItems = q.isEmpty ? flat : flat.filter {
-            CatalogTextSearch.matches(search: q, text: $0.stream.name)
+            CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name)
                 || ($0.stream.channelNumber.map { String($0) == q } ?? false)
         }
         // Round 8 (audit A3): cache the sections here — the old computed
@@ -1066,7 +1066,7 @@ struct LiveCategoryDetailView: View {
             // Build 61 (B8, C11 + H5): the in-list field matches the
             // provider channel number as well as the name.
             let filtered = base.filter {
-                CatalogTextSearch.matches(search: q, text: $0.stream.name)
+                CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name)
                     || ($0.stream.channelNumber.map { String($0) == q } ?? false)
             }
             return CatalogTextSearch.sortLiveByRelevance(filtered, search: q)
@@ -1351,7 +1351,7 @@ struct AllLiveView: View {
             if q.isEmpty { return base }
             // Build 61 (B8, C11 + H5): name OR provider channel number.
             let filtered = base.filter {
-                CatalogTextSearch.matches(search: q, text: $0.stream.name)
+                CatalogTextSearch.matchesFuzzy(search: q, text: $0.stream.name)
                     || ($0.stream.channelNumber.map { String($0) == q } ?? false)
             }
             return CatalogTextSearch.sortLiveByRelevance(filtered, search: q)

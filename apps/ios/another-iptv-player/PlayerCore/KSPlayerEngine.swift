@@ -40,6 +40,17 @@ final class KSPlayerEngine: NSObject, ObservableObject {
   /// this flag used to gate; it now only attributes the failure
   /// shown on the kept failure card.)
   @Published private(set) var playbackFailureIsProviderRefusal = false
+  /// Build 63 (item 16): true when the last failure was an
+  /// open-stage failure with no HTTP status (FFmpeg could not open
+  /// the input / find stream info). Together with
+  /// `playbackFailureIsProviderRefusal` it lets the controller
+  /// distinguish "the open itself was refused/reset" from codec /
+  /// content failures when deciding whether a load that directly
+  /// REPLACED a just-stopped stream deserves the reconnect ladder
+  /// (a connection-limited panel frees the previous slot a beat
+  /// after the old stream stops; the replacement open can be
+  /// refused in that window and must not be terminal).
+  @Published private(set) var playbackFailureIsOpenFailure = false
   @Published private(set) var position: TimeInterval = 0
   @Published private(set) var duration: TimeInterval = 0
   @Published private(set) var playbackRate: Double = 1
@@ -176,6 +187,7 @@ final class KSPlayerEngine: NSObject, ObservableObject {
     playbackFailureMessage = nil
     playbackFailureIsRecoverable = false
     playbackFailureIsProviderRefusal = false
+    playbackFailureIsOpenFailure = false
     isPlaybackEstablished = false
     hasRenderedFirstFrame = false
     isCompleted = false
@@ -1004,6 +1016,7 @@ extension KSPlayerEngine: KSPlayerLayerDelegate {
         let failure = Self.playbackFailure(for: error)
         self.playbackFailureIsRecoverable = failure.recoverable
         self.playbackFailureIsProviderRefusal = failure.providerRefusal
+        self.playbackFailureIsOpenFailure = failure.openFailure
         self.playbackFailureMessage = failure.message
       } else {
         self.isCompleted = true
@@ -1028,6 +1041,9 @@ extension KSPlayerEngine: KSPlayerLayerDelegate {
     /// in the same-form sense, but it IS eligible for the
     /// controller's one alternate-engine attempt.
     let providerRefusal: Bool
+    /// Build 63 (item 16): true for open-stage failures with no
+    /// HTTP status (.formatOpenInput / .formatFindStreamInfo).
+    let openFailure: Bool
   }
 
   private static func playbackFailure(for error: Error) -> PlaybackFailure {
@@ -1037,15 +1053,15 @@ extension KSPlayerEngine: KSPlayerLayerDelegate {
     if let status = httpStatusCode(in: error) {
       switch status {
       case 401:
-        return PlaybackFailure(message: L("playback.error.unauthorized"), recoverable: false, providerRefusal: true)
+        return PlaybackFailure(message: L("playback.error.unauthorized"), recoverable: false, providerRefusal: true, openFailure: false)
       case 403:
-        return PlaybackFailure(message: L("playback.error.forbidden"), recoverable: false, providerRefusal: true)
+        return PlaybackFailure(message: L("playback.error.forbidden"), recoverable: false, providerRefusal: true, openFailure: false)
       case 404:
-        return PlaybackFailure(message: L("playback.error.not_found"), recoverable: false, providerRefusal: true)
+        return PlaybackFailure(message: L("playback.error.not_found"), recoverable: false, providerRefusal: true, openFailure: false)
       case 400...499:
-        return PlaybackFailure(message: L("playback.error.http_status", status), recoverable: false, providerRefusal: true)
+        return PlaybackFailure(message: L("playback.error.http_status", status), recoverable: false, providerRefusal: true, openFailure: false)
       default:
-        return PlaybackFailure(message: L("playback.error.http_status", status), recoverable: true, providerRefusal: false)
+        return PlaybackFailure(message: L("playback.error.http_status", status), recoverable: true, providerRefusal: false, openFailure: false)
       }
     }
     let ns = error as NSError
@@ -1053,12 +1069,12 @@ extension KSPlayerEngine: KSPlayerLayerDelegate {
     if ns.domain == NSURLErrorDomain {
       switch ns.code {
       case NSURLErrorTimedOut:
-        return PlaybackFailure(message: L("playback.error.timeout"), recoverable: true, providerRefusal: false)
+        return PlaybackFailure(message: L("playback.error.timeout"), recoverable: true, providerRefusal: false, openFailure: false)
       case NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost,
            NSURLErrorNotConnectedToInternet:
-        return PlaybackFailure(message: L("playback.error.cannot_reach"), recoverable: true, providerRefusal: false)
+        return PlaybackFailure(message: L("playback.error.cannot_reach"), recoverable: true, providerRefusal: false, openFailure: false)
       default:
-        return PlaybackFailure(message: L("playback.error.failed_check_network"), recoverable: false, providerRefusal: false)
+        return PlaybackFailure(message: L("playback.error.failed_check_network"), recoverable: false, providerRefusal: false, openFailure: false)
       }
     }
     // 3) KSPlayer's own error codes distinguish "no playable
@@ -1067,18 +1083,18 @@ extension KSPlayerEngine: KSPlayerLayerDelegate {
        let code = KSPlayerErrorCode(rawValue: ns.code) {
       switch code {
       case .videoTracksUnplayable:
-        return PlaybackFailure(message: L("playback.error.no_playable_stream"), recoverable: false, providerRefusal: false)
+        return PlaybackFailure(message: L("playback.error.no_playable_stream"), recoverable: false, providerRefusal: false, openFailure: false)
       case .codecContextCreate, .codecContextSetParam, .codecContextFindDecoder,
            .codesContextOpen, .codecVideoSendPacket, .codecAudioSendPacket,
            .codecVideoReceiveFrame, .codecAudioReceiveFrame:
-        return PlaybackFailure(message: L("playback.error.unsupported"), recoverable: false, providerRefusal: false)
+        return PlaybackFailure(message: L("playback.error.unsupported"), recoverable: false, providerRefusal: false, openFailure: false)
       case .formatOpenInput, .formatFindStreamInfo:
-        return PlaybackFailure(message: L("playback.error.failed_to_start"), recoverable: false, providerRefusal: false)
+        return PlaybackFailure(message: L("playback.error.failed_to_start"), recoverable: false, providerRefusal: false, openFailure: true)
       default:
         break
       }
     }
-    return PlaybackFailure(message: L("playback.error.failed_check_network"), recoverable: false, providerRefusal: false)
+    return PlaybackFailure(message: L("playback.error.failed_check_network"), recoverable: false, providerRefusal: false, openFailure: false)
   }
 
   /// Extracts an HTTP status code from an error chain: FFmpeg

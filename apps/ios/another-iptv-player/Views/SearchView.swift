@@ -15,9 +15,24 @@ import SwiftUI
 struct SearchView: View {
     let playlist: Playlist
     @Binding var searchText: String
+    /// Build 63 (item 15): the section the user opened search FROM.
+    /// The pill row used to ALWAYS start on Movies, so searching
+    /// from the Series tab hunted through the movies and "found
+    /// nothing" for series titles until the user noticed and tapped
+    /// the Series pill by hand — the owner's "I type a series name
+    /// and it barely shows up". Each section's search entry now
+    /// passes its own filter; Home keeps the Movies default.
+    var initialFilter: SearchFilter = .movies
     @State private var debouncedQuery = ""
     @State private var debounceTask: Task<Void, Never>?
-    @State private var selectedFilter: SearchFilter = .movies
+    @State private var selectedFilter: SearchFilter
+
+    init(playlist: Playlist, searchText: Binding<String>, initialFilter: SearchFilter = .movies) {
+        self.playlist = playlist
+        self.initialFilter = initialFilter
+        self._searchText = searchText
+        self._selectedFilter = State(initialValue: initialFilter)
+    }
     /// Build 61 (B10, Q14): persisted recent queries (the ONE
     /// SearchHistoryStore — the same store Settings ▸ Storage
     /// clears), shown while the field is empty/short.

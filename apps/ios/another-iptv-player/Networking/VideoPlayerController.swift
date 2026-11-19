@@ -268,6 +268,21 @@ final class VideoPlayerController: ObservableObject {
   // simply not published yet. Reset on every explicit `play(url:)`
   // and on every successful establishment.
   private var autoReconnectAttempts = 0
+  /// Build 63 (item 16): true when the CURRENT load directly
+  /// replaced a just-stopped stream — either it superseded a
+  /// previous load on this controller (zap / next episode) or this
+  /// controller was created within seconds of another player's
+  /// teardown (close one title, open another). On a
+  /// connection-limited panel the previous slot frees a beat AFTER
+  /// the old stream stops, so the replacement open can be refused
+  /// (HTTP 403/451) or reset (open-stage failure) inside that
+  /// window. Both classes are TERMINAL for a cold open (round 14:
+  /// retrying a genuinely dead stream only delays the real
+  /// message), but a replacement load gets the same bounded
+  /// reconnect ladder as a transient failure.
+  private var currentLoadMayRetryRefusal = false
+  /// When any controller last tore down (stamped in `teardown()`).
+  private static var lastTeardownAt: Date?
   private var pendingReconnectWorkItem: DispatchWorkItem?
   private static let reconnectBackoffs: [TimeInterval] = [1, 3, 8]
   private static let maxReconnectAttempts = 3
@@ -421,6 +436,7 @@ final class VideoPlayerController: ObservableObject {
         // reconnect budget and records the Q10 success (which
         // clears the channel's consecutive-failure streak). ===
         autoReconnectAttempts = 0
+        currentLoadMayRetryRefusal = false
         cancelPendingReconnect()
         cancelStallWatchdog()
         if let key = importedSubtitleContentKey {
@@ -457,7 +473,12 @@ final class VideoPlayerController: ObservableObject {
     if !castPresenting,
        engine.playbackFailureMessage != nil,
        let request = currentLoadRequest {
-      if engine.playbackFailureIsRecoverable,
+      // Build 63 (item 16): a replacement load may also spend the
+      // ladder on a provider refusal / open failure (see
+      // currentLoadMayRetryRefusal) — the panel-slot-release race.
+      let refusalRetry = currentLoadMayRetryRefusal
+        && (engine.playbackFailureIsProviderRefusal || engine.playbackFailureIsOpenFailure)
+      if engine.playbackFailureIsRecoverable || refusalRetry,
          autoReconnectAttempts < Self.maxReconnectAttempts,
          pendingReconnectWorkItem == nil {
         let delay = Self.reconnectBackoffs[min(autoReconnectAttempts, Self.reconnectBackoffs.count - 1)]
@@ -896,6 +917,10 @@ final class VideoPlayerController: ObservableObject {
     bufferBaseForward = nil
     lastBufferHealthCheckAt = nil
     lastBufferAheadSeconds = 0
+    // Build 63 (item 16): arm the refusal-retry BEFORE the new
+    // request replaces the old one.
+    currentLoadMayRetryRefusal = currentLoadRequest != nil
+      || (Self.lastTeardownAt.map { Date().timeIntervalSince($0) < 20 } ?? false)
     PlaybackPrewarmService.shared.cancelNeighbors()
     currentLoadRequest = PendingLoadRequest(
       url: url,
@@ -1275,6 +1300,7 @@ final class VideoPlayerController: ObservableObject {
     cancelPendingReconnect()
     cancelStallWatchdog()
     Self.unregister(self)
+    Self.lastTeardownAt = Date()
     seriesEpisodeOnPrevious = nil
     seriesEpisodeOnNext = nil
     MPRemoteCommandCenter.shared().previousTrackCommand.isEnabled = false

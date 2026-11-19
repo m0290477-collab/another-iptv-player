@@ -174,8 +174,12 @@ struct SeriesPlayShell: View {
 
     private func startPlayback(episode: DBEpisode, resume: DBWatchHistory?) async {
         let sid = episode.episodeId ?? episode.id
+        // Build 63 (item 16 hardening, same fix as item 6a): the
+        // BOUNDED variant — an unbounded local-file lookup must
+        // never be able to stall episode playback before it starts.
         let localURL = await DownloadManager.shared.localURL(
-            forId: DownloadManager.idFor(episode: playlist.id, episodeId: sid)
+            forId: DownloadManager.idFor(episode: playlist.id, episodeId: sid),
+            timeout: 1.5
         )
         let url: URL
         if let localURL {

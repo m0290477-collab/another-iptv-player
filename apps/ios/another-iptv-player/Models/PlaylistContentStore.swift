@@ -480,10 +480,16 @@ final class PlaylistContentStore: ObservableObject {
                     try Self.fetchLiveStreamsData(playlistId: playlistId, db: db)
                 }
                 let (cats, ls) = try await (catsTask, dataTask)
-                let by = Self.mergeUncategorized(ls.byCategory, validIds: Set(cats.map(\.id)))
-                liveCategories = Self.appendingUncategorized(cats, byCategory: by, type: "live", playlistId: playlistId)
+                // Build 63 (item 14, S2): merge off the main actor;
+                // only the finished values are published here.
+                let merged = await Task.detached(priority: .userInitiated) {
+                    let by = Self.mergeUncategorized(ls.byCategory, validIds: Set(cats.map(\.id)))
+                    let categories = Self.appendingUncategorized(cats, byCategory: by, type: "live", playlistId: playlistId)
+                    return (categories, by)
+                }.value
+                liveCategories = merged.0
                 liveStreams = ls.streams
-                liveStreamsByCategoryId = by
+                liveStreamsByCategoryId = merged.1
             case .vod:
                 async let catsTask = AppDatabase.shared.read { db in
                     try Self.fetchCategories(playlistId: playlistId, type: "vod", db: db)
@@ -492,10 +498,15 @@ final class PlaylistContentStore: ObservableObject {
                     try Self.fetchVODStreamsData(playlistId: playlistId, db: db)
                 }
                 let (cats, vs) = try await (catsTask, dataTask)
-                let by = Self.mergeUncategorized(vs.byCategory, validIds: Set(cats.map(\.id)))
-                vodCategories = Self.appendingUncategorized(cats, byCategory: by, type: "vod", playlistId: playlistId)
+                // Build 63 (item 14, S2): merge off the main actor.
+                let merged = await Task.detached(priority: .userInitiated) {
+                    let by = Self.mergeUncategorized(vs.byCategory, validIds: Set(cats.map(\.id)))
+                    let categories = Self.appendingUncategorized(cats, byCategory: by, type: "vod", playlistId: playlistId)
+                    return (categories, by)
+                }.value
+                vodCategories = merged.0
                 vodStreams = vs.streams
-                vodStreamsByCategoryId = by
+                vodStreamsByCategoryId = merged.1
             case .series:
                 async let catsTask = AppDatabase.shared.read { db in
                     try Self.fetchCategories(playlistId: playlistId, type: "series", db: db)
@@ -504,10 +515,15 @@ final class PlaylistContentStore: ObservableObject {
                     try Self.fetchSeriesData(playlistId: playlistId, db: db)
                 }
                 let (cats, si) = try await (catsTask, dataTask)
-                let by = Self.mergeUncategorized(si.byCategory, validIds: Set(cats.map(\.id)))
-                seriesCategories = Self.appendingUncategorized(cats, byCategory: by, type: "series", playlistId: playlistId)
+                // Build 63 (item 14, S2): merge off the main actor.
+                let merged = await Task.detached(priority: .userInitiated) {
+                    let by = Self.mergeUncategorized(si.byCategory, validIds: Set(cats.map(\.id)))
+                    let categories = Self.appendingUncategorized(cats, byCategory: by, type: "series", playlistId: playlistId)
+                    return (categories, by)
+                }.value
+                seriesCategories = merged.0
                 seriesItems = si.items
-                seriesItemsByCategoryId = by
+                seriesItemsByCategoryId = merged.1
             }
             // Round 14 (B10): one of the catalog arrays changed.
             scheduleSharedRankingsRecompute()
@@ -547,20 +563,34 @@ final class PlaylistContentStore: ObservableObject {
         // Collect orphaned/uncategorized streams in the synthetic "Uncategorized" bucket and
         // add a visible entry to the category list when needed.
         let ls = try await liveTask
-        let liveBy = Self.mergeUncategorized(ls.byCategory, validIds: Set(cats.live.map(\.id)))
-        liveCategories = Self.appendingUncategorized(cats.live, byCategory: liveBy, type: "live", playlistId: playlistId)
+        // Build 63 (item 14, S2): merges off the main actor; the
+        // per-type publish order and values are unchanged.
+        let liveMerged = await Task.detached(priority: .userInitiated) {
+            let by = Self.mergeUncategorized(ls.byCategory, validIds: Set(cats.live.map(\.id)))
+            let categories = Self.appendingUncategorized(cats.live, byCategory: by, type: "live", playlistId: playlistId)
+            return (categories, by)
+        }.value
+        liveCategories = liveMerged.0
         liveStreams = ls.streams
-        liveStreamsByCategoryId = liveBy
+        liveStreamsByCategoryId = liveMerged.1
         let vs = try await vodTask
-        let vodBy = Self.mergeUncategorized(vs.byCategory, validIds: Set(cats.vod.map(\.id)))
-        vodCategories = Self.appendingUncategorized(cats.vod, byCategory: vodBy, type: "vod", playlistId: playlistId)
+        let vodMerged = await Task.detached(priority: .userInitiated) {
+            let by = Self.mergeUncategorized(vs.byCategory, validIds: Set(cats.vod.map(\.id)))
+            let categories = Self.appendingUncategorized(cats.vod, byCategory: by, type: "vod", playlistId: playlistId)
+            return (categories, by)
+        }.value
+        vodCategories = vodMerged.0
         vodStreams = vs.streams
-        vodStreamsByCategoryId = vodBy
+        vodStreamsByCategoryId = vodMerged.1
         let si = try await seriesTask
-        let seriesBy = Self.mergeUncategorized(si.byCategory, validIds: Set(cats.series.map(\.id)))
-        seriesCategories = Self.appendingUncategorized(cats.series, byCategory: seriesBy, type: "series", playlistId: playlistId)
+        let seriesMerged = await Task.detached(priority: .userInitiated) {
+            let by = Self.mergeUncategorized(si.byCategory, validIds: Set(cats.series.map(\.id)))
+            let categories = Self.appendingUncategorized(cats.series, byCategory: by, type: "series", playlistId: playlistId)
+            return (categories, by)
+        }.value
+        seriesCategories = seriesMerged.0
         seriesItems = si.items
-        seriesItemsByCategoryId = seriesBy
+        seriesItemsByCategoryId = seriesMerged.1
         streamsLoaded = true
         // Round 14 (B10/B8): same derivation as the initial load.
         scheduleSharedRankingsRecompute()
@@ -689,7 +719,10 @@ final class PlaylistContentStore: ObservableObject {
 
     /// Merges buckets that are not among the known category ids (nil or orphaned) under the synthetic
     /// "Uncategorized" key.
-    private static func mergeUncategorized<T>(
+    /// Build 63 (item 14, S2): `nonisolated` — the merge walks the
+    /// full per-type arrays and now runs inside a detached task at
+    /// the reload call sites instead of on the main actor.
+    nonisolated private static func mergeUncategorized<T>(
         _ byCategory: [String: [T]], validIds: Set<String>
     ) -> [String: [T]] {
         var result: [String: [T]] = [:]
@@ -702,7 +735,9 @@ final class PlaylistContentStore: ObservableObject {
 
     /// If the synthetic "Uncategorized" bucket is non-empty, it appends a visible category to the end of the category list;
     /// if empty, it returns the list as-is.
-    private static func appendingUncategorized(
+    /// Build 63 (item 14, S2): `nonisolated`, same reason as
+    /// `mergeUncategorized` above.
+    nonisolated private static func appendingUncategorized(
         _ categories: [DBCategory],
         byCategory: [String: [some Any]],
         type: String,
