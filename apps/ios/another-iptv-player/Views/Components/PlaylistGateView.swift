@@ -156,41 +156,18 @@ struct PlaylistGateView: View {
 
     private var hasLocalFile: Bool { localContent != nil }
 
-    /// Build 65 (Login gate style 2 'Cinematic Card'): the blurred
-    /// cinematic backdrop behind the gate — the brand flame blown
-    /// up, blurred and dimmed over a warm charcoal gradient (brand
-    /// art only; the gate has no catalog to borrow posters from,
-    /// and none are invented).
-    private var gateBackdrop: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.13, green: 0.06, blue: 0.045),
-                    AppTheme.background,
-                    AppTheme.background
-                ],
-                startPoint: .top, endPoint: .bottom
-            )
-            Image(systemName: "flame.fill")
-                .font(.system(size: 430, weight: .bold))
-                .foregroundStyle(AppTheme.brandGradient)
-                .blur(radius: 95)
-                .opacity(0.32)
-                .offset(y: -190)
-            // A second, cooler ember low in the frame for depth.
-            Image(systemName: "flame.fill")
-                .font(.system(size: 300, weight: .bold))
-                .foregroundStyle(AppTheme.brandGradient)
-                .blur(radius: 110)
-                .opacity(0.14)
-                .offset(x: 130, y: 330)
-        }
-        .ignoresSafeArea()
-    }
+    // Build 68 (W-H, owner order): the gate is SIMPLIFIED — the
+    // build-65 blurred-flame backdrop (two oversized blurred flame
+    // glyphs over a warm gradient) and the frosted-glass card that
+    // wrapped header + form are REMOVED. The gate now sits flat on
+    // the plain charcoal AppTheme.background with tight, even
+    // spacing: logo, wordmark, subtitle, segmented switch, form,
+    // primary button. Presentation only — every field, binding,
+    // validation and save pipeline below is unchanged.
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 22) {
+            VStack(spacing: 16) {
                 // Round 15 (C13): "All subscriptions expired" —
                 // an explicit line instead of blind-entering a
                 // dead playlist; the add form below stays ready.
@@ -198,36 +175,17 @@ struct PlaylistGateView: View {
                     allExpiredCard
                 }
 
-                // Build 65 (style 2 'Cinematic Card'): header +
-                // form live inside ONE frosted-glass card over the
-                // blurred backdrop — the mockup's composition.
-                // Every field, the segmented switch and all logic
-                // are the existing views, unchanged.
-                VStack(spacing: 22) {
-                    header
-                    addSection
-                }
-                .padding(20)
-                .background {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 26, style: .continuous)
-                            .fill(.ultraThinMaterial)
-                        RoundedRectangle(cornerRadius: 26, style: .continuous)
-                            .fill(AppTheme.surface.opacity(0.55))
-                    }
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 26, style: .continuous)
-                        .stroke(Color.white.opacity(0.13), lineWidth: 1)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-                .shadow(color: .black.opacity(0.45), radius: 24, y: 12)
+                // Build 68 (W-H): header + form sit directly on
+                // the background — no wrapping card, no glass, no
+                // border, no shadow. Every field, the segmented
+                // switch and all logic are the existing views,
+                // unchanged.
+                header
+                addSection
 
                 // Round 15 (C13): after an explicit sign-out, one
                 // discreet row back into the last playlist (name
                 // only — tapping re-enters that saved record).
-                // Build 65: it sits UNDER the card, where the
-                // mockup puts its saved-playlist chips.
                 if let last = continueWithPlaylist {
                     continueWithRow(last)
                 }
@@ -235,16 +193,15 @@ struct PlaylistGateView: View {
                 helpLine
             }
             .padding(.horizontal, 20)
-            .padding(.top, 24)
-            .padding(.bottom, 32)
+            .padding(.top, 16)
+            .padding(.bottom, 24)
             // While a verify/import runs, the gate is inert — the analog
             // of the Add sheets' `interactiveDismissDisabled(isLoading)`.
             .disabled(isLoading)
         }
-        // Build 65 (Cinematic Card): the blurred backdrop behind
-        // the scroll content (ContentView's flat cinematic
-        // background sits behind this).
-        .background(gateBackdrop)
+        // Build 68 (W-H): plain charcoal background only — the
+        // blurred cinematic backdrop is gone.
+        .cinematicBackground()
         .overlay {
             if let summary = addSummary {
                 // Build 61 (B10, L2/L3): the end-of-add summary.
@@ -346,7 +303,7 @@ struct PlaylistGateView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             // Build 61 (Design-4, panel 4): the centered flame mark
             // over the wordmark — the mockup's flame-X treatment,
             // rendered with the system flame glyph in the fixed
@@ -354,11 +311,10 @@ struct PlaylistGateView: View {
             // opaque blue-on-black raster, so it cannot carry the
             // treatment; the app icon itself is unchanged and still
             // shows everywhere the system shows it).
+            // Build 68 (W-H): modest size, no glow shadow.
             Image(systemName: "flame.fill")
-                .font(.system(size: 54, weight: .bold))
+                .font(.system(size: 44, weight: .bold))
                 .foregroundStyle(AppTheme.brandGradient)
-                .shadow(color: AppTheme.accentStart.opacity(0.45), radius: 14, x: 0, y: 6)
-                .padding(.bottom, 2)
 
             // Typographic wordmark — no invented logo artwork: "Super"
             // in white, the X in the brand gradient (the mockup's
@@ -375,7 +331,7 @@ struct PlaylistGateView: View {
                 Text("Pro Max")
                     .foregroundStyle(.white)
             }
-            .font(.system(size: 32, weight: .black))
+            .font(.system(size: 30, weight: .black))
             .tracking(-0.5)
 
             // Design-4 subtitle ("IPTV • Playlist Login" in the
@@ -530,9 +486,6 @@ struct PlaylistGateView: View {
         }
         .padding(4)
         .background(Capsule().fill(AppTheme.surface))
-        .overlay(
-            Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-        )
     }
 
     private func segmentButton(kind: FormKind, title: String) -> some View {
@@ -682,12 +635,8 @@ struct PlaylistGateView: View {
                 importTask = Task { await saveXtream() }
             }
         }
-        .padding(16)
-        .background(AppTheme.cardGradient, in: RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
-        )
+        // Build 68 (W-H): no card fill / gradient / border around
+        // the form — fields sit directly on the background.
     }
 
     private var m3uForm: some View {
@@ -787,12 +736,8 @@ struct PlaylistGateView: View {
                 importTask = Task { await saveM3U() }
             }
         }
-        .padding(16)
-        .background(AppTheme.cardGradient, in: RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
-        )
+        // Build 68 (W-H): no card fill / gradient / border around
+        // the form — fields sit directly on the background.
     }
 
     private func submitButton(title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
@@ -854,10 +799,6 @@ struct PlaylistGateView: View {
         }
         .padding(14)
         .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
-        )
         .contentShape(Rectangle())
         .onTapGesture { onSelect(playlist) }
         .contextMenu {
