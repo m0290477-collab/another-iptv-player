@@ -209,10 +209,10 @@ struct MyPlaylistsView: View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(.caption.weight(.semibold))
-                .foregroundColor(.white)
+                .foregroundColor(.primary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
-                .background(Color.white.opacity(0.12), in: Capsule())
+                .background(AppTheme.overlayFill(0.12), in: Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -252,10 +252,10 @@ struct MyPlaylistsView: View {
                     if isDefault {
                         Text(L("playlists.default_badge"))
                             .font(.caption2.weight(.bold))
-                            .foregroundColor(.white)
+                            .foregroundColor(.primary)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.white.opacity(0.22), in: Capsule())
+                            .background(AppTheme.overlayFill(0.22), in: Capsule())
                     }
                     // C13: health dot from the last verify/sync.
                     Circle()
@@ -323,7 +323,7 @@ struct MyPlaylistsView: View {
         .cornerRadius(AppTheme.cornerRadius)
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                .strokeBorder(isActive ? AppTheme.accent.opacity(0.45) : Color.white.opacity(0.06), lineWidth: 1)
+                .strokeBorder(isActive ? AppTheme.accent.opacity(0.45) : AppTheme.cardBorderColor, lineWidth: 1)
         )
         .contentShape(Rectangle())
         .onTapGesture {

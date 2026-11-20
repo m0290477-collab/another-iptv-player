@@ -93,7 +93,7 @@ struct SearchView: View {
                 }
                 .font(.system(size: 20, weight: .black))
                 .latinBrandTracking(-0.5)
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
 
                 CatalogSearchField(text: $searchText, placeholder: L("search.placeholder"))
 

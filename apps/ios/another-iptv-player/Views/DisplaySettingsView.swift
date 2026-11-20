@@ -24,7 +24,7 @@ import SwiftUI
 /// section visibility, motion intensity and UI sounds — via the
 /// shared sections below, each reachable exactly once.
 struct DisplaySettingsView: View {
-    @AppStorage("app.appearance") private var appearance = "dark"
+    @AppStorage("app.appearance") private var appearance = "system"
     @AppStorage(PosterSizePreference.defaultsKey) private var posterSizeRaw = PosterSizePreference.medium.rawValue
     @AppStorage(HomeDensityPreference.defaultsKey) private var densityRaw = HomeDensityPreference.comfortable.rawValue
     @ObservedObject private var accentStore = AccentThemeStore.shared
@@ -103,7 +103,7 @@ struct DisplaySettingsView: View {
                                 }
                                 .overlay {
                                     Circle()
-                                        .stroke(accentStore.preset == preset ? Color.white : Color.clear, lineWidth: 2)
+                                        .stroke(accentStore.preset == preset ? Color.primary : Color.clear, lineWidth: 2)
                                         .padding(-4)
                                 }
                             }

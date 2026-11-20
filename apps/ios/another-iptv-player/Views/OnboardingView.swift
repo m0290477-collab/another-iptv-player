@@ -52,7 +52,7 @@ struct OnboardingView: View {
                         .shadow(color: AppTheme.accentStart.opacity(0.45), radius: 14, x: 0, y: 6)
                     HStack(spacing: 4) {
                         Text("Super")
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                         Text("X")
                             .foregroundStyle(AppTheme.brandGradient)
                     }
@@ -74,7 +74,7 @@ struct OnboardingView: View {
                 HStack(spacing: 8) {
                     ForEach(pages.indices, id: \.self) { index in
                         Capsule()
-                            .fill(index == page ? AppTheme.accent : Color.white.opacity(0.25))
+                            .fill(index == page ? AppTheme.accent : AppTheme.overlayFill(0.25))
                             .frame(width: index == page ? 22 : 8, height: 8)
                     }
                 }
@@ -83,7 +83,7 @@ struct OnboardingView: View {
                 HStack(spacing: 12) {
                     Button(L("onboarding.skip")) { onFinish() }
                         .font(.body.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.75))
+                        .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
 
@@ -118,11 +118,11 @@ struct OnboardingView: View {
                 .background(Circle().fill(AppTheme.surface))
             Text(L(page.titleKey))
                 .font(.title2.weight(.bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .multilineTextAlignment(.center)
             Text(L(page.bodyKey))
                 .font(.body)
-                .foregroundStyle(.white.opacity(0.72))
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 36)
             Spacer()

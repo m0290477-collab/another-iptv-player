@@ -11,14 +11,45 @@ import UIKit
 /// accent #FF4A1F (gradient to #FF7A18 for brand/hero fills), and red
 /// reserved for LIVE indicators only. Screens should use these tokens
 /// instead of ad-hoc colors so the design stays consistent.
+///
+/// Build 76 (owner order, follow-the-device theming): every surface
+/// token below is a DYNAMIC color — the dark value is the exact
+/// Design-4 value the app has always shipped; the light value is the
+/// paired light-theme value (light-gray page, white cards, near-black
+/// text via `.primary`). A surface and the text on it now always come
+/// from the same scheme, so no surface can mix light chrome with
+/// dark paint again. The accent and brand gradient are identical in
+/// both schemes.
 enum AppTheme {
-    /// App-wide near-black charcoal background (#0B0B0E).
-    static let background = Color(red: 0.043, green: 0.043, blue: 0.055)
-    /// Raised surface (#141419).
-    static let surface = Color(red: 0.078, green: 0.078, blue: 0.098)
+    /// Build 76: one dynamic color from its dark and light values.
+    /// The dark value is resolved under the dark scheme, the light
+    /// value under the light scheme — resolved by the system at
+    /// render time from the view's effective color scheme.
+    static func dynamicColor(dark: UIColor, light: UIColor) -> Color {
+        Color(uiColor: UIColor(dynamicProvider: { traits in
+            traits.userInterfaceStyle == .dark ? dark : light
+        }))
+    }
+
+    /// App-wide background: near-black charcoal #0B0B0E in dark,
+    /// light gray #F2F2F7 in light.
+    static let background = dynamicColor(
+        dark: UIColor(red: 0.043, green: 0.043, blue: 0.055, alpha: 1),
+        light: UIColor(red: 0.949, green: 0.949, blue: 0.969, alpha: 1)
+    )
+    /// Raised surface: #141419 in dark, white in light.
+    static let surface = dynamicColor(
+        dark: UIColor(red: 0.078, green: 0.078, blue: 0.098, alpha: 1),
+        light: UIColor(red: 1, green: 1, blue: 1, alpha: 1)
+    )
     /// Card surface (#1A1A21) — sheets-on-sheets, chips, placeholders
-    /// and the Design-4 card fill.
-    static let elevated = Color(red: 0.102, green: 0.102, blue: 0.129)
+    /// and the Design-4 card fill. Light: a near-white #F6F6FA, so an
+    /// elevated chip/card still reads against a white surface while
+    /// staying lighter than the light-gray page background.
+    static let elevated = dynamicColor(
+        dark: UIColor(red: 0.102, green: 0.102, blue: 0.129, alpha: 1),
+        light: UIColor(red: 0.965, green: 0.965, blue: 0.980, alpha: 1)
+    )
     /// The app accent — user-selectable since round 7 (Settings → App →
     /// Accent Color); since build 61 the DEFAULT preset is the Design-4
     /// red-orange #FF4A1F (users who already picked another accent keep
@@ -55,7 +86,27 @@ enum AppTheme {
     /// Gate text-field fill: dark translucent over the charcoal
     /// background; the field outline is `accent` at reduced opacity
     /// (applied at the call site so focus/validation can vary it).
-    static let fieldBackground = Color.white.opacity(0.045)
+    /// Build 76: scheme-paired — white at 4.5% in dark (unchanged),
+    /// black at 4.5% in light, so fields stay visible on white cards.
+    static let fieldBackground = dynamicColor(
+        dark: UIColor.white.withAlphaComponent(0.045),
+        light: UIColor.black.withAlphaComponent(0.045)
+    )
+
+    /// Build 76: the scheme-paired replacement for a raw
+    /// `Color.white.opacity(x)` fill/stroke/divider sitting on a
+    /// THEMED surface (chip capsules, progress tracks, hairline
+    /// dividers, ghost buttons on cards). The dark value is the
+    /// exact white opacity the call site always shipped; the light
+    /// value is black at 55% of that opacity, which reads with the
+    /// same visual weight on white. NOT for overlays on artwork or
+    /// video — those keep white/black scrims in both schemes.
+    static func overlayFill(_ darkOpacity: Double) -> Color {
+        dynamicColor(
+            dark: UIColor.white.withAlphaComponent(CGFloat(darkOpacity)),
+            light: UIColor.black.withAlphaComponent(CGFloat(darkOpacity * 0.55))
+        )
+    }
     /// LIVE badge / live-now indicator red (#E82A2E). Nothing else uses red
     /// except destructive actions, which keep the system red.
     static let live = Color(red: 0.910, green: 0.165, blue: 0.180)
@@ -94,10 +145,20 @@ enum AppTheme {
     static let spacingCardGap: CGFloat = 12
 
     /// The ONE card border token (B9): a hairline white at ~6% so
-    /// posters separate from the near-black background.
-    static let cardBorderColor = Color.white.opacity(0.06)
-    /// Card surface shadow token (B9).
-    static let cardShadowColor = Color.black.opacity(0.35)
+    /// posters separate from the near-black background. Build 76:
+    /// scheme-paired — white 6% in dark (unchanged), black 8% in
+    /// light, where the hairline carries the card separation.
+    static let cardBorderColor = dynamicColor(
+        dark: UIColor.white.withAlphaComponent(0.06),
+        light: UIColor.black.withAlphaComponent(0.08)
+    )
+    /// Card surface shadow token (B9). Build 76: black 35% in dark
+    /// (unchanged); a softer black 10% in light, where elevation is
+    /// carried more by the border than by the shadow.
+    static let cardShadowColor = dynamicColor(
+        dark: UIColor.black.withAlphaComponent(0.35),
+        light: UIColor.black.withAlphaComponent(0.10)
+    )
     static let cardShadowRadius: CGFloat = 12
     static let cardShadowY: CGFloat = 4
 
@@ -329,7 +390,7 @@ extension View {
 
 /// UIKit chrome (tab bar / navigation bar) matching the cinematic design.
 /// Applied once at app launch from the app delegate; SwiftUI screens keep
-/// using semantic colors under the forced dark color scheme.
+/// using semantic colors under the device's color scheme (build 76).
 enum AppChrome {
     /// Design-4 (build 61): the selected tab sits in a FILLED ACCENT
     /// PILL (home mockup, panel 4). UIKit's one hook for that is the
@@ -350,18 +411,39 @@ enum AppChrome {
     }
 
     static func apply() {
-        let background = UIColor(red: 0.043, green: 0.043, blue: 0.055, alpha: 1)
+        // Build 76 (follow-the-device): the chrome colors are
+        // DYNAMIC — the dark values are the exact Design-4 values
+        // the app has always shipped; the light values pair with
+        // the light theme (white bar, mid-gray unselected items,
+        // near-black titles). One appearance object now renders
+        // correctly in both schemes.
+        let background = UIColor(dynamicProvider: { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: 0.043, green: 0.043, blue: 0.055, alpha: 1)
+                : UIColor(red: 1, green: 1, blue: 1, alpha: 1)
+        })
         // Round 7: the chrome accent follows the user's picker choice.
         let accent = AccentThemeStore.shared.uiColor
-        let muted = UIColor(red: 0.557, green: 0.557, blue: 0.576, alpha: 1)
+        let muted = UIColor(dynamicProvider: { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: 0.557, green: 0.557, blue: 0.576, alpha: 1)
+                : UIColor(red: 0.430, green: 0.430, blue: 0.450, alpha: 1)
+        })
+        let titleColor = UIColor(dynamicProvider: { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor.white
+                : UIColor.black
+        })
 
         let tabBar = UITabBarAppearance()
         tabBar.configureWithOpaqueBackground()
         tabBar.backgroundColor = background
-        // ST1 (B7): subtle glass/blur on the tab bar — a dark
-        // system blur under the charcoal tint. Chrome only, applied
-        // once here; no per-cell blur anywhere.
-        tabBar.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterialDark)
+        // ST1 (B7): subtle glass/blur on the tab bar — a system
+        // blur under the bar tint. Chrome only, applied once here;
+        // no per-cell blur anywhere. Build 76: the ADAPTIVE
+        // material (was the dark-only variant) so the blur matches
+        // the scheme the dynamic background resolves to.
+        tabBar.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
         for itemAppearance in [tabBar.stackedLayoutAppearance,
                                tabBar.inlineLayoutAppearance,
                                tabBar.compactInlineLayoutAppearance] {
@@ -379,8 +461,11 @@ enum AppChrome {
 
         let navBar = UINavigationBarAppearance()
         navBar.configureWithDefaultBackground()
-        navBar.titleTextAttributes = [.foregroundColor: UIColor.white]
-        navBar.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+        // Build 76: titles take the dynamic title color (white in
+        // dark — unchanged; black in light) over the adaptive
+        // default nav background, instead of fixed white.
+        navBar.titleTextAttributes = [.foregroundColor: titleColor]
+        navBar.largeTitleTextAttributes = [.foregroundColor: titleColor]
         UINavigationBar.appearance().standardAppearance = navBar
         UINavigationBar.appearance().scrollEdgeAppearance = navBar
         UINavigationBar.appearance().compactAppearance = navBar

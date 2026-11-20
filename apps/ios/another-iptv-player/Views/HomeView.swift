@@ -964,7 +964,7 @@ struct HomeView: View {
                 .font(.system(size: 24, weight: .black))
                 // C9: tracking on the Latin brand wordmark ONLY.
                 .latinBrandTracking(-0.5)
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
 
                 if onSwitchPlaylist != nil {
                     Button { showPlaylistSwitcher = true } label: {
@@ -1051,7 +1051,7 @@ struct HomeView: View {
         }
     }
 
-    private func topBarSquare(systemName: String, tint: Color = .white) -> some View {
+    private func topBarSquare(systemName: String, tint: Color = .primary) -> some View {
         Image(systemName: systemName)
             .font(.system(size: 16, weight: .semibold))
             .foregroundStyle(tint)

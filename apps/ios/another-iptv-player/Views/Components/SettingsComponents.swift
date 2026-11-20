@@ -13,11 +13,17 @@ struct SettingsIconTile: View {
     let systemImage: String
     let tint: Color
     var size: CGFloat = 28
+    /// Build 76: the glyph color — white on the colored tints every
+    /// existing call site passes (the default, unchanged). A caller
+    /// passing a scheme-paired NEUTRAL tint (the Settings hub rows)
+    /// passes `.primary` so the glyph pairs with the tint in both
+    /// schemes instead of white-on-white in light mode.
+    var glyphColor: Color = .white
 
     var body: some View {
         Image(systemName: systemImage)
             .font(.system(size: size * 0.5, weight: .semibold))
-            .foregroundColor(.white)
+            .foregroundColor(glyphColor)
             .frame(width: size, height: size)
             .background(tint, in: RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
     }
@@ -154,7 +160,7 @@ struct SettingsFormCard<Content: View>: View {
         .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+                .strokeBorder(AppTheme.cardBorderColor, lineWidth: 1)
         )
     }
 }
@@ -222,10 +228,13 @@ struct ScopedSectionHeader: View {
         VStack(alignment: .leading, spacing: 2) {
             // Build 66 (W10, modern-look pass): the title carries
             // the shared group-header treatment (small-caps, bold,
-            // white-70) instead of the stock List header rendering.
+            // secondary) instead of the stock List header rendering.
+            // Build 76: `.secondary` replaces the fixed white-70 so
+            // the header pairs with the page background in both
+            // schemes (white-60 in dark, mid-gray in light).
             Text(title)
                 .font(.caption.weight(.bold))
-                .foregroundStyle(Color.white.opacity(0.7))
+                .foregroundStyle(.secondary)
                 .textCase(.uppercase)
             Text(L(thisPlaylist ? "settings.scope.this_playlist" : "settings.scope.whole_app"))
                 .font(.caption2.weight(.medium))
@@ -238,7 +247,7 @@ struct ScopedSectionHeader: View {
 /// Build 66 (W10, modern-look pass): the ONE shared header for
 /// settings sections that have no scope caption — the plain
 /// `Text(...)` section headers rendered as stock gray caps.
-/// Small-caps bold white-70, matching `ScopedSectionHeader`'s
+/// Small-caps bold secondary, matching `ScopedSectionHeader`'s
 /// title treatment so every group on the hub pages reads as one
 /// designed system. (The pre-existing `SettingsGroupHeader`
 /// above belongs to the Add/Edit playlist forms and keeps its
@@ -249,7 +258,7 @@ struct SettingsSectionHeader: View {
     var body: some View {
         Text(title)
             .font(.caption.weight(.bold))
-            .foregroundStyle(Color.white.opacity(0.7))
+            .foregroundStyle(.secondary)
             .textCase(.uppercase)
     }
 }
@@ -2008,10 +2017,10 @@ struct SubscriptionOverviewView: View {
                         Spacer()
                         Text(playlist.kind == .m3u ? "M3U" : "Xtream")
                             .font(.caption2.weight(.semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(.primary)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.white.opacity(0.16), in: Capsule())
+                            .background(AppTheme.overlayFill(0.16), in: Capsule())
                     }
                     Text(providerLabel(for: playlist))
                         .font(.caption)
@@ -2827,7 +2836,7 @@ struct XtreamAccountSettingsSection: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(currentPlaylist.name)
                         .font(.headline)
-                        .foregroundColor(.white)
+                        .foregroundColor(.primary)
                         .lineLimit(1)
                     HStack(spacing: 6) {
                         if authResponse?.userInfo != nil {
@@ -2848,10 +2857,10 @@ struct XtreamAccountSettingsSection: View {
                         }
                         Text("Xtream")
                             .font(.caption2.weight(.semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(.primary)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.white.opacity(0.16), in: Capsule())
+                            .background(AppTheme.overlayFill(0.16), in: Capsule())
                     }
                 }
                 Spacer()
@@ -2861,7 +2870,7 @@ struct XtreamAccountSettingsSection: View {
                let fraction = subscriptionRemainingFraction(userInfo: userInfo) {
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.18))
+                        Capsule().fill(AppTheme.overlayFill(0.18))
                         Capsule().fill(AppTheme.accent).frame(width: proxy.size.width * fraction)
                     }
                 }
@@ -2874,13 +2883,13 @@ struct XtreamAccountSettingsSection: View {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(L("settings.playlist.password"))
                         .font(.caption)
-                        .foregroundColor(.white.opacity(0.6))
+                        .foregroundColor(.secondary)
                         .frame(width: 108, alignment: .leading)
                     Text(isPasswordRevealed
                          ? resolvedPassword
                          : String(repeating: "•", count: resolvedPassword.count))
                         .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.9))
+                        .foregroundColor(.primary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     Button {
@@ -2899,7 +2908,7 @@ struct XtreamAccountSettingsSection: View {
                         ProgressView().controlSize(.small)
                         Text(L("settings.playlist.fetching_info"))
                             .font(.caption)
-                            .foregroundColor(.white.opacity(0.6))
+                            .foregroundColor(.secondary)
                     }
                 } else if let error = errorMessage {
                     VStack(alignment: .leading, spacing: 6) {
@@ -2940,7 +2949,7 @@ struct XtreamAccountSettingsSection: View {
                 }
             }
 
-            Divider().overlay(Color.white.opacity(0.10))
+            Divider().overlay(AppTheme.overlayFill(0.10))
 
             HStack(spacing: 10) {
                 Button {
@@ -2948,10 +2957,10 @@ struct XtreamAccountSettingsSection: View {
                 } label: {
                     Label(L("common.edit"), systemImage: "pencil")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(.primary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 9)
-                        .background(Color.white.opacity(0.14), in: Capsule())
+                        .background(AppTheme.overlayFill(0.14), in: Capsule())
                 }
                 .buttonStyle(.plain)
 
@@ -2968,7 +2977,7 @@ struct XtreamAccountSettingsSection: View {
                 .buttonStyle(.plain)
             }
 
-            Divider().overlay(Color.white.opacity(0.10))
+            Divider().overlay(AppTheme.overlayFill(0.10))
 
             Button {
                 Task { await testConnection() }
@@ -2976,10 +2985,10 @@ struct XtreamAccountSettingsSection: View {
                 HStack(spacing: 12) {
                     SettingsIconTile(systemImage: "antenna.radiowaves.left.and.right", tint: AppTheme.accent)
                     Text(L("settings.test_connection.title"))
-                        .foregroundColor(.white)
+                        .foregroundColor(.primary)
                     Spacer()
                     if isTestingConnection {
-                        ProgressView().tint(.white)
+                        ProgressView().tint(.primary)
                     }
                 }
             }
@@ -2989,11 +2998,11 @@ struct XtreamAccountSettingsSection: View {
             if isTestingConnection {
                 Text(L("settings.test_connection.testing"))
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(.secondary)
             } else if let connectionTestResult {
                 Text(connectionTestResult)
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.85))
+                    .foregroundColor(.primary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -3009,7 +3018,7 @@ struct XtreamAccountSettingsSection: View {
         }
         .overlay {
             RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(AppTheme.overlayFill(0.08), lineWidth: 1)
         }
         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
         .listRowBackground(Color.clear)
@@ -3020,11 +3029,11 @@ struct XtreamAccountSettingsSection: View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(label)
                 .font(.caption)
-                .foregroundColor(.white.opacity(0.6))
+                .foregroundColor(.secondary)
                 .frame(width: 108, alignment: .leading)
             Text(value)
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(.primary)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 0)
@@ -3178,25 +3187,25 @@ struct M3UAccountSettingsSection: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(currentPlaylist.name)
                             .font(.headline)
-                            .foregroundColor(.white)
+                            .foregroundColor(.primary)
                             .lineLimit(1)
                         HStack(spacing: 6) {
                             Text("M3U")
                                 .font(.caption2.weight(.semibold))
-                                .foregroundColor(.white)
+                                .foregroundColor(.primary)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(Color.white.opacity(0.16), in: Capsule())
+                                .background(AppTheme.overlayFill(0.16), in: Capsule())
                             Text(currentPlaylist.serverURL.isEmpty ? L("playlists.local_file") : L("playlists.remote_playlist"))
                                 .font(.caption)
-                                .foregroundColor(.white.opacity(0.75))
+                                .foregroundColor(.secondary)
                                 .lineLimit(1)
                         }
                     }
                     Spacer()
                 }
 
-                Divider().overlay(Color.white.opacity(0.10))
+                Divider().overlay(AppTheme.overlayFill(0.10))
 
                 HStack(spacing: 10) {
                     Button {
@@ -3204,10 +3213,10 @@ struct M3UAccountSettingsSection: View {
                     } label: {
                         Label(L("common.edit"), systemImage: "pencil")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(.primary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 9)
-                            .background(Color.white.opacity(0.14), in: Capsule())
+                            .background(AppTheme.overlayFill(0.14), in: Capsule())
                     }
                     .buttonStyle(.plain)
 
@@ -3236,7 +3245,7 @@ struct M3UAccountSettingsSection: View {
             }
             .overlay {
                 RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    .stroke(AppTheme.overlayFill(0.08), lineWidth: 1)
             }
             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             .listRowBackground(Color.clear)

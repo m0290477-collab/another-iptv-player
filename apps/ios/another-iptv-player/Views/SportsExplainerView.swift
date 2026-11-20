@@ -150,7 +150,7 @@ struct SportsExplainerView: View {
                 .padding(.horizontal, AppTheme.spacingScreenMargin)
 
             Divider()
-                .overlay(Color.white.opacity(0.08))
+                .overlay(AppTheme.overlayFill(0.08))
                 .padding(.horizontal, AppTheme.spacingScreenMargin)
                 .padding(.vertical, 20)
 

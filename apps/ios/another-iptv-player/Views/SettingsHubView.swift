@@ -245,7 +245,7 @@ struct SettingsHubView: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color.white.opacity(0.10))
+                        .fill(AppTheme.overlayFill(0.10))
                     Capsule()
                         .fill(AppTheme.accentStart)
                         .frame(width: geo.size.width * headerProgress)
@@ -366,11 +366,12 @@ struct SettingsHubView: View {
         }
     }
 
-    /// One Style-3 hub row: a small muted icon chip (dark
-    /// rounded square, white glyph — the mockup's chips, NOT the
-    /// user accent, so this surface keeps the Design-4 look for
-    /// every preset), the title, and a chevron. NO value: the
-    /// identity/state lives only in the header card.
+    /// One Style-3 hub row: a small muted icon chip (neutral
+    /// scheme-paired chip — the mockup's chips, NOT the user
+    /// accent, so this surface keeps the Design-4 look for every
+    /// preset; build 76 pairs the tint and glyph with the scheme),
+    /// the title, and a chevron. NO value: the identity/state
+    /// lives only in the header card.
     @ViewBuilder
     private func hubRow<Destination: View>(
         icon: String,
@@ -379,7 +380,7 @@ struct SettingsHubView: View {
     ) -> some View {
         NavigationLink(destination: destination) {
             HStack(spacing: 12) {
-                SettingsIconTile(systemImage: icon, tint: Color.white.opacity(0.09), size: 30)
+                SettingsIconTile(systemImage: icon, tint: AppTheme.overlayFill(0.09), size: 30, glyphColor: .primary)
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)

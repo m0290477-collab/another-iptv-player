@@ -171,9 +171,11 @@ private struct AppRootView: View {
     @ObservedObject private var localization = LocalizationManager.shared
     // Build 61 (B3, item 7a): the user's appearance choice
     // (Settings ▸ Playback & Appearance; key "app.appearance",
-    // values "system" / "light" / "dark"). Default is "dark" —
-    // the app's established look — until the user picks otherwise.
-    @AppStorage("app.appearance") private var appearanceChoice = "dark"
+    // values "system" / "light" / "dark"). Build 76 (owner order:
+    // follow the device, like other apps): the DEFAULT is now
+    // "system" — the app follows the phone's appearance unless
+    // the user explicitly pins Dark or Light in Settings.
+    @AppStorage("app.appearance") private var appearanceChoice = "system"
 
     /// The stored choice as a color scheme; nil = follow system.
     private var preferredScheme: ColorScheme? {
@@ -243,9 +245,10 @@ private struct AppRootView: View {
                 }
             }
             // Build 61 (B3, item 7a): the stored appearance choice
-            // replaces the hard-forced dark scheme (default stays
-            // dark). The player subtree keeps its own nil reset in
-            // PlayerOverlayController, exactly as before.
+            // replaces the hard-forced dark scheme (default follows
+            // the device since build 76). The player subtree keeps
+            // its own nil reset in PlayerOverlayController, exactly
+            // as before.
             .preferredColorScheme(preferredScheme)
             .accentColor(accentTheme.color)
             .tint(accentTheme.color)
