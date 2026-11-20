@@ -21,12 +21,38 @@ struct StandingEntry: Identifiable {
     /// (gamesPlayed, wins, ties, losses, points,
     /// pointDifferential, …) — only what the feed returned.
     let stats: [String: String]
+    /// Build 83 (item 2): the payload's OWN label for each
+    /// stat — its `abbreviation`, falling back to its
+    /// `shortDisplayName` — keyed by the same stat name. The
+    /// standings header prints THESE labels, so a column can
+    /// never be titled with a word ESPN didn't publish.
+    let statLabels: [String: String]
+    /// Build 83 (item 2): the entry's zone note, verbatim from
+    /// the payload (`note.color` / `note.description` — e.g.
+    /// "#81D6AC" / "Champions League"). Nil when the feed
+    /// attaches no note to this entry (the whole NBA/NFL feed
+    /// and some soccer leagues carry none) — no bar, no
+    /// legend, nothing inferred from the rank.
+    let noteColorHex: String?
+    let noteText: String?
+}
+
+/// Build 83 (item 2): one legend row of a standings group —
+/// a zone color + its payload description, deduplicated from
+/// the group's entry notes in first-appearance order.
+struct StandingLegendItem: Identifiable {
+    var id: String { "\(colorHex)|\(text)" }
+    let colorHex: String
+    let text: String
 }
 
 struct StandingGroup: Identifiable {
     var id: String { name }
     let name: String
     let entries: [StandingEntry]
+    /// Zone legend derived from the entries' payload notes;
+    /// empty when the feed published no notes for the group.
+    let legend: [StandingLegendItem]
 }
 
 enum MatchesStandingsService {
@@ -40,6 +66,14 @@ enum MatchesStandingsService {
         struct Entry: Decodable {
             let team: Team?
             let stats: [Stat]?
+            /// Build 83 (item 2): the zone note (singular in
+            /// the payload): {color: "#81D6AC", description:
+            /// "Champions League", rank: 1}.
+            let note: Note?
+        }
+        struct Note: Decodable {
+            let color: String?
+            let description: String?
         }
         struct Team: Decodable {
             let id: String?
@@ -49,7 +83,15 @@ enum MatchesStandingsService {
             let logo: String?
         }
         struct Logo: Decodable { let href: String? }
-        struct Stat: Decodable { let name: String?; let displayValue: String? }
+        struct Stat: Decodable {
+            let name: String?
+            let displayValue: String?
+            /// Build 83 (item 2): the payload's own column
+            /// labels (abbreviation "GD", shortDisplayName
+            /// "GD") — decoded so the header never invents one.
+            let abbreviation: String?
+            let shortDisplayName: String?
+        }
     }
 
     /// The league standings endpoint lives on the `apis/v2`
@@ -67,18 +109,35 @@ enum MatchesStandingsService {
                 guard let team = entry.team,
                       let name = team.displayName ?? team.name, !name.isEmpty else { return nil }
                 var stats: [String: String] = [:]
+                var statLabels: [String: String] = [:]
                 for stat in entry.stats ?? [] {
-                    if let name = stat.name, let value = stat.displayValue { stats[name] = value }
+                    guard let name = stat.name else { continue }
+                    if let value = stat.displayValue { stats[name] = value }
+                    if let label = stat.abbreviation ?? stat.shortDisplayName, !label.isEmpty {
+                        statLabels[name] = label
+                    }
                 }
                 let logo = team.logos?.first?.href ?? team.logo
                 return StandingEntry(
                     teamId: team.id, teamName: name,
                     logoURL: logo.flatMap { URL(string: $0) },
-                    stats: stats
+                    stats: stats,
+                    statLabels: statLabels,
+                    noteColorHex: entry.note?.color,
+                    noteText: entry.note?.description
                 )
             }
             guard !entries.isEmpty else { return nil }
-            return StandingGroup(name: child.name ?? "", entries: entries)
+            // The group's legend: the distinct zone notes its
+            // entries carry, in table order.
+            var legend: [StandingLegendItem] = []
+            for entry in entries {
+                guard let color = entry.noteColorHex, let text = entry.noteText,
+                      !legend.contains(where: { $0.colorHex == color && $0.text == text })
+                else { continue }
+                legend.append(StandingLegendItem(colorHex: color, text: text))
+            }
+            return StandingGroup(name: child.name ?? "", entries: entries, legend: legend)
         }
     }
 }
@@ -122,7 +181,17 @@ enum MatchesScorersService {
         let now = Date()
         let comps = Calendar.current.dateComponents([.year, .month], from: now)
         let season = (comps.month ?? 1) >= 7 ? (comps.year ?? 2026) : (comps.year ?? 2026) - 1
-        let urlString = "https://sports.core.api.espn.com/v2/sports/soccer/leagues/\(leaguePath)/seasons/\(season)/types/1/leaders"
+        // Build 83 (item 3): callers pass the full site path
+        // ("soccer/eng.1") — the form every other Matches
+        // service takes — but the core API's leagues segment
+        // takes the bare slug ("eng.1"). Interpolating the
+        // full path produced …/leagues/soccer/eng.1/…, which
+        // the core API answers HTTP 400, so Top Scorers had
+        // been silently empty for every league. Verified live
+        // 2026-11-20: the slug form returns goalsLeaders for
+        // all 17 catalog leagues.
+        let slug = leaguePath.split(separator: "/").last.map(String.init) ?? leaguePath
+        let urlString = "https://sports.core.api.espn.com/v2/sports/soccer/leagues/\(slug)/seasons/\(season)/types/1/leaders"
         guard let url = URL(string: urlString) else { return [] }
         var request = URLRequest(url: url)
         request.timeoutInterval = 20

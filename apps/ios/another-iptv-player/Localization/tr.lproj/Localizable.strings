@@ -1071,6 +1071,13 @@
 "matches.team.recent" = "Son Maçlar";
 "matches.team.squad" = "Kadro";
 "matches.search.placeholder" = "Takım Ara";
+/* Build 83: league browser + standings Short/Full modes. */
+"matches.leagues" = "Ligler";
+"matches.search_leagues" = "Lig ara";
+"matches.leagues_empty" = "Lig bulunamadı";
+"matches.table_short" = "Kısa";
+"matches.table_full" = "Tam";
+"matches.team_label" = "Takım";
 
 /* Build 65: redesign surfaces (display, settings hub, EPG cards, match tabs, favorites shelves, downloads dashboard). */
 "display.accent" = "Vurgu rengi";

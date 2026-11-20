@@ -1053,6 +1053,13 @@
 "matches.team.recent" = "Resultados recientes";
 "matches.team.squad" = "Plantilla";
 "matches.search.placeholder" = "Buscar equipos";
+/* Build 83: league browser + standings Short/Full modes. */
+"matches.leagues" = "Ligas";
+"matches.search_leagues" = "Buscar ligas";
+"matches.leagues_empty" = "No se encontraron ligas";
+"matches.table_short" = "Resumida";
+"matches.table_full" = "Completa";
+"matches.team_label" = "Equipo";
 
 /* Build 65: redesign surfaces (display, settings hub, EPG cards, match tabs, favorites shelves, downloads dashboard). */
 "display.accent" = "Color de acento";

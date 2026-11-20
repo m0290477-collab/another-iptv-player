@@ -61,6 +61,8 @@ struct StandingsView: View {
     let leagueName: String?
     @State private var groups: [StandingGroup] = []
     @State private var loaded = false
+    /// Build 83 (item 2): FotMob's Short / Full column modes.
+    @State private var fullMode = false
 
     var body: some View {
         List {
@@ -70,8 +72,19 @@ struct StandingsView: View {
                     .foregroundStyle(.secondary)
                     .listRowBackground(AppTheme.surface)
             }
+            if !groups.isEmpty {
+                Section {
+                    Picker(L("matches.standings"), selection: $fullMode) {
+                        Text(L("matches.table_short")).tag(false)
+                        Text(L("matches.table_full")).tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .listRowBackground(AppTheme.surface)
+            }
             ForEach(groups) { group in
                 Section {
+                    columnHeaderRow(group: group)
                     ForEach(Array(group.entries.enumerated()), id: \.element.id) { index, entry in
                         NavigationLink {
                             TeamPageView(team: TeamRef(
@@ -80,9 +93,12 @@ struct StandingsView: View {
                                 logoURL: entry.logoURL
                             ))
                         } label: {
-                            standingRow(index: index, entry: entry)
+                            standingRow(index: index, entry: entry, columns: visibleColumns(for: group))
                         }
                         .disabled(entry.teamId == nil)
+                    }
+                    if !group.legend.isEmpty {
+                        legendRow(group: group)
                     }
                 } header: {
                     if !group.name.isEmpty { extrasSectionHeader(group.name) }
@@ -96,41 +112,230 @@ struct StandingsView: View {
         .navigationTitle(leagueName ?? L("matches.standings"))
         .navigationBarTitleDisplayMode(.inline)
         .overlay { if !loaded { BrandedLoader() } }
+        // Build 83 (item 5): the Short/Full swap crossfades on
+        // the shared chip token (nil — instant — under Reduce
+        // Motion / reduced effects, as everywhere).
+        .animation(Motion.animate(Motion.chipSwap), value: fullMode)
         .task {
             groups = await MatchesStandingsService.fetch(sport: sport, leaguePath: leaguePath)
             loaded = true
         }
     }
 
-    private func standingRow(index: Int, entry: StandingEntry) -> some View {
-        HStack(spacing: 10) {
-            Text("\(index + 1)")
-                .font(AppTheme.fontMetadata.weight(.bold))
-                .monospacedDigit()
-                .frame(width: 22, alignment: .trailing)
-            CachedImage(url: entry.logoURL, width: 24, height: 24, cornerRadius: 12, iconName: "shield")
-            Text(entry.teamName)
-                .font(AppTheme.fontCardTitle)
-                .lineLimit(1)
-            Spacer()
-            statCell(entry.stats["gamesPlayed"])
-            statCell(entry.stats["wins"])
-            statCell(entry.stats["ties"])
-            statCell(entry.stats["losses"])
-            statCell(entry.stats["pointDifferential"])
-            Text(entry.stats["points"] ?? "–")
-                .font(AppTheme.fontCardTitle)
-                .monospacedDigit()
-                .frame(width: 30, alignment: .trailing)
+    // MARK: Columns (build 83, item 2)
+
+    /// One table column: the ESPN stat it reads and the fixed
+    /// cell width that fits its values without wrapping. The
+    /// header label is NOT stored here — it resolves from the
+    /// payload's own stat labels at render time
+    /// (`columnLabel`), so a column can never be titled with a
+    /// word ESPN didn't publish. A nil statName is the combined
+    /// goals for–against column (soccer Full), whose value and
+    /// label are composed from the payload's pointsFor /
+    /// pointsAgainst stats.
+    private struct StandingColumn: Identifiable {
+        let statName: String?
+        let width: CGFloat
+        let bold: Bool
+        var id: String { statName ?? "goalsForAgainst" }
+    }
+
+    /// The column SETS, FotMob-style. Soccer Short = played,
+    /// goal difference, points; Full adds W/D/L and the
+    /// goals for–against column. NBA/NFL sets are built from
+    /// the stats those feeds actually return (verified live
+    /// 2026-11-20): `pointDifferential` is the TOTAL
+    /// differential (PF−PA) in both feeds — the NBA feed's
+    /// `differential` is a per-game average and is deliberately
+    /// NOT used. Short = the record core; Full adds PF/PA/DIFF.
+    private var columns: [StandingColumn] {
+        switch sport {
+        case .soccer:
+            return fullMode
+                ? [StandingColumn(statName: "gamesPlayed", width: 28, bold: false),
+                   StandingColumn(statName: "wins", width: 24, bold: false),
+                   StandingColumn(statName: "ties", width: 24, bold: false),
+                   StandingColumn(statName: "losses", width: 24, bold: false),
+                   StandingColumn(statName: nil, width: 48, bold: false),
+                   StandingColumn(statName: "pointDifferential", width: 34, bold: false),
+                   StandingColumn(statName: "points", width: 30, bold: true)]
+                : [StandingColumn(statName: "gamesPlayed", width: 30, bold: false),
+                   StandingColumn(statName: "pointDifferential", width: 36, bold: false),
+                   StandingColumn(statName: "points", width: 32, bold: true)]
+        case .nba:
+            return fullMode
+                ? [StandingColumn(statName: "wins", width: 26, bold: false),
+                   StandingColumn(statName: "losses", width: 26, bold: false),
+                   StandingColumn(statName: "winPercent", width: 42, bold: false),
+                   StandingColumn(statName: "gamesBehind", width: 34, bold: false),
+                   StandingColumn(statName: "pointsFor", width: 44, bold: false),
+                   StandingColumn(statName: "pointsAgainst", width: 44, bold: false),
+                   StandingColumn(statName: "pointDifferential", width: 40, bold: false)]
+                : [StandingColumn(statName: "wins", width: 28, bold: false),
+                   StandingColumn(statName: "losses", width: 28, bold: false),
+                   StandingColumn(statName: "winPercent", width: 44, bold: false),
+                   StandingColumn(statName: "gamesBehind", width: 36, bold: false)]
+        case .nfl:
+            return fullMode
+                ? [StandingColumn(statName: "wins", width: 26, bold: false),
+                   StandingColumn(statName: "losses", width: 26, bold: false),
+                   StandingColumn(statName: "ties", width: 24, bold: false),
+                   StandingColumn(statName: "winPercent", width: 42, bold: false),
+                   StandingColumn(statName: "pointsFor", width: 42, bold: false),
+                   StandingColumn(statName: "pointsAgainst", width: 42, bold: false),
+                   StandingColumn(statName: "pointDifferential", width: 38, bold: false)]
+                : [StandingColumn(statName: "wins", width: 28, bold: false),
+                   StandingColumn(statName: "losses", width: 28, bold: false),
+                   StandingColumn(statName: "ties", width: 26, bold: false),
+                   StandingColumn(statName: "winPercent", width: 44, bold: false)]
         }
     }
 
-    private func statCell(_ value: String?) -> some View {
-        Text(value ?? "–")
-            .font(AppTheme.fontMetadata)
-            .foregroundStyle(.secondary)
-            .monospacedDigit()
-            .frame(width: 24, alignment: .trailing)
+    /// A column renders for a group only when the group's
+    /// entries actually carry its stat — a group missing a
+    /// stat drops the column instead of printing a column of
+    /// dashes under a borrowed label.
+    private func visibleColumns(for group: StandingGroup) -> [StandingColumn] {
+        columns.filter { column in
+            guard let statName = column.statName else {
+                return group.entries.contains { $0.stats["pointsFor"] != nil && $0.stats["pointsAgainst"] != nil }
+            }
+            return group.entries.contains { $0.stats[statName] != nil }
+        }
+    }
+
+    /// The header label for a column, from the payload's own
+    /// stat abbreviations (e.g. gamesPlayed → "GP",
+    /// pointDifferential → "GD", points → "P" in the soccer
+    /// feed; winPercent → "PCT", gamesBehind → "GB" in the
+    /// NBA feed). The combined goals column composes its
+    /// label from the payload's for/against abbreviations
+    /// ("F" / "A" → "F–A").
+    private func columnLabel(_ column: StandingColumn, for group: StandingGroup) -> String {
+        if let statName = column.statName {
+            return group.entries.first(where: { $0.statLabels[statName] != nil })?.statLabels[statName] ?? ""
+        }
+        let goalsFor = group.entries.first(where: { $0.statLabels["pointsFor"] != nil })?.statLabels["pointsFor"]
+        let goalsAgainst = group.entries.first(where: { $0.statLabels["pointsAgainst"] != nil })?.statLabels["pointsAgainst"]
+        if let goalsFor, let goalsAgainst { return "\(goalsFor)–\(goalsAgainst)" }
+        return ""
+    }
+
+    private func columnValue(_ column: StandingColumn, for entry: StandingEntry) -> String {
+        if let statName = column.statName {
+            return entry.stats[statName] ?? "–"
+        }
+        if let goalsFor = entry.stats["pointsFor"], let goalsAgainst = entry.stats["pointsAgainst"] {
+            return "\(goalsFor)-\(goalsAgainst)"
+        }
+        return "–"
+    }
+
+    // MARK: Rows
+
+    /// The labeled header row (build 83, item 2): every column
+    /// named, in the exact slots the data rows use, so labels
+    /// and values can never drift apart.
+    private func columnHeaderRow(group: StandingGroup) -> some View {
+        let cols = visibleColumns(for: group)
+        return HStack(spacing: 6) {
+            Color.clear.frame(width: 3)
+            Text("#")
+                .frame(width: 20, alignment: .trailing)
+            Color.clear.frame(width: 22)
+            Text(L("matches.team_label"))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            ForEach(cols) { column in
+                Text(columnLabel(column, for: group))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .frame(width: column.width, alignment: .trailing)
+            }
+        }
+        .font(.caption2.weight(.bold))
+        .foregroundStyle(.secondary)
+    }
+
+    /// Build 83 (item 2): the FotMob row — zone bar (payload
+    /// note color only), rank, crest, the FULL team name (two
+    /// lines when it needs them — never clipped to fragments
+    /// by fixed stat cells again), then one aligned,
+    /// never-wrapping cell per labeled column. Values are
+    /// `fixedSize` inside fixed-width frames: a value that
+    /// somehow exceeds its cell overflows invisibly into its
+    /// own padding rather than wrapping mid-number (the old
+    /// "-20/7" defect).
+    private func standingRow(index: Int, entry: StandingEntry, columns: [StandingColumn]) -> some View {
+        HStack(spacing: 6) {
+            zoneBar(for: entry)
+            Text("\(index + 1)")
+                .font(AppTheme.fontMetadata.weight(.bold))
+                .monospacedDigit()
+                .frame(width: 20, alignment: .trailing)
+            CachedImage(url: entry.logoURL, width: 22, height: 22, cornerRadius: 11, iconName: "shield")
+            Text(entry.teamName)
+                .font(AppTheme.fontCardTitle)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            ForEach(columns) { column in
+                Text(columnValue(column, for: entry))
+                    .font(column.bold ? AppTheme.fontCardTitle : AppTheme.fontMetadata)
+                    .foregroundStyle(column.bold ? .primary : .secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize()
+                    .frame(width: column.width, alignment: .trailing)
+            }
+        }
+    }
+
+    /// The zone bar: rendered ONLY when the payload attached
+    /// a note with a parseable color to this entry. Leagues
+    /// whose feed carries no notes (NBA, NFL, some soccer
+    /// leagues) get an empty slot of the same width — never a
+    /// bar inferred from the rank.
+    @ViewBuilder
+    private func zoneBar(for entry: StandingEntry) -> some View {
+        if let hex = entry.noteColorHex, let color = zoneColor(hex) {
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(color)
+                .frame(width: 3, height: 26)
+        } else {
+            Color.clear.frame(width: 3)
+        }
+    }
+
+    /// The group's legend: the payload's own zone descriptions
+    /// with their colors, in table order.
+    private func legendRow(group: StandingGroup) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(group.legend) { item in
+                if let color = zoneColor(item.colorHex) {
+                    HStack(spacing: 8) {
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(color)
+                            .frame(width: 10, height: 10)
+                        Text(item.text)
+                            .font(AppTheme.fontMetadata)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// Parses the payload's "#RRGGBB" note color. Anything
+    /// else → nil (no bar, no legend swatch).
+    private func zoneColor(_ hex: String) -> Color? {
+        var text = hex.trimmingCharacters(in: .whitespaces)
+        if text.hasPrefix("#") { text.removeFirst() }
+        guard text.count == 6, let value = UInt32(text, radix: 16) else { return nil }
+        return Color(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
     }
 }
 
@@ -706,5 +911,200 @@ struct TeamSearchView: View {
             allTeams = teams
             loaded = true
         }
+    }
+}
+
+// MARK: - League browser (build 83, item 3)
+
+/// The FotMob-style league browser: a search field over the
+/// verified league catalog (`MatchSport.soccerLeagueCatalog`),
+/// one row per league with its payload logo and name. Opening
+/// the browser fires NO network calls — the catalog is local
+/// data verified at build time; a league's standings and
+/// fixtures load only when its page opens.
+struct LeagueBrowserView: View {
+    @State private var query = ""
+
+    private var leagues: [SoccerLeague] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return MatchSport.soccerLeagueCatalog }
+        return MatchSport.soccerLeagueCatalog.filter {
+            $0.name.localizedCaseInsensitiveContains(trimmed)
+        }
+    }
+
+    var body: some View {
+        List {
+            if leagues.isEmpty {
+                Text(L("matches.leagues_empty"))
+                    .font(AppTheme.fontMetadata)
+                    .foregroundStyle(.secondary)
+                    .listRowBackground(AppTheme.surface)
+            }
+            ForEach(leagues) { league in
+                NavigationLink {
+                    LeaguePageView(league: league)
+                } label: {
+                    HStack(spacing: 12) {
+                        CachedImage(
+                            url: league.logoURL,
+                            width: 30, height: 30,
+                            cornerRadius: 6,
+                            contentMode: .fit,
+                            iconName: "trophy"
+                        )
+                        Text(league.name)
+                            .font(AppTheme.fontCardTitle)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                    }
+                }
+                .buttonStyle(.plain)
+                .listRowBackground(AppTheme.surface)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .cinematicBackground()
+        .navigationTitle(L("matches.leagues"))
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $query, prompt: L("matches.search_leagues"))
+    }
+}
+
+/// One league's page: its standings and top scorers (the same
+/// destinations the Matches home section headers open) plus
+/// its fixtures/results for the shared day window, fetched
+/// through the existing per-league plumbing
+/// (`MatchesService.matches(sport:leaguePath:day:)` — the
+/// shared day cache, so a league visited here and a followed
+/// team's league share one fetch). Rows are the Matches
+/// home's own `MatchRowView` and open the same match detail.
+struct LeaguePageView: View {
+    let league: SoccerLeague
+    private let scheduleDays = MatchesService.windowDays()
+    @State private var selectedDayIndex = 3
+    @State private var matches: [MatchEvent] = []
+    @State private var loaded = false
+
+    private var selectedDay: Date {
+        scheduleDays[min(max(selectedDayIndex, 0), scheduleDays.count - 1)]
+    }
+
+    var body: some View {
+        List {
+            Section {
+                NavigationLink {
+                    StandingsView(
+                        sport: .soccer,
+                        leaguePath: league.leaguePath,
+                        leagueName: league.name
+                    )
+                } label: {
+                    Label(L("matches.standings"), systemImage: "chart.bar.fill")
+                        .font(AppTheme.fontCardTitle)
+                }
+                .buttonStyle(.plain)
+                NavigationLink {
+                    TopScorersView(
+                        leaguePath: league.leaguePath,
+                        leagueName: league.name
+                    )
+                } label: {
+                    Label(L("matches.scorers"), systemImage: "list.number")
+                        .font(AppTheme.fontCardTitle)
+                }
+                .buttonStyle(.plain)
+            } header: {
+                HStack(spacing: 8) {
+                    CachedImage(
+                        url: league.logoURL,
+                        width: 20, height: 20,
+                        cornerRadius: 4,
+                        contentMode: .fit,
+                        iconName: "trophy"
+                    )
+                    Text(league.name)
+                        .font(AppTheme.fontBadge)
+                        .foregroundStyle(AppTheme.accent)
+                }
+            }
+            .listRowBackground(AppTheme.surface)
+
+            Section {
+                if loaded && matches.isEmpty {
+                    Label(L("matches.empty"), systemImage: "calendar.badge.exclamationmark")
+                        .font(AppTheme.fontMetadata)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(matches) { match in
+                    NavigationLink {
+                        MatchDetailView(
+                            sport: .soccer,
+                            leaguePath: league.leaguePath,
+                            match: match,
+                            leagueName: league.name
+                        )
+                    } label: {
+                        MatchRowView(match: match, isStale: false)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .listRowBackground(AppTheme.surface)
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .cinematicBackground()
+        .navigationTitle(league.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .overlay { if !loaded { BrandedLoader() } }
+        // The day strip rides ABOVE the list, the Matches
+        // home's own arrangement.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(scheduleDays.indices, id: \.self) { index in
+                        dayChip(day: scheduleDays[index], isSelected: index == selectedDayIndex) {
+                            selectedDayIndex = index
+                        }
+                    }
+                }
+                .padding(.horizontal, AppTheme.spacingScreenMargin)
+                .padding(.vertical, 6)
+            }
+            .background(AppTheme.background)
+        }
+        .task(id: selectedDayIndex) {
+            loaded = false
+            matches = await MatchesService.matches(
+                sport: .soccer, leaguePath: league.leaguePath, day: selectedDay
+            )
+            loaded = true
+        }
+    }
+
+    /// The Matches home's day chip, same shape and tokens
+    /// (weekday/day text from MatchesView's own formatters).
+    private func dayChip(day: Date, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        let isToday = Calendar.current.isDateInToday(day)
+        return Button(action: action) {
+            VStack(spacing: 2) {
+                Text(MatchesView.weekdayText(day))
+                    .font(AppTheme.fontBadge)
+                    .foregroundStyle(isSelected ? AppTheme.onAccent : (isToday ? AppTheme.accent : .secondary))
+                Text(MatchesView.dayNumberText(day))
+                    .font(AppTheme.fontCardTitle)
+                    .foregroundStyle(isSelected ? AppTheme.onAccent : .primary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected ? AppTheme.accent : AppTheme.surface)
+            )
+        }
+        .buttonStyle(PressOpacityButtonStyle())
+        .accessibilityLabel(MatchesView.dayAccessibilityText(day))
     }
 }

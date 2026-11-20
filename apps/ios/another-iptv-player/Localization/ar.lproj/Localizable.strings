@@ -1053,6 +1053,13 @@
 "matches.team.recent" = "النتائج الأخيرة";
 "matches.team.squad" = "التشكيلة";
 "matches.search.placeholder" = "ابحث عن الفرق";
+/* Build 83: league browser + standings Short/Full modes. */
+"matches.leagues" = "الدوريات";
+"matches.search_leagues" = "بحث في الدوريات";
+"matches.leagues_empty" = "لا توجد دوريات مطابقة";
+"matches.table_short" = "مختصر";
+"matches.table_full" = "كاملة";
+"matches.team_label" = "الفريق";
 
 /* Build 65: redesign surfaces (display, settings hub, EPG cards, match tabs, favorites shelves, downloads dashboard). */
 "display.accent" = "لون التمييز";

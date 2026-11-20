@@ -872,6 +872,11 @@ struct SeriesFeaturedHero: View {
     /// exactly the treatment build 81 item 4 gave the Home hero.
     @State private var backdropLoadFailed = false
 
+    /// Build 83 (item 4): the hero art's MEASURED aspect
+    /// (width ÷ height), probed through the image pipeline —
+    /// see `ArtworkAspectProbe`. Nil until measured.
+    @State private var artAspect: CGFloat? = nil
+
     private var backdropURL: URL? {
         series.backdropPath.flatMap { ArtworkURL.url(from: $0) }
     }
@@ -885,14 +890,35 @@ struct SeriesFeaturedHero: View {
         return posterURL
     }
 
+    /// Build 83 (item 4, owner — artwork shown WHOLE, never
+    /// cropped): wide art (measured aspect ≥ 1.15, or the
+    /// backdrop field before measurement) fills the frame as
+    /// before; portrait/square art is aspect-FITTED over the
+    /// hero's near-black ground — a 2:3 poster aspect-filled
+    /// into this wide frame loses over half its height (the
+    /// cut faces in the owner's screenshot). The backdrop-
+    /// preferred order from builds 81/82 is unchanged; only
+    /// the fit changes.
+    private var heroContentMode: ContentMode {
+        let aspect = artAspect ?? heroURL.flatMap { ArtworkAspectProbe.shared.cachedAspect(for: $0) }
+        if let aspect { return aspect >= 1.15 ? .fill : .fit }
+        return (backdropURL != nil && heroURL == backdropURL) ? .fill : .fit
+    }
+
     var body: some View {
         ZStack(alignment: .bottomLeading) {
+            // Build 83 (item 4): the near-black ground the
+            // aspect-fitted art sits on (invisible when wide
+            // art fills the frame).
+            RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                .fill(Color.black)
+                .frame(width: UIScreen.main.bounds.width - 32, height: 210)
             CachedImage(
                 url: heroURL,
                 width: UIScreen.main.bounds.width - 32,
                 height: 210,
                 cornerRadius: AppTheme.heroCornerRadius,
-                contentMode: .fill,
+                contentMode: heroContentMode,
                 iconName: "play.tv",
                 loadProfile: .high,
                 onLoadFailed: {
@@ -900,6 +926,12 @@ struct SeriesFeaturedHero: View {
                 }
             )
             .onChange(of: backdropURL) { _, _ in backdropLoadFailed = false }
+            .task(id: heroURL) {
+                artAspect = nil
+                if let heroURL {
+                    artAspect = await ArtworkAspectProbe.shared.probe(heroURL)
+                }
+            }
             LinearGradient(
                 colors: [.clear, AppTheme.background.opacity(0.88)],
                 startPoint: .center,

@@ -163,7 +163,14 @@ struct CachedImage: View {
             }
         }
         .transaction { t in
-            if loadProfile == .standard {
+            // Build 83 (item 5): the load crossfade now also
+            // covers the `.high` profile — heroes and detail
+            // backdrops fade in on load instead of snapping.
+            // The list profiles (shelf/grid) stay instant on
+            // purpose: implicit animations on recycled grid
+            // cells read as flicker while scrolling, and the
+            // speed law outranks the flourish there.
+            if loadProfile == .standard || loadProfile == .high {
                 t.animation = .easeIn(duration: 0.12)
             } else {
                 t.animation = nil
@@ -273,4 +280,62 @@ struct CachedImage: View {
         )
     }
 
+}
+
+/// Build 83 (item 4, owner — "صور مقصوصة", the pictures are
+/// cropped): measured pixel aspect (width ÷ height) of remote
+/// artwork, probed through the SAME Nuke pipeline `CachedImage`
+/// renders with. The heroes use it to show artwork WHOLE: art
+/// whose measured aspect is wide fills the hero frame as before;
+/// portrait/square art is aspect-FITTED over the hero's near-black
+/// ground instead of being aspect-fill-cropped (a 2:3 poster
+/// filled into a 16:9 frame loses over half its height — the
+/// cut faces in the owner's screenshot).
+///
+/// The probe issues a SMALL aspect-fit request: the returned
+/// image keeps the source's natural aspect at a fraction of the
+/// bytes, and the pipeline's data cache shares the underlying
+/// download with the hero's own full-size request, so probing
+/// costs no second fetch of the original. Results are memoised
+/// per URL for the session. A failed probe returns nil and the
+/// caller keeps its field-based default (backdrop field → fill,
+/// poster field → fit) — nothing is ever guessed into a value
+/// the payload didn't provide.
+final class ArtworkAspectProbe {
+    static let shared = ArtworkAspectProbe()
+
+    private var aspects: [String: CGFloat] = [:]
+    private let lock = NSLock()
+
+    func cachedAspect(for url: URL) -> CGFloat? {
+        lock.lock()
+        defer { lock.unlock() }
+        return aspects[url.absoluteString]
+    }
+
+    func probe(_ url: URL) async -> CGFloat? {
+        if let cached = cachedAspect(for: url) { return cached }
+        let request = ImageRequest(
+            url: url,
+            processors: [
+                ImageProcessors.Resize(
+                    size: CGSize(width: 96, height: 96),
+                    unit: .pixels,
+                    contentMode: .aspectFit,
+                    crop: false,
+                    upscale: false
+                )
+            ]
+        )
+        guard let container = try? await ImagePipeline.shared.image(for: request) else {
+            return nil
+        }
+        let size = container.image.size
+        guard size.width > 0, size.height > 0 else { return nil }
+        let aspect = size.width / size.height
+        lock.lock()
+        aspects[url.absoluteString] = aspect
+        lock.unlock()
+        return aspect
+    }
 }

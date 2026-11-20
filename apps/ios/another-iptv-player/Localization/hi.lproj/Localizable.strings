@@ -1053,6 +1053,13 @@
 "matches.team.recent" = "हाल के परिणाम";
 "matches.team.squad" = "दस्ता";
 "matches.search.placeholder" = "टीमें खोजें";
+/* Build 83: league browser + standings Short/Full modes. */
+"matches.leagues" = "लीग";
+"matches.search_leagues" = "लीग खोजें";
+"matches.leagues_empty" = "कोई लीग नहीं मिली";
+"matches.table_short" = "संक्षिप्त";
+"matches.table_full" = "पूर्ण";
+"matches.team_label" = "टीम";
 
 /* Build 65: redesign surfaces (display, settings hub, EPG cards, match tabs, favorites shelves, downloads dashboard). */
 "display.accent" = "एक्सेंट रंग";

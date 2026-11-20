@@ -66,6 +66,67 @@ enum MatchSport: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Soccer league catalog (build 83, item 3)
+
+/// One soccer league/competition in the league browser.
+/// `name` and `logoURL` are EXACTLY what ESPN's scoreboard
+/// payload returned for the league when the catalog was
+/// verified live (2026-11-20) — never invented, never
+/// localized (the same rule the Matches screens already apply
+/// to payload league names). A league is in this catalog ONLY
+/// because its standings AND scoreboard endpoints verified
+/// live with real data on that date; the build-83 report
+/// carries the per-league evidence and the excluded
+/// candidates (sau.1 — the standings endpoint answers
+/// HTTP 400; fifa.world / uefa.euro / conmebol.america /
+/// caf.nations — completed tournaments whose endpoints return
+/// only final historical tables and no fixtures;
+/// afc.asian.cup — a pre-tournament shell with no played
+/// matches). `leaguePaths` above stays the FEATURED subset
+/// the Matches home loads — the home's behaviour is unchanged;
+/// the browser fetches a league's data only when its page
+/// opens, so opening the browser fires no network calls.
+struct SoccerLeague: Identifiable, Hashable {
+    /// ESPN league slug ("eng.1").
+    let slug: String
+    /// Payload league name, verbatim ("English Premier League").
+    let name: String
+    /// Payload league logo (the scoreboard's `leagues[].logos`).
+    let logoURL: URL?
+
+    var id: String { slug }
+    /// The full site/v2 path every Matches service takes
+    /// ("soccer/eng.1").
+    var leaguePath: String { "soccer/\(slug)" }
+}
+
+extension MatchSport {
+    /// Build 83 (item 3): the league browser's catalog —
+    /// FotMob-style order: the five big leagues, the UEFA
+    /// cups, the rest of Europe, then the Americas. Every
+    /// entry verified live on 2026-11-20 (standings entries,
+    /// scoreboard events, top-scorers leaders, payload logo).
+    static let soccerLeagueCatalog: [SoccerLeague] = [
+        SoccerLeague(slug: "eng.1", name: "English Premier League", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/23.png")),
+        SoccerLeague(slug: "esp.1", name: "Spanish LALIGA", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/15.png")),
+        SoccerLeague(slug: "ita.1", name: "Italian Serie A", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/12.png")),
+        SoccerLeague(slug: "ger.1", name: "German Bundesliga", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/10.png")),
+        SoccerLeague(slug: "fra.1", name: "French Ligue 1", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/9.png")),
+        SoccerLeague(slug: "uefa.champions", name: "UEFA Champions League", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/2.png")),
+        SoccerLeague(slug: "uefa.europa", name: "UEFA Europa League", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/2310.png")),
+        SoccerLeague(slug: "uefa.europa.conf", name: "UEFA Conference League", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/20296.png")),
+        SoccerLeague(slug: "ned.1", name: "Dutch Eredivisie", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/11.png")),
+        SoccerLeague(slug: "por.1", name: "Portuguese Primeira Liga", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/14.png")),
+        SoccerLeague(slug: "tur.1", name: "Turkish Super Lig", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/18.png")),
+        SoccerLeague(slug: "sco.1", name: "Scottish Premiership", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/45.png")),
+        SoccerLeague(slug: "bel.1", name: "Belgian Pro League", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/6.png")),
+        SoccerLeague(slug: "usa.1", name: "MLS", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/19.png")),
+        SoccerLeague(slug: "mex.1", name: "Mexican Liga BBVA MX", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/22.png")),
+        SoccerLeague(slug: "bra.1", name: "Brazilian Serie A", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/85.png")),
+        SoccerLeague(slug: "arg.1", name: "Argentine Liga Profesional de Fútbol", logoURL: URL(string: "https://a.espncdn.com/i/leaguelogos/soccer/500/1.png"))
+    ]
+}
+
 // MARK: Domain models (already sanitized for the UI)
 
 enum MatchState: Equatable {

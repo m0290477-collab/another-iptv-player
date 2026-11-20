@@ -417,7 +417,10 @@ struct MatchesView: View {
                     .fill(isSelected ? AppTheme.accent : AppTheme.surface)
             )
         }
-        .buttonStyle(.plain)
+        // Build 83 (item 5): press feedback on the day chips
+        // (the shared opacity press token; instant under
+        // Reduce Motion, as everywhere).
+        .buttonStyle(PressOpacityButtonStyle())
         .accessibilityLabel(Self.dayAccessibilityText(day))
     }
 
@@ -474,6 +477,14 @@ struct MatchesView: View {
                     staleBanner(updated)
                 }
                 List {
+                    // Build 83 (item 3): the league browser
+                    // entry rides at the top of the Soccer tab
+                    // only. The home's own loading is untouched —
+                    // the browser fetches nothing until a league
+                    // page opens.
+                    if selectedSport == .soccer {
+                        leagueBrowserEntry
+                    }
                     ForEach(state.sections) { section in
                         leagueSection(section, sportState: state)
                     }
@@ -485,6 +496,34 @@ struct MatchesView: View {
                 }
             }
         }
+    }
+
+    /// Build 83 (item 3): the league browser entry — one row
+    /// opening the FotMob-style browser (search + every
+    /// verified league with its payload logo). The count is
+    /// the catalog's own count, computed, never typed.
+    private var leagueBrowserEntry: some View {
+        Section {
+            NavigationLink {
+                LeagueBrowserView()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "trophy.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                    Text(L("matches.leagues"))
+                        .font(AppTheme.fontCardTitle)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text("\(MatchSport.soccerLeagueCatalog.count)")
+                        .font(AppTheme.fontMetadata.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+            .buttonStyle(.plain)
+        }
+        .listRowBackground(AppTheme.surface)
     }
 
     @ViewBuilder
@@ -639,7 +678,12 @@ struct MatchesView: View {
 
 // MARK: - Match row (M3: logo + name + score + state, nothing else)
 
-private struct MatchRowView: View {
+/// Build 83 (item 3): internal (was private) — the league
+/// browser's league page renders its fixtures with this exact
+/// row, so a match looks and behaves identically wherever it
+/// is listed. Its helpers (LivePulseDot / FlashScoreText)
+/// stay file-private; they are only used inside this view.
+struct MatchRowView: View {
     let match: MatchEvent
     let isStale: Bool
 

@@ -2175,6 +2175,32 @@ private struct FeaturedSlide: View {
     /// B12: title-block entrance, driven by slide change.
     @State private var textShown = false
 
+    /// Build 83 (item 4): the slide art's MEASURED aspect
+    /// (width ÷ height), probed through the image pipeline —
+    /// see `ArtworkAspectProbe`. Nil until measured.
+    @State private var artAspect: CGFloat? = nil
+
+    /// The artwork the backdrop layer actually shows: the
+    /// backdrop when the record carries one, else the poster
+    /// (build 81 item 4's order, unchanged).
+    private var currentArtURL: URL? {
+        entry.hasBackdropArt ? entry.artURL : entry.posterURL
+    }
+
+    /// Build 83 (item 4, owner — artwork shown WHOLE, never
+    /// cropped): wide art (measured aspect ≥ 1.15, or the
+    /// backdrop field before measurement) fills the frame as
+    /// before; portrait/square art is aspect-FITTED over the
+    /// hero's near-black ground. Build 81's poster fill is what
+    /// cropped the faces in the owner's screenshot — a 2:3
+    /// poster filled into this 16:9 frame loses over half its
+    /// height. No blurred pillars (rejected in build 80).
+    private var slideContentMode: ContentMode {
+        let aspect = artAspect ?? currentArtURL.flatMap { ArtworkAspectProbe.shared.cachedAspect(for: $0) }
+        if let aspect { return aspect >= 1.15 ? .fill : .fit }
+        return entry.hasBackdropArt ? .fill : .fit
+    }
+
     var body: some View {
         // Build 80 (item 6, owner-picked Option 3): the WIDE
         // letterbox composition — full-bleed backdrop; a SMALL
@@ -2239,13 +2265,19 @@ private struct FeaturedSlide: View {
     /// gradient keeps the overlaid text readable on any art.
     private var backdropView: some View {
         ZStack {
+            // Build 83 (item 4): the near-black ground the
+            // aspect-fitted art sits on (invisible when wide
+            // art fills the frame).
+            RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                .fill(Color.black)
+                .frame(width: width, height: height)
             if entry.hasBackdropArt {
                 CachedImage(
                     url: entry.artURL,
                     width: width,
                     height: height,
                     cornerRadius: AppTheme.heroCornerRadius,
-                    contentMode: .fill,
+                    contentMode: slideContentMode,
                     iconName: entry.iconName,
                     loadProfile: .high
                 )
@@ -2255,7 +2287,7 @@ private struct FeaturedSlide: View {
                     width: width,
                     height: height,
                     cornerRadius: AppTheme.heroCornerRadius,
-                    contentMode: .fill,
+                    contentMode: slideContentMode,
                     iconName: entry.iconName,
                     loadProfile: .high
                 )
@@ -2278,6 +2310,14 @@ private struct FeaturedSlide: View {
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
         .onTapGesture { if isCurrent { onDetails() } }
+        // Build 83 (item 4): measure the current art's aspect;
+        // the memo makes re-visits instant.
+        .task(id: currentArtURL) {
+            artAspect = nil
+            if let currentArtURL {
+                artAspect = await ArtworkAspectProbe.shared.probe(currentArtURL)
+            }
+        }
     }
 
     /// The small poster thumbnail overlapping the backdrop's

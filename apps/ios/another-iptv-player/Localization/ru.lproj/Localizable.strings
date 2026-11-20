@@ -1053,6 +1053,13 @@
 "matches.team.recent" = "Последние результаты";
 "matches.team.squad" = "Состав";
 "matches.search.placeholder" = "Поиск команд";
+/* Build 83: league browser + standings Short/Full modes. */
+"matches.leagues" = "Лиги";
+"matches.search_leagues" = "Поиск лиг";
+"matches.leagues_empty" = "Лиги не найдены";
+"matches.table_short" = "Краткая";
+"matches.table_full" = "Полная";
+"matches.team_label" = "Команда";
 
 /* Build 65: redesign surfaces (display, settings hub, EPG cards, match tabs, favorites shelves, downloads dashboard). */
 "display.accent" = "Акцентный цвет";

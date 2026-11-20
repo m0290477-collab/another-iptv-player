@@ -1053,6 +1053,13 @@
 "matches.team.recent" = "最近战绩";
 "matches.team.squad" = "球员名单";
 "matches.search.placeholder" = "搜索球队";
+/* Build 83: league browser + standings Short/Full modes. */
+"matches.leagues" = "联赛";
+"matches.search_leagues" = "搜索联赛";
+"matches.leagues_empty" = "未找到联赛";
+"matches.table_short" = "简表";
+"matches.table_full" = "完整";
+"matches.team_label" = "球队";
 
 /* Build 65: redesign surfaces (display, settings hub, EPG cards, match tabs, favorites shelves, downloads dashboard). */
 "display.accent" = "强调色";

@@ -1737,7 +1737,17 @@ private struct PlayerViewImpl: View {
                     .padding(.leading, 12 + outerSafeAreaInsets.leading)
                     .padding(.trailing, 12 + outerSafeAreaInsets.trailing)
                     .padding(.top, outerSafeAreaInsets.top)
-                    .padding(.bottom, 12 + outerSafeAreaInsets.bottom)
+                    // Build 83 (item 1, owner): in LANDSCAPE the
+                    // bottom chrome floated — the 12 pt extra plus
+                    // the full 21 pt home-indicator inset stacked
+                    // into a ~33 pt dead band below the bar (his
+                    // red underlines), with the video squeezed
+                    // above it. Landscape now rests the chrome
+                    // group 8 pt off the bottom edge so the video
+                    // takes the reclaimed space; portrait keeps the
+                    // build-70 formula exactly (12 + the inset), so
+                    // the portrait fit guarantees do not regress.
+                    .padding(.bottom, geo.size.width > geo.size.height ? 8 : 12 + outerSafeAreaInsets.bottom)
                     // Build 70: pin the chrome stack to the actual container width.
                     // Unpinned, a too-wide child (the slim bar on portrait phones)
                     // widens the whole stack past the screen and the enclosing
@@ -2581,7 +2591,11 @@ private struct PlayerViewImpl: View {
     /// closure, same accessibility label; only its visual position
     /// within the chrome changed.
     private var bottomTransportChrome: some View {
-        VStack(alignment: .trailing, spacing: 10) {
+        // Build 83 (item 1): spacing 10 → 6 — with the seek pill
+        // bottom-aligned in its row (see `vodSeekPill`), the
+        // pill-to-bar gap is now exactly this spacing instead of
+        // spacing + the pill row's dead half.
+        VStack(alignment: .trailing, spacing: 6) {
 
             if showSeriesEpisodeSkip {
                 HStack(spacing: 8) {
@@ -2812,7 +2826,14 @@ private struct PlayerViewImpl: View {
                     .shadow(color: .black.opacity(0.45), radius: 3, y: 1)
                     .allowsHitTesting(false)
             }
-            .frame(height: 44)
+            // Build 83 (item 1): the 30 pt pill BOTTOM-aligns in
+            // its 44 pt touch row — centered, it left ~7 pt of
+            // dead space under the pill that read as part of the
+            // pill-to-bar gap in the owner's screenshot. The
+            // touch row itself is unchanged (still 44 pt, same
+            // gesture, same seek behaviour); the slack now sits
+            // ABOVE the pill, merged into the open video area.
+            .frame(height: 44, alignment: .bottom)
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)

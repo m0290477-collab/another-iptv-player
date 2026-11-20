@@ -925,6 +925,13 @@ struct LiveCategoryShelfRow: View, Equatable {
                                 categoryId: category.id,
                                 categoryName: category.name
                             )
+                            // Build 83 (item 5): the category
+                            // shelves get the same one-shot card
+                            // entrance the trending shelf already
+                            // had (`shelfCardAppear` — gated by
+                            // the EffectsGate, indices ≥ 12
+                            // pre-shown, transform/opacity only).
+                            .shelfCardAppear(index: index)
                             // Round 20 (R20-5): as each cell appears,
                             // warm the logos just ahead of it — the
                             // old head-only prefetch left every logo
