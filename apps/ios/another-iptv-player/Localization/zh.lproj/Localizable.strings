@@ -518,6 +518,8 @@
 "detail.about" = "关于";
 "detail.continue_episode" = "继续 • 第 %d 集";
 "detail.play_episode_1" = "播放第 1 集";
+"detail.play_season_episode" = "播放第 %d 季 · 第 %d 集";
+"detail.play_season" = "播放第 %d 季";
 "common.off" = "关闭";
 "playlists.remote_playlist" = "远程播放列表";
 "settings.account.provider_subscription" = "您的提供商订阅";

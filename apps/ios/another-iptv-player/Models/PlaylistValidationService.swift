@@ -393,16 +393,16 @@ enum PlaylistValidationService {
     /// is a short-timeout FIRST-BYTES check — it opens the stream
     /// URL exactly as the player builds it, reads the first chunk,
     /// and stops; it is NOT full playback and is labeled as such
-    /// on the summary. Sequential with an overall cap, cancellable
+    /// on the summary. Concurrent with an overall cap, cancellable
     /// with the add task; a cancelled probe returns nil (no ratio
     /// is shown) rather than a partial count presented as complete.
     static func probeCompatibility(playlist: Playlist) async -> CompatibilityResult? {
-        // Build 63: hard overall cap. The uncapped probe is up to
-        // 10 sequential first-bytes checks (≈8 s each worst case ≈
-        // 80 s) and in build 62 it ran BETWEEN the content stages
-        // and the guide with no stage active — an invisible stall
-        // at the end of the checklist. Overrunning the cap (or any
-        // failure) yields nil: no ratio shown, never a block.
+        // Build 63: hard overall cap. The probe is up to 10
+        // first-bytes checks (run concurrently since build 82 —
+        // sequentially they could stack ≈8 s timeouts into an
+        // invisible stall at the end of the checklist, the build
+        // 62 pattern). Overrunning the cap (or any failure)
+        // yields nil: no ratio shown, never a block.
         do {
             return try await withStageTimeout(25) {
                 await probeCompatibilityCapped(playlist: playlist)
@@ -419,12 +419,25 @@ enum PlaylistValidationService {
         config.timeoutIntervalForRequest = 6
         config.timeoutIntervalForResource = 8
         let session = URLSession(configuration: config)
-        var reachable = 0
-        for target in targets {
-            if Task.isCancelled { return nil }
-            if await probeFirstBytes(target: target, playlist: playlist, session: session) {
-                reachable += 1
+        // Build 82 (item 2): the probes run CONCURRENTLY. They
+        // used to run one after another, so every dead or slow
+        // target burned its full request timeout (6 s) in
+        // sequence — up to the whole 25 s cap of pure tail AFTER
+        // the catalog was already stored, while the progress
+        // card sat on its last stage label with every row
+        // checked. The targets are independent first-bytes
+        // checks; in parallel the whole sample costs about one
+        // probe's time, and the 25 s cap in `probeCompatibility`
+        // still bounds the total.
+        let reachable = await withTaskGroup(of: Bool.self) { group in
+            for target in targets {
+                group.addTask {
+                    await probeFirstBytes(target: target, playlist: playlist, session: session)
+                }
             }
+            var count = 0
+            for await ok in group where ok { count += 1 }
+            return count
         }
         if Task.isCancelled { return nil }
         return CompatibilityResult(reachable: reachable, sampled: targets.count)

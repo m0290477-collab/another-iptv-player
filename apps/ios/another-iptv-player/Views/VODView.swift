@@ -1169,7 +1169,12 @@ struct VODStreamCard: View {
                     // paths carry spaces) + the title, so a movie
                     // with no usable image renders the designed
                     // title card instead of an anonymous blank tile.
-                    url: ArtworkURL.url(from: stream.streamIcon),
+                    // Build 82 (item 6): when the icon field itself
+                    // is empty/unusable, fall back to the record's
+                    // stored backdrop (filled by the detail-info
+                    // fetch) before giving up to the title card —
+                    // the same second field the heroes use.
+                    url: ArtworkURL.url(from: stream.streamIcon) ?? ArtworkURL.url(from: stream.backdropPath),
                     width: posterWidth,
                     height: posterHeight,
                     contentMode: SwiftUI.ContentMode.fill,
@@ -1766,17 +1771,41 @@ struct MovieFeaturedHero: View {
     let onDetails: () -> Void
     let onPlay: () -> Void
 
+    /// Build 82 (item 1): same failure swap as the Series tab
+    /// hero — a backdrop string that exists but fails to load
+    /// no longer strands the hero on the placeholder while the
+    /// movie's poster sits unused; the poster aspect-fills the
+    /// wide frame (the build 81 item 4 treatment).
+    @State private var backdropLoadFailed = false
+
+    private var backdropURL: URL? {
+        movie.backdropPath.flatMap { ArtworkURL.url(from: $0) }
+    }
+
+    private var posterURL: URL? {
+        movie.streamIcon.flatMap { ArtworkURL.url(from: $0) }
+    }
+
+    private var heroURL: URL? {
+        if let backdropURL, !backdropLoadFailed { return backdropURL }
+        return posterURL
+    }
+
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             CachedImage(
-                url: movie.backdropPath.flatMap { ArtworkURL.url(from: $0) } ?? movie.streamIcon.flatMap { ArtworkURL.url(from: $0) },
+                url: heroURL,
                 width: UIScreen.main.bounds.width - 32,
                 height: 210,
                 cornerRadius: AppTheme.heroCornerRadius,
                 contentMode: .fill,
                 iconName: "film",
-                loadProfile: .high
+                loadProfile: .high,
+                onLoadFailed: {
+                    if heroURL == backdropURL { backdropLoadFailed = true }
+                }
             )
+            .onChange(of: backdropURL) { _, _ in backdropLoadFailed = false }
             LinearGradient(
                 colors: [.clear, AppTheme.background.opacity(0.88)],
                 startPoint: .center,
@@ -2030,6 +2059,17 @@ struct MovieCollectionsShelf: View, Equatable {
 
     @Environment(\.posterMetrics) private var posterMetrics
 
+    /// Build 82 (item 6): the first group member whose stored
+    /// poster URL is usable — the collection's best available
+    /// artwork from its own items (the pattern the ranked rails
+    /// already use for their representative pick).
+    private func collectionArtworkURL(_ group: FranchiseGroup) -> URL? {
+        for movie in group.movies {
+            if let url = ArtworkURL.url(from: movie.streamIcon) { return url }
+        }
+        return nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // No "see all" — the shelf IS the collections surface;
@@ -2053,12 +2093,31 @@ struct MovieCollectionsShelf: View, Equatable {
                             VStack(alignment: .leading, spacing: 6) {
                                 ZStack(alignment: .bottomTrailing) {
                                     CachedImage(
-                                        url: group.movies.first?.streamIcon.flatMap { ArtworkURL.url(from: $0) },
+                                        // Build 82 (item 6): the
+                                        // group's first USABLE
+                                        // poster, not blindly its
+                                        // first movie's — when the
+                                        // first entry's icon is
+                                        // empty/unusable the card
+                                        // used to strand on the
+                                        // film placeholder even
+                                        // though sibling entries in
+                                        // the same collection carry
+                                        // real posters (the
+                                        // owner's "WWE RAW"
+                                        // collection card). And
+                                        // the designed title card
+                                        // (build 81 item 5c) is
+                                        // passed the group title —
+                                        // this call site never
+                                        // passed `title:` at all.
+                                        url: collectionArtworkURL(group),
                                         width: posterMetrics.shelfPosterWidth,
                                         height: posterMetrics.shelfPosterHeight,
                                         contentMode: .fill,
                                         iconName: "film",
-                                        loadProfile: .shelf
+                                        loadProfile: .shelf,
+                                        title: group.title
                                     )
                                     Text("\(group.movies.count)")
                                         .font(AppTheme.fontBadge)

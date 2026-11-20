@@ -535,6 +535,8 @@
 "detail.about" = "Hakkında";
 "detail.continue_episode" = "Devam Et • %d. Bölüm";
 "detail.play_episode_1" = "1. Bölümü Oynat";
+"detail.play_season_episode" = "%d. Sezon · %d. Bölüm Oynat";
+"detail.play_season" = "%d. Sezonu Oynat";
 "common.off" = "Kapalı";
 "playlists.remote_playlist" = "Uzak oynatma listesi";
 "settings.account.provider_subscription" = "Sağlayıcı aboneliğiniz";

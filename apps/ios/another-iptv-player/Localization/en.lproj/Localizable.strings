@@ -535,6 +535,8 @@
 "detail.about" = "About";
 "detail.continue_episode" = "Continue • Episode %d";
 "detail.play_episode_1" = "Play Episode 1";
+"detail.play_season_episode" = "Play S%d · Episode %d";
+"detail.play_season" = "Play Season %d";
 "common.off" = "Off";
 "playlists.remote_playlist" = "Remote playlist";
 "settings.account.provider_subscription" = "Your provider subscription";

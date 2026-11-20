@@ -518,6 +518,8 @@
 "detail.about" = "حول";
 "detail.continue_episode" = "متابعة • الحلقة %d";
 "detail.play_episode_1" = "تشغيل الحلقة 1";
+"detail.play_season_episode" = "تشغيل الموسم %d · الحلقة %d";
+"detail.play_season" = "تشغيل الموسم %d";
 "common.off" = "إيقاف";
 "playlists.remote_playlist" = "قائمة تشغيل عن بُعد";
 "settings.account.provider_subscription" = "اشتراك المزوّد الخاص بك";

@@ -518,6 +518,8 @@
 "detail.about" = "À propos";
 "detail.continue_episode" = "Continuer • Épisode %d";
 "detail.play_episode_1" = "Lire l’épisode 1";
+"detail.play_season_episode" = "Lire S%d · Épisode %d";
+"detail.play_season" = "Lire la saison %d";
 "common.off" = "Désactivé";
 "playlists.remote_playlist" = "Playlist distante";
 "settings.account.provider_subscription" = "Votre abonnement fournisseur";

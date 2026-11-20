@@ -805,9 +805,21 @@ struct DetailSeasonTabBar: View {
                     ForEach(orderedSeasons) { season in
                         let isSelected = selectedId == season.id
                         Button {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                selectedId = season.id
-                            }
+                            // Build 82 (item 5): the selection
+                            // applies INSTANTLY. It used to be
+                            // wrapped in a spring while the
+                            // onChange below ran a SECOND
+                            // animation (the centering scroll) —
+                            // two animations on one state change,
+                            // each restarted from mid-flight
+                            // interpolated states on every rapid
+                            // re-tap, compositing chips at
+                            // overlapping positions with
+                            // half-blended labels (the owner's
+                            // video: "Season 21", "Seas3n 3").
+                            // Instant selection + an instant
+                            // centering jump cannot stack.
+                            selectedId = season.id
                         } label: {
                             Text(tabTitle(season))
                                 .font(.subheadline.weight(.semibold))
@@ -840,7 +852,11 @@ struct DetailSeasonTabBar: View {
             }
             .onChange(of: selectedId) { _, new in
                 guard let new else { return }
-                withAnimation { proxy.scrollTo(new, anchor: .center) }
+                // Build 82 (item 5): no animation — see the chip
+                // tap above. The centering jump is instant, so a
+                // fast sequence of taps lands each chip exactly
+                // once, fully rendered.
+                proxy.scrollTo(new, anchor: .center)
             }
         }
     }

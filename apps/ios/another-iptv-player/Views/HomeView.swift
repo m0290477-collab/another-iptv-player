@@ -1167,6 +1167,13 @@ struct HomeView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
+                        // Build 82 (item 7): one fixed height for
+                        // all three cards — icon + label + the
+                        // vertical padding sum to exactly this —
+                        // so the row can never drift uneven again
+                        // (it aligns by construction, on any
+                        // screen width).
+                        .frame(height: 80)
                         .background(
                             RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
                                 .fill(AppTheme.surface)
@@ -1188,7 +1195,13 @@ struct HomeView: View {
     private func sportSymbolName(_ sport: MatchSport) -> String {
         switch sport {
         case .soccer: return "soccerball"
-        case .nfl: return "americanfootball.fill"
+        // Build 82 (item 7): "americanfootball.fill" is NOT an
+        // SF Symbols name — Image(systemName:) with an unknown
+        // name renders zero-size, which is why the NFL card had
+        // no icon and collapsed shorter than its neighbours.
+        // The canonical names are "american.football" /
+        // "american.football.fill".
+        case .nfl: return "american.football.fill"
         case .nba: return "basketball.fill"
         }
     }

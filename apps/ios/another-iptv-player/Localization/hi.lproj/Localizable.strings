@@ -518,6 +518,8 @@
 "detail.about" = "जानकारी";
 "detail.continue_episode" = "जारी रखें • एपिसोड %d";
 "detail.play_episode_1" = "एपिसोड 1 चलाएँ";
+"detail.play_season_episode" = "S%d · एपिसोड %d चलाएँ";
+"detail.play_season" = "सीज़न %d चलाएँ";
 "common.off" = "बंद";
 "playlists.remote_playlist" = "रिमोट प्लेलिस्ट";
 "settings.account.provider_subscription" = "आपकी प्रदाता सदस्यता";

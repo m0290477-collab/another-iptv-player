@@ -862,17 +862,44 @@ struct SeriesFeaturedHero: View {
     let onDetails: () -> Void
     let onPlay: () -> Void
 
+    /// Build 82 (item 1): the backdrop-first pick used to be a
+    /// one-shot URL selection — a backdrop string that exists
+    /// but FAILS to load (dead panel host, 404) stranded the
+    /// hero on the placeholder even though the series' poster
+    /// loads fine in the rails below. The hero now swaps to the
+    /// poster on load failure, the same chain the detail hero
+    /// (R19-2) runs; the poster aspect-fills the wide frame,
+    /// exactly the treatment build 81 item 4 gave the Home hero.
+    @State private var backdropLoadFailed = false
+
+    private var backdropURL: URL? {
+        series.backdropPath.flatMap { ArtworkURL.url(from: $0) }
+    }
+
+    private var posterURL: URL? {
+        series.cover.flatMap { ArtworkURL.url(from: $0) }
+    }
+
+    private var heroURL: URL? {
+        if let backdropURL, !backdropLoadFailed { return backdropURL }
+        return posterURL
+    }
+
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             CachedImage(
-                url: series.backdropPath.flatMap { ArtworkURL.url(from: $0) } ?? series.cover.flatMap { ArtworkURL.url(from: $0) },
+                url: heroURL,
                 width: UIScreen.main.bounds.width - 32,
                 height: 210,
                 cornerRadius: AppTheme.heroCornerRadius,
                 contentMode: .fill,
                 iconName: "play.tv",
-                loadProfile: .high
+                loadProfile: .high,
+                onLoadFailed: {
+                    if heroURL == backdropURL { backdropLoadFailed = true }
+                }
             )
+            .onChange(of: backdropURL) { _, _ in backdropLoadFailed = false }
             LinearGradient(
                 colors: [.clear, AppTheme.background.opacity(0.88)],
                 startPoint: .center,
@@ -1306,7 +1333,10 @@ struct SeriesCard: View {
                 CachedImage(
                     // Build 81 (items 5b/5c): lenient artwork URL +
                     // title card fallback — see VODStreamCard.
-                    url: ArtworkURL.url(from: stream.cover),
+                    // Build 82 (item 6, symmetric): the record's
+                    // stored backdrop is the fallback when the
+                    // cover field is empty/unusable.
+                    url: ArtworkURL.url(from: stream.cover) ?? ArtworkURL.url(from: stream.backdropPath),
                     width: posterWidth,
                     height: posterHeight,
                     contentMode: SwiftUI.ContentMode.fill,
@@ -1752,6 +1782,11 @@ struct SeriesDetailView: View {
     /// both resolved from the database, never assumed.
     @State private var resumeEpisode: DBEpisode?
     @State private var firstEpisode: DBEpisode?
+    /// Build 82 (item 3): the first episode of the season the
+    /// user has SELECTED with the season chips — the Play
+    /// button's target whenever the on-screen season is not
+    /// the resume episode's own season.
+    @State private var selectedSeasonFirstEpisode: DBEpisode?
     /// Round 14 (B1): series Play surfaces a VISIBLE failure when no
     /// episode resolves — never a silent no-op.
     @State private var showPlayFailure = false
@@ -1947,6 +1982,7 @@ struct SeriesDetailView: View {
             }
         }
         .task(id: watchHistory?.streamId) { await loadResumeEpisode() }
+        .task(id: seasonPlayTargetKey) { await loadSelectedSeasonFirstEpisode() }
         .task(id: watchHistory?.streamId) { await loadNextUnwatched() }
         .task(id: seasons.first?.id) { await loadFirstEpisode() }
         .task(id: currentSeries.seasonsLoaded) {
@@ -1957,13 +1993,49 @@ struct SeriesDetailView: View {
         .cinematicBackground()
     }
 
+    /// Build 82 (item 3): the season currently on screen (the
+    /// chip selection), when one is selected.
+    private var selectedSeason: DBSeason? {
+        guard let sid = selectedSeasonId else { return nil }
+        return seasons.first { $0.id == sid }
+    }
+
+    /// Whether the saved resume point belongs to the season on
+    /// screen. While the resume episode is still resolving, the
+    /// answer stays "yes" — the legacy resume behaviour holds
+    /// until the record proves it points at another season.
+    private var resumeAppliesToSelectedSeason: Bool {
+        guard hasResume else { return false }
+        guard let sid = selectedSeasonId, let resume = resumeEpisode else { return true }
+        return resume.seasonId == sid
+    }
+
+    /// Build 82 (item 3): Play targets the SELECTED season
+    /// whenever the on-screen season is not the resume
+    /// episode's season — the button must never silently play
+    /// a different season than the one the user is looking at
+    /// (the owner's build-81 video: chips on Season 3, the
+    /// button still played Season 1 Episode 1).
+    private var playTargetsSelectedSeason: Bool {
+        selectedSeason != nil && !resumeAppliesToSelectedSeason
+    }
+
     /// The big Play button's label (point 20): "Continue • Episode
     /// N" with the REAL episode number from the resumed episode's
     /// record; "Play Episode 1" when there is no history but the
     /// series has seasons; the previous generic labels otherwise.
     /// Round 14 (B8): a FINISHED latest episode (≥98%) labels the
     /// button with the NEXT episode instead of "Continue".
+    /// Build 82 (item 3): when the on-screen season is not the
+    /// resume season, the label names the SELECTED season and
+    /// its first episode ("Play S3 · Episode 1").
     private var primaryActionTitle: String {
+        if playTargetsSelectedSeason, let season = selectedSeason {
+            if let ep = selectedSeasonFirstEpisode {
+                return L("detail.play_season_episode", season.seasonNumber, ep.episodeNum)
+            }
+            return L("detail.play_season", season.seasonNumber)
+        }
         if hasResume {
             if resumeIsFinished {
                 if let num = nextUnwatchedEpisode?.episodeNum {
@@ -2227,11 +2299,16 @@ struct SeriesDetailView: View {
 
                 DetailActionBar(
                     primaryTitle: primaryActionTitle,
-                    primarySubtitle: resumeIsFinished ? nil : resumeSubtitle,
-                    primaryIcon: hasResume ? "play.circle.fill" : "play.fill",
-                    progress: resumeIsFinished ? nil : resumeProgress,
+                    // Build 82 (item 3): in selected-season mode the
+                    // resume subtitle/progress/icon do not apply —
+                    // the button plays that season's first episode.
+                    primarySubtitle: (playTargetsSelectedSeason || resumeIsFinished) ? nil : resumeSubtitle,
+                    primaryIcon: hasResume && !playTargetsSelectedSeason ? "play.circle.fill" : "play.fill",
+                    progress: (playTargetsSelectedSeason || resumeIsFinished) ? nil : resumeProgress,
                     onPrimary: {
-                        if hasResume && resumeIsFinished {
+                        if playTargetsSelectedSeason {
+                            playSelectedSeasonFirstEpisode()
+                        } else if hasResume && resumeIsFinished {
                             playNextUnwatched()
                         } else if hasResume {
                             resumeLatestEpisode()
@@ -2630,6 +2707,63 @@ struct SeriesDetailView: View {
                 // B1: the resume target no longer resolves — say so
                 // visibly instead of swallowing the tap.
                 await MainActor.run { showPlayFailure = true }
+            }
+        }
+    }
+
+    /// Build 82 (item 3): the Play button's season target —
+    /// reloads with the chip selection, and again once the
+    /// series info lands (seasonsLoaded), which is when the
+    /// season's episode rows reach the database.
+    private var seasonPlayTargetKey: String {
+        "\(selectedSeasonId ?? "none")|\(currentSeries.seasonsLoaded)"
+    }
+
+    private func loadSelectedSeasonFirstEpisode() async {
+        guard let sid = selectedSeasonId else {
+            selectedSeasonFirstEpisode = nil
+            return
+        }
+        let ep = try? await AppDatabase.shared.read { db in
+            let episodes = try DBEpisode
+                .filter(Column("seasonId") == sid)
+                .fetchAll(db)
+            return SeriesPlaybackOrdering.orderedEpisodes(episodes).first
+        }
+        selectedSeasonFirstEpisode = ep ?? nil
+    }
+
+    /// Build 82 (item 3): Play in selected-season mode — plays
+    /// the SELECTED season's first episode, and only that. If
+    /// the season's episodes have not resolved yet it resolves
+    /// at tap time; a season with no episodes fails VISIBLY
+    /// (the B1 no-silent-failure surface) — it never falls
+    /// back to another season's episode.
+    private func playSelectedSeasonFirstEpisode() {
+        if let ep = selectedSeasonFirstEpisode {
+            selectedEpisode = (ep, nil)
+            presentEpisodeOverlay(ep: ep, history: nil)
+            return
+        }
+        guard let sid = selectedSeasonId else {
+            showPlayFailure = true
+            return
+        }
+        Task {
+            let ep = try? await AppDatabase.shared.read { db in
+                let episodes = try DBEpisode
+                    .filter(Column("seasonId") == sid)
+                    .fetchAll(db)
+                return SeriesPlaybackOrdering.orderedEpisodes(episodes).first
+            }
+            await MainActor.run {
+                if let ep {
+                    selectedSeasonFirstEpisode = ep
+                    selectedEpisode = (ep, nil)
+                    presentEpisodeOverlay(ep: ep, history: nil)
+                } else {
+                    showPlayFailure = true
+                }
             }
         }
     }

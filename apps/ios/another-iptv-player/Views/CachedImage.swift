@@ -112,7 +112,15 @@ struct CachedImage: View {
                 // pipeline keeps no negative cache; see
                 // ArtworkFailureMemo). After the memo's TTL the
                 // URL is retried normally.
+                // Build 82 (items 1+4): the failure hook fires
+                // here too — the load DID fail, and call sites
+                // with a fallback image (the detail hero's
+                // poster swap, the tab heroes) otherwise never
+                // learn about a memo-hit failure and stay stuck
+                // on the placeholder even though their fallback
+                // art is sitting unused.
                 placeholder
+                    .onAppear { onLoadFailed?() }
             } else if let url {
                 // A custom `transaction` can trigger multiple LazyImageContext updates in the same frame; animation is handled by the parent `Group` instead.
                 LazyImage(request: makeRequest(url: url)) { state in

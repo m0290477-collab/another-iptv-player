@@ -518,6 +518,8 @@
 "detail.about" = "Информация";
 "detail.continue_episode" = "Продолжить • Серия %d";
 "detail.play_episode_1" = "Смотреть серию 1";
+"detail.play_season_episode" = "Смотреть S%d · Серия %d";
+"detail.play_season" = "Смотреть сезон %d";
 "common.off" = "Выкл.";
 "playlists.remote_playlist" = "Удалённый плейлист";
 "settings.account.provider_subscription" = "Ваша подписка провайдера";

@@ -518,6 +518,8 @@
 "detail.about" = "Sobre";
 "detail.continue_episode" = "Continuar • Episódio %d";
 "detail.play_episode_1" = "Reproduzir episódio 1";
+"detail.play_season_episode" = "Reproduzir T%d · Episódio %d";
+"detail.play_season" = "Reproduzir temporada %d";
 "common.off" = "Desligado";
 "playlists.remote_playlist" = "Playlist remota";
 "settings.account.provider_subscription" = "Sua assinatura do provedor";
