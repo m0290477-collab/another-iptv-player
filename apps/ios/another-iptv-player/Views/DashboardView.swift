@@ -691,7 +691,7 @@ private struct DashboardPhoneTabBarView: View {
             selection = tab
         } label: {
             HStack(spacing: 7) {
-                glyphImage(tab, size: 22)
+                glyphImage(for: tab, size: 22)
                 // Same Arabic treatment as the system-bar labels
                 // (ST5): IBM Plex Sans Arabic when the app language
                 // is Arabic, the bar's own font otherwise.
@@ -722,7 +722,7 @@ private struct DashboardPhoneTabBarView: View {
         Button {
             selection = tab
         } label: {
-            glyphImage(tab, size: 23)
+            glyphImage(for: tab, size: 23)
                 .foregroundStyle(Color.white.opacity(0.55))
                 .frame(maxWidth: .infinity)
                 .frame(height: 40)
