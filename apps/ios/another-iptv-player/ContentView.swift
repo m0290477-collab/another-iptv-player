@@ -165,7 +165,6 @@ struct ContentView: View {
                             }
                             // Drop the large catalog copies when returning to the picker.
                             M3UContentStore.shared.unload()
-                            EPGStore.shared.setActivePlaylist(nil)
                         }, onSwitchPlaylist: { newPlaylist in
                             switchPlaylist(to: newPlaylist)
                         })
@@ -182,7 +181,6 @@ struct ContentView: View {
                                 selectedPlaylist = nil
                             }
                             PlaylistContentStore.shared.unload()
-                            EPGStore.shared.setActivePlaylist(nil)
                         }, onSwitchPlaylist: { newPlaylist in
                             switchPlaylist(to: newPlaylist)
                         })
@@ -359,7 +357,6 @@ struct ContentView: View {
             } else {
                 PlaylistContentStore.shared.unload()
             }
-            EPGStore.shared.setActivePlaylist(nil)
         }
         selectPlaylist(newPlaylist)
     }

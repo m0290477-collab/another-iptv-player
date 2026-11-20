@@ -33,23 +33,29 @@ struct MatchDetailView: View {
     @State private var watchLoaded = false
     /// Item 10e state.
     @State private var reminderOn = false
-    /// Build 65 (Match detail style 1 'Scoreboard Pro'): the
-    /// detail sections below the scoreboard are TABBED —
-    /// Timeline / Lineups / Stats — each tab existing ONLY when
-    /// the feed actually carries that data. (No H2H tab: the
-    /// ESPN summary payload has no head-to-head data, and an
-    /// empty invented tab would be fake UI.)
+    /// Build 65 (Match detail style 1 'Scoreboard Pro') introduced
+    /// the tabbed sections; build 80 (item 16) re-arranges them
+    /// the FotMob way at the owner's order: Facts / Lineup / Stats
+    /// / H2H / Commentary — each tab existing ONLY when the feed
+    /// actually carries that data. (The build-65 note claimed the
+    /// summary had no head-to-head data; build 80's payload
+    /// inspection found it in `seasonseries`, which the old
+    /// decoder never read — see MatchesService.mapH2H. Still
+    /// excluded, because ESPN's free data does not carry them:
+    /// player ratings, momentum, Player of the Match.)
     @State private var detailTab = 0
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
 
     private enum DetailTab: Hashable {
-        case timeline, lineups, stats
+        case facts, lineups, stats, h2h, commentary
 
         var title: String {
             switch self {
-            case .timeline: return L("matches.detail.timeline")
+            case .facts: return L("matches.detail.facts")
             case .lineups: return L("matches.lineups")
             case .stats: return L("matches.stats")
+            case .h2h: return L("matches.detail.h2h")
+            case .commentary: return L("matches.detail.commentary")
             }
         }
     }
@@ -57,13 +63,23 @@ struct MatchDetailView: View {
     private var hasTimeline: Bool { !(detail?.timeline.isEmpty ?? true) }
     private var hasLineups: Bool { !(detail?.lineups.isEmpty ?? true) }
     private var hasStats: Bool { !(detail?.stats.isEmpty ?? true) }
+    /// Facts exists when any of its three groups has real data:
+    /// the timeline, the payload's match info, or its videos.
+    private var hasFacts: Bool {
+        guard let detail else { return false }
+        return hasTimeline || detail.info != nil || !detail.videos.isEmpty
+    }
+    private var hasH2H: Bool { !(detail?.h2h?.meetings.isEmpty ?? true) }
+    private var hasCommentary: Bool { !(detail?.commentary.isEmpty ?? true) }
 
     /// The tabs that exist for THIS match, in display order.
     private var availableTabs: [DetailTab] {
         var tabs: [DetailTab] = []
-        if hasTimeline { tabs.append(.timeline) }
+        if hasFacts { tabs.append(.facts) }
         if hasLineups { tabs.append(.lineups) }
         if hasStats { tabs.append(.stats) }
+        if hasH2H { tabs.append(.h2h) }
+        if hasCommentary { tabs.append(.commentary) }
         return tabs
     }
 
@@ -183,13 +199,39 @@ struct MatchDetailView: View {
                 }
                 .listRowBackground(Color.clear)
 
-                if selectedTab == .timeline {
-                    Section {
-                        ForEach(detail.timeline) { event in
-                            timelineRow(event)
+                if selectedTab == .facts {
+                    // Build 80 (item 16): Facts — match info,
+                    // the event timeline, and the payload's
+                    // official videos (item 15), each group
+                    // rendered only when the payload carries it.
+                    if let info = detail.info {
+                        Section {
+                            infoRows(info)
+                        } header: {
+                            sectionHeader(L("matches.detail.match_info"))
                         }
+                        .listRowBackground(AppTheme.surface)
                     }
-                    .listRowBackground(AppTheme.surface)
+                    if !detail.timeline.isEmpty {
+                        Section {
+                            ForEach(detail.timeline) { event in
+                                timelineRow(event)
+                            }
+                        } header: {
+                            sectionHeader(L("matches.detail.timeline"))
+                        }
+                        .listRowBackground(AppTheme.surface)
+                    }
+                    if !detail.videos.isEmpty {
+                        Section {
+                            ForEach(detail.videos) { video in
+                                videoRow(video)
+                            }
+                        } header: {
+                            sectionHeader(L("matches.detail.highlights"))
+                        }
+                        .listRowBackground(AppTheme.surface)
+                    }
                 } else if selectedTab == .lineups {
                     Section {
                         NavigationLink {
@@ -207,6 +249,38 @@ struct MatchDetailView: View {
                         }
                     } header: {
                         sectionHeader(L("matches.detail.team_stats"))
+                    }
+                    .listRowBackground(AppTheme.surface)
+                } else if selectedTab == .h2h {
+                    // Build 80 (item 15): head-to-head — the
+                    // payload's own series summary + past
+                    // meetings with real scores and dates.
+                    if let h2h = detail.h2h {
+                        Section {
+                            if let title = h2h.title {
+                                Text(title)
+                                    .font(AppTheme.fontCardTitle)
+                            }
+                            if let summary = h2h.summary {
+                                Text(summary)
+                                    .font(AppTheme.fontMetadata)
+                                    .foregroundStyle(AppTheme.accent)
+                            }
+                            ForEach(h2h.meetings) { meeting in
+                                h2hRow(meeting)
+                            }
+                        } header: {
+                            sectionHeader(L("matches.detail.h2h"))
+                        }
+                        .listRowBackground(AppTheme.surface)
+                    }
+                } else if selectedTab == .commentary {
+                    Section {
+                        ForEach(detail.commentary) { entry in
+                            commentaryRow(entry)
+                        }
+                    } header: {
+                        sectionHeader(L("matches.detail.commentary"))
                     }
                     .listRowBackground(AppTheme.surface)
                 }
@@ -246,8 +320,55 @@ struct MatchDetailView: View {
                 teamColumn(away)
             }
             statePill
+            scorersRow
         }
         .padding(.vertical, 8)
+    }
+
+    /// Build 80 (item 16): the scorers under the score header,
+    /// FotMob-style — each team's goalscorers listed under their
+    /// own side, derived from the timeline's goal events (soccer
+    /// only; NBA/NFL scoring plays are baskets/plays, not a
+    /// scorer list). Renders nothing when there are no goals.
+    @ViewBuilder
+    private var scorersRow: some View {
+        let homeGoals = goalEvents(for: home)
+        let awayGoals = goalEvents(for: away)
+        if !homeGoals.isEmpty || !awayGoals.isEmpty {
+            HStack(alignment: .top, spacing: 8) {
+                scorerColumn(homeGoals, trailing: false)
+                Spacer(minLength: 0)
+                scorerColumn(awayGoals, trailing: true)
+            }
+        }
+    }
+
+    private func goalEvents(for side: MatchTeamSide?) -> [MatchTimelineEvent] {
+        guard sport == .soccer, let detail, let name = side?.name else { return [] }
+        return detail.timeline.filter { $0.kind == .goal && $0.teamName == name }
+    }
+
+    private func scorerColumn(_ goals: [MatchTimelineEvent], trailing: Bool) -> some View {
+        VStack(alignment: trailing ? .trailing : .leading, spacing: 3) {
+            ForEach(goals) { goal in
+                HStack(spacing: 4) {
+                    Image(systemName: "soccerball")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                    Text(scorerText(goal))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: trailing ? .trailing : .leading)
+    }
+
+    private func scorerText(_ goal: MatchTimelineEvent) -> String {
+        let name = goal.playerName ?? goal.title
+        guard let minute = goal.minuteText, !minute.isEmpty else { return name }
+        return "\(name) \(minute)"
     }
 
     @ViewBuilder
@@ -633,21 +754,169 @@ struct MatchDetailView: View {
     // MARK: Stats
 
     private func statsRow(_ line: MatchTeamStatLine) -> some View {
-        HStack(spacing: 8) {
-            Text(line.homeValue ?? "–")
-                .font(AppTheme.fontCardTitle)
-                .monospacedDigit()
-                .frame(width: 52, alignment: .leading)
-            Spacer()
-            Text(line.label)
+        VStack(spacing: 5) {
+            HStack(spacing: 8) {
+                Text(line.homeValue ?? "–")
+                    .font(AppTheme.fontCardTitle)
+                    .monospacedDigit()
+                    .frame(width: 52, alignment: .leading)
+                Spacer()
+                Text(line.label)
+                    .font(AppTheme.fontMetadata)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Spacer()
+                Text(line.awayValue ?? "–")
+                    .font(AppTheme.fontCardTitle)
+                    .monospacedDigit()
+                    .frame(width: 52, alignment: .trailing)
+            }
+            // Build 80 (item 16): FotMob-style dual comparison
+            // bars under the values, only when BOTH values are
+            // numeric — each bar's share is value / (home + away);
+            // the leading side takes the accent.
+            if let home = Self.numericValue(line.homeValue),
+               let away = Self.numericValue(line.awayValue),
+               home + away > 0 {
+                HStack(spacing: 4) {
+                    GeometryReader { proxy in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(AppTheme.overlayFill(0.12))
+                            Capsule()
+                                .fill(home >= away ? AppTheme.accent : AppTheme.overlayFill(0.35))
+                                .frame(width: proxy.size.width * CGFloat(home / (home + away)))
+                        }
+                    }
+                    .frame(height: 4)
+                    GeometryReader { proxy in
+                        ZStack(alignment: .trailing) {
+                            Capsule().fill(AppTheme.overlayFill(0.12))
+                            Capsule()
+                                .fill(away > home ? AppTheme.accent : AppTheme.overlayFill(0.35))
+                                .frame(width: proxy.size.width * CGFloat(away / (home + away)))
+                        }
+                    }
+                    .frame(height: 4)
+                }
+            }
+        }
+    }
+
+    /// A stat's numeric magnitude for the comparison bars:
+    /// "58%" → 58, "47.5" → 47.5; nil for non-numeric values
+    /// (records, streaks) — those rows stay text-only.
+    private static func numericValue(_ text: String?) -> Double? {
+        guard let text else { return nil }
+        let cleaned = text.replacingOccurrences(of: "%", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        return Double(cleaned)
+    }
+
+    // MARK: Facts / H2H / Commentary rows (build 80, items 15/16)
+
+    /// Match-info rows: only the fields the payload provided.
+    @ViewBuilder
+    private func infoRows(_ info: MatchInfo) -> some View {
+        if let league = info.leagueName {
+            infoRow(label: L("matches.info.competition"), value: league)
+        }
+        if let venue = info.venueText {
+            infoRow(label: L("matches.info.venue"), value: venue)
+        }
+        if let attendance = info.attendance {
+            infoRow(label: L("matches.info.attendance"), value: attendance.formatted())
+        }
+        if let referee = info.refereeText {
+            infoRow(label: L("matches.info.referee"), value: referee)
+        }
+    }
+
+    private func infoRow(label: String, value: String) -> some View {
+        HStack(spacing: 10) {
+            Text(label)
                 .font(AppTheme.fontMetadata)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Spacer()
-            Text(line.awayValue ?? "–")
-                .font(AppTheme.fontCardTitle)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(AppTheme.fontMetadata)
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    /// An official highlight/analysis video (item 15): thumbnail,
+    /// the payload's own headline, duration; opens the payload's
+    /// web link (the same Link path trailers use).
+    private func videoRow(_ video: MatchVideo) -> some View {
+        Link(destination: video.url) {
+            HStack(spacing: 12) {
+                ZStack {
+                    CachedImage(
+                        url: video.thumbnailURL,
+                        width: 96, height: 54,
+                        cornerRadius: 8,
+                        contentMode: .fill,
+                        iconName: "play.rectangle"
+                    )
+                    Image(systemName: "play.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.5), radius: 4)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(video.headline)
+                        .font(AppTheme.fontMetadata)
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                    if let duration = video.durationSeconds, duration > 0 {
+                        Text("\(duration / 60):\(String(format: "%02d", duration % 60))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    /// One past meeting (item 15): date, then the two teams with
+    /// the real score between them.
+    private func h2hRow(_ meeting: MatchH2HMeeting) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if let date = meeting.date {
+                Text(date.formatted(date: .abbreviated, time: .omitted))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                Text(meeting.homeName ?? "")
+                    .font(AppTheme.fontMetadata)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("\(meeting.homeScore ?? "–") – \(meeting.awayScore ?? "–")")
+                    .font(AppTheme.fontCardTitle)
+                    .monospacedDigit()
+                    .fixedSize()
+                Text(meeting.awayName ?? "")
+                    .font(AppTheme.fontMetadata)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+    }
+
+    /// One commentary entry: the payload's minute + text.
+    private func commentaryRow(_ entry: MatchCommentaryEntry) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(entry.minuteText ?? "")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.accent)
                 .monospacedDigit()
-                .frame(width: 52, alignment: .trailing)
+                .frame(width: 34, alignment: .leading)
+            Text(entry.text)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
         }
     }
 }

@@ -28,6 +28,17 @@ private struct LiveRecomputeToken: Equatable {
     let gridCategory: String?
 }
 
+/// Build 80: one category group for a channel grid's "All" browse —
+/// the category's REAL name from the playlist data plus its channels
+/// in display order. Built inside the same detached recompute pass
+/// that produces the flat grid list (never in a view body), so the
+/// grouped presentation costs no extra catalog walk.
+struct LiveChannelGridSection: Identifiable {
+    let id: String
+    let title: String
+    let items: [LiveStreamWithCategory]
+}
+
 struct LiveStreamsView: View {
     let playlist: Playlist
     @ObservedObject private var contentStore = PlaylistContentStore.shared
@@ -38,7 +49,6 @@ struct LiveStreamsView: View {
     // Build 61 (B9, Q10): dead-channel markings (hide-dead filter).
     @ObservedObject private var channelHealth = ChannelHealthStore.shared
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
-    @Environment(\.epgSnapshot) private var epgSnapshot
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.posterMetrics) private var posterMetrics
     @State private var heroScrollVisible = false
@@ -54,10 +64,16 @@ struct LiveStreamsView: View {
     @State private var gridDebouncedQuery = ""
     @State private var gridDebounceTask: Task<Void, Never>?
     @State private var gridItems: [LiveStreamWithCategory] = []
+    /// Build 80: the grid's "All" browse grouped by category —
+    /// the SAME display set as `gridItems` before search/chip
+    /// filtering, split per category in catalog category order,
+    /// computed inside `recomputeFilter`'s detached pass and
+    /// published once with the other display values.
+    @State private var gridSections: [LiveChannelGridSection] = []
     /// Build 65 (inside-sections): the grid mode's category chip
     /// selection — nil = every visible channel; a category id
     /// filters the SAME grid (cards already carry their real EPG
-    /// now/next lines via `EPGNowNextLine`).
+    /// programme lines — build 80 removed them with the TV Guide).
     @State private var selectedCategoryId: String? = nil
 
     // Build 75 (performance): the grid's category-chip filter used
@@ -175,13 +191,6 @@ struct LiveStreamsView: View {
         return item
     }
 
-    /// The hero subtitle is the channel's REAL current EPG programme title;
-    /// nil when the guide has nothing for the channel (subtitle omitted).
-    private func heroNowTitle(for stream: DBLiveStream) -> String? {
-        guard let snapshot = epgSnapshot else { return nil }
-        return snapshot[EPGChannelKey.forXtream(stream)]?.now?.title
-    }
-
     /// The hero's live preview may run only while the hero is actually on
     /// screen and nothing covers the tab: hero inside the scroll viewport,
     /// app in the foreground (also pre-empts any automatic PiP hand-off of
@@ -286,15 +295,6 @@ struct LiveStreamsView: View {
         // switch; their inputs all ride in `liveRecomputeToken`.
         .task(id: liveRecomputeToken) { await recomputeFilter() }
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                NavigationLink {
-                    EPGGuideView(source: .xtream(playlist))
-                } label: {
-                    Image(systemName: "calendar.day.timeline.left")
-                        .font(.body.weight(.semibold))
-                }
-                .accessibilityLabel(L("epg.guide.title"))
-            }
             // === B5 (build 61) Item 11: Multiview entry — wave-2 (B8) preserve this item ===
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -478,7 +478,7 @@ struct LiveStreamsView: View {
             if let hero = heroStream {
                 LiveHeroCard(
                     stream: hero,
-                    nowProgramTitle: heroNowTitle(for: hero),
+                    nowProgramTitle: nil,
                     previewURL: PlaybackURLBuilder(playlist: playlist).liveURL(streamId: hero.streamId),
                     previewActive: heroPreviewActive,
                     userAgent: playlist.trimmedUserAgent
@@ -547,9 +547,17 @@ struct LiveStreamsView: View {
                 )
                 .padding(.vertical, 6)
             }
+            // Build 80: browsing "All" (no category chip, no
+            // active search) renders the grid GROUPED by category
+            // with a section header per group; a chip selection or
+            // an active search keeps the flat presentation exactly
+            // as before (nil sections).
             LiveCategoryContent(
                 playlist: playlist,
                 items: gridItems,
+                groupedSections: (selectedCategoryId == nil
+                    && gridDebouncedQuery.trimmingCharacters(in: .whitespaces).isEmpty)
+                    ? gridSections : nil,
                 onStreamSelected: { stream, history in
                     presentLiveSelection(LivePlayerSelection(stream: stream, history: history))
                 }
@@ -692,7 +700,7 @@ struct LiveStreamsView: View {
     /// Filter order and published results are unchanged.
     private func recomputeFilter() async {
         guard playlist.id == contentStore.activePlaylistId else {
-            displayCategories = []; displayItemsByCategory = [:]; liveChannelSections = []; return
+            displayCategories = []; displayItemsByCategory = [:]; liveChannelSections = []; gridSections = []; return
         }
         let pid = playlist.id
         // Main-actor snapshots (cheap reads only).
@@ -725,6 +733,7 @@ struct LiveStreamsView: View {
             categories: [DBCategory],
             itemsByCategory: [String: [LiveStreamWithCategory]],
             grid: [LiveStreamWithCategory],
+            gridSections: [LiveChannelGridSection],
             sections: [LiveChannelCategorySection]
         ) in
             // B2 (build 61, item 12): apply the user's persisted
@@ -798,6 +807,19 @@ struct LiveStreamsView: View {
             // end of the same pass — it used to re-run as a
             // computed property on every body pass.
             let flat = categories.flatMap { itemsByCategory[$0.id] ?? [] }
+            // Build 80: the "All" browse groups — the SAME display
+            // set as `flat`, split per category BEFORE the search
+            // and chip filters narrow the flat list. Group order is
+            // `categories` order (the catalog's category order, the
+            // same order the filter chips use); channel order
+            // inside a group is the bucket order verbatim (saved
+            // custom channel order already applied above), so
+            // flattening the groups reproduces `flat` exactly.
+            let gridSections = categories.compactMap { cat -> LiveChannelGridSection? in
+                let items = itemsByCategory[cat.id] ?? []
+                guard !items.isEmpty else { return nil }
+                return LiveChannelGridSection(id: cat.id, title: cat.name, items: items)
+            }
             let q = query.trimmingCharacters(in: .whitespaces)
             var grid = q.isEmpty ? flat : flat.filter {
                 CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.stream.name)
@@ -815,12 +837,13 @@ struct LiveStreamsView: View {
                 guard !streams.isEmpty else { return nil }
                 return LiveChannelCategorySection(id: cat.id, title: cat.name, streams: streams)
             }
-            return (categories, itemsByCategory, grid, sections)
+            return (categories, itemsByCategory, grid, gridSections, sections)
         }.value
         guard !Task.isCancelled else { return }
         displayCategories = result.categories
         displayItemsByCategory = result.itemsByCategory
         gridItems = result.grid
+        gridSections = result.gridSections
         liveChannelSections = result.sections
     }
 
@@ -978,7 +1001,6 @@ struct LiveStreamCard: View {
     var imageLoadProfile: ImageLoadProfile = .standard
     var onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil
 
-    @Environment(\.epgSnapshot) private var epgSnapshot
     // Build 61 (B8): R2 NEW badge + C10 pin indicator, read from the
     // stores at render (cards are cheap; the stores bump `version`).
     @ObservedObject private var firstSeenStore = FirstSeenStore.shared
@@ -1046,10 +1068,6 @@ struct LiveStreamCard: View {
                         .lineLimit(1)
                 }
 
-                if let snapshot = epgSnapshot {
-                    EPGNowNextLine(nowNext: snapshot[EPGChannelKey.forXtream(stream)],
-                                   width: width, reserveSpace: true)
-                }
             }
         }
         .buttonStyle(.plain)
@@ -1216,6 +1234,13 @@ struct LiveCategoryDetailView: View {
 struct LiveCategoryContent: View, Equatable {
     let playlist: Playlist
     let items: [LiveStreamWithCategory]
+    /// Build 80: optional category groups for the "All" browse.
+    /// When non-nil (and no sort/filter is active — see
+    /// `recompute()`), the grid renders one headed section per
+    /// group instead of one flat grid. Callers that pass nil (the
+    /// category detail screen, a chip-filtered or searched grid)
+    /// keep the flat presentation unchanged.
+    let groupedSections: [LiveChannelGridSection]?
     var onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil
 
     /// Cheap signature compare (ignores the selection closure) so a parent @Published
@@ -1226,6 +1251,9 @@ struct LiveCategoryContent: View, Equatable {
             && lhs.items.count == rhs.items.count
             && lhs.items.first?.stream.streamId == rhs.items.first?.stream.streamId
             && lhs.items.last?.stream.streamId == rhs.items.last?.stream.streamId
+            && lhs.groupedSections?.count == rhs.groupedSections?.count
+            && lhs.groupedSections?.first?.id == rhs.groupedSections?.first?.id
+            && lhs.groupedSections?.last?.id == rhs.groupedSections?.last?.id
     }
 
     @Environment(\.posterMetrics) private var posterMetrics
@@ -1238,6 +1266,11 @@ struct LiveCategoryContent: View, Equatable {
     @State private var filter: LiveStreamFilter = []
     /// Sort/filter output, recomputed off the main thread on input changes.
     @State private var displayItems: [LiveStreamWithCategory] = []
+    /// Build 80: grouped render output — the per-category sections
+    /// after this view's own processing, plus the flag that the
+    /// grouped presentation is in force for the current inputs.
+    @State private var displaySections: [LiveChannelGridSection] = []
+    @State private var displayGrouped = false
     /// Paginated render count so a huge catalog doesn't build one giant ForEach.
     @State private var visibleCount = Self.pageSize
     // Build 61 (B8): C10 pins / H2 hidden channels / O7 favorite tier.
@@ -1245,9 +1278,10 @@ struct LiveCategoryContent: View, Equatable {
     @ObservedObject private var hiddenChannelStore = HiddenChannelStore.shared
     @Query<FavoriteLiveRequest> private var favoriteLiveChannels: [LiveStreamWithCategory]
 
-    init(playlist: Playlist, items: [LiveStreamWithCategory], onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil) {
+    init(playlist: Playlist, items: [LiveStreamWithCategory], groupedSections: [LiveChannelGridSection]? = nil, onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil) {
         self.playlist = playlist
         self.items = items
+        self.groupedSections = groupedSections
         self.onStreamSelected = onStreamSelected
         _favoriteLiveChannels = Query(FavoriteLiveRequest(playlistId: playlist.id), in: \.appDatabase)
     }
@@ -1261,6 +1295,11 @@ struct LiveCategoryContent: View, Equatable {
         hasher.combine(items.count)
         hasher.combine(items.first?.stream.streamId)
         hasher.combine(items.last?.stream.streamId)
+        // Build 80: the grouping signature rides along so a
+        // sections change re-runs the same recompute.
+        hasher.combine(groupedSections?.count ?? -1)
+        hasher.combine(groupedSections?.first?.id)
+        hasher.combine(groupedSections?.last?.id)
         return hasher.finalize()
     }
 
@@ -1272,6 +1311,14 @@ struct LiveCategoryContent: View, Equatable {
         let source = items
         let sort = sortOption
         let activeFilter = filter
+        // Build 80: grouping is the DEFAULT presentation of the
+        // "All" browse. An explicit sort or toggle filter is a
+        // global re-ordering/filtering of the whole catalog, so
+        // while one is active the grid falls back to the flat
+        // presentation (the pre-build-80 behavior); clearing back
+        // to the default order with no filters restores grouping.
+        let sectionsInput = groupedSections
+        let grouping = sectionsInput != nil && sort == .defaultOrder && activeFilter.isEmpty
         // Build 61 (B9, Q10): the dead set is computed once here
         // (not per row) and applied inside the same detached pass.
         let dead: Set<String> = ChannelHealthStore.hideDeadEnabled
@@ -1283,22 +1330,51 @@ struct LiveCategoryContent: View, Equatable {
         let hidden = hiddenChannelStore.hiddenIds(playlistId: playlist.id)
         let pinned = pinnedStore.pinnedIds(playlistId: playlist.id)
         let favorites = Set(favoriteLiveChannels.map(\.stream.streamId))
-        let result = await Task.detached(priority: .userInitiated) {
-            var base = LiveStreamFilter.apply(source, activeFilter)
-            base = base.filter { !hidden.contains($0.stream.streamId) }
-            if !dead.isEmpty {
-                base = base.filter {
-                    !dead.contains(ImportedSubtitleStore.contentKey(
-                        playlistId: playlistId, type: "live", streamId: String($0.stream.streamId)
-                    ))
+        let result = await Task.detached(priority: .userInitiated) { () -> (
+            flat: [LiveStreamWithCategory],
+            sections: [LiveChannelGridSection]
+        ) in
+            // The per-list processing, shared verbatim by both
+            // presentations: toggle filter → hidden channels →
+            // dead channels → sort → pinned/favorites tier.
+            func process(_ list: [LiveStreamWithCategory]) -> [LiveStreamWithCategory] {
+                var base = LiveStreamFilter.apply(list, activeFilter)
+                base = base.filter { !hidden.contains($0.stream.streamId) }
+                if !dead.isEmpty {
+                    base = base.filter {
+                        !dead.contains(ImportedSubtitleStore.contentKey(
+                            playlistId: playlistId, type: "live", streamId: String($0.stream.streamId)
+                        ))
+                    }
                 }
+                let sorted = sort.apply(to: base)
+                return ChannelOrdering.pinnedFavoritesFirst(sorted, pinned: pinned, favorites: favorites) { $0.stream.streamId }
             }
-            let sorted = sort.apply(to: base)
-            return ChannelOrdering.pinnedFavoritesFirst(sorted, pinned: pinned, favorites: favorites) { $0.stream.streamId }
+            if grouping, let sectionsInput {
+                // Grouped: the same processing per section (the
+                // pinned/favorites tier then holds at the front of
+                // the channel's OWN category instead of jumping
+                // across categories); sections that process to
+                // empty drop out. The flat publish value is the
+                // groups flattened in order — identical membership
+                // and order to the sections.
+                var sections: [LiveChannelGridSection] = []
+                sections.reserveCapacity(sectionsInput.count)
+                for section in sectionsInput {
+                    let processed = process(section.items)
+                    if !processed.isEmpty {
+                        sections.append(LiveChannelGridSection(id: section.id, title: section.title, items: processed))
+                    }
+                }
+                return (sections.flatMap(\.items), sections)
+            }
+            return (process(source), [])
         }.value
-        displayItems = result
-        visibleCount = min(Self.pageSize, result.count)
-        prefetch(result)
+        displayItems = result.flat
+        displaySections = result.sections
+        displayGrouped = grouping && !result.sections.isEmpty
+        visibleCount = min(Self.pageSize, result.flat.count)
+        prefetch(result.flat)
     }
 
     private func loadMore() {
@@ -1310,6 +1386,50 @@ struct LiveCategoryContent: View, Equatable {
         // first 24 logos (at recompute), so every paged-in page
         // painted cold during fast scrolling.
         prefetch(displayItems, startingAt: pageStart)
+    }
+
+    /// Build 80: the grouped presentation's visible slices — the
+    /// pagination budget (`visibleCount`, counted over the
+    /// flattened display order) consumed across the sections in
+    /// order. Each slice carries its offset in the flattened order
+    /// so a cell's load-more trigger is the same check the flat
+    /// grid makes.
+    private var groupedVisibleSlices: [(section: LiveChannelGridSection, items: [LiveStreamWithCategory], offset: Int)] {
+        guard displayGrouped else { return [] }
+        var remaining = visibleCount
+        var offset = 0
+        var slices: [(section: LiveChannelGridSection, items: [LiveStreamWithCategory], offset: Int)] = []
+        for section in displaySections {
+            if remaining <= 0 { break }
+            let slice = Array(section.items.prefix(remaining))
+            if !slice.isEmpty {
+                slices.append((section: section, items: slice, offset: offset))
+            }
+            remaining -= slice.count
+            offset += section.items.count
+        }
+        return slices
+    }
+
+    /// The channel cell — ONE implementation shared by the flat
+    /// and grouped grids, so the tile rendering (logo + name card
+    /// and its context menu) is identical in both presentations.
+    @ViewBuilder
+    private func channelCell(_ item: LiveStreamWithCategory) -> some View {
+        LiveStreamCard(
+            playlistId: playlist.id,
+            stream: item.stream,
+            width: posterMetrics.liveGridIconSize,
+            iconSize: posterMetrics.liveGridIconSize,
+            imageLoadProfile: .grid,
+            onStreamSelected: onStreamSelected
+        )
+        .liveCardContextMenu(
+            playlist: playlist,
+            stream: item.stream,
+            categoryId: item.stream.categoryId,
+            categoryName: item.categoryName
+        )
     }
 
     var body: some View {
@@ -1329,26 +1449,37 @@ struct LiveCategoryContent: View, Equatable {
                     GridItem(.adaptive(minimum: posterMetrics.liveGridIconSize), spacing: posterMetrics.gridSpacing)
                 ]
                 ScrollView {
-                    LazyVGrid(columns: columns, spacing: posterMetrics.gridRowSpacing) {
-                        ForEach(Array(displayItems.prefix(visibleCount).enumerated()), id: \.element.stream.streamId) { index, item in
-                            LiveStreamCard(
-                                playlistId: playlist.id,
-                                stream: item.stream,
-                                width: posterMetrics.liveGridIconSize,
-                                iconSize: posterMetrics.liveGridIconSize,
-                                imageLoadProfile: .grid,
-                                onStreamSelected: onStreamSelected
-                            )
-                            .liveCardContextMenu(
-                                playlist: playlist,
-                                stream: item.stream,
-                                categoryId: item.stream.categoryId,
-                                categoryName: item.categoryName
-                            )
-                            .onAppear { if index >= visibleCount - 15 { loadMore() } }
+                    if displayGrouped {
+                        // Build 80: one headed section per category
+                        // group — header + that group's own lazy
+                        // grid, sections stacked lazily so off-screen
+                        // groups are never built.
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(groupedVisibleSlices, id: \.section.id) { slice in
+                                VStack(alignment: .leading, spacing: 0) {
+                                    LiveGridSectionHeader(title: slice.section.title, count: slice.section.items.count)
+                                        .padding(.top, slice.offset == 0 ? 6 : 22)
+                                        .padding(.bottom, 10)
+                                    LazyVGrid(columns: columns, spacing: posterMetrics.gridRowSpacing) {
+                                        ForEach(Array(slice.items.enumerated()), id: \.element.stream.streamId) { index, item in
+                                            channelCell(item)
+                                                .onAppear { if slice.offset + index >= visibleCount - 15 { loadMore() } }
+                                        }
+                                    }
+                                    .padding(.horizontal)
+                                }
+                            }
                         }
+                        .padding(.bottom)
+                    } else {
+                        LazyVGrid(columns: columns, spacing: posterMetrics.gridRowSpacing) {
+                            ForEach(Array(displayItems.prefix(visibleCount).enumerated()), id: \.element.stream.streamId) { index, item in
+                                channelCell(item)
+                                    .onAppear { if index >= visibleCount - 15 { loadMore() } }
+                            }
+                        }
+                        .padding()
                     }
-                    .padding()
 
                     if visibleCount < displayItems.count {
                         BrandedLoader(size: 28)
@@ -1422,6 +1553,36 @@ struct LiveCategoryContent: View, Equatable {
     }
 }
 
+/// Build 80: the in-grid category header for the grouped "All"
+/// browse. It reuses the app's ONE shelf-header treatment from
+/// `CinematicSectionHeader` — the accent small-caps title and the
+/// real-count accent badge — without that component's "See all"
+/// navigation link (the grid already shows the whole group; there
+/// is nowhere further to navigate to from inside it).
+private struct LiveGridSectionHeader: View {
+    let title: String
+    let count: Int
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("• \(title.uppercased()) •")
+                .font(AppFont.font(.subheadline, weight: .bold))
+                .foregroundStyle(AppTheme.accent)
+                .lineLimit(1)
+            Spacer()
+            if count > 0 {
+                Text(CatalogCountFormatter.string(count))
+                    .font(AppTheme.fontBadge)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(AppTheme.accent))
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+}
+
 // MARK: - All Live (flat, sortable/filterable browse)
 
 /// Flat grid of every channel across categories. Reuses `LiveCategoryContent`, so
@@ -1436,6 +1597,10 @@ struct AllLiveView: View {
     @State private var debouncedQuery = ""
     @State private var debounceTask: Task<Void, Never>?
     @State private var displayItems: [LiveStreamWithCategory] = []
+    /// Build 80: the browsed (unsearched) list grouped by
+    /// category, built in this view's own detached recompute;
+    /// empty while a search is active (search stays flat).
+    @State private var allSections: [LiveChannelGridSection] = []
 
     private var currentStreams: [DBLiveStream] { displayItems.map(\.stream) }
 
@@ -1443,6 +1608,7 @@ struct AllLiveView: View {
         LiveCategoryContent(
             playlist: playlist,
             items: displayItems,
+            groupedSections: allSections.isEmpty ? nil : allSections,
             onStreamSelected: { stream, history in
                 let all = currentStreams
                 playerOverlay.present(playlistId: playlist.id) {
@@ -1478,23 +1644,48 @@ struct AllLiveView: View {
     }
 
     private func recompute() async {
-        guard playlist.id == contentStore.activePlaylistId else { displayItems = []; return }
+        guard playlist.id == contentStore.activePlaylistId else { displayItems = []; allSections = []; return }
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")
         let source = contentStore.liveStreams
+        let categories = contentStore.liveCategories
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         // All work off the main thread; the catalog can be very large.
-        let result = await Task.detached(priority: .userInitiated) {
+        let result = await Task.detached(priority: .userInitiated) { () -> (
+            items: [LiveStreamWithCategory],
+            sections: [LiveChannelGridSection]
+        ) in
             let base = source.filter { !hidden.contains($0.stream.categoryId ?? "") }
-            if q.isEmpty { return base }
+            if q.isEmpty {
+                // Build 80: group the browsed list by category in
+                // catalog category order (bucket order inside a
+                // group = the base order verbatim). Grouping is
+                // only published when EVERY base item lands in a
+                // group — a stream whose category is missing from
+                // the category list keeps the flat presentation
+                // rather than silently vanishing from the grid.
+                let buckets = Dictionary(grouping: base) { $0.stream.categoryId ?? "" }
+                var sections: [LiveChannelGridSection] = []
+                for cat in categories where !hidden.contains(cat.id) {
+                    let items = buckets[cat.id] ?? []
+                    if !items.isEmpty {
+                        sections.append(LiveChannelGridSection(id: cat.id, title: cat.name, items: items))
+                    }
+                }
+                if sections.reduce(0, { $0 + $1.items.count }) != base.count {
+                    sections = []
+                }
+                return (base, sections)
+            }
             // Build 61 (B8, C11 + H5): name OR provider channel number.
             let filtered = base.filter {
                 CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.stream.name)
                     || ($0.stream.channelNumber.map { String($0) == q } ?? false)
             }
-            return CatalogTextSearch.sortLiveByRelevance(filtered, search: q)
+            return (CatalogTextSearch.sortLiveByRelevance(filtered, search: q), [])
         }.value
         guard !Task.isCancelled else { return }
-        displayItems = result
+        displayItems = result.items
+        allSections = result.sections
     }
 }
 
@@ -1592,7 +1783,6 @@ struct LivePlayerShell: View {
                     // Build 61 (FA, F-2/G2): the playlist's custom
                     // headers reach playback alongside the UA.
                     customHeaders: playlist.customHeaders,
-                    epgChannelKey: EPGChannelKey.forXtream(session.stream),
                     canGoToPreviousChannel: (currentIndex ?? 0) > 0,
                     canGoToNextChannel: {
                         guard let index = currentIndex else { return false }

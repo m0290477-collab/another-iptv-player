@@ -67,8 +67,8 @@ struct SeriesView: View {
     // Round 5: the native `.searchable` is GONE (same treatment Live got
     // in round 3 and Movies got this round) — the tab's ONE search entry
     // is the HomeSearchBar in the header, opening the global SearchView.
-    @State private var homeSearchText = ""
-    @State private var showSearchSheet = false
+    // Build 80 (item 4) SUPERSEDES this: a REAL CatalogSearchField in
+    // the header now filters this tab in place.
 
     // Round 5: unified content pattern — filter chips.
     // Round 8 (D-4/D-5): the Favorites and History chips were removed —
@@ -85,6 +85,9 @@ struct SeriesView: View {
 
     @State private var displayCategories: [DBCategory] = []
     @State private var displayItemsByCategory: [String: [SeriesWithCategory]] = [:]
+    // Build 80 (item 12): deduped SHELF presentation (see VODView).
+    @State private var shelfCategories: [DBCategory] = []
+    @State private var shelfItemsByCategory: [String: [SeriesWithCategory]] = [:]
     @State private var recentlyAddedSeries: [DBSeries] = []
     @State private var newestSeries: [DBSeries] = []
     @State private var topRatedSeries: [DBSeries] = []
@@ -127,6 +130,13 @@ struct SeriesView: View {
     // playlist via ScrollAnchorStore. Applies to the All (shelves)
     // chip only; the Newest grid keeps its own behaviour.
     @State private var scrollAnchorID: String? = nil
+    // Build 80 (item 4): REAL in-tab search state — same fix as the
+    // Movies tab (the old bar was a fake field opening a sheet; the
+    // tab itself filtered nothing).
+    @State private var tabSearchText = ""
+    @State private var tabDebouncedQuery = ""
+    @State private var tabSearchResults: [SeriesWithCategory] = []
+    @State private var tabSearchVisibleCount = 90
 
     var body: some View {
         Group {
@@ -171,6 +181,12 @@ struct SeriesView: View {
 
                         // The chips swap the scroll content — All keeps
                         // the shelves; Newest renders its grid.
+                        // Build 80 (item 4): an active in-tab search
+                        // replaces the chip content entirely; clearing
+                        // the field restores it exactly.
+                        if !tabDebouncedQuery.isEmpty {
+                            tabSearchResultsGrid
+                        } else {
                         switch selectedChip {
                         case .all:
                             // Build 65 (inside-sections design):
@@ -227,11 +243,11 @@ struct SeriesView: View {
                             }
 
                             LazyVStack(spacing: 0) {
-                                ForEach(displayCategories) { category in
+                                ForEach(shelfCategories) { category in
                                     SeriesCategoryShelfRow(
                                         playlist: playlist,
                                         category: category,
-                                        items: displayItemsByCategory[category.id] ?? [],
+                                        items: shelfItemsByCategory[category.id] ?? [],
                                         isStreamsLoading: !contentStore.streamsLoaded,
                                         progressBySeriesId: progressBySeriesId,
                                         watchedPercentBySeriesId: watchedPercentBySeriesId
@@ -243,6 +259,7 @@ struct SeriesView: View {
                             } // Build 65: end of the All (shelves) branch of the category-chip swap.
                         case .newest:
                             newestGrid
+                        }
                         }
                     }
                     .refreshable {
@@ -303,13 +320,6 @@ struct SeriesView: View {
                 pendingScrollTarget = id
             }
         }
-        .sheet(isPresented: $showSearchSheet) {
-            NavigationStack {
-                // Round 10: SearchView owns its big title — the
-                // wrapper's inline title was removed.
-                SearchView(playlist: playlist, searchText: $homeSearchText, initialFilter: .series)
-            }
-        }
         // Round 8 (audit A2): ONE recompute trigger — the same combined
         // token round 7 gave Home. The two separate `.task(id:)` modifiers
         // that used to sit here (streamsLoaded + the hidden set) fired
@@ -324,12 +334,92 @@ struct SeriesView: View {
             order: orderStore.orderedIds(playlistId: playlist.id, type: "series")
         )) { await recomputeFilter() }
         .onAppear { shelfReplayToken += 1 }
+        // Build 80 (item 4): 280 ms debounce, then the detached
+        // filter pass over the tab's display set.
+        .task(id: tabSearchText) {
+            let text = tabSearchText
+            try? await Task.sleep(nanoseconds: 280_000_000)
+            guard !Task.isCancelled, tabSearchText == text else { return }
+            tabDebouncedQuery = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            tabSearchVisibleCount = 90
+        }
+        .task(id: tabSearchToken) { await recomputeTabSearch() }
         .onChange(of: selectedCategoryId) { _, _ in categoryVisibleCount = 90 }
         .transaction { $0.animation = nil }
         .navigationDestination(item: $pendingSeriesDetail) { series in
             SeriesDetailView(playlist: playlist, series: series)
         }
         .cinematicBackground()
+    }
+
+    /// Build 80 (item 4): in-tab search recompute triggers.
+    private var tabSearchToken: String {
+        "\(tabDebouncedQuery)#\(displayCategories.count)#\(contentStore.seriesItems.count)#\(contentStore.streamsLoaded)"
+    }
+
+    /// Build 80 (item 4): filter the tab's OWN display set by title
+    /// in ONE detached pass (same pattern as the Movies tab).
+    private func recomputeTabSearch() async {
+        let q = tabDebouncedQuery
+        guard !q.isEmpty else { tabSearchResults = []; return }
+        let categories = displayCategories
+        let byCategory = displayItemsByCategory
+        let result = await Task.detached(priority: .userInitiated) { () -> [SeriesWithCategory] in
+            var seen = Set<Int>()
+            var matches: [SeriesWithCategory] = []
+            for category in categories {
+                for item in byCategory[category.id] ?? [] {
+                    guard seen.insert(item.series.seriesId).inserted else { continue }
+                    if CatalogTextSearch.matchesSectionFuzzy(search: q, text: item.series.name) {
+                        matches.append(item)
+                    }
+                }
+            }
+            return matches
+        }.value
+        guard !Task.isCancelled, tabDebouncedQuery == q else { return }
+        tabSearchResults = result
+    }
+
+    /// Build 80 (item 4): in-tab search results grid (the tab's own
+    /// cards + detail destination, 90-per-page pagination).
+    private var tabSearchResultsGrid: some View {
+        Group {
+            if tabSearchResults.isEmpty {
+                ContentUnavailableView.search(text: tabDebouncedQuery)
+                    .padding(.top, 40)
+            } else {
+                LazyVGrid(columns: posterGridColumns, spacing: posterMetrics.gridRowSpacing) {
+                    ForEach(Array(tabSearchResults.prefix(tabSearchVisibleCount).enumerated()), id: \.element.id) { index, item in
+                        NavigationLink {
+                            SeriesDetailView(playlist: playlist, series: item.series)
+                        } label: {
+                            SeriesCard(
+                                playlistId: playlist.id,
+                                stream: item.series,
+                                posterWidth: posterMetrics.categoryGridPosterWidth,
+                                posterHeight: posterMetrics.categoryGridPosterHeight,
+                                imageLoadProfile: .grid
+                            )
+                        }
+                        .buttonStyle(PressScaleButtonStyle())
+                        .onAppear {
+                            if index >= tabSearchVisibleCount - 15 {
+                                tabSearchVisibleCount = min(tabSearchVisibleCount + 90, tabSearchResults.count)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+                if tabSearchVisibleCount < tabSearchResults.count {
+                    BrandedLoader(size: 28)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                }
+            }
+        }
     }
 
     /// O9 restore: once the shelves exist (All chip), jump back to
@@ -351,10 +441,9 @@ struct SeriesView: View {
     /// series total, then the filter chips.
     private var tabHeader: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HomeSearchBar(placeholder: L("home.search_placeholder")) {
-                showSearchSheet = true
-            }
-            .padding(.horizontal, 16)
+            // Build 80 (item 4): REAL text field bound to the tab's
+            // own query (see VODView) — typing filters this tab.
+            CatalogSearchField(text: $tabSearchText, prompt: L("home.search_placeholder"))
             .padding(.top, 4)
 
             Text(L("home.count_series", CatalogCountFormatter.string(displayCategories.reduce(0) { $0 + (displayItemsByCategory[$1.id]?.count ?? 0) })))
@@ -555,7 +644,7 @@ struct SeriesView: View {
     /// (the same simplification Live got in round 3).
     private func recomputeFilter() async {
         guard playlist.id == contentStore.activePlaylistId else {
-            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedSeries = []; newestSeries = []; topRatedSeries = []; newestAll = []; progressBySeriesId = [:]; return
+            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedSeries = []; newestSeries = []; topRatedSeries = []; newestAll = []; progressBySeriesId = [:]; shelfCategories = []; shelfItemsByCategory = [:]; return
         }
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")
         let allCats = orderStore.applyOrder(
@@ -598,6 +687,54 @@ struct SeriesView: View {
         guard !Task.isCancelled else { return }
         newestAll = byModifiedDesc
         newestVisibleCount = min(Self.newestPageSize, byModifiedDesc.count)
+
+        // Build 80 (item 12): dedupe the tab's catalog rails in
+        // RENDER order, first rail wins (Top → Recently Added →
+        // category shelves) — same rules as the Movies tab: same-id
+        // or same-NAME duplicate category rails merge into the
+        // first rail of that name, an item shown in an earlier rail
+        // never repeats later, exact repeats inside one rail
+        // collapse; different encodes are different ids and stay.
+        // Chips and per-category grids keep the full display data.
+        let catsSnapshot = displayCategories
+        let itemsSnapshot = displayItemsByCategory
+        let topSnapshot = topRatedSeries
+        let recentSnapshot = recentlyAddedSeries
+        let deduped = await Task.detached(priority: .userInitiated) { () -> (top: [DBSeries], recent: [DBSeries], shelfCats: [DBCategory], shelfItems: [String: [SeriesWithCategory]]) in
+            var seen = Set<Int>()
+            func take(_ items: [DBSeries]) -> [DBSeries] {
+                var out: [DBSeries] = []
+                for item in items where seen.insert(item.seriesId).inserted { out.append(item) }
+                return out
+            }
+            let top = take(topSnapshot)
+            let recent = take(recentSnapshot)
+            var shelfCats: [DBCategory] = []
+            var shelfItems: [String: [SeriesWithCategory]] = [:]
+            var firstIdByName: [String: String] = [:]
+            for category in catsSnapshot {
+                let nameKey = category.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let targetId: String
+                if let existing = firstIdByName[nameKey] {
+                    targetId = existing
+                } else {
+                    firstIdByName[nameKey] = category.id
+                    targetId = category.id
+                    shelfCats.append(category)
+                    shelfItems[category.id] = []
+                }
+                for item in itemsSnapshot[category.id] ?? [] where seen.insert(item.series.seriesId).inserted {
+                    shelfItems[targetId, default: []].append(item)
+                }
+            }
+            shelfCats = shelfCats.filter { !(shelfItems[$0.id]?.isEmpty ?? true) }
+            return (top, recent, shelfCats, shelfItems)
+        }.value
+        guard !Task.isCancelled else { return }
+        topRatedSeries = deduped.top
+        recentlyAddedSeries = deduped.recent
+        shelfCategories = deduped.shelfCats
+        shelfItemsByCategory = deduped.shelfItems
 
         await loadProgressBySeries()
     }
@@ -1179,8 +1316,9 @@ struct SeriesCard: View {
             // Round 15 (C9): left-aligned card titles on the shared
             // font tokens (matching RankedPosterCard).
             Text(stream.name)
-                .font(AppTheme.fontCardTitle)
-                .lineLimit(2)
+                .font(AppTheme.fontPosterTitle)
+                .lineLimit(2, reservesSpace: true)
+                .minimumScaleFactor(0.9)
                 .multilineTextAlignment(.leading)
                 .frame(width: posterWidth, alignment: .leading)
                 .foregroundColor(.primary)

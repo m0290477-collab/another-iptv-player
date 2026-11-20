@@ -519,13 +519,16 @@ struct DetailGlassActionsRow<Download: View>: View {
 
 // MARK: - Cast row (build 78: shared by both detail pages)
 
-/// The detail pages' cast row: round monogram avatars from the
-/// REAL cast names. Provider data carries cast names only — no
-/// headshot URLs exist — so each avatar is a monogram of the real
-/// name (never an invented photo). Tapping a person browses their
-/// titles (the C7 person route). Shared since build 78 so the
-/// series page renders cast in the same family as the movie page
-/// (it previously showed name chips).
+/// The detail pages' cast row: round avatars from the REAL cast
+/// names. Provider data carries cast names only — no headshot
+/// URLs exist — so each avatar starts as a monogram of the real
+/// name; build 80 (item 10) swaps in a VERIFIED real photo from
+/// Wikidata/Wikipedia when one exists for that exact person
+/// (see CastPhotoResolver — never an invented or unguarded
+/// photo). Tapping a person browses their titles (the C7 person
+/// route). Shared since build 78 so the series page renders cast
+/// in the same family as the movie page (it previously showed
+/// name chips).
 struct DetailCastRow: View {
     let names: [String]
     var onPersonTap: ((String) -> Void)? = nil
@@ -553,14 +556,7 @@ struct DetailCastRow: View {
 
     private func avatar(_ name: String) -> some View {
         VStack(spacing: 6) {
-            ZStack {
-                Circle()
-                    .fill(AppTheme.accent.opacity(0.22))
-                Text(Self.initials(of: name))
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(AppTheme.accent)
-            }
-            .frame(width: 56, height: 56)
+            CastAvatarView(name: name)
             Text(name)
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
@@ -573,6 +569,41 @@ struct DetailCastRow: View {
     static func initials(of name: String) -> String {
         let parts = name.split(separator: " ").prefix(2)
         return parts.compactMap { $0.first }.map(String.init).joined().uppercased()
+    }
+}
+
+/// Build 80 (item 10): one cast avatar — the monogram renders
+/// IMMEDIATELY; when `CastPhotoResolver` verifies a real photo
+/// for the name (Wikidata/Wikipedia, wrong-person-guarded), the
+/// photo swaps in over the monogram through the app's existing
+/// Nuke-backed CachedImage. Unresolved names keep the monogram
+/// exactly as before.
+private struct CastAvatarView: View {
+    let name: String
+    @State private var photoURL: URL?
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(AppTheme.accent.opacity(0.22))
+            Text(DetailCastRow.initials(of: name))
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(AppTheme.accent)
+            if let photoURL {
+                CachedImage(
+                    url: photoURL,
+                    width: 56,
+                    height: 56,
+                    cornerRadius: 28,
+                    contentMode: .fill,
+                    iconName: "person.fill"
+                )
+            }
+        }
+        .frame(width: 56, height: 56)
+        .task(id: name) {
+            photoURL = await CastPhotoResolver.shared.photo(for: name)
+        }
     }
 }
 

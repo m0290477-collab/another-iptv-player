@@ -124,15 +124,6 @@ struct SettingsHubView: View {
                     ) {
                         notificationsDestination
                     }
-
-                    rowDivider
-
-                    hubRow(
-                        icon: "calendar.badge.clock",
-                        title: L("epg.settings.section_title")
-                    ) {
-                        guideDestination
-                    }
                 }
 
                 hubSection(title: L("settings.hub.section_security_data")) {
@@ -469,28 +460,6 @@ struct SettingsHubView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private var guideDestination: some View {
-        List {
-            Section {
-                if isM3U {
-                    M3UEPGSettingsRows(playlist: playlist)
-                    Text(L("epg.settings.url_footer"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    XtreamEPGSettingsRows(playlist: playlist)
-                }
-            }
-            .settingsCardRows()
-            EPGOffsetSettingsSection()
-        }
-        .listStyle(.insetGrouped)
-        .listSectionSpacing(16)
-        .cinematicScrollBackground()
-        .navigationTitle(L("epg.settings.section_title"))
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
     private var downloadsDestination: some View {
         List {
             DownloadsSettingsSection(playlist: playlist)
@@ -516,7 +485,6 @@ struct SettingsHubView: View {
     private var notificationsDestination: some View {
         List {
             ExpiryAlertsSettingsSection()
-            RemindersSettingsSection()
             Section {
                 NavigationLink {
                     NotificationsView(playlist: playlist)

@@ -23,6 +23,8 @@ struct M3UChannelsView: View {
 
     /// Category jump: whether the picker sheet is open, and the most recently requested group (for scrollTo).
     @State private var showingCategoryPicker = false
+    /// Build 80 (item 13, F3): unsanitizable-URL tap alert.
+    @State private var showPlayFailure = false
     @State private var pendingScrollTarget: String? = nil
 
     /// The groups to show in the shelf list (hidden ones removed). The picker sees all groups.
@@ -70,15 +72,6 @@ struct M3UChannelsView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 NavigationLink {
-                    EPGGuideView(source: .m3u(playlist))
-                } label: {
-                    Image(systemName: "calendar.day.timeline.left")
-                        .font(.body.weight(.semibold))
-                }
-                .accessibilityLabel(L("epg.guide.title"))
-            }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                NavigationLink {
                     M3UFavoritesView(playlist: playlist)
                 } label: {
                     Image(systemName: "star.fill")
@@ -97,6 +90,9 @@ struct M3UChannelsView: View {
                 .disabled(displayGroups.isEmpty)
                 .accessibilityLabel(L("list.jump_to_category"))
             }
+        }
+        .alert(L("playback.error.failed_to_start"), isPresented: $showPlayFailure) {
+            Button(L("common.ok")) { showPlayFailure = false }
         }
         .sheet(isPresented: $showingCategoryPicker) {
             CategoryPickerSheet(
@@ -329,7 +325,7 @@ struct M3UChannelsView: View {
     // MARK: - Playback
 
     private func present(_ channel: DBM3UChannel) {
-        guard M3UParser.sanitizedURL(from: channel.url) != nil else { return }
+        guard M3UParser.sanitizedURL(from: channel.url) != nil else { showPlayFailure = true; return }
         let queue = queueForChannel(channel)
         playerOverlay.present {
             M3UPlayerShell(
@@ -356,7 +352,7 @@ struct M3UChannelsView: View {
             // will be updated on the next refresh.
             return
         }
-        guard M3UParser.sanitizedURL(from: channel.url) != nil else { return }
+        guard M3UParser.sanitizedURL(from: channel.url) != nil else { showPlayFailure = true; return }
         let queue = queueForChannel(channel)
         playerOverlay.present {
             M3UPlayerShell(
@@ -477,7 +473,6 @@ struct M3UChannelCard: View {
     var imageLoadProfile: ImageLoadProfile = .standard
     var onChannelSelected: ((DBM3UChannel) -> Void)? = nil
 
-    @Environment(\.epgSnapshot) private var epgSnapshot
 
     var body: some View {
         Button {
@@ -511,10 +506,6 @@ struct M3UChannelCard: View {
                         .lineLimit(1)
                 }
 
-                if let snapshot = epgSnapshot {
-                    EPGNowNextLine(nowNext: snapshot[EPGChannelKey.forM3U(channel)],
-                                   width: width, reserveSpace: true)
-                }
             }
         }
         .buttonStyle(.plain)
@@ -572,6 +563,8 @@ struct M3UGroupDetailView: View {
     let group: String
 
     @State private var searchText = ""
+    /// Build 80 (item 13, F3): unsanitizable-URL tap alert.
+    @State private var showPlayFailure = false
     @State private var debouncedQuery = ""
     @State private var debounceTask: Task<Void, Never>?
     @State private var displayItems: [DBM3UChannel] = []
@@ -589,6 +582,9 @@ struct M3UGroupDetailView: View {
         .navigationTitle(M3UContentStore.displayName(forGroup: group))
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.hidden, for: .tabBar)
+        .alert(L("playback.error.failed_to_start"), isPresented: $showPlayFailure) {
+            Button(L("common.ok")) { showPlayFailure = false }
+        }
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: L("live.search_placeholder"))
         .onChange(of: searchText) { _, new in
             debounceTask?.cancel()
@@ -630,7 +626,7 @@ struct M3UGroupDetailView: View {
     }
 
     private func present(_ channel: DBM3UChannel) {
-        guard M3UParser.sanitizedURL(from: channel.url) != nil else { return }
+        guard M3UParser.sanitizedURL(from: channel.url) != nil else { showPlayFailure = true; return }
         // In this detail screen, the queue = all channels of this group (filtered if there is a search).
         playerOverlay.present {
             M3UPlayerShell(
@@ -790,7 +786,6 @@ struct M3UPlayerShell: View {
                     userAgent: playlist.playbackUserAgent(channelUserAgent: activeChannel.userAgent),
                     // Build 61 (FA, F-2/G2): custom headers alongside the UA.
                     customHeaders: playlist.customHeaders,
-                    epgChannelKey: classification.isLive ? EPGChannelKey.forM3U(activeChannel) : nil,
                     canGoToPreviousChannel: hasQueueNav && currentIndex > 0,
                     canGoToNextChannel: hasQueueNav && currentIndex < queue.count - 1,
                     onPreviousChannel: hasQueueNav ? { jump(offset: -1) } : nil,

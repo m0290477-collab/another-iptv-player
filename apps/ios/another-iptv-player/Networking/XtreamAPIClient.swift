@@ -21,16 +21,15 @@ enum XtreamError: LocalizedError {
 /// A session with bounded timeouts for IPTV panel/playlist requests. `URLSession.shared`
 /// comes with a 60s idle + 7-DAY resource timeout — an unresponsive panel
 /// used to leave the add/refresh flow hanging for minutes, uncancellable.
-/// `nonisolated`: URLSession is Sendable; used from background contexts (EPG download).
+/// `nonisolated`: URLSession is Sendable; used from background contexts.
 nonisolated enum PanelURLSession {
     static let shared: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 20
         // Build 66 (W4, item 8c): 300 → 90 — a hung panel must not
         // hold a sync/refresh open for five minutes. This session is
-        // SHARED by XtreamAPIClient, M3UService and EPGDownloader
-        // (guide downloads ride it too; there is no separate EPG
-        // session), so the bound applies to all three.
+        // SHARED by XtreamAPIClient and M3UService, so the bound
+        // applies to both.
         config.timeoutIntervalForResource = 90
         return URLSession(configuration: config)
     }()
@@ -237,25 +236,6 @@ class XtreamAPIClient {
         var queryItems: [URLQueryItem] = []
         queryItems.append(URLQueryItem(name: "vod_id", value: String(vodId)))
         return try await fetch(action: "get_vod_info", queryItems: queryItems)
-    }
-
-    // MARK: - EPG
-
-    /// Short now/next EPG for one channel — used as the player overlay fallback
-    /// when the XMLTV guide is missing/broken. Never call this per shelf card.
-    func getShortEPG(streamId: Int, limit: Int = EPGConstants.shortEPGLimit) async throws -> XtreamEPGListingsResponse {
-        let queryItems = [
-            URLQueryItem(name: "stream_id", value: String(streamId)),
-            URLQueryItem(name: "limit", value: String(limit))
-        ]
-        return try await fetch(action: "get_short_epg", queryItems: queryItems)
-    }
-
-    /// Full per-channel EPG table (past + future, includes archive flags) — used
-    /// for the channel detail list and catch-up when XMLTV lacks past programmes.
-    func getSimpleDataTable(streamId: Int) async throws -> XtreamEPGListingsResponse {
-        let queryItems = [URLQueryItem(name: "stream_id", value: String(streamId))]
-        return try await fetch(action: "get_simple_data_table", queryItems: queryItems)
     }
 
 }

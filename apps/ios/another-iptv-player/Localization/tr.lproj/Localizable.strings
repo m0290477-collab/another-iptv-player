@@ -1041,6 +1041,15 @@
 "matches.detail.top_performers" = "Öne Çıkanlar";
 "matches.detail.team_stats" = "Takım İstatistikleri";
 "matches.detail.no_details" = "Bu maç için henüz detay yok.";
+"matches.detail.facts" = "Bilgiler";
+"matches.detail.h2h" = "İkili Karşılaşma";
+"matches.detail.commentary" = "Anlatım";
+"matches.detail.highlights" = "Özet";
+"matches.detail.match_info" = "Maç Bilgisi";
+"matches.info.competition" = "Turnuva";
+"matches.info.venue" = "Stadyum";
+"matches.info.attendance" = "Seyirci";
+"matches.info.referee" = "Hakem";
 "matches.follow" = "Takip Et";
 "matches.following" = "Takip Ediliyor";
 "matches.notify.title" = "Bildirimler";

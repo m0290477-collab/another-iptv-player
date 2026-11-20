@@ -1023,6 +1023,15 @@
 "matches.detail.top_performers" = "أفضل اللاعبين";
 "matches.detail.team_stats" = "إحصائيات الفريقين";
 "matches.detail.no_details" = "لا توجد تفاصيل متاحة لهذه المباراة بعد.";
+"matches.detail.facts" = "حقائق";
+"matches.detail.h2h" = "المواجهات";
+"matches.detail.commentary" = "التعليق";
+"matches.detail.highlights" = "الملخصات";
+"matches.detail.match_info" = "معلومات المباراة";
+"matches.info.competition" = "المسابقة";
+"matches.info.venue" = "الملعب";
+"matches.info.attendance" = "الحضور";
+"matches.info.referee" = "الحكم";
 "matches.follow" = "متابعة";
 "matches.following" = "تتم متابعته";
 "matches.notify.title" = "الإشعارات";

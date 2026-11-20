@@ -464,8 +464,72 @@ struct MatchDetail {
     /// Item 10f: lineups (rosters + formation) when the summary
     /// carries them; empty → no Lineups entry is shown.
     let lineups: [MatchLineupSide]
+    /// Build 80 (items 15/16): FotMob-arrangement data, every
+    /// field decoded from the SAME summary payload and rendered
+    /// ONLY when present — nothing here is ever invented.
+    let info: MatchInfo?
+    let h2h: MatchH2H?
+    let videos: [MatchVideo]
+    let commentary: [MatchCommentaryEntry]
 
-    var isEmpty: Bool { timeline.isEmpty && stats.isEmpty && leaders.isEmpty }
+    var isEmpty: Bool {
+        timeline.isEmpty && stats.isEmpty && leaders.isEmpty && lineups.isEmpty
+            && videos.isEmpty && commentary.isEmpty && h2h == nil
+    }
+}
+
+/// Build 80 (item 16, Facts): match information the summary
+/// payload itself carries — league name (header.league), venue
+/// and attendance (gameInfo), referee (gameInfo.officials, when
+/// the payload lists officials). Every field optional; the view
+/// renders only the rows the payload actually provided.
+struct MatchInfo {
+    let leagueName: String?
+    let venueText: String?
+    let attendance: Int?
+    let refereeText: String?
+}
+
+/// Build 80 (item 15): head-to-head from the summary's
+/// `seasonseries` — for soccer the series is literally typed
+/// "head-to-head" ("Last 5 Matchups", real past meetings with
+/// scores and dates); for the NBA it is the regular-season
+/// series between the same two teams. Verified live against the
+/// ESPN payloads (e.g. event 401879244, Brighton v Brentford).
+struct MatchH2H {
+    let title: String?
+    let summary: String?
+    let meetings: [MatchH2HMeeting]
+}
+
+struct MatchH2HMeeting: Identifiable {
+    let id: String
+    let date: Date?
+    let homeName: String?
+    let awayName: String?
+    let homeScore: String?
+    let awayScore: String?
+}
+
+/// Build 80 (item 15): an official ESPN video attached to the
+/// match (summary `videos[]`) — headline + the payload's own web
+/// link; rendered only when both exist.
+struct MatchVideo: Identifiable {
+    let id: String
+    let headline: String
+    let url: URL
+    let thumbnailURL: URL?
+    let durationSeconds: Int?
+}
+
+/// Build 80 (item 16): one commentary entry from the summary's
+/// `commentary[]` (soccer payloads carry it — 100+ entries for a
+/// full match; NBA/NFL summaries do not, so those sports simply
+/// get no Commentary tab).
+struct MatchCommentaryEntry: Identifiable {
+    let id: Int
+    let minuteText: String?
+    let text: String
 }
 
 /// Item 10f: one player in a lineup.
@@ -499,6 +563,56 @@ private struct ESPNSummary: Decodable {
     let scoringPlays: [ESPNPlay]?
     let plays: [ESPNPlay]?
     let rosters: [ESPNRosterSide]?
+    // Build 80 (items 15/16): the FotMob-arrangement payloads.
+    let gameInfo: ESPNGameInfo?
+    let seasonseries: [ESPNSeries]?
+    let videos: [ESPNVideo]?
+    let commentary: [ESPNCommentaryEntry]?
+}
+
+private struct ESPNGameInfo: Decodable {
+    struct Venue: Decodable {
+        struct Address: Decodable { let city: String? }
+        let fullName: String?
+        let shortName: String?
+        let address: Address?
+    }
+    struct Official: Decodable { let displayName: String? }
+    let venue: Venue?
+    let attendance: Int?
+    let officials: [Official]?
+}
+
+private struct ESPNSeries: Decodable {
+    let type: String?
+    let title: String?
+    let summary: String?
+    let events: [ESPNSeriesEvent]?
+}
+
+private struct ESPNSeriesEvent: Decodable {
+    let id: String?
+    let date: String?
+    let competitors: [ESPNCompetitor]?
+}
+
+private struct ESPNVideo: Decodable {
+    struct Links: Decodable {
+        struct Web: Decodable { let href: String? }
+        let web: Web?
+    }
+    let id: Int?
+    let headline: String?
+    let thumbnail: String?
+    let duration: Int?
+    let links: Links?
+}
+
+private struct ESPNCommentaryEntry: Decodable {
+    struct Time: Decodable { let displayValue: String? }
+    let sequence: Int?
+    let time: Time?
+    let text: String?
 }
 
 struct ESPNRosterSide: Decodable {
@@ -520,7 +634,11 @@ struct ESPNPosition: Decodable {
 }
 
 private struct ESPNHeader: Decodable {
+    struct League: Decodable { let name: String? }
     let competitions: [ESPNHeaderCompetition]?
+    /// Build 80 (item 16): the payload's own league name
+    /// (e.g. "English Premier League") for the Facts tab.
+    let league: League?
 }
 
 private struct ESPNHeaderCompetition: Decodable {
@@ -666,8 +784,86 @@ extension MatchesService {
             timeline: mapTimeline(summary, competition: competition, sport: sport),
             stats: mapStats(summary, competition: competition),
             leaders: mapLeaders(summary, sport: sport),
-            lineups: mapLineups(summary, sport: sport)
+            lineups: mapLineups(summary, sport: sport),
+            info: mapInfo(summary),
+            h2h: mapH2H(summary),
+            videos: mapVideos(summary),
+            commentary: mapCommentary(summary)
         )
+    }
+
+    /// Build 80 (item 16): Facts-tab match info — only fields the
+    /// payload itself carries (league, venue + city, attendance,
+    /// first listed official as referee).
+    private static func mapInfo(_ summary: ESPNSummary) -> MatchInfo? {
+        let venueName = summary.gameInfo?.venue?.fullName ?? summary.gameInfo?.venue?.shortName
+        let venueText = [venueName, summary.gameInfo?.venue?.address?.city]
+            .compactMap { $0?.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+        let info = MatchInfo(
+            leagueName: summary.header?.league?.name,
+            venueText: venueText.isEmpty ? nil : venueText,
+            attendance: summary.gameInfo?.attendance,
+            refereeText: summary.gameInfo?.officials?.first?.displayName
+        )
+        guard info.leagueName != nil || info.venueText != nil
+            || info.attendance != nil || info.refereeText != nil else { return nil }
+        return info
+    }
+
+    /// Build 80 (item 15): head-to-head / season series — the
+    /// FIRST series in the payload, meetings newest first, each
+    /// with the payload's own team names and scores.
+    private static func mapH2H(_ summary: ESPNSummary) -> MatchH2H? {
+        guard let series = summary.seasonseries?.first else { return nil }
+        let meetings = (series.events ?? []).compactMap { event -> MatchH2HMeeting? in
+            guard let competitors = event.competitors, competitors.count >= 2,
+                  let home = competitors.first(where: { $0.homeAway == "home" }) ?? competitors.first,
+                  let away = competitors.first(where: { $0.homeAway == "away" }) ?? competitors.dropFirst().first
+            else { return nil }
+            return MatchH2HMeeting(
+                id: event.id ?? "\(event.date ?? "")-\(home.team?.id ?? "")-\(away.team?.id ?? "")",
+                date: event.date.flatMap { parseEventDate($0) },
+                homeName: home.team?.displayName,
+                awayName: away.team?.displayName,
+                homeScore: home.score,
+                awayScore: away.score
+            )
+        }
+        .sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
+        guard !meetings.isEmpty else { return nil }
+        return MatchH2H(title: series.title, summary: series.summary, meetings: meetings)
+    }
+
+    /// Build 80 (item 15): official videos — a video renders only
+    /// with a headline AND the payload's own web link.
+    private static func mapVideos(_ summary: ESPNSummary) -> [MatchVideo] {
+        (summary.videos ?? []).compactMap { video -> MatchVideo? in
+            guard let headline = video.headline, !headline.isEmpty,
+                  let href = video.links?.web?.href, let url = URL(string: href)
+            else { return nil }
+            return MatchVideo(
+                id: video.id.map(String.init) ?? href,
+                headline: headline,
+                url: url,
+                thumbnailURL: video.thumbnail.flatMap { URL(string: $0) },
+                durationSeconds: video.duration
+            )
+        }
+    }
+
+    /// Build 80 (item 16): commentary in payload (chronological)
+    /// order; empty-text entries are dropped.
+    private static func mapCommentary(_ summary: ESPNSummary) -> [MatchCommentaryEntry] {
+        (summary.commentary ?? []).enumerated().compactMap { index, entry -> MatchCommentaryEntry? in
+            guard let text = entry.text, !text.isEmpty else { return nil }
+            return MatchCommentaryEntry(
+                id: index,
+                minuteText: entry.time?.displayValue,
+                text: text
+            )
+        }
     }
 
     /// Item 10f: rosters → lineups. Formation and positions are

@@ -8,14 +8,9 @@ import UserNotifications
 ///    timestamps recorded by `ProviderExpiryStore` (the same record
 ///    the playback gate reads), gated by the EXISTING Settings
 ///    expiry-alerts toggle (`notifications.expiryAlertsEnabled`).
-///    Programme reminders (below) are gated by the programme-
 ///    reminders toggle (`reminders.enabled`) — that toggle gates
 ///    ONLY programme reminders.
 ///
-/// EPG programme reminders ARE routed through here as of build 61
-/// (B1): `scheduleProgrammeReminder(title:channelName:startDate:id:)`
-/// is the §5 contract the programme detail sheet calls; the sheet
-/// previously scheduled directly on `UNUserNotificationCenter`.
 ///
 /// Authorization is requested ONLY when there is something real to
 /// schedule (a recorded expiry date, or a programme reminder) —
@@ -25,9 +20,6 @@ enum NotificationScheduler {
 
     private static var expiryAlertsEnabled: Bool {
         UserDefaults.standard.object(forKey: "notifications.expiryAlertsEnabled") as? Bool ?? true
-    }
-    private static var remindersEnabled: Bool {
-        UserDefaults.standard.object(forKey: "reminders.enabled") as? Bool ?? true
     }
 
     /// The scheduler's own record of which expiry timestamp an
@@ -172,59 +164,4 @@ enum NotificationScheduler {
         return { formatter.string(from: $0) }
     }
 
-    // MARK: - Programme reminders (build 61, B1 — SPEC §5 contract)
-
-    /// The Settings-owned lead time (minutes before programme start)
-    /// the reminder fires at; the picker lives in Settings
-    /// (`reminders.leadTimeMinutes`, default 10).
-    private static var reminderLeadMinutes: Int {
-        UserDefaults.standard.object(forKey: "reminders.leadTimeMinutes") as? Int ?? 10
-    }
-
-    /// Stable request identifier for a programme reminder. `id` is
-    /// the caller-supplied programme identity (the detail sheet
-    /// passes `"<channelKey>|<start epoch seconds>"`, which produces
-    /// exactly the identifier earlier builds scheduled under, so
-    /// reminders set before this refactor stay visible/cancellable).
-    static func programmeReminderIdentifier(id: String) -> String {
-        "epg.reminder.\(id)"
-    }
-
-    /// Schedules a local notification for one programme, firing at
-    /// `startDate` minus the Settings lead time. Title is the
-    /// programme title, body the channel name (the same content the
-    /// detail sheet used when it scheduled directly). Re-scheduling
-    /// the same `id` replaces the pending request. Returns false —
-    /// and schedules nothing — when the reminders toggle is off,
-    /// when the fire moment has already passed, or when
-    /// authorization is not granted.
-    @discardableResult
-    static func scheduleProgrammeReminder(title: String, channelName: String, startDate: Date, id: String) async -> Bool {
-        guard remindersEnabled else { return false }
-        // F1 (B13): the reminder fires relative to the DISPLAYED
-        // programme start — the raw start shifted by the one EPG
-        // time offset (`EPGOffsetStore`), the same shift the guide
-        // and details show. `startDate` arrives raw.
-        let displayStart = EPGOffsetStore.displayDate(startDate)
-        let fireDate = displayStart.addingTimeInterval(-Double(reminderLeadMinutes) * 60)
-        guard fireDate > Date() else { return false }
-        guard await requestAuthorization() else { return false }
-        await add(identifier: programmeReminderIdentifier(id: id),
-                  title: title,
-                  body: channelName,
-                  fireDate: fireDate)
-        return await isProgrammeReminderSet(id: id)
-    }
-
-    /// Removes the pending reminder for `id`, if any.
-    static func cancelProgrammeReminder(id: String) {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(
-            withIdentifiers: [programmeReminderIdentifier(id: id)])
-    }
-
-    /// Whether a reminder for `id` is currently pending.
-    static func isProgrammeReminderSet(id: String) async -> Bool {
-        let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
-        return pending.contains { $0.identifier == programmeReminderIdentifier(id: id) }
-    }
 }

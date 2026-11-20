@@ -118,6 +118,8 @@ struct HomeView: View {
     @ObservedObject private var sectionVisibility = SectionVisibilityStore.shared
     @ObservedObject private var updateService = AppUpdateService.shared
     @State private var showOfflineAlert = false
+    /// Build 80 (item 13, F2): Continue Watching failure alert.
+    @State private var showHistoryPlayFailure = false
 
     // Build 77 (Design A): the J3 row-order / Edit-mode machinery is
     // gone — the five sections have a fixed order the owner picked,
@@ -128,7 +130,7 @@ struct HomeView: View {
     // finished ones, from the real MatchesService payload only
     // (the same fetch the Matches tab runs). Empty until a fetch
     // lands, and empty again when today has no live/finished match.
-    @State private var matchResults: [MatchEvent] = []
+    @State private var matchResults: [HomeMatchEntry] = []
 
     /// Build 77: seriesId → next-episode label ("S02 E05") for the
     /// merged Continue rail's finished-series cards, resolved off
@@ -159,25 +161,31 @@ struct HomeView: View {
             return
         }
         let dateParameter = MatchesService.todayParameter()
-        var collected: [MatchEvent] = []
+        var collected: [HomeMatchEntry] = []
         var seenIds = Set<String>()
         for sport in MatchSport.allCases {
             let outcomes = await MatchesService.fetchSport(sport, dateParameter: dateParameter)
-            for outcome in outcomes {
-                guard case .loaded(let result) = outcome else { continue }
+            // fetchSport's outcomes are index-aligned with
+            // sport.leaguePaths (the service sorts by league index),
+            // so each match keeps the identity item 5 needs to open
+            // ITS OWN detail page.
+            for (index, outcome) in outcomes.enumerated() {
+                guard case .loaded(let result) = outcome,
+                      sport.leaguePaths.indices.contains(index) else { continue }
+                let leaguePath = sport.leaguePaths[index]
                 for match in result.matches
                 where (match.state == .live || match.state == .finished)
                     && seenIds.insert(match.id).inserted {
-                    collected.append(match)
+                    collected.append(HomeMatchEntry(sport: sport, leaguePath: leaguePath, match: match))
                 }
             }
         }
         let live = collected
-            .filter { $0.state == .live }
-            .sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
+            .filter { $0.match.state == .live }
+            .sorted { ($0.match.startDate ?? .distantFuture) < ($1.match.startDate ?? .distantFuture) }
         let finished = collected
-            .filter { $0.state == .finished }
-            .sorted { ($0.startDate ?? .distantPast) > ($1.startDate ?? .distantPast) }
+            .filter { $0.match.state == .finished }
+            .sorted { ($0.match.startDate ?? .distantPast) > ($1.match.startDate ?? .distantPast) }
         matchResults = Array((live + finished).prefix(8))
     }
 
@@ -443,6 +451,12 @@ struct HomeView: View {
                         // Continue Series merged, each item once.
                         mergedContinueRail
 
+                        // Build 80 (item 11): the Support entry
+                        // ordered in the build-74 round and never
+                        // implemented — a slim row at the very end
+                        // of the Home scroll.
+                        homeSupportEntry
+
                         // B6 per-type loading: a type that has not
                         // landed yet shows a skeleton while the others
                         // already render.
@@ -553,6 +567,9 @@ struct HomeView: View {
         }
         // G5 (B13): the offline answer for this screen's refresh
         // actions, with Retry.
+        .alert(L("playback.error.failed_to_start"), isPresented: $showHistoryPlayFailure) {
+            Button(L("common.ok")) { showHistoryPlayFailure = false }
+        }
         .alert(L("offline.title"), isPresented: $showOfflineAlert) {
             Button(L("common.try_again")) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { runHomeRefresh() }
@@ -953,38 +970,50 @@ struct HomeView: View {
 
     // MARK: - Featured carousel
 
-    /// Build 65 (Home v2 style 1 'Cinematic Hero'): the hero is
-    /// TALL in portrait — the mockup's backdrop fills roughly the
-    /// top half of the screen (poster art center-crops into the
-    /// taller frame; slides with true 16:9 backdrops crop the same
-    /// way the mockup's own art does). Landscape keeps the 16:9
-    /// cinematic frame (the height-capped `cardWidth` already
-    /// bounds it there).
+    /// Build 80 (item 6, owner-picked Option 3): the hero is a
+    /// WIDE cinematic letterbox — 16:9 in BOTH orientations (the
+    /// build-65 tall portrait hero with its stretched poster and
+    /// blurred side pillars is gone). `heroHeight` is the BACKDROP
+    /// height; the slide adds a small overflow below it for the
+    /// overlapping poster thumbnail.
     private var heroHeight: CGFloat {
-        let bounds = UIScreen.main.bounds
-        if bounds.width > bounds.height {
-            return cardWidth * 9 / 16
-        }
-        return min(cardWidth * 1.08, bounds.height * 0.52)
+        cardWidth * 9 / 16
     }
 
+    /// The full slide height: backdrop + the poster thumbnail's
+    /// overflow below the backdrop's bottom edge.
+    private var heroSlideHeight: CGFloat { heroHeight + 30 }
+
+    /// Build 80 (items 3 + 6): the pager is a HORIZONTAL ScrollView
+    /// with paging behavior — NOT a TabView. The old page-style
+    /// TabView's gesture ate vertical drags that started on the
+    /// hero, so the page would not scroll from the cover (item 3);
+    /// a horizontal ScrollView inside the vertical page scroll
+    /// negotiates by drag direction: vertical drags scroll the
+    /// page, horizontal drags page the hero. The page dots sit at
+    /// the RIGHT end of the current slide's button row (item 6's
+    /// picked composition), overlaid on the frame.
     private var featuredCarousel: some View {
-        VStack(spacing: 10) {
-            TabView(selection: $featuredIndex) {
-                ForEach(featured.indices, id: \.self) { index in
-                    FeaturedSlide(
-                        entry: featured[index],
-                        isCurrent: index == featuredIndex,
-                        width: cardWidth,
-                        height: heroHeight,
-                        onPlay: { playFeatured(featured[index]) },
-                        onDetails: { showFeaturedDetails(featured[index]) }
-                    )
-                    .tag(index)
+        ZStack(alignment: .bottomTrailing) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 0) {
+                    ForEach(featured.indices, id: \.self) { index in
+                        FeaturedSlide(
+                            entry: featured[index],
+                            isCurrent: index == featuredIndex,
+                            width: cardWidth,
+                            height: heroHeight,
+                            onPlay: { playFeatured(featured[index]) },
+                            onDetails: { showFeaturedDetails(featured[index]) }
+                        )
+                        .id(index)
+                    }
                 }
+                .scrollTargetLayout()
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(width: cardWidth, height: heroHeight)
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: featuredPosition)
+            .frame(width: cardWidth, height: heroSlideHeight)
             .frame(maxWidth: .infinity)
             .onChange(of: featuredIndex) { _, _ in
                 // Timer-driven advances set the suppression flag first; a
@@ -997,9 +1026,9 @@ struct HomeView: View {
                 }
             }
 
-            // Page dots — tappable since round 10 (manual jump; the
-            // onChange above pauses auto-rotation after any manual
-            // move, dots included).
+            // Page dots — at the right end of the button row
+            // (item 6), tappable (manual jump; the onChange above
+            // pauses auto-rotation after any manual move).
             HStack(spacing: 6) {
                 ForEach(featured.indices, id: \.self) { index in
                     Button {
@@ -1010,7 +1039,7 @@ struct HomeView: View {
                         // B12: the active dot is an elongated pill
                         // whose width springs; inactive dots stay 7 pt.
                         Capsule()
-                            .fill(index == featuredIndex ? AppTheme.accent : Color.secondary.opacity(0.4))
+                            .fill(index == featuredIndex ? AppTheme.accent : Color.white.opacity(0.45))
                             .frame(width: index == featuredIndex ? 22 : 7, height: 7)
                             .frame(width: 22, height: 22)
                             .contentShape(Capsule())
@@ -1019,9 +1048,22 @@ struct HomeView: View {
                     .animation(Motion.animate(Motion.shelfSpring), value: featuredIndex)
                 }
             }
-            .frame(maxWidth: .infinity)
+            .padding(.trailing, AppTheme.spacingScreenMargin)
+            // Aligned with the slide's button row, which sits 40 pt
+            // above the slide's bottom edge (item 6 layout).
+            .padding(.bottom, 44)
         }
         .task(id: featured.count) { await runCarouselTimer() }
+    }
+
+    /// scrollPosition's optional-id binding over the carousel's
+    /// Int selection (auto-advance and dot taps write the Int; the
+    /// pager writes back through here on user swipes).
+    private var featuredPosition: Binding<Int?> {
+        Binding(
+            get: { featuredIndex },
+            set: { if let value = $0 { featuredIndex = value } }
+        )
     }
 
     /// The round's ONLY repeating timer. Advances the carousel every ~6 s,
@@ -1088,11 +1130,12 @@ struct HomeView: View {
 
     // MARK: Section 2 — Match Results
 
-    /// One card per match, stacked: team logos + names exactly as
-    /// the payload provides them, the score in the middle, and the
-    /// state chip (LIVE with the live clock, or FT). Every card —
-    /// and the header's See-all — opens the full Matches screen.
-    /// Renders nothing when today has no live or finished match.
+    /// One card per match, stacked (build 80, item 8: two team
+    /// rows — logo + FULL name + that team's score per row — with
+    /// the state chip on a slim header line). Build 80 (item 5):
+    /// tapping a card opens THAT match's own detail page; only the
+    /// header's See-all opens the full Matches screen. Renders
+    /// nothing when today has no live or finished match.
     @ViewBuilder
     private var matchResultsSection: some View {
         if !matchResults.isEmpty {
@@ -1101,11 +1144,11 @@ struct HomeView: View {
                     MatchesView()
                 }
                 VStack(spacing: 10) {
-                    ForEach(matchResults) { match in
+                    ForEach(matchResults) { entry in
                         NavigationLink {
-                            MatchesView()
+                            MatchDetailView(sport: entry.sport, leaguePath: entry.leaguePath, match: entry.match)
                         } label: {
-                            HomeMatchResultCard(match: match)
+                            HomeMatchResultCard(match: entry.match)
                         }
                         .buttonStyle(.plain)
                     }
@@ -1113,6 +1156,54 @@ struct HomeView: View {
                 .padding(.horizontal, 16)
             }
         }
+    }
+
+    // MARK: Support entry (build 80, item 11)
+
+    /// A slim Design A row opening the SAME Support destination
+    /// the Settings hub opens — the exact `SupportSettingsSection`
+    /// content (diagnostics, connection & speed test; NO contact
+    /// row — the owner never named a support contact, and none is
+    /// invented). The section resolves the speed-test target from
+    /// the active playlist, which is the playlist Home already
+    /// holds, so it is passed directly.
+    private var homeSupportEntry: some View {
+        NavigationLink {
+            List {
+                SupportSettingsSection(playlists: [playlist])
+            }
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(16)
+            .cinematicScrollBackground()
+            .navigationTitle(L("support.title"))
+            .navigationBarTitleDisplayMode(.inline)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "questionmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(AppTheme.accent)
+                Text(L("support.title"))
+                    .font(AppTheme.fontSectionTitle)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                    .fill(AppTheme.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                            .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
     }
 
     // MARK: Section 3 — Most Popular Movies
@@ -1381,7 +1472,10 @@ struct HomeView: View {
     private var homeLiveQueue: [DBLiveStream] { homeLiveSections.flatMap(\.streams) }
 
     private func presentHistoryItem(_ item: DBWatchHistory) {
-        guard let url = historyURL(for: item) else { return }
+        // Build 80 (item 13, F2): a nil resume URL used to return
+        // SILENTLY — the tap did nothing. Surface the standard
+        // playback-failure alert instead.
+        guard let url = historyURL(for: item) else { showHistoryPlayFailure = true; return }
         if item.type == "series" {
             playerOverlay.present(playlistId: playlist.id) {
                 HistorySeriesPlayerShell(playlist: playlist, history: item, url: url)
@@ -1772,6 +1866,24 @@ enum FeaturedEntry: Identifiable, Equatable {
         }
     }
 
+    /// The item's POSTER art (2:3) — the wide hero's small
+    /// thumbnail (build 80, item 6). Distinct from `artURL`, which
+    /// prefers the backdrop.
+    var posterURL: URL? {
+        switch self {
+        case .movie(let movie):
+            if let icon = movie.streamIcon?.trimmingCharacters(in: .whitespaces), !icon.isEmpty {
+                return URL(string: icon)
+            }
+            return nil
+        case .series(let series):
+            if let cover = series.cover?.trimmingCharacters(in: .whitespaces), !cover.isEmpty {
+                return URL(string: cover)
+            }
+            return nil
+        }
+    }
+
     /// True when the record carries real backdrop art (16:9-shaped).
     /// Poster-only entries render CONTAINED in the carousel card
     /// (round 7 landscape rule: never fill-crop a 2:3 poster into a
@@ -1836,51 +1948,37 @@ enum FeaturedEntry: Identifiable, Equatable {
 /// chip — a red LIVE pill carrying the live clock while the match
 /// is in play, a quiet FT chip once it is finished. Scores, names
 /// and state come from the payload only; nothing is invented.
+/// Build 80 (item 5): a Home Match Results entry — the match plus
+/// the sport/league identity its own detail page needs (MatchEvent
+/// itself carries neither; the Home loader recovers the league from
+/// the fetchSport outcome's index alignment with leaguePaths).
+private struct HomeMatchEntry: Identifiable {
+    let sport: MatchSport
+    let leaguePath: String
+    let match: MatchEvent
+    var id: String { match.id }
+}
+
 private struct HomeMatchResultCard: View {
     let match: MatchEvent
 
     var body: some View {
-        // Build 79: team names use the smaller team-name font (plus
-        // slightly tighter spacing/padding for layout room) so the
-        // FULL names fit on one line — the owner's "Houston..." /
-        // "Indianap..." truncation complaint. Score, logos and the
-        // state chip are unchanged.
-        HStack(spacing: 8) {
-            CachedImage(
-                url: match.home.logoURL,
-                width: 30,
-                height: 30,
-                cornerRadius: 15,
-                iconName: "shield"
-            )
-            Text(match.home.name ?? "")
-                .font(AppTheme.fontTeamName)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(scoreText)
-                .font(.title3.weight(.bold))
-                .foregroundStyle(.primary)
-                .monospacedDigit()
-                .fixedSize()
-
-            CachedImage(
-                url: match.away.logoURL,
-                width: 30,
-                height: 30,
-                cornerRadius: 15,
-                iconName: "shield"
-            )
-            Text(match.away.name ?? "")
-                .font(AppTheme.fontTeamName)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            stateChip
+        // Build 80 (item 8): the build-77/79 ONE-ROW layout (2 logos
+        // + 2 names + score + chip in a single row) still truncated
+        // full names at phone width at ANY legible font size — the
+        // owner's screenshots show "Indianapolis Co...", "Memphis
+        // Gri..." even at build 79's 12 pt. The card is now TWO
+        // team rows: each team gets the row's full width (logo +
+        // FULL name + that team's own score at the right end), and
+        // the state chip (LIVE + live clock, or FT) sits on a slim
+        // header line. Same Design A surface/radius/padding family.
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Spacer(minLength: 0)
+                stateChip
+            }
+            teamRow(match.home)
+            teamRow(match.away)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 12)
@@ -1896,10 +1994,32 @@ private struct HomeMatchResultCard: View {
         .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
     }
 
-    /// The payload's own score strings; a side the payload has not
-    /// scored yet reads "0", the same rule Home's score lines used.
-    private var scoreText: String {
-        "\(match.home.score ?? "0") – \(match.away.score ?? "0")"
+    /// Build 80 (item 8): one team's row — logo, FULL name (the
+    /// row's whole width at build 79's team-name font; the scale
+    /// factor remains only as a safety net), and that team's own
+    /// score at the right end. A side the payload has not scored
+    /// yet reads "0", the same rule Home's score lines used.
+    private func teamRow(_ side: MatchTeamSide) -> some View {
+        HStack(spacing: 10) {
+            CachedImage(
+                url: side.logoURL,
+                width: 26,
+                height: 26,
+                cornerRadius: 13,
+                iconName: "shield"
+            )
+            Text(side.name ?? "")
+                .font(AppTheme.fontTeamName)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(side.score ?? "0")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.primary)
+                .monospacedDigit()
+                .fixedSize()
+        }
     }
 
     @ViewBuilder
@@ -1953,8 +2073,9 @@ private struct FeaturedSlide: View {
     let entry: FeaturedEntry
     let isCurrent: Bool
     let width: CGFloat
-    /// Build 65 (Cinematic Hero): the slide's frame height — tall
-    /// in portrait, 16:9 in landscape (computed by the carousel).
+    /// Build 80 (item 6): the BACKDROP height (16:9 wide, computed
+    /// by the carousel); the slide adds a 30 pt overflow below it
+    /// for the overlapping poster thumbnail.
     let height: CGFloat
     let onPlay: () -> Void
     let onDetails: () -> Void
@@ -1963,134 +2084,38 @@ private struct FeaturedSlide: View {
     @State private var textShown = false
 
     var body: some View {
-        // B6: text/meta/buttons OVER the backdrop with a gradient —
-        // the round-10 layout put the text block UNDER the art. B1:
-        // tapping the backdrop itself opens the detail page (the
-        // buttons keep their own actions).
+        // Build 80 (item 6, owner-picked Option 3): the WIDE
+        // letterbox composition — full-bleed backdrop; a SMALL
+        // poster thumbnail overlapping the backdrop's bottom-left
+        // corner (hanging 30 pt into the slide's overflow zone);
+        // the title beside the poster with the meta line under it;
+        // Play + Details under the title; the carousel's page dots
+        // overlay the right end of the button row. Poster-only
+        // entries get a plain surface backdrop — the build-65
+        // blurred-pillar / stretched-poster presentation is GONE.
+        // B1: tapping the backdrop itself opens the detail page
+        // (the buttons keep their own actions).
         ZStack(alignment: .bottomLeading) {
-            if !entry.hasBackdropArt {
-                RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
-                    .fill(AppTheme.surface)
-                CachedImage(
-                    url: entry.artURL,
-                    width: width,
-                    height: height,
-                    cornerRadius: AppTheme.heroCornerRadius,
-                    contentMode: .fill,
-                    iconName: entry.iconName,
-                    loadProfile: .standard
-                )
-                .scaleEffect(1.15)
-                .blur(radius: 26)
-                .overlay(Color.black.opacity(0.5))
-            }
+            backdropView
 
-            CachedImage(
-                url: entry.artURL,
-                width: width,
-                height: height,
-                cornerRadius: AppTheme.heroCornerRadius,
-                contentMode: entry.hasBackdropArt ? .fill : .fit,
-                iconName: entry.iconName,
-                loadProfile: .high
-            )
+            HStack(alignment: .bottom, spacing: 12) {
+                posterThumb
+                    // The overlap: the thumb's layout bottom sits
+                    // on the backdrop's bottom edge; the offset
+                    // hangs it 30 pt into the overflow zone.
+                    .offset(y: 30)
 
-            // Gradient so the overlaid text stays readable on any art.
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0.35),
-                    .init(color: AppTheme.background.opacity(0.92), location: 1)
-                ],
-                startPoint: .top, endPoint: .bottom
-            )
-            .allowsHitTesting(false)
-
-            // Build 65 (Cinematic Hero): the mockup carries NO
-            // badge over the art — the backdrop, the big title and
-            // the actions are the whole treatment.
-
-            VStack(alignment: .leading, spacing: 8) {
-                // Build 65 (Home v2 style 1): the hero title is BIG
-                // and WHITE over the art (the build-61 accent
-                // headline gives way to the cinematic treatment);
-                // the accent lives in the Play pill.
-                Text(entry.title)
-                    .font(.largeTitle.weight(.black))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-
-                HStack(spacing: 8) {
-                    if let ratingText = entry.ratingText {
-                        HStack(spacing: 4) {
-                            Image(systemName: "star.fill")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(AppTheme.ratingGold)
-                            Text(ratingText)
-                                .font(AppTheme.fontMetadata.weight(.bold))
-                                .foregroundStyle(.white)
-                        }
-                    }
-                    if let metaLine = entry.metaLine {
-                        Text(metaLine)
-                            .font(AppTheme.fontMetadata)
-                            .foregroundStyle(.white.opacity(0.8))
-                            .lineLimit(1)
-                    }
-                }
-
-                HStack(spacing: 10) {
-                    Button(action: onPlay) {
-                        // Design-4 PLAY pill: solid accent, BLACK
-                        // bold text (SPEC §2, as the gate's primary).
-                        Label(L("home.play"), systemImage: "play.fill")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(AppTheme.onAccent)
-                            .padding(.horizontal, 22)
-                            .padding(.vertical, 10)
-                            .background(Capsule().fill(AppTheme.accent))
-                            // ST2 (B7): the signature glow lives ONLY
-                            // under primary/hero actions like this one.
-                            .signatureGlow()
-                    }
-                    .buttonStyle(PressScaleButtonStyle())
-
-                    Button(action: onDetails) {
-                        // Build 65: the mockup's ghost action beside
-                        // Play — a translucent capsule with a hairline
-                        // border (its "+ Watchlist"; ours opens the
-                        // same detail page as before).
-                        Text(L("home.details"))
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 22)
-                            .padding(.vertical, 10)
-                            .background(Capsule().fill(Color.white.opacity(0.14)))
-                            .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
-                    }
-                    .buttonStyle(PressScaleButtonStyle())
-                }
+                textColumn
             }
             .padding(.horizontal, AppTheme.spacingScreenMargin)
-            .padding(.bottom, 18)
+            // Row bottom = 10 pt above the backdrop's bottom edge
+            // (30 overflow + 10), so title/meta/buttons all live
+            // over the backdrop's gradient in both themes.
+            .padding(.bottom, 40)
             .frame(width: width, alignment: .leading)
-            // B12: slide change animates the title block
-            // (transform/opacity only).
-            // Round 16 (P4b): the block shows ONLY on the current
-            // slide. During a page transition the outgoing slide's
-            // title + Play/Details buttons used to stay fully
-            // rendered next to the incoming slide's — two control
-            // sets on screen at once. Non-current slides now render
-            // artwork + gradient only, and their block takes no hits.
-            .opacity(isCurrent && textShown ? 1 : 0)
-            .offset(y: textShown ? 0 : 12)
-            .allowsHitTesting(isCurrent)
         }
-        .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
-        // X4 (B7): subtle shine across the hero art while pressed.
-        .posterShine()
-        .onTapGesture { if isCurrent { onDetails() } }
+        .frame(width: width, height: height + 30)
+        .contentShape(Rectangle())
         .onChange(of: isCurrent) { _, current in
             if current {
                 textShown = false
@@ -2106,5 +2131,127 @@ private struct FeaturedSlide: View {
         .onAppear {
             withAnimation(Motion.animate(.easeOut(duration: 0.4).delay(0.05))) { textShown = true }
         }
+    }
+
+    /// The wide backdrop: real 16:9 art full-bleed when the record
+    /// carries it; otherwise the plain Design A surface (no
+    /// blurred pillars, no stretched poster). The bottom gradient
+    /// keeps the overlaid text readable on any art.
+    private var backdropView: some View {
+        ZStack {
+            if entry.hasBackdropArt {
+                CachedImage(
+                    url: entry.artURL,
+                    width: width,
+                    height: height,
+                    cornerRadius: AppTheme.heroCornerRadius,
+                    contentMode: .fill,
+                    iconName: entry.iconName,
+                    loadProfile: .high
+                )
+            } else {
+                RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                    .fill(AppTheme.surface)
+                    .frame(width: width, height: height)
+            }
+
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0.35),
+                    .init(color: AppTheme.background.opacity(0.92), location: 1)
+                ],
+                startPoint: .top, endPoint: .bottom
+            )
+            .allowsHitTesting(false)
+        }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
+        .onTapGesture { if isCurrent { onDetails() } }
+    }
+
+    /// The small poster thumbnail overlapping the backdrop's
+    /// bottom-left corner (the item-6 signature element).
+    private var posterThumb: some View {
+        CachedImage(
+            url: entry.posterURL,
+            width: 54,
+            height: 81,
+            cornerRadius: 8,
+            contentMode: .fill,
+            iconName: entry.iconName,
+            loadProfile: .standard
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.white.opacity(0.25), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
+    }
+
+    /// Title + meta + actions beside the poster. Round 16 (P4b)
+    /// gating kept: only the CURRENT slide's block shows and takes
+    /// hits, so a page transition never shows two control sets.
+    private var textColumn: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(entry.title)
+                .font(.title3.weight(.black))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .shadow(color: .black.opacity(0.45), radius: 6, y: 2)
+
+            HStack(spacing: 8) {
+                if let ratingText = entry.ratingText {
+                    HStack(spacing: 4) {
+                        Image(systemName: "star.fill")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(AppTheme.ratingGold)
+                        Text(ratingText)
+                            .font(AppTheme.fontMetadata.weight(.bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                if let metaLine = entry.metaLine {
+                    Text(metaLine)
+                        .font(AppTheme.fontMetadata)
+                        .foregroundStyle(.white.opacity(0.8))
+                        .lineLimit(1)
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button(action: onPlay) {
+                    // Design-4 PLAY pill: solid accent, BLACK bold
+                    // text (SPEC §2, as the gate's primary).
+                    Label(L("home.play"), systemImage: "play.fill")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(AppTheme.onAccent)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 10)
+                        .background(Capsule().fill(AppTheme.accent))
+                        // ST2 (B7): the signature glow lives ONLY
+                        // under primary/hero actions like this one.
+                        .signatureGlow()
+                }
+                .buttonStyle(PressScaleButtonStyle())
+
+                Button(action: onDetails) {
+                    // The mockup's ghost action beside Play — a
+                    // translucent capsule with a hairline border
+                    // and the info glyph.
+                    Label(L("home.details"), systemImage: "info.circle")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 10)
+                        .background(Capsule().fill(Color.white.opacity(0.14)))
+                        .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
+                }
+                .buttonStyle(PressScaleButtonStyle())
+            }
+        }
+        .opacity(isCurrent && textShown ? 1 : 0)
+        .offset(y: textShown ? 0 : 12)
+        .allowsHitTesting(isCurrent)
     }
 }

@@ -451,7 +451,7 @@ enum AppPreferenceKeys {
         // backup export/import silently stranded them (team review
         // Settings-S3). Display poster/density (DisplayPreferences),
         // appearance extras, the downloads storage cap
-        // (DownloadsView), the EPG offset (EPGOffsetStore), the
+        // (DownloadsView), the
         // app-open lock (AppLockService) and every concrete
         // section-visibility key (SectionVisibilityStore).
         "display.posterSize", "display.homeDensity",
@@ -993,48 +993,6 @@ struct AppLockSection: View {
 // B2's StorageService measures and clears.
 
 // MARK: - New feature settings (C5)
-
-/// Build 66 (W1): the reminders half of the former
-/// Advanced section, moved to the hub's Notifications
-/// page. Keys are the exact ones the reminder engine reads:
-/// "reminders.enabled" (separate from the expiry-alerts toggle)
-/// + "reminders.leadTimeMinutes" (5/10/15/30). The section's old
-/// Zapping and Next-episode-card controls are DELETED in build
-/// 66 — they persisted keys no player code ever read.
-struct RemindersSettingsSection: View {
-    @AppStorage("reminders.enabled") private var remindersEnabled = true
-    @AppStorage("reminders.leadTimeMinutes") private var reminderLeadTimeMinutes = 10
-
-    var body: some View {
-        Section(header: ScopedSectionHeader(title: L("reminders.enabled.title"), thisPlaylist: false)) {
-            Toggle(isOn: $remindersEnabled) {
-                HStack(spacing: 12) {
-                    SettingsIconTile(systemImage: "bell.badge.fill", tint: AppTheme.accent)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L("reminders.enabled.title"))
-                        Text(L("reminders.enabled.desc"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            SettingsPickerRow(
-                systemImage: "timer",
-                tint: AppTheme.accent,
-                title: L("reminders.lead_time"),
-                selection: $reminderLeadTimeMinutes
-            ) {
-                ForEach([5, 10, 15, 30], id: \.self) { minutes in
-                    Text(L("player.sleep_timer.minutes", minutes)).tag(minutes)
-                }
-            }
-            .disabled(!remindersEnabled)
-            .opacity(remindersEnabled ? 1 : 0.45)
-        }
-        .settingsCardRows()
-    }
-}
 
 /// Build 66 (W1): the motion + UI-sounds half of the former
 /// Advanced section, moved to the hub's Display page.
@@ -1609,45 +1567,6 @@ struct PlaybackSettingsSection: View {
         .settingsCardRows()
     }
 
-}
-
-/// Build 66 (W1): the EPG time-offset stepper, MOVED out of
-/// PlaybackSettingsSection into the hub's Guide page (team review
-/// Settings-S6: the offset belongs with the guide controls). F1
-/// (B13): the ONE EPG time offset store — guide display,
-/// programme details and reminder fire dates all read it
-/// (`epg.timeOffsetHours`, −12…+12 h in 0.5 h steps, per-APP).
-struct EPGOffsetSettingsSection: View {
-    @ObservedObject private var epgOffset = EPGOffsetStore.shared
-
-    var body: some View {
-        Section(header: ScopedSectionHeader(title: L("epgoffset.title"), thisPlaylist: false)) {
-            HStack(spacing: 12) {
-                SettingsIconTile(systemImage: "clock.arrow.2.circlepath", tint: AppTheme.accent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L("epgoffset.title"))
-                    Text(L("epgoffset.desc"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(epgOffsetValueText)
-                    .font(.subheadline.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                Stepper("", value: $epgOffset.offsetHours, in: -12...12, step: 0.5)
-                    .labelsHidden()
-            }
-        }
-        .settingsCardRows()
-    }
-
-    /// "+1.5 h" / "-0.5 h" / "0 h" — the stepper's current value.
-    private var epgOffsetValueText: String {
-        let value = epgOffset.offsetHours
-        let number = value == 0 ? "0" : String(format: "%+.1f", value)
-        return L("epgoffset.value_format", number)
-    }
 }
 
 /// APPEARANCE leftovers (item 7a), shown on the hub's Display
@@ -2492,7 +2411,6 @@ struct DangerZoneSection: View {
         }
         await PlaylistContentStore.shared.unload()
         await M3UContentStore.shared.unload()
-        await EPGStore.shared.setActivePlaylist(nil)
         isWorking = false
         if succeeded {
             onExitToGate()
@@ -2788,6 +2706,21 @@ struct AdultFilterSettingsSection: View {
 /// expiry/connections (all from the live auth fetch), password
 /// reveal, Edit / Sign Out and Test Connection. No server URL
 /// row (round 11).
+/// Build 80 (item 14b): last-known Xtream account info per
+/// playlist, kept for the session. The Account section's own
+/// @State starts empty on EVERY appearance, so re-entering the
+/// page blanked the subscription rows back to "Loading
+/// subscription info…" although they were shown seconds before
+/// (build-75 audit, item 19). The section now seeds from this
+/// cache and refreshes behind the real values.
+@MainActor
+final class AccountAuthInfoCache {
+    static let shared = AccountAuthInfoCache()
+    private var responses: [UUID: XtreamAuthResponse] = [:]
+    func response(for playlistId: UUID) -> XtreamAuthResponse? { responses[playlistId] }
+    func store(_ response: XtreamAuthResponse, for playlistId: UUID) { responses[playlistId] = response }
+}
+
 struct XtreamAccountSettingsSection: View {
     let playlist: Playlist
     let onDismiss: () -> Void
@@ -2826,7 +2759,15 @@ struct XtreamAccountSettingsSection: View {
         .sheet(isPresented: $showEditSheet) {
             AddPlaylistView(editingPlaylist: currentPlaylist)
         }
-        .task { await fetchAuthInfo() }
+        .task {
+            // Build 80 (item 14b): seed last-known values first —
+            // the page never blanks data it has already shown.
+            if authResponse == nil,
+               let cached = AccountAuthInfoCache.shared.response(for: playlist.id) {
+                authResponse = cached
+            }
+            await fetchAuthInfo()
+        }
     }
 
     private var accountCard: some View {
@@ -3076,12 +3017,17 @@ struct XtreamAccountSettingsSection: View {
     }
 
     private func fetchAuthInfo() async {
-        isLoading = true
+        // Build 80 (item 14b): the loading state (and its
+        // "Loading subscription info…" row) shows ONLY when no
+        // value has ever loaded; with last-known values on screen
+        // the refresh runs behind them.
+        isLoading = authResponse == nil
         errorMessage = nil
         let client = XtreamAPIClient(playlist: currentPlaylist)
         do {
             let response = try await client.verify()
             PlaylistHealthStore.recordVerified(playlistId: currentPlaylist.id, expDate: response.userInfo?.expDate)
+            AccountAuthInfoCache.shared.store(response, for: currentPlaylist.id)
             await MainActor.run {
                 self.authResponse = response
                 self.isLoading = false
@@ -3095,7 +3041,12 @@ struct XtreamAccountSettingsSection: View {
         } catch {
             PlaylistHealthStore.record(.refused, for: currentPlaylist.id)
             await MainActor.run {
-                self.errorMessage = error.localizedDescription
+                // Build 80 (item 14b): a failed refresh never
+                // blanks values already on screen — the error
+                // branch only replaces the loading state.
+                if self.authResponse == nil {
+                    self.errorMessage = error.localizedDescription
+                }
                 self.isLoading = false
             }
         }

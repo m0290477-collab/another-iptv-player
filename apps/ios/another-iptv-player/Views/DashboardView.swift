@@ -7,7 +7,6 @@ struct DashboardView: View {
     /// Round 10: playlist switching from Settings ▸ My Playlists.
     let onSwitchPlaylist: (Playlist) -> Void
     @ObservedObject private var contentStore = PlaylistContentStore.shared
-    @ObservedObject private var epgStore = EPGStore.shared
     /// F6 (B13): section visibility — hidden Movies/Series leave
     /// the tab bar (Home and Live are never hidable).
     @ObservedObject private var sectionVisibility = SectionVisibilityStore.shared
@@ -220,7 +219,6 @@ struct DashboardView: View {
             .zIndex(10_000)
         }
         .environmentObject(playerOverlay)
-        .environment(\.epgSnapshot, epgStore.snapshot)
         // G5 (B13): the shared offline indicator — local content
         // (cached catalog, downloads) stays usable beneath it.
         // Build 66 (item 10): gated on no player presentation —
@@ -245,10 +243,6 @@ struct DashboardView: View {
             // fresh for the playback gate (no-op when verified within
             // the last 6 hours; Xtream playlists only).
             await ProviderExpiryStore.refreshIfStale(playlist: playlist)
-            // Bind the EPG store to this playlist and refresh the guide if stale.
-            // Runs after the catalog load so the wanted-channel set is populated.
-            epgStore.setActivePlaylist(playlist)
-            await epgStore.refreshIfStale(playlist: playlist)
             // Round 15 (C11): after the catalog load — schedule
             // expiry alerts from the recorded exp_dates and consume
             // any pending playback request. The scheduler step is

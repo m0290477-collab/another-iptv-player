@@ -3,7 +3,7 @@ import SwiftUI
 struct GlassSystemIconButton: View {
     var systemName: String
     var pointSize: CGFloat
-    var weight: Font.Weight = .semibold
+    var weight: Font.Weight = .regular
     var buttonSize: CGFloat
     /// Round 15 (C1): VoiceOver label, supplied by the caller with
     /// a translated key. Optional so existing icon-only call sites
@@ -12,21 +12,16 @@ struct GlassSystemIconButton: View {
     var action: () -> Void
 
     var body: some View {
+        // Build 80 (item 7, player-style-flat): the glass circle is
+        // gone — a bare thin-line icon on the same hit frame. (This
+        // component is used only by the player's chrome.)
         let button = Button(action: action) {
-            ZStack {
-                Circle()
-                    .fill(.ultraThinMaterial)
-
-                Circle()
-                    .strokeBorder(.white.opacity(0.14), lineWidth: 0.5)
-
-                Image(systemName: systemName)
-                    .font(.system(size: pointSize, weight: weight))
-                    .foregroundStyle(.white.opacity(0.96))
-                    .shadow(color: .black.opacity(0.25), radius: 2, y: 0.5)
-            }
-            .frame(width: buttonSize, height: buttonSize)
-            .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
+            Image(systemName: systemName)
+                .font(.system(size: pointSize, weight: weight))
+                .foregroundStyle(.white.opacity(0.96))
+                .shadow(color: .black.opacity(0.3), radius: 3, y: 0.5)
+                .frame(width: buttonSize, height: buttonSize)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         // Only override the label when the caller supplied one —

@@ -1023,6 +1023,15 @@
 "matches.detail.top_performers" = "最佳球员";
 "matches.detail.team_stats" = "球队数据";
 "matches.detail.no_details" = "本场比赛暂无详细信息。";
+"matches.detail.facts" = "概况";
+"matches.detail.h2h" = "交锋记录";
+"matches.detail.commentary" = "文字直播";
+"matches.detail.highlights" = "集锦";
+"matches.detail.match_info" = "比赛信息";
+"matches.info.competition" = "赛事";
+"matches.info.venue" = "球场";
+"matches.info.attendance" = "观众人数";
+"matches.info.referee" = "裁判";
 "matches.follow" = "关注";
 "matches.following" = "已关注";
 "matches.notify.title" = "通知";

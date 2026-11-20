@@ -571,9 +571,10 @@ struct RankedPosterCard: View {
             }
 
             Text(title)
-                .font(AppTheme.fontCardTitle)
+                .font(AppTheme.fontPosterTitle)
                 .foregroundStyle(.primary)
-                .lineLimit(2)
+                .lineLimit(2, reservesSpace: true)
+                .minimumScaleFactor(0.9)
                 .frame(width: posterWidth, alignment: .leading)
 
             if let metaText {

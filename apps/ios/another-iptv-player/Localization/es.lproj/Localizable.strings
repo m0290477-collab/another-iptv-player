@@ -1023,6 +1023,15 @@
 "matches.detail.top_performers" = "Destacados";
 "matches.detail.team_stats" = "Estadísticas del equipo";
 "matches.detail.no_details" = "Aún no hay detalles disponibles para este partido.";
+"matches.detail.facts" = "Datos";
+"matches.detail.h2h" = "Cara a cara";
+"matches.detail.commentary" = "Comentarios";
+"matches.detail.highlights" = "Resumen";
+"matches.detail.match_info" = "Info del partido";
+"matches.info.competition" = "Competición";
+"matches.info.venue" = "Estadio";
+"matches.info.attendance" = "Asistencia";
+"matches.info.referee" = "Árbitro";
 "matches.follow" = "Seguir";
 "matches.following" = "Siguiendo";
 "matches.notify.title" = "Notificaciones";

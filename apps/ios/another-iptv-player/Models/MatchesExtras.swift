@@ -237,7 +237,7 @@ enum WatchChannelSearch {
             // [now-3h, now+36h] whose title names a team. The
             // join to a channel uses the EPG store's own key
             // rule (channelKey = lowercased epgChannelId / tvgId
-            // / channel name — see EPGConstants).
+            // / channel name — the former EPG key normalization).
             let now = Date()
             let windowStart = Int64(now.addingTimeInterval(-3 * 3600).timeIntervalSince1970)
             let windowEnd = Int64(now.addingTimeInterval(36 * 3600).timeIntervalSince1970)

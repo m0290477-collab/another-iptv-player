@@ -89,7 +89,6 @@ struct AddPlaylistProgressView: View {
                 summaryRow(icon: "tv", label: L("dashboard.live"), stage: .loadingChannels)
                 summaryRow(icon: "film", label: L("dashboard.movies"), stage: .loadingMoviesSeries)
                 summaryRow(icon: "rectangle.stack", label: L("dashboard.series"), stage: .loadingMoviesSeries)
-                summaryRow(icon: "calendar", label: L("epg.guide.title"), stage: .loadingGuide)
             }
 
             // Current step label (connecting / verifying have no
@@ -175,12 +174,13 @@ struct AddPlaylistProgressView: View {
     }
 }
 
-/// L2/L3 summary card (see the type note above).
+/// L2 summary card (see the type note above). Build 80 (item 9):
+/// the L3 partial-success variant went with the TV Guide stage —
+/// with the guide removed, no non-critical stage remains that
+/// could fail while the account is valid, so the summary is
+/// always the success presentation.
 struct AddPlaylistSummaryView: View {
     let summary: PlaylistValidationService.AddSummary
-    /// L3: re-runs ONLY the failed stage; the card stays up and
-    /// the caller refreshes the summary when the retry lands.
-    let onRetryFailedStage: (() -> Void)?
     let onStartWatching: () -> Void
 
     var body: some View {
@@ -194,17 +194,10 @@ struct AddPlaylistSummaryView: View {
 
             HStack(spacing: 10) {
                 // X7 (B7): the add-success summary leads with the
-                // drawn animated check (+ light success haptic);
-                // the partial-success warning glyph is unchanged.
-                if summary.failedStage == nil {
-                    AnimatedCheckView(size: 26)
-                        .onAppear { Haptics.success() }
-                } else {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.orange)
-                }
-                Text(summary.failedStage == nil ? L("addplaylist.summary.title") : L("addplaylist.summary.partial_title"))
+                // drawn animated check (+ light success haptic).
+                AnimatedCheckView(size: 26)
+                    .onAppear { Haptics.success() }
+                Text(L("addplaylist.summary.title"))
                     .font(.headline)
             }
 
@@ -251,23 +244,6 @@ struct AddPlaylistSummaryView: View {
                         .foregroundStyle(.secondary)
                 }
                 .accessibilityElement(children: .combine)
-            }
-
-            if summary.failedStage != nil {
-                Text(L("addplaylist.summary.guide_failed"))
-                    .font(.subheadline)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let onRetryFailedStage {
-                    Button {
-                        onRetryFailedStage()
-                    } label: {
-                        Text(L("addplaylist.summary.retry_guide"))
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(AppTheme.accent)
-                    }
-                    .buttonStyle(.plain)
-                }
             }
 
             // Free-forever discipline (§3.5): the subscription is

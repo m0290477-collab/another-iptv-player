@@ -1023,6 +1023,15 @@
 "matches.detail.top_performers" = "Лучшие игроки";
 "matches.detail.team_stats" = "Статистика команд";
 "matches.detail.no_details" = "Подробности этого матча пока недоступны.";
+"matches.detail.facts" = "Факты";
+"matches.detail.h2h" = "Личные встречи";
+"matches.detail.commentary" = "Комментарии";
+"matches.detail.highlights" = "Обзоры";
+"matches.detail.match_info" = "О матче";
+"matches.info.competition" = "Турнир";
+"matches.info.venue" = "Стадион";
+"matches.info.attendance" = "Зрители";
+"matches.info.referee" = "Судья";
 "matches.follow" = "Подписаться";
 "matches.following" = "Вы подписаны";
 "matches.notify.title" = "Уведомления";

@@ -250,9 +250,6 @@ struct PlaylistGateView: View {
                 // Build 61 (B10, L2/L3): the end-of-add summary.
                 AddPlaylistSummaryView(
                     summary: summary,
-                    onRetryFailedStage: summary.failedStage == nil ? nil : {
-                        Task { await retryGuideStage() }
-                    },
                     onStartWatching: {
                         addSummary = nil
                         addStages = [:]
@@ -445,27 +442,6 @@ struct PlaylistGateView: View {
 
     private func resetStages() {
         addStages = Dictionary(uniqueKeysWithValues: PlaylistValidationService.Stage.allCases.map { ($0, .pending) })
-    }
-
-    /// L3 retry: re-runs ONLY the guide stage for the summarized
-    /// playlist; success clears the summary's failed-stage mark.
-    private func retryGuideStage() async {
-        guard let summary = addSummary else { return }
-        let failed = await PlaylistValidationService.runGuideStage(playlist: summary.playlist) { stage, state in
-            if state == .done || state == .failed {
-                self.addSummary = PlaylistValidationService.AddSummary(
-                    playlist: summary.playlist,
-                    expiryDate: summary.expiryDate,
-                    liveCount: summary.liveCount,
-                    movieCount: summary.movieCount,
-                    seriesCount: summary.seriesCount,
-                    failedStage: state == .done ? nil : .loadingGuide,
-                    compatibility: summary.compatibility
-                )
-            }
-            _ = stage
-        }
-        _ = failed
     }
 
     /// Build 61 (B10): the optional connection-fields group shared
@@ -1253,15 +1229,9 @@ struct PlaylistGateView: View {
             setStage(.loadingMoviesSeries, .done)
 
             let compatibility = await PlaylistValidationService.probeCompatibility(playlist: newPlaylist)
-            // Build 63: the guide no longer blocks the add here
-            // either — background handoff, stage completes at once
-            // (see PlaylistValidationService.importXtream).
-            self.setStage(.loadingGuide, .active)
-            if newPlaylist.epgEnabled {
-                GuideBackgroundLoader.start(playlist: newPlaylist)
-            }
-            self.setStage(.loadingGuide, .done)
-            let guideFailed = false
+            // Build 80 (item 9): no guide stage — the TV Guide/EPG
+            // system was removed entirely; the summary follows the
+            // content stages directly.
             let counts = await PlaylistValidationService.importedCounts(playlistId: newPlaylist.id, kind: .xtream)
             let expiry = ProviderExpiryStore.expiryDate(playlistId: newPlaylist.id)
 
@@ -1273,7 +1243,6 @@ struct PlaylistGateView: View {
                     playlist: newPlaylist,
                     expiryDate: expiry,
                     liveCount: counts.live, movieCount: counts.movies, seriesCount: counts.series,
-                    failedStage: guideFailed ? .loadingGuide : nil,
                     compatibility: compatibility
                 )
             }

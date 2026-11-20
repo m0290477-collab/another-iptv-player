@@ -65,8 +65,8 @@ struct VODView: View {
     // the header, opening the global SearchView. In-tab shelf filtering
     // went with it; All Movies and the category screens keep their own
     // search fields.
-    @State private var homeSearchText = ""
-    @State private var showSearchSheet = false
+    // Build 80 (item 4) SUPERSEDES the round-5 note: the header now
+    // holds a REAL CatalogSearchField filtering this tab in place.
 
     // Round 5: unified content pattern — filter chips.
     // Round 8 (D-4/D-5): the Favorites and History chips were removed —
@@ -84,6 +84,11 @@ struct VODView: View {
     // The filtering results are computed in the background; only the assignment is made on the main thread
     @State private var displayCategories: [DBCategory] = []
     @State private var displayItemsByCategory: [String: [VODWithCategory]] = [:]
+    // Build 80 (item 12): the deduped SHELF presentation of the
+    // category rails — chips and per-category grids keep the full
+    // display data above; only the shelves render from these.
+    @State private var shelfCategories: [DBCategory] = []
+    @State private var shelfItemsByCategory: [String: [VODWithCategory]] = [:]
     @State private var recentlyAddedVODs: [DBVODStream] = []
     @State private var newestVODs: [DBVODStream] = []
     @State private var topRatedVODs: [DBVODStream] = []
@@ -99,6 +104,14 @@ struct VODView: View {
     // playlist via ScrollAnchorStore. Applies to the All (shelves)
     // chip only; the Newest grid keeps its own behaviour.
     @State private var scrollAnchorID: String? = nil
+    // Build 80 (item 4): REAL in-tab search state. The tab's old
+    // "search bar" was HomeSearchBar — a Button styled as a field
+    // that only opened the global SearchView sheet; the tab itself
+    // held no query and filtered nothing (owner: "البحث مو شغال").
+    @State private var tabSearchText = ""
+    @State private var tabDebouncedQuery = ""
+    @State private var tabSearchResults: [VODWithCategory] = []
+    @State private var tabSearchVisibleCount = 90
 
     var body: some View {
         Group {
@@ -143,6 +156,12 @@ struct VODView: View {
 
                         // The chips swap the scroll content — All keeps
                         // the shelves; Newest renders its grid.
+                        // Build 80 (item 4): an active in-tab search
+                        // replaces the chip content entirely; clearing
+                        // the field restores it exactly.
+                        if !tabDebouncedQuery.isEmpty {
+                            tabSearchResultsGrid
+                        } else {
                         switch selectedChip {
                         case .all:
                             // Round 14 (B7): the Movies identity —
@@ -204,11 +223,11 @@ struct VODView: View {
                             }
 
                             LazyVStack(spacing: 0) {
-                                ForEach(displayCategories) { category in
+                                ForEach(shelfCategories) { category in
                                     VODCategoryShelfRow(
                                         playlist: playlist,
                                         category: category,
-                                        items: displayItemsByCategory[category.id] ?? [],
+                                        items: shelfItemsByCategory[category.id] ?? [],
                                         isStreamsLoading: !contentStore.streamsLoaded
                                     )
                                     .equatable()
@@ -218,6 +237,7 @@ struct VODView: View {
                             } // Build 65: end of the All (shelves) branch of the category-chip swap.
                         case .newest:
                             newestGrid
+                        }
                         }
                     }
                     .refreshable {
@@ -278,17 +298,6 @@ struct VODView: View {
                 pendingScrollTarget = id
             }
         }
-        .sheet(isPresented: $showSearchSheet) {
-            NavigationStack {
-                // Round 10: SearchView owns its big title — the
-                // wrapper's inline title was removed.
-                // Build 64 (A4): pass .movies — build 63's item-15
-                // wiring missed this call site, so the Movies tab's
-                // search bar opened on the default filter while its
-                // placeholder promised the section's own content.
-                SearchView(playlist: playlist, searchText: $homeSearchText, initialFilter: .movies)
-            }
-        }
         // Round 8 (audit A2): ONE recompute trigger — the same combined
         // token round 7 gave Home. The two separate `.task(id:)` modifiers
         // that used to sit here (streamsLoaded + the hidden set) fired
@@ -306,12 +315,96 @@ struct VODView: View {
             order: orderStore.orderedIds(playlistId: playlist.id, type: "vod")
         )) { await recomputeFilter() }
         .onAppear { shelfReplayToken += 1 }
+        // Build 80 (item 4): 280 ms debounce (the app pattern), then
+        // the detached filter pass over the tab's display set.
+        .task(id: tabSearchText) {
+            let text = tabSearchText
+            try? await Task.sleep(nanoseconds: 280_000_000)
+            guard !Task.isCancelled, tabSearchText == text else { return }
+            tabDebouncedQuery = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            tabSearchVisibleCount = 90
+        }
+        .task(id: tabSearchToken) { await recomputeTabSearch() }
         .onChange(of: selectedCategoryId) { _, _ in categoryVisibleCount = 90 }
         .transaction { $0.animation = nil }
         .navigationDestination(item: $pendingMovieDetail) { movie in
             MovieDetailView(playlist: playlist, movie: movie)
         }
         .cinematicBackground()
+    }
+
+    /// Build 80 (item 4): recompute triggers for the in-tab search —
+    /// the query plus the display-set identity (catalog load / chip
+    /// filters republishing display values re-run the filter).
+    private var tabSearchToken: String {
+        "\(tabDebouncedQuery)#\(displayCategories.count)#\(contentStore.vodStreams.count)#\(contentStore.streamsLoaded)"
+    }
+
+    /// Build 80 (item 4): filter the tab's OWN display set (the same
+    /// items the shelves/grids show — hidden/parental rules already
+    /// applied by recomputeFilter) by title, in ONE detached pass.
+    private func recomputeTabSearch() async {
+        let q = tabDebouncedQuery
+        guard !q.isEmpty else { tabSearchResults = []; return }
+        let categories = displayCategories
+        let byCategory = displayItemsByCategory
+        let result = await Task.detached(priority: .userInitiated) { () -> [VODWithCategory] in
+            var seen = Set<Int>()
+            var matches: [VODWithCategory] = []
+            for category in categories {
+                for item in byCategory[category.id] ?? [] {
+                    guard seen.insert(item.stream.streamId).inserted else { continue }
+                    if CatalogTextSearch.matchesSectionFuzzy(search: q, text: item.stream.name) {
+                        matches.append(item)
+                    }
+                }
+            }
+            return matches
+        }.value
+        guard !Task.isCancelled, tabDebouncedQuery == q else { return }
+        tabSearchResults = result
+    }
+
+    /// Build 80 (item 4): the in-tab search results — the tab's own
+    /// poster grid idiom (same cards, same detail destination,
+    /// 90-per-page BrandedLoader pagination as the other grids).
+    private var tabSearchResultsGrid: some View {
+        Group {
+            if tabSearchResults.isEmpty {
+                ContentUnavailableView.search(text: tabDebouncedQuery)
+                    .padding(.top, 40)
+            } else {
+                LazyVGrid(columns: posterGridColumns, spacing: posterMetrics.gridRowSpacing) {
+                    ForEach(Array(tabSearchResults.prefix(tabSearchVisibleCount).enumerated()), id: \.element.id) { index, item in
+                        NavigationLink {
+                            MovieDetailView(playlist: playlist, movie: item.stream)
+                        } label: {
+                            VODStreamCard(
+                                playlistId: playlist.id,
+                                stream: item.stream,
+                                posterWidth: posterMetrics.categoryGridPosterWidth,
+                                posterHeight: posterMetrics.categoryGridPosterHeight,
+                                imageLoadProfile: .grid
+                            )
+                        }
+                        .buttonStyle(PressScaleButtonStyle())
+                        .onAppear {
+                            if index >= tabSearchVisibleCount - 15 {
+                                tabSearchVisibleCount = min(tabSearchVisibleCount + 90, tabSearchResults.count)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+                if tabSearchVisibleCount < tabSearchResults.count {
+                    BrandedLoader(size: 28)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                }
+            }
+        }
     }
 
     /// O9 restore: once the shelves exist (All chip), jump back to
@@ -333,10 +426,10 @@ struct VODView: View {
     /// movie total, then the filter chips.
     private var tabHeader: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HomeSearchBar(placeholder: L("home.search_placeholder")) {
-                showSearchSheet = true
-            }
-            .padding(.horizontal, 16)
+            // Build 80 (item 4): a REAL text field (CatalogSearchField,
+            // the same field global search uses) bound to the tab's own
+            // query — typing filters this tab's catalog below.
+            CatalogSearchField(text: $tabSearchText, prompt: L("home.search_placeholder"))
             .padding(.top, 4)
 
             Text(L("home.count_movies", CatalogCountFormatter.string(displayCategories.reduce(0) { $0 + (displayItemsByCategory[$1.id]?.count ?? 0) })))
@@ -495,7 +588,7 @@ struct VODView: View {
     /// (the same simplification Live got in round 3).
     private func recomputeFilter() async {
         guard playlist.id == contentStore.activePlaylistId else {
-            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedVODs = []; newestVODs = []; topRatedVODs = []; newestAll = []; franchiseGroups = []; return
+            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedVODs = []; newestVODs = []; topRatedVODs = []; newestAll = []; franchiseGroups = []; shelfCategories = []; shelfItemsByCategory = [:]; return
         }
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod")
         let allCats = orderStore.applyOrder(
@@ -578,6 +671,60 @@ struct VODView: View {
         }.value
         guard !Task.isCancelled else { return }
         franchiseGroups = groups
+
+        // Build 80 (item 12): dedupe the tab's catalog rails in
+        // RENDER order, first rail wins (the build-77 Home rule):
+        // Top → Recently Added → Collections → category shelves.
+        // (a) duplicate category rails — same id, or the same NAME
+        // listed twice by the provider (the audit's two "ANIME
+        // SERIES - 2026" rails) — merge into the first rail of that
+        // name; (b) an item shown in an earlier rail never repeats
+        // in a later one; (c) exact repeats inside one rail (same
+        // stream id) collapse. Different encodes ([FHD] vs [HD])
+        // are different stream ids and stay. Personal lists (Watch-
+        // list, Continue Watching) are not catalog rails and are
+        // untouched. Detached, like the other heavy passes here.
+        let catsSnapshot = displayCategories
+        let itemsSnapshot = displayItemsByCategory
+        let topSnapshot = topRatedVODs
+        let recentSnapshot = recentlyAddedVODs
+        let groupsSnapshot = franchiseGroups
+        let deduped = await Task.detached(priority: .userInitiated) { () -> (top: [DBVODStream], recent: [DBVODStream], shelfCats: [DBCategory], shelfItems: [String: [VODWithCategory]]) in
+            var seen = Set<Int>()
+            func take(_ items: [DBVODStream]) -> [DBVODStream] {
+                var out: [DBVODStream] = []
+                for item in items where seen.insert(item.streamId).inserted { out.append(item) }
+                return out
+            }
+            let top = take(topSnapshot)
+            let recent = take(recentSnapshot)
+            for group in groupsSnapshot { for movie in group.movies { seen.insert(movie.streamId) } }
+            var shelfCats: [DBCategory] = []
+            var shelfItems: [String: [VODWithCategory]] = [:]
+            var firstIdByName: [String: String] = [:]
+            for category in catsSnapshot {
+                let nameKey = category.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let targetId: String
+                if let existing = firstIdByName[nameKey] {
+                    targetId = existing
+                } else {
+                    firstIdByName[nameKey] = category.id
+                    targetId = category.id
+                    shelfCats.append(category)
+                    shelfItems[category.id] = []
+                }
+                for item in itemsSnapshot[category.id] ?? [] where seen.insert(item.stream.streamId).inserted {
+                    shelfItems[targetId, default: []].append(item)
+                }
+            }
+            shelfCats = shelfCats.filter { !(shelfItems[$0.id]?.isEmpty ?? true) }
+            return (top, recent, shelfCats, shelfItems)
+        }.value
+        guard !Task.isCancelled else { return }
+        topRatedVODs = deduped.top
+        recentlyAddedVODs = deduped.recent
+        shelfCategories = deduped.shelfCats
+        shelfItemsByCategory = deduped.shelfItems
     }
 
     private func presentHistoryPlayer(_ item: DBWatchHistory) {
@@ -1033,8 +1180,9 @@ struct VODStreamCard: View {
             // Round 15 (C9): card titles are LEFT-aligned everywhere
             // (matching RankedPosterCard), on the shared font tokens.
             Text(stream.name)
-                .font(AppTheme.fontCardTitle)
-                .lineLimit(2)
+                .font(AppTheme.fontPosterTitle)
+                .lineLimit(2, reservesSpace: true)
+                .minimumScaleFactor(0.9)
                 .multilineTextAlignment(.leading)
                 .frame(width: posterWidth, alignment: .leading)
                 .foregroundColor(.primary)
@@ -1467,6 +1615,7 @@ struct VODPlayerShell: View {
 
     @State private var currentMovie: DBVODStream
     @State private var resumeMs: Int?
+    @EnvironmentObject private var playerOverlay: PlayerOverlayController
     @Environment(\.playerOverlayPresentationID) private var overlayPresentationID
 
     init(
@@ -1523,6 +1672,28 @@ struct VODPlayerShell: View {
             .onChange(of: overlayPresentationID) { _, _ in
                 applyInitialSelectionIfNeeded()
             }
+        } else {
+            // Build 80 (item 13, F1 — build-68 faulthunt): when the
+            // URL build fails, the pre-fix shell rendered NOTHING —
+            // a silent empty overlay behind a dead "Watch Now" tap.
+            // Now the shell shows the app's standard playback-failure
+            // message with a dismiss that closes the overlay, the
+            // same honesty the series path's alert provides.
+            VStack(spacing: 16) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.largeTitle)
+                    .foregroundStyle(AppTheme.accent)
+                Text(L("playback.error.failed_to_start"))
+                    .font(AppTheme.fontCardTitle)
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                Button(L("common.ok")) { playerOverlay.dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.accent)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black)
         }
     }
 

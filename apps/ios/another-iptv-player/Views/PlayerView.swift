@@ -13,7 +13,7 @@ struct LiveChannelCategorySection: Identifiable, Equatable {
 
 extension LiveChannelCategorySection {
     /// Full live queue + per-category sections for the current Xtream playlist.
-    /// Players opened outside the main channel list (EPG guide, programme sheet)
+    /// Players opened outside the main channel list (search, favorites)
     /// use this so prev/next channel and the channel side panel keep working instead
     /// of being disabled by a single-item queue.
     @MainActor
@@ -62,8 +62,6 @@ struct PlayerView: View {
     /// Build 61 (FA, F-2/G2): the active playlist's parsed custom
     /// headers; reaches the engine's KSOptions alongside the UA.
     var customHeaders: [String: String] = [:]
-    /// EPG lookup key for the live channel; drives the in-player now-playing strip.
-    var epgChannelKey: String? = nil
     /// Catch-up playback must not write watch history (would overwrite the live row).
     var suppressWatchHistory: Bool = false
 
@@ -104,7 +102,6 @@ struct PlayerView: View {
             containerExtension: containerExtension,
             userAgent: userAgent,
             customHeaders: customHeaders,
-            epgChannelKey: epgChannelKey,
             suppressWatchHistory: suppressWatchHistory,
             isFavorite: isFavorite,
             onToggleFavorite: onToggleFavorite,
@@ -145,7 +142,6 @@ private struct PlayerViewImpl: View {
     var userAgent: String? = nil
     /// Build 61 (FA, F-2/G2): playlist custom headers (see PlayerView).
     var customHeaders: [String: String] = [:]
-    var epgChannelKey: String? = nil
     var suppressWatchHistory: Bool = false
 
     /// Opsiyonel favori butonu — yalnız ikisi de set ise topChrome'da gösterilir.
@@ -184,14 +180,6 @@ private struct PlayerViewImpl: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.layoutDirection) private var layoutDirection
-    @Environment(\.epgSnapshot) private var epgSnapshot
-
-    /// Current programme for the live channel, if EPG data is available.
-    private var currentNowNext: EPGNowNext? {
-        guard isLiveStream, let key = epgChannelKey else { return nil }
-        return epgSnapshot?[key]
-    }
-
     @State private var showControls = true
     @State private var timer: Timer?
     @State private var saveHistoryTimer: Timer?
@@ -809,9 +797,6 @@ private struct PlayerViewImpl: View {
             }
         }
         .onChange(of: playbackPresentationKey) { _, _ in
-            player.setPlaybackPresentation(makePresentation())
-        }
-        .onChange(of: currentNowNext?.now?.id) { _, _ in
             player.setPlaybackPresentation(makePresentation())
         }
         // Build 61 (FA, X5): the zap event bumps the sweep trigger;
@@ -2124,17 +2109,17 @@ private struct PlayerViewImpl: View {
         commitVideoPanClamp()
     }
 
-    /// Builds the Now Playing presentation, folding in the current EPG programme
-    /// (used as the Now Playing title on live channels).
+    /// Builds the Now Playing presentation. (Build 80, item 9:
+    /// the EPG programme fold-in is gone with the TV Guide — the
+    /// presentation is the channel/movie/series title only.)
     private func makePresentation() -> PlaybackPresentation {
-        let programme = currentNowNext?.now
-        return PlaybackPresentation(
+        PlaybackPresentation(
             title: title,
             subtitle: subtitle,
             artworkURL: artworkURL,
             isLive: isLiveStream,
-            programmeTitle: programme?.title,
-            programmeInterval: programme.map { DateInterval(start: $0.start, end: max($0.start, $0.stop)) }
+            programmeTitle: nil,
+            programmeInterval: nil
         )
     }
 
@@ -2194,11 +2179,11 @@ private struct PlayerViewImpl: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(.white)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                    .shadow(color: .black.opacity(0.45), radius: 4, y: 1)
+                    .shadow(color: .black.opacity(0.4), radius: 4, y: 1)
                 if let subtitle, !subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(subtitle)
                         .font(.caption.weight(.medium))
@@ -2220,14 +2205,14 @@ private struct PlayerViewImpl: View {
                 }
             }
 
+            // Build 80 (item 7, player-style-flat): the glass
+            // capsule behind the top actions is gone — the thin
+            // icons sit directly on the video/gradient.
             HStack(spacing: 2) {
                 topChromeActions
             }
             .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 4)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.2), radius: 8, y: 3)
         }
         // The containing chrome already has 12pt + safe-area padding. A second
         // 20pt inset made the live-TV toolbar overflow on compact phones.
@@ -2445,9 +2430,9 @@ private struct PlayerViewImpl: View {
             action()
         } label: {
             Image(systemName: systemName)
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 16, weight: .regular))
                 .foregroundStyle(.white.opacity(0.96))
-                .shadow(color: .black.opacity(0.25), radius: 2, y: 0.5)
+                .shadow(color: .black.opacity(0.3), radius: 3, y: 0.5)
                 .frame(width: 44, height: 44)  // HIG minimum dokunma hedefi
                 .contentShape(Rectangle())
         }
@@ -2573,9 +2558,9 @@ private struct PlayerViewImpl: View {
             action()
         } label: {
             Image(systemName: systemName)
-                .font(.system(size: symbolSize, weight: .semibold))
+                .font(.system(size: symbolSize, weight: .regular))
                 .foregroundStyle(.white.opacity(0.96))
-                .shadow(color: .black.opacity(0.45), radius: 5, y: 1)
+                .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
                 .frame(width: hitFrame, height: hitFrame)
                 .contentShape(Rectangle())
         }
@@ -2633,10 +2618,11 @@ private struct PlayerViewImpl: View {
 
             // Build 66 (W6, item 11): the Build 65 Rich Bar's
             // stacked rows (identity row + control row + VOD seek
-            // card, plus the standalone B14 V5 Up Next strip above
-            // it) are restyled into ONE slim blurred bar. The Up
-            // Next programme is folded into the bar's identity
-            // segment (title only, same EPG snapshot); every
+            // card) are restyled into ONE slim bar (build 80,
+            // item 7: restyled again into the ultra-flat slab —
+            // flat translucent fill, no stroke/shadow). The bar's
+            // identity segment shows the title only (build 80,
+            // item 9 removed the EPG programme fold-in); every
             // control keeps its exact action, menu and gesture
             // behavior, and the bar rides the same show/hide
             // chrome as before.
@@ -2649,7 +2635,8 @@ private struct PlayerViewImpl: View {
     /// The slim bar: ONE row, ~12% of screen height in landscape —
     /// identity segment on the leading side, the existing controls
     /// on the trailing side — over the same heavily blurred
-    /// `.ultraThinMaterial` + black wash the Rich Bar used, so the
+    /// flat translucent black slab (build 80, item 7; formerly
+    /// the material + black wash), so the
     /// video stays clearly visible through it. The thin red-orange
     /// progress line sits at the bar's TOP edge (see
     /// `slimBarProgressLine`).
@@ -2726,22 +2713,15 @@ private struct PlayerViewImpl: View {
         .padding(.horizontal, 12)
         .frame(height: useStackedPlayerBar ? 102 : 52)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(Color.black.opacity(0.22))
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
+            // Build 80 (item 7, player-style-flat): flat
+            // translucent slab — no material, no stroke.
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.black.opacity(0.48))
         )
         .overlay(alignment: .top) {
             slimBarProgressLine
                 .padding(.horizontal, 16)
         }
-        .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
         .padding(.horizontal, 4)
     }
 
@@ -2776,30 +2756,15 @@ private struct PlayerViewImpl: View {
     }
 
     /// The thin (3pt) red-orange line at the bar's TOP edge.
-    /// Live: programme progress from the same EPG snapshot the
-    /// Rich Bar's identity capsule read — non-interactive, exactly
-    /// as before. VOD: this IS the seek bar (see `slimBarSeekLine`).
+    /// VOD: this IS the seek bar (see `slimBarSeekLine`). Live
+    /// renders nothing here (build 80, item 9).
     @ViewBuilder
     private var slimBarProgressLine: some View {
-        if isLiveStream {
-            if let now = currentNowNext?.now,
-               let fraction = now.progress(at: EPGOffsetStore.lookupNow()) {
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.22)).frame(height: 3)
-                        Capsule().fill(AppTheme.accentStart)
-                            .frame(
-                                width: proxy.size.width * CGFloat(min(max(fraction, 0), 1)),
-                                height: 3
-                            )
-                    }
-                    .frame(height: 3)
-                }
-                .frame(height: 3)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-            }
-        } else {
+        // Build 80 (item 9): the live branch read programme
+        // progress from the EPG snapshot — gone with the TV Guide
+        // removal. Live shows no progress line (a live stream has
+        // no position); VOD keeps its seek line.
+        if !isLiveStream {
             slimBarSeekLine
         }
     }
@@ -2885,16 +2850,12 @@ private struct PlayerViewImpl: View {
 
     /// Build 66 (W6, item 11): the slim bar's identity segment —
     /// artwork thumbnail + channel/content name on the first
-    /// line; for live, the CURRENT programme title with its time
-    /// range and the NEXT programme (title only) after it, all
-    /// from the same EPG snapshot (`currentNowNext`) the Rich Bar
-    /// read, plus the small LIVE badge (the existing live logic:
-    /// `isLiveStream` + `L("player.live_badge")`, with the red dot
-    /// the Rich Bar identity row already used). Programme progress
-    /// moved to the bar's top-edge line. VOD shows its real
-    /// subtitle line when present, and the current / total time —
-    /// the exact labels the old scrub card rendered
-    /// (`formatMs` / `totalDurationLabel`).
+    /// line, plus the small LIVE badge (the existing live logic:
+    /// `isLiveStream` + `L(\"player.live_badge\")`, with the red
+    /// dot the identity row already used). VOD shows its real
+    /// subtitle line when present, and the current / total time.
+    /// (Build 80, item 9: the live programme title / time range /
+    /// Up Next fold-in is removed with the TV Guide.)
     private var slimBarIdentitySegment: some View {
         HStack(spacing: 10) {
             if let artworkURL {
@@ -2910,7 +2871,7 @@ private struct PlayerViewImpl: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(title)
-                        .font(.subheadline.weight(.bold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
                     if isLiveStream {
@@ -2928,29 +2889,7 @@ private struct PlayerViewImpl: View {
                         .fixedSize(horizontal: true, vertical: false)
                     }
                 }
-                if isLiveStream, let now = currentNowNext?.now {
-                    HStack(spacing: 6) {
-                        Text(now.title)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.92))
-                            .lineLimit(1)
-                        Text(EPGTimeFormat.range(now.start, now.stop))
-                            .font(.caption2.weight(.medium))
-                            .monospacedDigit()
-                            .foregroundStyle(.white.opacity(0.65))
-                            .fixedSize(horizontal: true, vertical: false)
-                        if let next = currentNowNext?.next {
-                            Text(L("player.upnext"))
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(.white.opacity(0.6))
-                                .fixedSize(horizontal: true, vertical: false)
-                            Text(next.title)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.8))
-                                .lineLimit(1)
-                        }
-                    }
-                } else if !isLiveStream {
+                if !isLiveStream {
                     HStack(spacing: 6) {
                         if let subtitle, !subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text(subtitle)

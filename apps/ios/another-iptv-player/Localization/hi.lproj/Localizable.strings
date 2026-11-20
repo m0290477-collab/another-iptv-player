@@ -1023,6 +1023,15 @@
 "matches.detail.top_performers" = "शीर्ष प्रदर्शनकर्ता";
 "matches.detail.team_stats" = "टीम आँकड़े";
 "matches.detail.no_details" = "इस मैच के लिए अभी कोई विवरण उपलब्ध नहीं है।";
+"matches.detail.facts" = "तथ्य";
+"matches.detail.h2h" = "आमने-सामने";
+"matches.detail.commentary" = "कमेंट्री";
+"matches.detail.highlights" = "हाइलाइट्स";
+"matches.detail.match_info" = "मैच जानकारी";
+"matches.info.competition" = "प्रतियोगिता";
+"matches.info.venue" = "स्टेडियम";
+"matches.info.attendance" = "उपस्थिति";
+"matches.info.referee" = "रेफरी";
 "matches.follow" = "फ़ॉलो करें";
 "matches.following" = "फ़ॉलो किया गया";
 "matches.notify.title" = "सूचनाएँ";

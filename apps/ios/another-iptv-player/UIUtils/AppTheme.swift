@@ -143,6 +143,10 @@ enum AppTheme {
     /// so long names ("Wolverhampton Wanderers", "Golden State
     /// Warriors") fit on one line in the match layouts.
     static let fontTeamName: Font = .caption.weight(.semibold)
+    /// Build 80 (item 2): poster-card title — one step smaller than
+    /// fontCardTitle so FULL movie/series titles fit the two-line
+    /// wrap at phone poster widths instead of truncating.
+    static let fontPosterTitle: Font = .footnote.weight(.semibold)
 
     /// Spacing tokens (B9).
     static let spacingScreenMargin: CGFloat = 16

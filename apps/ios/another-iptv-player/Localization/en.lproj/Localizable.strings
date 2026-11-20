@@ -1041,6 +1041,15 @@
 "matches.detail.top_performers" = "Top Performers";
 "matches.detail.team_stats" = "Team Stats";
 "matches.detail.no_details" = "No details available for this match yet.";
+"matches.detail.facts" = "Facts";
+"matches.detail.h2h" = "H2H";
+"matches.detail.commentary" = "Commentary";
+"matches.detail.highlights" = "Highlights";
+"matches.detail.match_info" = "Match Info";
+"matches.info.competition" = "Competition";
+"matches.info.venue" = "Venue";
+"matches.info.attendance" = "Attendance";
+"matches.info.referee" = "Referee";
 "matches.follow" = "Follow";
 "matches.following" = "Following";
 "matches.notify.title" = "Notifications";

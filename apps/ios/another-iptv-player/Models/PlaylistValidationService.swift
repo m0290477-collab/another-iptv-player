@@ -13,11 +13,13 @@ import GRDB
 /// `PlaylistSaveService` only run after a successful probe, and the
 /// M3U pipeline itself parses before it replaces any rows.
 ///
-/// L1/L2/L3: `importXtream` / `importM3U` drive the add flow stage
+/// L1/L2: `importXtream` / `importM3U` drive the add flow stage
 /// by stage and report a real `PlaylistAddSummary` (real expiry,
-/// real imported counts, the one non-critical stage that failed —
-/// the guide — which can be retried on its own). The stage
-/// callbacks fire from the actual importer calls, never a timer.
+/// real imported counts). The stage callbacks fire from the
+/// actual importer calls, never a timer. (Build 80, item 9: the
+/// L3 guide stage and its retry went with the TV Guide removal —
+/// every remaining stage is critical and aborts the add on
+/// failure.)
 enum PlaylistValidationService {
 
     // MARK: - Q17 failure taxonomy
@@ -57,7 +59,6 @@ enum PlaylistValidationService {
         case verifying
         case loadingChannels
         case loadingMoviesSeries
-        case loadingGuide
 
         var titleKey: String {
             switch self {
@@ -65,7 +66,6 @@ enum PlaylistValidationService {
             case .verifying: return "addplaylist.stage.verifying"
             case .loadingChannels: return "addplaylist.stage.channels"
             case .loadingMoviesSeries: return "addplaylist.stage.movies_series"
-            case .loadingGuide: return "addplaylist.stage.guide"
             }
         }
     }
@@ -74,12 +74,12 @@ enum PlaylistValidationService {
         case pending, active, done, failed
     }
 
-    // MARK: - Build 63: bounded stages + background guide
+    // MARK: - Build 63: bounded stages
 
     /// Thrown by `withStageTimeout` when a stage overruns its
     /// budget. Call sites map it onto their existing failure
     /// surface (a probe/content timeout reads as `.unreachable`;
-    /// a guide timeout is the L3 partial-success failure).
+    /// partial-success failure).
     struct StageTimeoutError: Error {}
 
     /// Races `operation` against a hard deadline. The loser is
@@ -117,10 +117,6 @@ enum PlaylistValidationService {
         let liveCount: Int
         let movieCount: Int
         let seriesCount: Int
-        /// The non-critical stage that failed while the account was
-        /// valid (L3) — currently only the guide can land here;
-        /// content-stage failures abort the add and save nothing.
-        let failedStage: Stage?
         /// Z1: the compatibility probe result (real reachable /
         /// sampled counts), nil when no live streams existed to
         /// probe or the probe was cancelled. Informational only —
@@ -266,8 +262,7 @@ enum PlaylistValidationService {
     /// inside `XtreamImporter` and are saved in one write, so the
     /// channels and movies/series stages complete together when
     /// that single real step lands — they are not separately
-    /// timed), then the guide stage. Guide failure is L3 partial success — the
-    /// playlist IS saved; every earlier failure saves nothing.
+    /// timed). Every failure saves nothing.
     /// Cancel mid-way throws `CancellationError` before the save
     /// for the probe stages; the importer's own save is its final
     /// step, so a cancelled import leaves no half-written catalog
@@ -320,25 +315,15 @@ enum PlaylistValidationService {
         // internally — it can no longer hold the flow open either).
         let compatibility = await probeCompatibility(playlist: probed.playlist)
         if Task.isCancelled { throw CancellationError() }
-        // Build 63 (owner report, build 62): the guide stage NO
-        // LONGER awaits the XMLTV download + parse inline — on a
-        // large provider that was minutes of dead checklist. The
-        // playlist is fully saved at this point; the guide load is
-        // handed to GuideBackgroundLoader (own 240 s budget, its
-        // progress/bookkeeping lands on the playlist's EPG source
-        // record, exactly like every other refresh) and the stage
-        // completes at handoff. A guide failure can therefore
-        // never block or fail an add again.
-        await onStage(.loadingGuide, .active)
-        if probed.playlist.epgEnabled {
-            GuideBackgroundLoader.start(playlist: probed.playlist)
-        }
-        await onStage(.loadingGuide, .done)
+        // Build 80 (item 9): the TV Guide stage is GONE — the
+        // guide/EPG system was removed entirely at the owner's
+        // order, so the checklist now ends with the content
+        // stages (Live TV, Movies, Series) and the add completes
+        // as soon as the catalog is stored.
         return AddSummary(
             playlist: probed.playlist,
             expiryDate: ProviderExpiryStore.parseExpiryDate(probed.response.userInfo?.expDate),
             liveCount: counts.live, movieCount: counts.movies, seriesCount: counts.series,
-            failedStage: nil,
             compatibility: compatibility
         )
     }
@@ -347,11 +332,7 @@ enum PlaylistValidationService {
 
     /// Full staged add for M3U: probe (fetch + parse — connecting +
     /// verifying + channels complete from the one real pipeline),
-    /// save via the shared importer path, then the guide stage
-    /// (only when the playlist actually has a guide source; with no
-    /// source the stage completes trivially — there is no guide to
-    /// load, and the checklist row is marked done, not faked: the
-    /// importer's parse already captured the source's EPG URL).
+    /// then save via the shared importer path.
     static func importM3U(
         playlist: Playlist,
         localContent: String?,
@@ -387,15 +368,7 @@ enum PlaylistValidationService {
         var saved = playlist
         saved.m3uEpgURL = probed.parsed.epgURL
         if localContent != nil { saved.serverURL = "" }
-        // Build 63: same guide rule as the Xtream path — the add
-        // completes once content is stored; the guide (when the
-        // source carries one) loads in the background under
-        // GuideBackgroundLoader and can never block completion.
-        await onStage(.loadingGuide, .active)
-        if saved.effectiveEPGURL != nil, saved.epgEnabled {
-            GuideBackgroundLoader.start(playlist: saved)
-        }
-        await onStage(.loadingGuide, .done)
+        // Build 80 (item 9): no guide stage — see the Xtream path.
         // Z1: compatibility probe AFTER the catalog load.
         let compatibility = await probeCompatibility(playlist: saved)
         if Task.isCancelled { throw CancellationError() }
@@ -403,7 +376,6 @@ enum PlaylistValidationService {
             playlist: saved,
             expiryDate: nil,
             liveCount: probed.parsed.channels.count, movieCount: 0, seriesCount: 0,
-            failedStage: nil,
             compatibility: compatibility
         )
     }
@@ -548,82 +520,33 @@ enum PlaylistValidationService {
         return picked
     }
 
-    /// The guide stage (L1 last row / L3 retry target): a real
-    /// EPG refresh through the existing coordinator. Returns true
-    /// when the stage failed. Playlists with EPG disabled complete
-    /// the stage without a fetch.
-    static func runGuideStage(
-        playlist: Playlist,
-        onStage: @escaping @MainActor (Stage, StageState) -> Void
-    ) async -> Bool {
-        await onStage(.loadingGuide, .active)
-        guard playlist.epgEnabled else {
-            await onStage(.loadingGuide, .done)
-            return false
-        }
-        do {
-            // Build 63: even the explicitly-awaited retry path is
-            // bounded now (180 s) — a timeout is the honest L3
-            // failure, not an endless spinner.
-            _ = try await withStageTimeout(180) {
-                try await EPGRefreshCoordinator().refresh(playlist: playlist) { _ in }
-            }
-            await onStage(.loadingGuide, .done)
-            return false
-        } catch {
-            await onStage(.loadingGuide, .failed)
-            return true
-        }
-    }
-
     /// Real imported counts for the L2 summary, read back from the
     /// database after the import — never the panel's claims.
+    ///
+    /// Build 80 (item 14a): the counts now go through the GRDB
+    /// RECORD layer (`fetchCount` with a `Column == UUID` filter) —
+    /// the same binding every working count in the app uses. The
+    /// previous implementation bound the playlist UUID through raw
+    /// SQL strings, the one mechanism that can silently match zero
+    /// rows against the record layer's stored representation; the
+    /// build-75 recording showed the summary at 0/0/0 while the
+    /// catalog held thousands of rows for the same playlist.
     static func importedCounts(
         playlistId: UUID, kind: PlaylistKind
     ) async -> (live: Int, movies: Int, series: Int) {
         let counts = try? await AppDatabase.shared.read { db -> (Int, Int, Int) in
             switch kind {
             case .xtream:
-                let live = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM liveStream WHERE playlistId = ?", arguments: [playlistId]) ?? 0
-                let movies = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM vodStream WHERE playlistId = ?", arguments: [playlistId]) ?? 0
-                let series = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM series WHERE playlistId = ?", arguments: [playlistId]) ?? 0
+                let live = try DBLiveStream.filter(Column("playlistId") == playlistId).fetchCount(db)
+                let movies = try DBVODStream.filter(Column("playlistId") == playlistId).fetchCount(db)
+                let series = try DBSeries.filter(Column("playlistId") == playlistId).fetchCount(db)
                 return (live, movies, series)
             case .m3u:
-                let live = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM m3uChannel WHERE playlistId = ?", arguments: [playlistId]) ?? 0
+                let live = try DBM3UChannel.filter(Column("playlistId") == playlistId).fetchCount(db)
                 return (live, 0, 0)
             }
         }
         return counts.map { (live: $0.0, movies: $0.1, series: $0.2) } ?? (0, 0, 0)
-    }
-}
-
-// MARK: - Build 63: background guide loading
-
-/// Owns the post-add guide load. The add flow hands the playlist
-/// here once its content is stored and completes immediately; the
-/// refresh itself runs detached with a hard 240 s budget through
-/// the SAME `EPGRefreshCoordinator` every other refresh uses, so
-/// its progress and outcome land in the playlist's EPG source
-/// bookkeeping (attempt / success / error) and the guide UI's
-/// existing refresh state reflects it. One in-flight load per
-/// playlist — a re-add or a retry replaces the previous task.
-/// Errors are deliberately swallowed here: the coordinator has
-/// already recorded them on the playlist, which is where the
-/// user-facing surface reads them from.
-enum GuideBackgroundLoader {
-    private static let lock = NSLock()
-    private static var tasks: [UUID: Task<Void, Never>] = [:]
-
-    static func start(playlist: Playlist) {
-        lock.lock()
-        tasks[playlist.id]?.cancel()
-        let task = Task.detached {
-            _ = try? await PlaylistValidationService.withStageTimeout(240) {
-                try await EPGRefreshCoordinator().refresh(playlist: playlist) { _ in }
-            }
-        }
-        tasks[playlist.id] = task
-        lock.unlock()
     }
 }
 
