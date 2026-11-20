@@ -1586,8 +1586,6 @@ struct SeriesDetailView: View {
     @State private var selectedEpisode: (DBEpisode, DBWatchHistory?)?
     @State private var episodeNavPrevious: DBEpisode?
     @State private var episodeNavNext: DBEpisode?
-    /// Round 10: the Episodes/About tab under the action bar.
-    @State private var detailTab = 0
     /// The episode the watch history points at (for the
     /// "Continue • Episode N" label and the download row) and the
     /// series' first episode (the no-history download target) —
@@ -1722,9 +1720,10 @@ struct SeriesDetailView: View {
         }
         .navigationTitle(showNavTitle ? currentSeries.name : "")
         .navigationBarTitleDisplayMode(.inline)
-        // Round 10: the favorite action moved beside the Play
-        // button (DetailFavoriteDownloadRow) — the toolbar star is
-        // gone so the action exists exactly once on this page.
+        // Round 10 / build 78: the favorite action lives in the
+        // glass action row under the Play button
+        // (DetailGlassActionsRow) — the toolbar star is gone so
+        // the action exists exactly once on this page.
         .fullScreenCover(item: $enlargedImage) { wrapper in
             FullscreenImageViewer(url: wrapper.url)
         }
@@ -2117,13 +2116,26 @@ struct SeriesDetailView: View {
                     .padding(.top, -10)
                 }
 
-                // Round 10 (point 20): favorite + download beside
-                // Play. The download targets the resumed episode,
+                // Build 78 (Style 1): favorite / download /
+                // watchlist as the picked mockup's round glass
+                // trio — the same three actions the square row, the
+                // download button and the full-width Watch Later
+                // row performed (Watch Later stays the SAME
+                // WatchlistStore as movies, separate from
+                // Favorites, with its own surface on the Series
+                // tab). The download targets the resumed episode,
                 // else episode 1 — and the slot stays empty until
                 // one resolves, never a dead button.
-                DetailFavoriteDownloadRow(
+                DetailGlassActionsRow(
                     isFavorite: isFavorite,
-                    onToggleFavorite: { Task { await toggleFavorite() } }
+                    onToggleFavorite: { Task { await toggleFavorite() } },
+                    isWatchlisted: watchlistStore.containsSeries(playlistId: playlist.id, seriesId: currentSeries.seriesId),
+                    onToggleWatchlist: {
+                        watchlistStore.toggleSeries(
+                            playlistId: playlist.id, seriesId: currentSeries.seriesId,
+                            title: currentSeries.name, imageURL: currentSeries.cover
+                        )
+                    }
                 ) {
                     if let ep = downloadTargetEpisode,
                        let remoteURL = PlaybackURLBuilder(playlist: playlist).seriesURL(
@@ -2142,19 +2154,14 @@ struct SeriesDetailView: View {
                             containerExtension: ep.containerExtension,
                             seriesId: String(currentSeries.seriesId),
                             seasonNumber: ep.seasonId.split(separator: "_").last.flatMap { Int($0) },
-                            episodeNumber: ep.episodeNum
+                            episodeNumber: ep.episodeNum,
+                            glassCircle: true
                         )
                     } else {
                         EmptyView()
                     }
                 }
                 .padding(.top, -10)
-
-                // Build 61 (B8, C2): series Watch Later — the SAME
-                // WatchlistStore as movies (separate from Favorites),
-                // with its own surface on the Series tab.
-                seriesWatchLaterRow
-                    .padding(.top, -10)
 
                 // Build 61 (B8, J1): add to a custom favorite group.
                 FavoriteGroupMenuItems(
@@ -2191,19 +2198,17 @@ struct SeriesDetailView: View {
                     .padding(.top, -4)
                 }
 
-                // Round 10: Episodes / About segmented tabs — the
-                // episode list is the default surface; Story,
-                // Director and Cast live under About.
-                Picker("", selection: $detailTab) {
-                    Text(L("detail.episodes")).tag(0)
-                    Text(L("detail.about")).tag(1)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
+                // Build 78 (Style 1): the round-10 Episodes/About
+                // segmented picker is GONE — the picked family is
+                // one scroll, like the movie page: seasons +
+                // episode cards first, then the About blocks
+                // (Story, Director, Cast) below them. Nothing the
+                // About tab held is lost; it renders under the
+                // episodes whenever the record carries any of its
+                // fields.
+                seasonsSection
 
-                if detailTab == 0 {
-                    seasonsSection
-                } else {
+                if hasAboutContent {
                     aboutSection
                 }
 
@@ -2227,9 +2232,19 @@ struct SeriesDetailView: View {
         .ignoresSafeArea(edges: .top)
     }
 
-    /// The About tab's content: Story / Director / Cast from the
-    /// series record's own fields — each block omitted when its
-    /// field is empty, exactly as before the tabs existed.
+    /// Build 78: the About blocks render below the episode list
+    /// when the record carries any of their fields (each block
+    /// still omits itself when its own field is empty).
+    private var hasAboutContent: Bool {
+        func nonEmpty(_ s: String?) -> Bool {
+            !(s?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        }
+        return nonEmpty(currentSeries.plot) || nonEmpty(currentSeries.director) || nonEmpty(currentSeries.cast)
+    }
+
+    /// The About content: Story / Director / Cast from the series
+    /// record's own fields — each block omitted when its field is
+    /// empty, exactly as before the tabs existed.
     @ViewBuilder
     private var aboutSection: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -2245,49 +2260,19 @@ struct SeriesDetailView: View {
             }
 
             if let cast = currentSeries.cast?.trimmingCharacters(in: .whitespacesAndNewlines), !cast.isEmpty {
-                DetailInfoTextBlock(label: L("movie.cast"), value: cast) { person in
+                // Build 78: cast renders as the family's shared
+                // monogram row (as on the movie page), not name
+                // chips — names stay tappable (C7 person route).
+                DetailCastRow(names: DetailFormatting.peopleList(cast)) { person in
                     pendingRoute = .person(person)
                 }
             }
         }
     }
 
-    // MARK: - Build 61 (B8): watch-later row, watched progress, More Like This
-
-    /// C2: series Watch Later toggle — same store as movies, its own
-    /// surface on the Series tab (WatchlistSeriesView).
-    private var seriesWatchLaterRow: some View {
-        let inList = watchlistStore.containsSeries(playlistId: playlist.id, seriesId: currentSeries.seriesId)
-        return Button {
-            watchlistStore.toggleSeries(
-                playlistId: playlist.id, seriesId: currentSeries.seriesId,
-                title: currentSeries.name, imageURL: currentSeries.cover
-            )
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: inList ? "bookmark.fill" : "bookmark")
-                    .font(.footnote.weight(.semibold))
-                Text(inList ? L("watchlist.in_list") : L("watchlist.add"))
-                    .font(.footnote.weight(.semibold))
-                    .lineLimit(1)
-                Spacer()
-            }
-            .foregroundStyle(inList ? AppTheme.accent : Color.primary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background(
-                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                    .fill(AppTheme.elevated)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                    .strokeBorder(AppTheme.cardBorderColor, lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 16)
-        .accessibilityLabel(L("watchlist.title"))
-    }
+    // MARK: - Build 61 (B8): watched progress, More Like This
+    // (The C2 Watch Later toggle moved into the build-78 glass
+    // action row — same WatchlistStore call, round form.)
 
     private var moreLikeThisSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -2406,12 +2391,11 @@ struct SeriesDetailView: View {
                     }
                     Spacer()
                     if let sid = selectedSeasonId,
-                       let s = seasons.first(where: { $0.id == sid }),
-                       let count = s.episodeCount {
-                        Text(L("detail.episode_count_plural", count))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .contentTransition(.numericText())
+                       let s = seasons.first(where: { $0.id == sid }) {
+                        // Build 78: the episode count moved to the
+                        // Episodes header (counted from the loaded
+                        // episode cards, as in the picked mockup) —
+                        // it no longer shows twice on this page.
                         // Round 14 (B8): download the whole season
                         // through the existing download queue.
                         Button {
@@ -2724,6 +2708,15 @@ private final class SeasonEpisodesObserver: ObservableObject {
     }
 }
 
+/// Build 78 (Style 1): the wide-card episode thumbnail size —
+/// ONE 16:9 size for the card render and the panel's prefetch, so
+/// the Nuke request matches the surface exactly (the old portrait
+/// 100×150 poster-metrics size belonged to the pre-card row).
+private enum EpisodeCardMetrics {
+    static let thumbWidth: CGFloat = 128
+    static let thumbHeight: CGFloat = 72
+}
+
 struct EpisodesPanel: View {
     let seasonId: String
     let playlist: Playlist
@@ -2733,7 +2726,6 @@ struct EpisodesPanel: View {
     var onEpisodeSelected: (DBEpisode, DBWatchHistory?) -> Void
 
     @Environment(\.appDatabase) private var appDatabase
-    @Environment(\.posterMetrics) private var posterMetrics
     @StateObject private var observer = SeasonEpisodesObserver()
 
     var body: some View {
@@ -2748,30 +2740,46 @@ struct EpisodesPanel: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 16)
             } else {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(observer.episodes.enumerated()), id: \.element.id) { index, episode in
-                        EpisodeDetailRow(
-                            playlist: playlist,
-                            episode: episode,
-                            seriesId: seriesId,
-                            seriesName: seriesName,
-                            seriesCover: seriesCover
-                        ) { ep, history in
-                            onEpisodeSelected(ep, history)
-                        }
-                        if index < observer.episodes.count - 1 {
-                            Divider()
-                                .padding(.leading, posterMetrics.episodeRowDividerLeading)
+                VStack(alignment: .leading, spacing: 10) {
+                    // Build 78 (Style 1): the picked mockup's
+                    // Episodes header — the title and the season's
+                    // REAL episode count, counted from the loaded
+                    // cards themselves.
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(L("detail.episodes"))
+                            .font(.title3.weight(.bold))
+                        Spacer()
+                        Text(L("detail.episode_count_plural", observer.episodes.count))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.numericText())
+                    }
+                    .padding(.horizontal, 16)
+
+                    // Build 78: episodes are wide CARDS now —
+                    // spaced surfaces, no divider rows.
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(observer.episodes, id: \.id) { episode in
+                            EpisodeDetailRow(
+                                playlist: playlist,
+                                episode: episode,
+                                seriesId: seriesId,
+                                seriesName: seriesName,
+                                seriesCover: seriesCover
+                            ) { ep, history in
+                                onEpisodeSelected(ep, history)
+                            }
                         }
                     }
+                    .padding(.horizontal, 16)
                 }
                 .onChange(of: observer.episodes) { _, newValue in
                     let urls = newValue.compactMap(\.cover).compactMap { URL(string: $0) }
-                    ListImagePrefetch.start(urls: urls, width: posterMetrics.episodeThumbWidth, height: posterMetrics.episodeThumbHeight, contentMode: .fill, loadProfile: .grid)
+                    ListImagePrefetch.start(urls: urls, width: EpisodeCardMetrics.thumbWidth, height: EpisodeCardMetrics.thumbHeight, contentMode: .fill, loadProfile: .grid)
                 }
                 .onAppear {
                     let urls = observer.episodes.compactMap(\.cover).compactMap { URL(string: $0) }
-                    ListImagePrefetch.start(urls: urls, width: posterMetrics.episodeThumbWidth, height: posterMetrics.episodeThumbHeight, contentMode: .fill, loadProfile: .grid)
+                    ListImagePrefetch.start(urls: urls, width: EpisodeCardMetrics.thumbWidth, height: EpisodeCardMetrics.thumbHeight, contentMode: .fill, loadProfile: .grid)
                 }
             }
         }
@@ -2792,7 +2800,6 @@ private struct EpisodeDetailRow: View {
     let seriesCover: String?
     var onStreamSelected: (DBEpisode, DBWatchHistory?) -> Void
 
-    @Environment(\.posterMetrics) private var posterMetrics
     @Query<WatchHistoryRequest> private var watchHistory: DBWatchHistory?
 
     init(
@@ -2837,129 +2844,92 @@ private struct EpisodeDetailRow: View {
         )
     }
 
-    /// Round 10 (point 4): the thumbnail is the episode's OWN still
-    /// when the panel provided one; when it didn't, the row falls
-    /// back to the series' cover art instead of rendering an empty
-    /// placeholder box (the build-46 defect). Both are real art from
-    /// the loaded data — nothing is substituted or invented.
-    private var thumbnailURL: URL? {
-        if let cover = episode.cover?.trimmingCharacters(in: .whitespaces), !cover.isEmpty {
-            return URL(string: cover)
+    /// Build 78 (Style 1): the thumbnail is the episode's OWN
+    /// still — full stop. The round-10 fallback to the SERIES
+    /// cover is DELETED: on panels that ship one still per series
+    /// (or none per episode) it painted the identical series art
+    /// on every row of the list — the exact defect the owner
+    /// picked Style 1 to kill. An episode with no still of its
+    /// own renders the styled number + title card instead (see
+    /// `thumbnail`). (The series cover still feeds the DOWNLOAD
+    /// item's artwork below — a different surface, unchanged.)
+    private var stillURL: URL? {
+        guard let cover = episode.cover?.trimmingCharacters(in: .whitespaces), !cover.isEmpty else {
+            return nil
         }
-        if let cover = seriesCover?.trimmingCharacters(in: .whitespaces), !cover.isEmpty {
-            return URL(string: cover)
-        }
-        return nil
+        return URL(string: cover)
+    }
+
+    /// "EP 3" — a code, not prose: identical in every language
+    /// (the same treatment the old S01E03 code had).
+    private var episodeBadgeText: String? {
+        episode.episodeNum.map { "EP \($0)" }
+    }
+
+    /// The record's own duration string ("42m"), when it has one.
+    private var durationText: String? {
+        guard let d = episode.duration?.trimmingCharacters(in: .whitespacesAndNewlines), !d.isEmpty else { return nil }
+        return d
+    }
+
+    /// In-progress fraction for the card's progress bar — the
+    /// same 2%…98% window the resume logic uses (a finished
+    /// episode shows the Watched label instead, never a full bar).
+    private var watchProgress: Double? {
+        guard let history = watchHistory, history.durationMs > 0 else { return nil }
+        let p = Double(history.lastTimeMs) / Double(history.durationMs)
+        return (p > 0.02 && p < 0.98) ? p : nil
+    }
+
+    /// The episode's own title, unprefixed — the number rides the
+    /// meta line and the fallback card now, not the title text.
+    private var rawEpisodeTitle: String {
+        let raw = episode.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? L("detail.episode_fallback") : raw
     }
 
     var body: some View {
+        // Build 78 (Style 1): the episode is a wide CARD — a
+        // surface holding the episode's own 16:9 still, the
+        // mockup's meta line and progress, and the same tap
+        // targets, download button and watched context menu the
+        // divider row had.
         HStack(alignment: .top, spacing: 12) {
-                // Round 14 (B1): the WHOLE row is tappable, thumbnail
-                // included — the tap target is no longer just the
-                // text block. The download button stays separate.
-                ZStack(alignment: .bottom) {
-                    CachedImage(
-                        url: thumbnailURL,
-                        width: posterMetrics.episodeThumbWidth,
-                        height: posterMetrics.episodeThumbHeight,
-                        cornerRadius: AppTheme.smallCornerRadius,
-                        contentMode: .fill,
-                        iconName: "play.rectangle.fill",
-                        loadProfile: .grid
-                    )
+            thumbnail
 
-                    // Round 10: a play affordance centered on the
-                    // thumbnail, so the row reads as playable video.
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.6), radius: 4)
-                        .frame(width: posterMetrics.episodeThumbWidth, height: posterMetrics.episodeThumbHeight)
-                    
-                    if let history = watchHistory, history.durationMs > 0 {
-                        let progress = Double(history.lastTimeMs) / Double(history.durationMs)
-                        Rectangle()
-                            .fill(AppTheme.accent)
-                            .frame(height: 3)
-                            .frame(width: posterMetrics.episodeThumbWidth * min(max(progress, 0), 1))
-                            .frame(maxWidth: posterMetrics.episodeThumbWidth, alignment: .leading)
-                            .background(Color.black.opacity(0.3))
-                            .cornerRadius(1.5)
-                            .padding(.bottom, 2)
-                            .padding(.horizontal, 4)
-                    }
-                }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    onStreamSelected(episode, watchHistory)
-                }
+            textColumn
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(episodeTitle)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-
-                    FlowMetaRow(episode: episode)
-
-                    // Build 61 (B8, C5): the WATCHED mark uses the
-                    // C5 rule — history at ≥90% or a manual toggle in
-                    // EpisodeWatchStore (context menu below). This is
-                    // deliberately separate from the ≥98% resume/
-                    // finished threshold used by the player shells.
-                    if isWatched {
-                        Label(L("detail.watched"), systemImage: "checkmark.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                            .labelStyle(.titleAndIcon)
-                    } else if let history = watchHistory, history.durationMs > 0 {
-                        let progress = Double(history.lastTimeMs) / Double(history.durationMs)
-                        if progress > 0.02 {
-                            let remainingMs = history.durationMs - history.lastTimeMs
-                            Label(L("detail.remaining_format", formatWatchMs(remainingMs)), systemImage: "play.circle")
-                                .font(.caption)
-                                .foregroundStyle(AppTheme.accent)
-                                .labelStyle(.titleAndIcon)
-                        }
-                    }
-
-                    if let plot = episode.info?.trimmingCharacters(in: .whitespacesAndNewlines), !plot.isEmpty {
-                        Text(plot)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(5)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    onStreamSelected(episode, watchHistory)
-                }
-
-                if let remoteURL {
-                    DownloadButton(
-                        id: DownloadManager.idFor(episode: playlist.id, episodeId: episode.episodeId ?? episode.id),
-                        playlistId: playlist.id,
-                        streamId: episode.episodeId ?? episode.id,
-                        type: "episode",
-                        title: episodeTitle,
-                        secondaryTitle: seriesName,
-                        imageURL: episode.cover ?? seriesCover,
-                        remoteURL: remoteURL,
-                        containerExtension: episode.containerExtension,
-                        seriesId: seriesId,
-                        // seasonId "<playlistUUID>_<seriesId>_<seasonNum>" — the last component
-                        // is the season number. When it wasn't parsed, DownloadsView was sorting S02E01
-                        // ahead of S01E02 (all of them counted as season 0).
-                        seasonNumber: episode.seasonId.split(separator: "_").last.flatMap { Int($0) },
-                        episodeNumber: episode.episodeNum,
-                        compact: true
-                    )
-                }
+            if let remoteURL {
+                DownloadButton(
+                    id: DownloadManager.idFor(episode: playlist.id, episodeId: episode.episodeId ?? episode.id),
+                    playlistId: playlist.id,
+                    streamId: episode.episodeId ?? episode.id,
+                    type: "episode",
+                    title: rawEpisodeTitle,
+                    secondaryTitle: seriesName,
+                    imageURL: episode.cover ?? seriesCover,
+                    remoteURL: remoteURL,
+                    containerExtension: episode.containerExtension,
+                    seriesId: seriesId,
+                    // seasonId "<playlistUUID>_<seriesId>_<seasonNum>" — the last component
+                    // is the season number. When it wasn't parsed, DownloadsView was sorting S02E01
+                    // ahead of S01E02 (all of them counted as season 0).
+                    seasonNumber: episode.seasonId.split(separator: "_").last.flatMap { Int($0) },
+                    episodeNumber: episode.episodeNum,
+                    compact: true
+                )
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        // Build 61 (B8, C5): manual watched toggle on the episode row.
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .fill(AppTheme.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .strokeBorder(AppTheme.cardBorderColor, lineWidth: 0.5)
+        )
+        // Build 61 (B8, C5): manual watched toggle on the episode card.
         .contextMenu {
             Button {
                 episodeWatchStore.setWatched(
@@ -2975,11 +2945,130 @@ private struct EpisodeDetailRow: View {
         }
     }
 
-    private var episodeTitle: String {
-        let num = episode.episodeNum.map { "\($0). " } ?? ""
-        let raw = episode.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let title = raw.isEmpty ? L("detail.episode_fallback") : raw
-        return "\(num)\(title)"
+    /// The card's 16:9 still box. With the episode's OWN still:
+    /// the image + the mockup's accent-ringed play badge. Without
+    /// one: the styled fallback — the episode's NUMBER + TITLE on
+    /// the elevated surface, never the series poster (build 78;
+    /// see `stillURL`).
+    @ViewBuilder
+    private var thumbnail: some View {
+        ZStack {
+            if let stillURL {
+                CachedImage(
+                    url: stillURL,
+                    width: EpisodeCardMetrics.thumbWidth,
+                    height: EpisodeCardMetrics.thumbHeight,
+                    cornerRadius: AppTheme.smallCornerRadius,
+                    contentMode: .fill,
+                    iconName: "play.rectangle.fill",
+                    loadProfile: .grid
+                )
+
+                ZStack {
+                    Circle().fill(Color.black.opacity(0.35))
+                    Circle().strokeBorder(AppTheme.accent, lineWidth: 1.5)
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white)
+                        .offset(x: 1)
+                }
+                .frame(width: 34, height: 34)
+            } else {
+                RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius, style: .continuous)
+                    .fill(AppTheme.elevated)
+                VStack(spacing: 3) {
+                    if let episodeBadgeText {
+                        Text(episodeBadgeText)
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(AppTheme.accent)
+                    }
+                    Text(rawEpisodeTitle)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 8)
+            }
+        }
+        .frame(width: EpisodeCardMetrics.thumbWidth, height: EpisodeCardMetrics.thumbHeight)
+        // Round 14 (B1): the thumbnail is a tap target, like the
+        // text block — the download button stays separate.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onStreamSelected(episode, watchHistory)
+        }
+    }
+
+    private var textColumn: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            // The mockup's meta line: "EP 1 • 42m" — the episode
+            // code in the accent, the record's own duration after
+            // it, and the episode's real rating when it has one
+            // (the old FlowMetaRow's contents, in card order).
+            HStack(spacing: 6) {
+                if let episodeBadgeText {
+                    Text(episodeBadgeText)
+                        .foregroundStyle(AppTheme.accent)
+                }
+                if let durationText {
+                    Text("•")
+                        .foregroundStyle(.secondary)
+                    Text(durationText)
+                        .foregroundStyle(.secondary)
+                }
+                if ContentRating.displayText(episode.rating) != nil {
+                    RatingLabel(rating: episode.rating, style: .compact)
+                }
+            }
+            .font(.caption.weight(.semibold))
+
+            Text(rawEpisodeTitle)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+
+            // In-progress: the mockup's progress bar under the
+            // title (it rode the thumbnail's bottom edge before).
+            if let watchProgress {
+                ProgressView(value: watchProgress)
+                    .tint(AppTheme.accent)
+            }
+
+            // Build 61 (B8, C5): the WATCHED mark uses the
+            // C5 rule — history at ≥90% or a manual toggle in
+            // EpisodeWatchStore (context menu above). This is
+            // deliberately separate from the ≥98% resume/
+            // finished threshold used by the player shells.
+            if isWatched {
+                Label(L("detail.watched"), systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                    .labelStyle(.titleAndIcon)
+            } else if let history = watchHistory, history.durationMs > 0 {
+                let progress = Double(history.lastTimeMs) / Double(history.durationMs)
+                if progress > 0.02 {
+                    let remainingMs = history.durationMs - history.lastTimeMs
+                    Label(L("detail.remaining_format", formatWatchMs(remainingMs)), systemImage: "play.circle")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.accent)
+                        .labelStyle(.titleAndIcon)
+                }
+            }
+
+            if let plot = episode.info?.trimmingCharacters(in: .whitespacesAndNewlines), !plot.isEmpty {
+                Text(plot)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onStreamSelected(episode, watchHistory)
+        }
     }
 
     private func formatWatchMs(_ ms: Int) -> String {
@@ -2991,41 +3080,6 @@ private struct EpisodeDetailRow: View {
     }
 }
 
-
-private struct FlowMetaRow: View {
-    let episode: DBEpisode
-
-    /// "S01E03" from the record's own numbers — the season number is
-    /// the seasonId's last component (the same derivation the
-    /// download button uses), the episode number is the record's.
-    /// A code, not prose: identical in every language.
-    private var episodeCode: String? {
-        guard let ep = episode.episodeNum else { return nil }
-        if let seasonPart = episode.seasonId.split(separator: "_").last, let season = Int(seasonPart) {
-            return String(format: "S%02dE%02d", season, ep)
-        }
-        return String(format: "E%02d", ep)
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            if let episodeCode {
-                Text(episodeCode)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            if let d = episode.duration?.trimmingCharacters(in: .whitespacesAndNewlines), !d.isEmpty {
-                Label(d, systemImage: "clock")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .labelStyle(.titleAndIcon)
-            }
-            if ContentRating.displayText(episode.rating) != nil {
-                RatingLabel(rating: episode.rating, style: .compact)
-            }
-        }
-    }
-}
 
 // MARK: - Series genre grid (round 14, B1)
 

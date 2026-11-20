@@ -439,29 +439,37 @@ struct DetailSectionHeader: View {
     }
 }
 
-// MARK: - Favorite + download row (round 10)
+// MARK: - Glass action row (build 78, Style 1)
 
-/// The square favorite button + download action that sit beside
-/// the big Play button on the detail pages (point 20). The
-/// favorite glyph is the app's star (gold when active) — the same
-/// favorite system as everywhere else, not a second one. The
-/// download slot is the caller's existing `DownloadButton` (full
-/// state machine: progress, pause, delete).
-struct DetailFavoriteDownloadRow<Download: View>: View {
+/// Build 78 (owner-picked Style 1 'wide cards'): the detail pages'
+/// action trio — favorite, download, watchlist — as round GLASS
+/// buttons under the big Play, matching the picked mockups. Every
+/// button performs the SAME action it had in the forms this row
+/// replaces (the square favorite + download row and the full-width
+/// watchlist row): the favorite toggle keeps its haptic + sound +
+/// pulse feedback package, the download slot is the caller's
+/// existing `DownloadButton` in its glass-circle presentation
+/// (same state machine, same actions), and the watchlist button
+/// makes the same WatchlistStore toggle the full-width row made.
+/// Nothing here is decorative.
+struct DetailGlassActionsRow<Download: View>: View {
     let isFavorite: Bool
     let onToggleFavorite: () -> Void
+    let isWatchlisted: Bool
+    let onToggleWatchlist: () -> Void
     @ViewBuilder let download: () -> Download
 
-    /// Round 15 (C12): scale pulse on the favorite toggle, paired with
-    /// the symbol bounce below.
+    /// The favorite toggle's scale pulse (carried over from the
+    /// round-10 row this replaces).
     @State private var favoritePulse = false
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 22) {
             Button {
-                // Round 15 (C12): the favorite toggle's full feedback
-                // package — success haptic + the fenced UI sound —
-                // alongside the visual bounce/pulse.
+                // The favorite toggle's full feedback package —
+                // success haptic + the fenced UI sound — alongside
+                // the visual bounce/pulse (unchanged from the old
+                // square row).
                 Haptics.success()
                 AppSound.play(.favorite)
                 withAnimation(Motion.pressSpring) { favoritePulse = true }
@@ -470,28 +478,101 @@ struct DetailFavoriteDownloadRow<Download: View>: View {
                 }
                 onToggleFavorite()
             } label: {
-                Image(systemName: isFavorite ? "star.fill" : "star")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(isFavorite ? AppTheme.ratingGold : .primary)
+                glassLabel(systemImage: isFavorite ? "star.fill" : "star",
+                           tint: isFavorite ? AppTheme.ratingGold : .primary)
                     .symbolEffect(.bounce, value: isFavorite)
                     .scaleEffect(favoritePulse ? 1.18 : 1.0)
-                    .frame(width: 48, height: 48)
-                    .background(
-                        RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                            .fill(AppTheme.elevated)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                            .strokeBorder(AppTheme.cardBorderColor, lineWidth: 0.5)
-                    )
             }
             .buttonStyle(.plain)
             .accessibilityLabel(L("favorites.title"))
 
             download()
-                .frame(maxWidth: .infinity)
+
+            Button {
+                onToggleWatchlist()
+            } label: {
+                glassLabel(systemImage: isWatchlisted ? "bookmark.fill" : "bookmark",
+                           tint: isWatchlisted ? AppTheme.accent : .primary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L("watchlist.title"))
         }
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
+    }
+
+    /// One round glass button face: ultra-thin material + hairline
+    /// stroke — the same glass recipe as GenreChipRow and the
+    /// action bar's secondary buttons, in the mockup's round form.
+    private func glassLabel(systemImage: String, tint: Color) -> some View {
+        Image(systemName: systemImage)
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(tint)
+            .frame(width: 56, height: 56)
+            .background(Circle().fill(.ultraThinMaterial))
+            .overlay(
+                Circle()
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+            )
+    }
+}
+
+// MARK: - Cast row (build 78: shared by both detail pages)
+
+/// The detail pages' cast row: round monogram avatars from the
+/// REAL cast names. Provider data carries cast names only — no
+/// headshot URLs exist — so each avatar is a monogram of the real
+/// name (never an invented photo). Tapping a person browses their
+/// titles (the C7 person route). Shared since build 78 so the
+/// series page renders cast in the same family as the movie page
+/// (it previously showed name chips).
+struct DetailCastRow: View {
+    let names: [String]
+    var onPersonTap: ((String) -> Void)? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            DetailSectionHeader(title: L("movie.cast"))
+                .padding(.horizontal, 16)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(names, id: \.self) { name in
+                        if let onPersonTap {
+                            Button { onPersonTap(name) } label: { avatar(name) }
+                                .buttonStyle(.plain)
+                        } else {
+                            avatar(name)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .scrollClipDisabled()
+        }
+    }
+
+    private func avatar(_ name: String) -> some View {
+        VStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(AppTheme.accent.opacity(0.22))
+                Text(Self.initials(of: name))
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.accent)
+            }
+            .frame(width: 56, height: 56)
+            Text(name)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .frame(width: 64)
+        }
+    }
+
+    static func initials(of name: String) -> String {
+        let parts = name.split(separator: " ").prefix(2)
+        return parts.compactMap { $0.first }.map(String.init).joined().uppercased()
     }
 }
 
@@ -704,7 +785,12 @@ struct DetailSeasonTabBar: View {
                                 .padding(.vertical, 9)
                                 .background(
                                     Capsule()
-                                        .fill(isSelected ? AppTheme.accent : Color.clear)
+                                        // Build 78 (Style 1): the
+                                        // unselected season pill
+                                        // carries the card surface,
+                                        // as in the picked mockup —
+                                        // not a bare outline.
+                                        .fill(isSelected ? AppTheme.accent : AppTheme.elevated)
                                 )
                                 .overlay(
                                     Capsule()

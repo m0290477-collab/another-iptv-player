@@ -24,6 +24,12 @@ struct DownloadButton: View {
     /// Compact variant — for narrow areas like series episode rows.
     var compact: Bool = false
 
+    /// Build 78 (Style 1): glass-circle variant — the detail pages'
+    /// round glass action trio. Presentation only: the state
+    /// machine, primary action, alerts and context menu are the
+    /// pill form's, unchanged.
+    var glassCircle: Bool = false
+
     @ObservedObject private var manager = DownloadManager.shared
     @Query<DownloadedItemByIDRequest> private var item: DBDownloadedItem?
     /// Round 8 (F-3): the primary tap in the downloading/queued and
@@ -46,7 +52,8 @@ struct DownloadButton: View {
         seriesId: String? = nil,
         seasonNumber: Int? = nil,
         episodeNumber: Int? = nil,
-        compact: Bool = false
+        compact: Bool = false,
+        glassCircle: Bool = false
     ) {
         self.id = id
         self.playlistId = playlistId
@@ -61,6 +68,7 @@ struct DownloadButton: View {
         self.seasonNumber = seasonNumber
         self.episodeNumber = episodeNumber
         self.compact = compact
+        self.glassCircle = glassCircle
         _item = Query(DownloadedItemByIDRequest(id: id), in: \.appDatabase)
     }
 
@@ -82,7 +90,11 @@ struct DownloadButton: View {
 
     var body: some View {
         Button(action: primaryAction) {
-            labelContent
+            if glassCircle {
+                glassLabelContent
+            } else {
+                labelContent
+            }
         }
         .buttonStyle(.plain)
         // Round 15 (C1): dynamic accessibility label + value for
@@ -150,6 +162,47 @@ struct DownloadButton: View {
         case .failed:
             return L("download.a11y.failed_value")
         }
+    }
+
+    /// Build 78 (Style 1): the glass-circle label — icon-only, the
+    /// same five states as the pill form (the downloading state
+    /// keeps its real progress: ring + percent, through the same
+    /// localized "%d%%" format the pill's text uses).
+    @ViewBuilder
+    private var glassLabelContent: some View {
+        ZStack {
+            Circle().fill(.ultraThinMaterial)
+            Circle().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+            switch state {
+            case .idle:
+                Image(systemName: "arrow.down")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+            case .queued:
+                Image(systemName: "clock")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+            case .downloading(let p):
+                VStack(spacing: 1) {
+                    ProgressView(value: max(0, min(1, p)))
+                        .progressViewStyle(.circular)
+                        .controlSize(.mini)
+                    Text(L("download.downloading_format", Int((p * 100).rounded())))
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.primary)
+                        .monospacedDigit()
+                }
+            case .completed:
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.green)
+            case .failed:
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.orange)
+            }
+        }
+        .frame(width: 56, height: 56)
     }
 
     @ViewBuilder

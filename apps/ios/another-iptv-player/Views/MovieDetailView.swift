@@ -223,9 +223,10 @@ struct MovieDetailView: View {
         contentScroll
         .navigationTitle(showNavTitle ? currentMovie.name : "")
         .navigationBarTitleDisplayMode(.inline)
-        // Round 10: the favorite action moved beside the Play
-        // button (DetailFavoriteDownloadRow) — the toolbar star is
-        // gone so the action exists exactly once on this page.
+        // Round 10 / build 78: the favorite action lives in the
+        // glass action row under the Play button
+        // (DetailGlassActionsRow) — the toolbar star is gone so
+        // the action exists exactly once on this page.
         .fullScreenCover(item: $enlargedImage) { wrapper in
             FullscreenImageViewer(url: wrapper.url)
         }
@@ -316,10 +317,27 @@ struct MovieDetailView: View {
                     trailerURL: nil
                 )
 
-                // Round 10 (point 20): favorite + download sit
-                // beside Play as one row (was: a toolbar star plus a
-                // standalone download button below the action bar).
-                DetailFavoriteDownloadRow(isFavorite: isFavorite, onToggleFavorite: toggleFavorite) {
+                // Build 78 (Style 1): favorite / download /
+                // watchlist as the picked mockup's round glass
+                // trio — the same three actions the square favorite
+                // row, the download pill and the full-width
+                // watchlist row performed (watchlist stays a state
+                // SEPARATE from Favorites, with its own surface on
+                // the Movies tab).
+                DetailGlassActionsRow(
+                    isFavorite: isFavorite,
+                    onToggleFavorite: toggleFavorite,
+                    isWatchlisted: watchlistStore.contains(playlistId: playlist.id, streamId: currentMovie.streamId),
+                    onToggleWatchlist: {
+                        // R6: the toggle carries a display snapshot
+                        // so a later-vanished entry stays listed,
+                        // marked unavailable (unchanged behavior).
+                        watchlistStore.toggleMovie(
+                            playlistId: playlist.id, streamId: currentMovie.streamId,
+                            title: currentMovie.name, imageURL: currentMovie.streamIcon
+                        )
+                    }
+                ) {
                     if let remoteURL = PlaybackURLBuilder(playlist: playlist).movieURL(
                         streamId: currentMovie.streamId,
                         containerExtension: currentMovie.containerExtension
@@ -333,7 +351,8 @@ struct MovieDetailView: View {
                             secondaryTitle: currentMovie.genre,
                             imageURL: currentMovie.streamIcon,
                             remoteURL: remoteURL,
-                            containerExtension: currentMovie.containerExtension
+                            containerExtension: currentMovie.containerExtension,
+                            glassCircle: true
                         )
                     } else {
                         EmptyView()
@@ -342,11 +361,6 @@ struct MovieDetailView: View {
                 // The same tight spacing as the trailer row; neutralizing the VStack spacing 20 with -10
                 // DetailActionBar içindeki 10pt ritme hizalar.
                 .padding(.top, -10)
-
-                // C7: Watchlist (bookmark) — a state SEPARATE from
-                // Favorites, with its own surface on the Movies tab.
-                watchlistRow
-                    .padding(.top, -10)
 
                 // Build 61 (B8, J1): add to a custom favorite group.
                 FavoriteGroupMenuItems(
@@ -389,7 +403,11 @@ struct MovieDetailView: View {
                     .padding(.top, -8)
                 }
 
-                if let trailerURL {
+                // Build 78: the trailer card exists ONLY with a
+                // validated trailer URL AND artwork to show — the
+                // empty black box from the owner's recording is
+                // gone by construction.
+                if let trailerURL, trailerImageURL != nil {
                     trailerTile(url: trailerURL)
                 }
 
@@ -407,15 +425,18 @@ struct MovieDetailView: View {
                 }
 
                 if let cast = currentMovie.cast?.trimmingCharacters(in: .whitespacesAndNewlines), !cast.isEmpty {
-                    // Build 65 (Cinematic detail): the cast renders
-                    // as the mockup's round-avatar row. Provider
-                    // data carries cast NAMES only — no headshot
-                    // URLs exist — so each avatar is a monogram of
-                    // the REAL name (never an invented photo).
-                    // Tapping still browses that person's titles
-                    // (the C7 person route), and the full list
-                    // scrolls — nothing is clipped away.
-                    castRow(names: DetailFormatting.peopleList(cast))
+                    // Build 65 (Cinematic detail) / build 78
+                    // (shared component): the cast renders as the
+                    // mockup's round-avatar row. Provider data
+                    // carries cast NAMES only — no headshot URLs
+                    // exist — so each avatar is a monogram of the
+                    // REAL name (never an invented photo). Tapping
+                    // still browses that person's titles (the C7
+                    // person route), and the full list scrolls —
+                    // nothing is clipped away.
+                    DetailCastRow(names: DetailFormatting.peopleList(cast)) { person in
+                        pendingRoute = .person(person)
+                    }
                 }
 
                 // Build 61 (B8, metadata completion): the remaining
@@ -462,96 +483,31 @@ struct MovieDetailView: View {
         .ignoresSafeArea(edges: .top)
     }
 
-    /// Build 65: the cinematic cast row — monogram circles from
-    /// the real cast names (provider data has no headshots).
-    private func castRow(names: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            DetailSectionHeader(title: L("movie.cast"))
-                .padding(.horizontal, 16)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 14) {
-                    ForEach(names, id: \.self) { name in
-                        Button {
-                            pendingRoute = .person(name)
-                        } label: {
-                            VStack(spacing: 6) {
-                                ZStack {
-                                    Circle()
-                                        .fill(AppTheme.accent.opacity(0.22))
-                                    Text(Self.initials(of: name))
-                                        .font(.subheadline.weight(.bold))
-                                        .foregroundStyle(AppTheme.accent)
-                                }
-                                .frame(width: 56, height: 56)
-                                Text(name)
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.center)
-                                    .frame(width: 64)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-            .scrollClipDisabled()
-        }
+    /// Build 78: the trailer tile's artwork — the movie's real
+    /// backdrop (poster fallback), the same chain the tile always
+    /// used, hoisted into one place so the tile can require it:
+    /// a trailer card with NO image at all was an empty black box
+    /// on the owner's recording. No artwork, no card — exactly
+    /// like no trailer, no card.
+    private var trailerImageURL: URL? {
+        currentMovie.backdropPath.flatMap { let t = $0.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : URL(string: t) }
+            ?? currentMovie.streamIcon.flatMap { URL(string: $0) }
     }
 
-    private static func initials(of name: String) -> String {
-        let parts = name.split(separator: " ").prefix(2)
-        return parts.compactMap { $0.first }.map(String.init).joined().uppercased()
-    }
-
-    /// C7 watchlist toggle row: bookmark state, distinct from the
-    /// favorite star beside Play.
-    private var watchlistRow: some View {
-        let inList = watchlistStore.contains(playlistId: playlist.id, streamId: currentMovie.streamId)
-        return Button {
-            // Build 61 (B8, R6): the toggle carries a display
-            // snapshot so a later-vanished entry stays listed,
-            // marked unavailable, instead of being dropped.
-            watchlistStore.toggleMovie(
-                playlistId: playlist.id, streamId: currentMovie.streamId,
-                title: currentMovie.name, imageURL: currentMovie.streamIcon
-            )
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: inList ? "bookmark.fill" : "bookmark")
-                    .font(.footnote.weight(.semibold))
-                Text(inList ? L("watchlist.in_list") : L("watchlist.add"))
-                    .font(.footnote.weight(.semibold))
-                    .lineLimit(1)
-                Spacer()
-            }
-            .foregroundStyle(inList ? AppTheme.accent : Color.primary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background(
-                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                    .fill(AppTheme.elevated)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                    .strokeBorder(AppTheme.cardBorderColor, lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 16)
-        .accessibilityLabel(L("watchlist.title"))
-    }
-
-    /// C7 trailer tile: the movie's real backdrop (poster fallback)
-    /// with a play badge; opens the validated YouTube URL externally.
+    /// C7 trailer tile (build 78 form): the movie's real backdrop
+    /// (poster fallback) as a 16:9 card with the mockup's big glass
+    /// play button; opens the validated YouTube URL externally.
+    /// Rendered ONLY when a validated trailer URL and artwork both
+    /// exist (see the call site).
     private func trailerTile(url: URL) -> some View {
-        Link(destination: url) {
+        let tileWidth = UIScreen.main.bounds.width - 32
+        let tileHeight = tileWidth * 9 / 16
+        return Link(destination: url) {
             ZStack {
                 CachedImage(
-                    url: currentMovie.backdropPath.flatMap { let t = $0.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : URL(string: t) } ?? currentMovie.streamIcon.flatMap { URL(string: $0) },
-                    width: UIScreen.main.bounds.width - 32,
-                    height: 160,
+                    url: trailerImageURL,
+                    width: tileWidth,
+                    height: tileHeight,
                     cornerRadius: AppTheme.cornerRadius,
                     contentMode: .fill,
                     iconName: "film",
@@ -577,7 +533,7 @@ struct MovieDetailView: View {
                     .padding(10)
                 }
             }
-            .frame(height: 160)
+            .frame(height: tileHeight)
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
