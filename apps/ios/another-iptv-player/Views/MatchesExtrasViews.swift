@@ -550,9 +550,13 @@ private struct TeamFixtureRow: View {
     var body: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
+                // Build 79: smaller team-name font so both FULL
+                // names fit on the line; scale factor is only a
+                // safety net for the longest pairings.
                 Text("\(match.home.name ?? "") – \(match.away.name ?? "")")
-                    .font(AppTheme.fontCardTitle)
+                    .font(AppTheme.fontTeamName)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                 if let start = match.startDate {
                     Text(MatchesView.kickoffText(start))
                         .font(AppTheme.fontMetadata)

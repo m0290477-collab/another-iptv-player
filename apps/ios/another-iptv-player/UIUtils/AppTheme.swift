@@ -138,6 +138,11 @@ enum AppTheme {
     static let fontCardTitle: Font = .subheadline.weight(.semibold)
     static let fontMetadata: Font = .caption
     static let fontBadge: Font = .caption2.weight(.bold)
+    /// Build 79: team names in match rows/cards — one step smaller
+    /// than fontCardTitle (owner order: full names, no truncation)
+    /// so long names ("Wolverhampton Wanderers", "Golden State
+    /// Warriors") fit on one line in the match layouts.
+    static let fontTeamName: Font = .caption.weight(.semibold)
 
     /// Spacing tokens (B9).
     static let spacingScreenMargin: CGFloat = 16

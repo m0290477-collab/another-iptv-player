@@ -660,9 +660,13 @@ private struct MatchRowView: View {
                 iconName: "shield"
             )
             // Team name EXACTLY as the payload provides it (M6).
+            // Build 79: the smaller team-name font so the FULL name
+            // fits on one line; the scale factor is only a safety
+            // net for extreme outliers on narrow screens.
             Text(side.name ?? "")
-                .font(AppTheme.fontCardTitle)
+                .font(AppTheme.fontTeamName)
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
             Spacer()
             if match.state != .upcoming, let score = side.score {
                 // Item 11(2): a live score change flashes once

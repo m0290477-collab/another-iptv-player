@@ -1840,7 +1840,12 @@ private struct HomeMatchResultCard: View {
     let match: MatchEvent
 
     var body: some View {
-        HStack(spacing: 10) {
+        // Build 79: team names use the smaller team-name font (plus
+        // slightly tighter spacing/padding for layout room) so the
+        // FULL names fit on one line — the owner's "Houston..." /
+        // "Indianap..." truncation complaint. Score, logos and the
+        // state chip are unchanged.
+        HStack(spacing: 8) {
             CachedImage(
                 url: match.home.logoURL,
                 width: 30,
@@ -1849,9 +1854,10 @@ private struct HomeMatchResultCard: View {
                 iconName: "shield"
             )
             Text(match.home.name ?? "")
-                .font(AppTheme.fontCardTitle)
+                .font(AppTheme.fontTeamName)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Text(scoreText)
@@ -1868,14 +1874,15 @@ private struct HomeMatchResultCard: View {
                 iconName: "shield"
             )
             Text(match.away.name ?? "")
-                .font(AppTheme.fontCardTitle)
+                .font(AppTheme.fontTeamName)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             stateChip
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 12)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity)
         .background(
