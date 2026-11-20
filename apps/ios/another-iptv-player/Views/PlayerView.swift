@@ -636,7 +636,12 @@ private struct PlayerViewImpl: View {
             let clampedProgress = min(max(miniProgress, 0), 1)
             let card = miniCardRect(container: containerSize, safeArea: outerSafeAreaInsets)
             let t = miniTransform(progress: clampedProgress, card: card, container: containerSize)
-            ZStack {
+            // Build 80 (fix round 1): the body chain is staged into
+            // sub-expressions — the single-expression chain exceeded
+            // the type-checker's budget (it gave up inside the
+            // teardown onDisappear). Staging changes nothing that
+            // renders: same views, same modifiers, same order.
+            let playerStage1 = ZStack {
                 // The whole mini-card group is repositioned by the live drag inside
                 // `MiniCardDragLayer`, which is the ONLY view that re-renders while dragging —
                 // the masked/scaled video below is evaluated once and merely re-offset, so the
@@ -796,6 +801,7 @@ private struct PlayerViewImpl: View {
                 return
             }
         }
+            let playerStage2 = playerStage1
         .onChange(of: playbackPresentationKey) { _, _ in
             player.setPlaybackPresentation(makePresentation())
         }
@@ -817,6 +823,7 @@ private struct PlayerViewImpl: View {
             saveWatchHistory(tags: historySaveTags)
             player.teardown()
         }
+            return playerStage2
         .sheet(isPresented: $showTrackSettings) {
             PlaybackTrackSettingsSheet(player: player, showDebugOverlay: $showDebugOverlay, streamURL: url)
                 .presentationDragIndicator(.visible)

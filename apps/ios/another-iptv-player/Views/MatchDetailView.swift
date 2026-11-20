@@ -524,7 +524,7 @@ struct MatchDetailView: View {
                                     Text(hit.channelName)
                                         .font(AppTheme.fontCardTitle)
                                         .lineLimit(1)
-                                    Text(hit.programmeTitle ?? hit.playlistName)
+                                    Text(hit.playlistName)
                                         .font(AppTheme.fontMetadata)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)

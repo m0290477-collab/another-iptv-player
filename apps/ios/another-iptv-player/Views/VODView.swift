@@ -429,7 +429,7 @@ struct VODView: View {
             // Build 80 (item 4): a REAL text field (CatalogSearchField,
             // the same field global search uses) bound to the tab's own
             // query — typing filters this tab's catalog below.
-            CatalogSearchField(text: $tabSearchText, prompt: L("home.search_placeholder"))
+            CatalogSearchField(text: $tabSearchText, placeholder: L("home.search_placeholder"))
             .padding(.top, 4)
 
             Text(L("home.count_movies", CatalogCountFormatter.string(displayCategories.reduce(0) { $0 + (displayItemsByCategory[$1.id]?.count ?? 0) })))

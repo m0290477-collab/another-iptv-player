@@ -443,7 +443,7 @@ struct SeriesView: View {
         VStack(alignment: .leading, spacing: 12) {
             // Build 80 (item 4): REAL text field bound to the tab's
             // own query (see VODView) — typing filters this tab.
-            CatalogSearchField(text: $tabSearchText, prompt: L("home.search_placeholder"))
+            CatalogSearchField(text: $tabSearchText, placeholder: L("home.search_placeholder"))
             .padding(.top, 4)
 
             Text(L("home.count_series", CatalogCountFormatter.string(displayCategories.reduce(0) { $0 + (displayItemsByCategory[$1.id]?.count ?? 0) })))

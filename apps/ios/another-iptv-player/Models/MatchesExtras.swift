@@ -174,14 +174,11 @@ private extension Optional where Wrapped == String {
 // MARK: - 10c Watch on your channels (local data only)
 
 struct WatchChannelHit: Identifiable {
-    var id: String { "\(playlistId.uuidString)|\(channelName)|\(programmeTitle ?? "")" }
+    var id: String { "\(playlistId.uuidString)|\(channelName)" }
     let playlistId: UUID
     let playlistName: String
     let channelName: String
     let channelLogoURL: URL?
-    /// The matched EPG programme title, when the hit came from
-    /// the guide; nil for a pure channel-name match.
-    let programmeTitle: String?
     /// Everything the player needs, resolved at tap time.
     let streamRef: WatchStreamRef
 }
@@ -192,11 +189,14 @@ enum WatchStreamRef {
 }
 
 /// Searches the USER'S OWN playlists for a channel airing the
-/// match: EPG now/next programme titles and channel names
-/// against the two team names (and channel names against the
-/// league name). Local database only — no network, and no
-/// broadcast claim is ever invented: a row appears only when
-/// text in the user's own data literally matches.
+/// match: channel names against the two team names (and
+/// against the league name). Local database only — no network,
+/// and no broadcast claim is ever invented: a row appears only
+/// when text in the user's own data literally matches.
+/// (Build 80, fix round 1: the former EPG now/next
+/// programme-title path was removed with the TV Guide/EPG
+/// system — the guide data source no longer exists;
+/// channel-name matching is unaffected.)
 enum WatchChannelSearch {
     static func search(homeName: String?, awayName: String?, leagueName: String?) async -> [WatchChannelHit] {
         let needles = [homeName, awayName]
@@ -211,63 +211,27 @@ enum WatchChannelSearch {
             let namesById = Dictionary(uniqueKeysWithValues: playlists.map { ($0.id, $0.name) })
 
             func like(_ needle: String) -> String { "%" + needle + "%" }
-            func xtreamHit(_ stream: DBLiveStream, programme: String?) -> WatchChannelHit {
+            func xtreamHit(_ stream: DBLiveStream) -> WatchChannelHit {
                 WatchChannelHit(
                     playlistId: stream.playlistId,
                     playlistName: namesById[stream.playlistId] ?? "",
                     channelName: stream.name,
                     channelLogoURL: stream.streamIcon.flatMap { URL(string: $0) },
-                    programmeTitle: programme,
                     streamRef: .xtreamLive(playlistId: stream.playlistId, streamId: stream.streamId)
                 )
             }
-            func m3uHit(_ channel: DBM3UChannel, programme: String?) -> WatchChannelHit? {
+            func m3uHit(_ channel: DBM3UChannel) -> WatchChannelHit? {
                 guard let url = URL(string: channel.url) else { return nil }
                 return WatchChannelHit(
                     playlistId: channel.playlistId,
                     playlistName: namesById[channel.playlistId] ?? "",
                     channelName: channel.name,
                     channelLogoURL: channel.tvgLogo.flatMap { URL(string: $0) },
-                    programmeTitle: programme,
                     streamRef: .m3u(url: url, name: channel.name, logoURL: channel.tvgLogo.flatMap { URL(string: $0) })
                 )
             }
 
-            // (1) EPG now/next: programmes airing within
-            // [now-3h, now+36h] whose title names a team. The
-            // join to a channel uses the EPG store's own key
-            // rule (channelKey = lowercased epgChannelId / tvgId
-            // / channel name — the former EPG key normalization).
-            let now = Date()
-            let windowStart = Int64(now.addingTimeInterval(-3 * 3600).timeIntervalSince1970)
-            let windowEnd = Int64(now.addingTimeInterval(36 * 3600).timeIntervalSince1970)
-            for needle in needles {
-                let programmes = try DBEPGProgramme
-                    .filter(Column("title").like(like(needle)))
-                    .filter(Column("startTs") >= windowStart && Column("startTs") <= windowEnd)
-                    .order(Column("startTs"))
-                    .limit(10)
-                    .fetchAll(db)
-                for programme in programmes {
-                    let key = programme.channelKey
-                    if let stream = try DBLiveStream
-                        .filter(sql: "playlistId = ? AND (lower(epgChannelId) = ? OR lower(name) = ?)",
-                                arguments: [programme.playlistId, key, key])
-                        .fetchOne(db),
-                       seen.insert("x|\(stream.playlistId)|\(stream.streamId)").inserted {
-                        hits.append(xtreamHit(stream, programme: programme.title))
-                    } else if let channel = try DBM3UChannel
-                        .filter(sql: "playlistId = ? AND (lower(tvgId) = ? OR lower(tvgName) = ? OR lower(name) = ?)",
-                                arguments: [programme.playlistId, key, key, key])
-                        .fetchOne(db),
-                       seen.insert("m|\(channel.id)").inserted,
-                       let hit = m3uHit(channel, programme: programme.title) {
-                        hits.append(hit)
-                    }
-                }
-            }
-
-            // (2) Channel names themselves (teams, then league).
+            // Channel names themselves (teams, then league).
             var nameNeedles = needles
             if let leagueNeedle { nameNeedles.append(leagueNeedle) }
             for needle in nameNeedles {
@@ -277,14 +241,14 @@ enum WatchChannelSearch {
                     .fetchAll(db)
                 for stream in streams
                 where seen.insert("x|\(stream.playlistId)|\(stream.streamId)").inserted {
-                    hits.append(xtreamHit(stream, programme: nil))
+                    hits.append(xtreamHit(stream))
                 }
                 let channels = try DBM3UChannel
                     .filter(Column("name").like(like(needle)))
                     .limit(10)
                     .fetchAll(db)
                 for channel in channels where seen.insert("m|\(channel.id)").inserted {
-                    if let hit = m3uHit(channel, programme: nil) { hits.append(hit) }
+                    if let hit = m3uHit(channel) { hits.append(hit) }
                 }
             }
             return Array(hits.prefix(20))
