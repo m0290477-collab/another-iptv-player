@@ -2031,8 +2031,8 @@ struct SeriesDetailView: View {
     /// its first episode ("Play S3 · Episode 1").
     private var primaryActionTitle: String {
         if playTargetsSelectedSeason, let season = selectedSeason {
-            if let ep = selectedSeasonFirstEpisode {
-                return L("detail.play_season_episode", season.seasonNumber, ep.episodeNum)
+            if let ep = selectedSeasonFirstEpisode, let num = ep.episodeNum {
+                return L("detail.play_season_episode", season.seasonNumber, num)
             }
             return L("detail.play_season", season.seasonNumber)
         }
