@@ -1137,15 +1137,6 @@ struct HomeView: View {
 
     private static let lastVisitKey = "home.lastVisitAt"
 
-    // MARK: Section 2 — Match Results
-
-    /// One card per match, stacked (build 80, item 8: two team
-    /// rows — logo + FULL name + that team's score per row — with
-    /// the state chip on a slim header line). Build 80 (item 5):
-    /// tapping a card opens THAT match's own detail page; only the
-    /// header's See-all opens the full Matches screen. Renders
-    /// nothing when today has no live or finished match.
-    @ViewBuilder
     // MARK: Sports entries (build 81, item 9)
 
     /// One card per covered sport (Soccer / NFL / NBA — the
@@ -1202,6 +1193,15 @@ struct HomeView: View {
         }
     }
 
+    // MARK: Section 2 — Match Results
+
+    /// One card per match, stacked (build 80, item 8: two team
+    /// rows — logo + FULL name + that team's score per row — with
+    /// the state chip on a slim header line). Build 80 (item 5):
+    /// tapping a card opens THAT match's own detail page; only the
+    /// header's See-all opens the full Matches screen. Renders
+    /// nothing when today has no live or finished match.
+    @ViewBuilder
     private var matchResultsSection: some View {
         if !matchResults.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
