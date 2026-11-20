@@ -50,7 +50,16 @@ final class ChannelOrderStore: ObservableObject {
     /// keep their incoming order. With no saved order the input is
     /// returned as-is. Duplicate-safe, like `CategoryOrderStore`.
     func applyOrder<T>(_ items: [T], playlistId: UUID, categoryId: String, id: (T) -> String) -> [T] {
-        let saved = orderedIds(playlistId: playlistId, categoryId: categoryId)
+        Self.applySavedOrder(items, saved: orderedIds(playlistId: playlistId, categoryId: categoryId), id: id)
+    }
+
+    /// Build 75 (performance): the ranking itself, split out as a
+    /// nonisolated static so off-main catalog passes (the Live tab's
+    /// detached recompute) can apply a saved order snapshotted on
+    /// the main actor without hopping back per category. Semantics
+    /// are exactly `applyOrder`'s: saved ids first in saved
+    /// sequence, the remainder in incoming order, duplicate-safe.
+    nonisolated static func applySavedOrder<T>(_ items: [T], saved: [String], id: (T) -> String) -> [T] {
         guard !saved.isEmpty else { return items }
         let rank = Dictionary(saved.enumerated().map { ($0.element, $0.offset) },
                               uniquingKeysWith: { first, _ in first })

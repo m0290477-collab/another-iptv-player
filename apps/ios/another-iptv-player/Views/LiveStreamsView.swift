@@ -8,9 +8,24 @@ import GRDBQuery
 /// the moment the live fetch publishes (the store publishes live →
 /// vod → series progressively) instead of waiting for
 /// `streamsLoaded`, which only flips after the LAST type lands.
+/// Build 75 (performance): EVERY recompute input now rides in
+/// this one token (health revision, hidden categories/channels,
+/// empty-category toggle, category + channel order, favorites
+/// toggle, grid search + chip) — the tab used to carry eight
+/// separate `.task(id:)` modifiers plus the grid's own, so one
+/// appearance could fire the full catalog pass up to nine times.
 private struct LiveRecomputeToken: Equatable {
     let loaded: Bool
     let liveCount: Int
+    let healthRevision: Int
+    let hiddenCategories: Set<String>
+    let hiddenChannelsVersion: Int
+    let showEmptyCategories: Bool
+    let categoryOrder: [String]
+    let channelOrderVersion: Int
+    let favoritesOnly: Bool
+    let gridQuery: String
+    let gridCategory: String?
 }
 
 struct LiveStreamsView: View {
@@ -45,10 +60,11 @@ struct LiveStreamsView: View {
     /// now/next lines via `EPGNowNextLine`).
     @State private var selectedCategoryId: String? = nil
 
-    private var filteredGridItems: [LiveStreamWithCategory] {
-        guard let selectedCategoryId else { return gridItems }
-        return gridItems.filter { $0.stream.categoryId == selectedCategoryId }
-    }
+    // Build 75 (performance): the grid's category-chip filter used
+    // to run here as a computed property — a full walk over the
+    // grid list on EVERY body pass. It is folded into
+    // `recomputeFilter`'s detached pass now (the chip rides in the
+    // recompute token), and the grid reads `gridItems` directly.
     // Build 61 (B8, Z6): recompute when the empty-category toggle flips.
     @AppStorage(EmptyCategoryVisibility.defaultsKey) private var showEmptyCategories = false
     // === B5 (build 61) Item 11: Multiview entry state — wave-2 (B8) preserve ===
@@ -144,7 +160,14 @@ struct LiveStreamsView: View {
         if let item = recentLiveHistory.first, let match = liveStream(for: item) {
             return match
         }
-        return livePlaybackQueue.first
+        // Build 75 (performance): the head of the playback queue
+        // without building the flattened queue array — the first
+        // stream of the first non-empty section (sections are
+        // non-empty by construction) is the same value.
+        for section in liveChannelSections {
+            if let first = section.streams.first { return first }
+        }
+        return nil
     }
 
     private func heroHistory(for stream: DBLiveStream) -> DBWatchHistory? {
@@ -186,6 +209,30 @@ struct LiveStreamsView: View {
             if result.count == 15 { break }
         }
         return result
+    }
+
+    /// Build 75 (performance): the ONE recompute trigger — every
+    /// input that used to carry its own `.task(id:)` modifier
+    /// (catalog load state, health revision, hidden categories,
+    /// channel hides (B8, H2), the empty-category toggle (B8, Z6),
+    /// category order, channel-order version (B2), the favorites
+    /// toggle, the grid's debounced search and its category chip)
+    /// is a field of this token, so the pass runs once per actual
+    /// change set instead of once per modifier.
+    private var liveRecomputeToken: LiveRecomputeToken {
+        LiveRecomputeToken(
+            loaded: contentStore.streamsLoaded,
+            liveCount: contentStore.liveStreams.count,
+            healthRevision: channelHealth.revision,
+            hiddenCategories: hiddenStore.hiddenIds(playlistId: playlist.id, type: "live"),
+            hiddenChannelsVersion: HiddenChannelStore.shared.version,
+            showEmptyCategories: showEmptyCategories,
+            categoryOrder: orderStore.orderedIds(playlistId: playlist.id, type: "live"),
+            channelOrderVersion: channelOrderStore.version,
+            favoritesOnly: favoritesOnly,
+            gridQuery: gridDebouncedQuery,
+            gridCategory: selectedCategoryId
+        )
     }
 
     var body: some View {
@@ -233,17 +280,11 @@ struct LiveStreamsView: View {
         // (mockup position), which presents the global SearchView. In-tab
         // shelf filtering went with it; AllLiveView and the category
         // detail screens keep their own search fields.
-        .task(id: LiveRecomputeToken(loaded: contentStore.streamsLoaded, liveCount: contentStore.liveStreams.count)) { await recomputeFilter() }
-        .task(id: channelHealth.revision) { await recomputeFilter() }
-        .task(id: hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")) { await recomputeFilter() }
-        // Build 61 (B8, H2): channel-hide changes refresh the shelves.
-        .task(id: HiddenChannelStore.shared.version) { await recomputeFilter() }
-        // Build 61 (B8, Z6): empty-category toggle changes refresh too.
-        .task(id: showEmptyCategories) { await recomputeFilter() }
-        .task(id: orderStore.orderedIds(playlistId: playlist.id, type: "live")) { await recomputeFilter() }
-        // B2 (build 61, item 12): a channel reorder bumps the store's version → recompute.
-        .task(id: channelOrderStore.version) { await recomputeFilter() }
-        .task(id: favoritesOnly) { await recomputeFilter() }
+        // Build 75 (performance): ONE `.task(id:)` for the whole
+        // recompute — the eight modifiers that used to sit here
+        // (one per input) each re-fired the full pass on a tab
+        // switch; their inputs all ride in `liveRecomputeToken`.
+        .task(id: liveRecomputeToken) { await recomputeFilter() }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 NavigationLink {
@@ -508,7 +549,7 @@ struct LiveStreamsView: View {
             }
             LiveCategoryContent(
                 playlist: playlist,
-                items: filteredGridItems,
+                items: gridItems,
                 onStreamSelected: { stream, history in
                     presentLiveSelection(LivePlayerSelection(stream: stream, history: history))
                 }
@@ -524,7 +565,8 @@ struct LiveStreamsView: View {
             }
         }
         .onDisappear { gridDebounceTask?.cancel(); gridDebounceTask = nil }
-        .task(id: gridDebouncedQuery) { await recomputeFilter() }
+        // Build 75: no `.task` here — the debounced query rides in
+        // the root's single `liveRecomputeToken`.
     }
 
     private var shelvesContent: some View {
@@ -634,94 +676,161 @@ struct LiveStreamsView: View {
     /// Round 3: with the native search bar removed there is no in-tab
     /// query anymore — the display set is simply every visible category
     /// with its streams, exactly what the old empty-query path produced.
+    ///
+    /// Build 75 (performance): the heavy middle of this pass — the
+    /// per-category channel order over every bucket, the
+    /// hidden-channel / favorites / dead filters, the grid flatten
+    /// + search + chip filter and the sections build — used to run
+    /// entirely on the main actor, and eight separate `.task(id:)`
+    /// modifiers could each re-fire it, so a single tab switch
+    /// queued several full walks over the whole live catalog
+    /// (~6.8k channels) ahead of the first frame. Now the main
+    /// actor only snapshots the inputs (store reads + the saved
+    /// channel orders), ONE combined token triggers the pass (see
+    /// `liveRecomputeToken`), the value work runs in a detached
+    /// task, and the four display values publish once at the end.
+    /// Filter order and published results are unchanged.
     private func recomputeFilter() async {
         guard playlist.id == contentStore.activePlaylistId else {
             displayCategories = []; displayItemsByCategory = [:]; liveChannelSections = []; return
         }
-        let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")
-        displayCategories = orderStore.applyOrder(
+        let pid = playlist.id
+        // Main-actor snapshots (cheap reads only).
+        let hidden = hiddenStore.hiddenIds(playlistId: pid, type: "live")
+        let orderedCategories = orderStore.applyOrder(
             contentStore.liveCategories.filter { !hidden.contains($0.id) },
-            playlistId: playlist.id, type: "live"
+            playlistId: pid, type: "live"
         ) { $0.id }
-        displayItemsByCategory = contentStore.liveStreamsByCategoryId
-        // B2 (build 61, item 12): apply the user's persisted
-        // per-category channel order (tier 3 of the O7 in-category
-        // order). With no saved order this is the identity, so the
-        // provider order stands; explicit name sorts in the category
-        // screens still override it there, as they do the provider
-        // order today.
-        displayItemsByCategory = Dictionary(uniqueKeysWithValues: displayItemsByCategory.map { categoryId, items in
-            (categoryId, channelOrderStore.applyOrder(items, playlistId: playlist.id, categoryId: categoryId) {
-                String($0.stream.streamId)
-            })
-        })
-        // Build 61 (B8, H2): per-channel hides apply to the shelves
-        // as well as the category grids (same HiddenChannelStore).
-        let hiddenChannels = HiddenChannelStore.shared.hiddenIds(playlistId: playlist.id)
-        if !hiddenChannels.isEmpty {
-            displayItemsByCategory = displayItemsByCategory.mapValues { items in
-                items.filter { !hiddenChannels.contains($0.stream.streamId) }
-            }
+        let byCategory = contentStore.liveStreamsByCategoryId
+        // B2 (build 61, item 12): the saved per-category channel
+        // orders, snapshotted per bucket (the detached pass applies
+        // them via `ChannelOrderStore.applySavedOrder`). Buckets
+        // with no saved order are absent here and pass through as
+        // the identity in the detached pass, exactly as
+        // `applyOrder` treats them.
+        var savedOrders: [String: [String]] = [:]
+        for bucketId in byCategory.keys {
+            let saved = channelOrderStore.orderedIds(playlistId: pid, categoryId: bucketId)
+            if !saved.isEmpty { savedOrders[bucketId] = saved }
         }
-        if favoritesOnly {
-            // B3: keep only favorite channels (and categories that
-            // still hold one) — hero, trending and the play queue all
-            // derive from these same display values.
-            let favoriteIds = Set(favoriteLiveChannels.map(\.stream.streamId))
-            displayItemsByCategory = displayItemsByCategory.mapValues { items in
-                items.filter { favoriteIds.contains($0.stream.streamId) }
-            }
-            displayCategories = displayCategories.filter { !(displayItemsByCategory[$0.id]?.isEmpty ?? true) }
-        }
-        if ChannelHealthStore.hideDeadEnabled {
-            // Build 61 (B9, Q10): hide channels marked dead
-            // (≥3 consecutive playback failures) from the shelves,
-            // the hero/trending derivation and the play queue.
-            let dead = channelHealth.deadKeys()
-            if !dead.isEmpty {
-                displayItemsByCategory = displayItemsByCategory.mapValues { items in
-                    items.filter {
-                        !dead.contains(ImportedSubtitleStore.contentKey(
-                            playlistId: playlist.id, type: "live", streamId: String($0.stream.streamId)
-                        ))
+        let hiddenChannels = HiddenChannelStore.shared.hiddenIds(playlistId: pid)
+        let favoriteIds: Set<Int>? = favoritesOnly ? Set(favoriteLiveChannels.map(\.stream.streamId)) : nil
+        let hideDead = ChannelHealthStore.hideDeadEnabled
+        let deadKeys: Set<String> = hideDead ? channelHealth.deadKeys() : []
+        let streamsLoaded = contentStore.streamsLoaded
+        let query = gridDebouncedQuery
+        let chipCategory = selectedCategoryId
+
+        let result = await Task.detached(priority: .userInitiated) { () -> (
+            categories: [DBCategory],
+            itemsByCategory: [String: [LiveStreamWithCategory]],
+            grid: [LiveStreamWithCategory],
+            sections: [LiveChannelCategorySection]
+        ) in
+            // B2 (build 61, item 12): apply the user's persisted
+            // per-category channel order (tier 3 of the O7
+            // in-category order). With no saved order this is the
+            // identity, so the provider order stands; explicit
+            // name sorts in the category screens still override it
+            // there, as they do the provider order today.
+            var itemsByCategory: [String: [LiveStreamWithCategory]] = [:]
+            itemsByCategory.reserveCapacity(byCategory.count)
+            for (bucketId, items) in byCategory {
+                if let saved = savedOrders[bucketId] {
+                    itemsByCategory[bucketId] = ChannelOrderStore.applySavedOrder(items, saved: saved) {
+                        String($0.stream.streamId)
                     }
+                } else {
+                    itemsByCategory[bucketId] = items
                 }
-                displayCategories = displayCategories.filter { !(displayItemsByCategory[$0.id]?.isEmpty ?? true) }
             }
-        }
-        // Build 61 (B8, Z6): once the catalog is actually loaded,
-        // empty categories leave the shelf list by default (the
-        // Appearance toggle brings them back). Applied AFTER the
-        // hidden-category and favorites filters, so an empty
-        // locked/hidden category stays hidden regardless.
-        if contentStore.streamsLoaded {
-            displayCategories = EmptyCategoryVisibility.visible(displayCategories) {
-                displayItemsByCategory[$0.id]?.count ?? 0
+            // Build 61 (B8, H2): per-channel hides apply to the
+            // shelves as well as the category grids (same
+            // HiddenChannelStore).
+            if !hiddenChannels.isEmpty {
+                itemsByCategory = itemsByCategory.mapValues { items in
+                    items.filter { !hiddenChannels.contains($0.stream.streamId) }
+                }
             }
-        }
-        // Build 61 (B8, Z13): the grid surface's flat item list — the
-        // same display set as the shelves, flattened in category
-        // order, with the grid's in-list search applied (name +
-        // provider number, C11/H5).
-        let flat = displayCategories.flatMap { displayItemsByCategory[$0.id] ?? [] }
-        let q = gridDebouncedQuery.trimmingCharacters(in: .whitespaces)
-        gridItems = q.isEmpty ? flat : flat.filter {
-            CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.stream.name)
-                || ($0.stream.channelNumber.map { String($0) == q } ?? false)
-        }
-        // Round 8 (audit A3): cache the sections here — the old computed
-        // property's mapping, verbatim — so body, hero, trending and the
-        // count line read this instead of re-mapping per render.
-        liveChannelSections = displayCategories.compactMap { cat in
-            let streams = displayItemsByCategory[cat.id]?.map(\.stream) ?? []
-            guard !streams.isEmpty else { return nil }
-            return LiveChannelCategorySection(id: cat.id, title: cat.name, streams: streams)
-        }
+            var categories = orderedCategories
+            if let favoriteIds {
+                // B3: keep only favorite channels (and categories
+                // that still hold one) — hero, trending and the
+                // play queue all derive from these same display
+                // values.
+                itemsByCategory = itemsByCategory.mapValues { items in
+                    items.filter { favoriteIds.contains($0.stream.streamId) }
+                }
+                categories = categories.filter { !(itemsByCategory[$0.id]?.isEmpty ?? true) }
+            }
+            if hideDead {
+                // Build 61 (B9, Q10): hide channels marked dead
+                // (≥3 consecutive playback failures) from the
+                // shelves, the hero/trending derivation and the
+                // play queue.
+                if !deadKeys.isEmpty {
+                    itemsByCategory = itemsByCategory.mapValues { items in
+                        items.filter {
+                            !deadKeys.contains(ImportedSubtitleStore.contentKey(
+                                playlistId: pid, type: "live", streamId: String($0.stream.streamId)
+                            ))
+                        }
+                    }
+                    categories = categories.filter { !(itemsByCategory[$0.id]?.isEmpty ?? true) }
+                }
+            }
+            // Build 61 (B8, Z6): once the catalog is actually
+            // loaded, empty categories leave the shelf list by
+            // default (the Appearance toggle brings them back).
+            // Applied AFTER the hidden-category and favorites
+            // filters, so an empty locked/hidden category stays
+            // hidden regardless.
+            if streamsLoaded {
+                categories = EmptyCategoryVisibility.visible(categories) {
+                    itemsByCategory[$0.id]?.count ?? 0
+                }
+            }
+            // Build 61 (B8, Z13): the grid surface's flat item
+            // list — the same display set as the shelves, flattened
+            // in category order, with the grid's in-list search
+            // applied (name + provider number, C11/H5). Build 75:
+            // the build-65 category chip's filter applies at the
+            // end of the same pass — it used to re-run as a
+            // computed property on every body pass.
+            let flat = categories.flatMap { itemsByCategory[$0.id] ?? [] }
+            let q = query.trimmingCharacters(in: .whitespaces)
+            var grid = q.isEmpty ? flat : flat.filter {
+                CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.stream.name)
+                    || ($0.stream.channelNumber.map { String($0) == q } ?? false)
+            }
+            if let chipCategory {
+                grid = grid.filter { $0.stream.categoryId == chipCategory }
+            }
+            // Round 8 (audit A3): cache the sections here — the
+            // old computed property's mapping, verbatim — so body,
+            // hero, trending and the count line read this instead
+            // of re-mapping per render.
+            let sections = categories.compactMap { cat -> LiveChannelCategorySection? in
+                let streams = itemsByCategory[cat.id]?.map(\.stream) ?? []
+                guard !streams.isEmpty else { return nil }
+                return LiveChannelCategorySection(id: cat.id, title: cat.name, streams: streams)
+            }
+            return (categories, itemsByCategory, grid, sections)
+        }.value
+        guard !Task.isCancelled else { return }
+        displayCategories = result.categories
+        displayItemsByCategory = result.itemsByCategory
+        gridItems = result.grid
+        liveChannelSections = result.sections
     }
 
     private func liveStream(for item: DBWatchHistory) -> DBLiveStream? {
         let streamId = Int(item.streamId) ?? 0
-        if let match = livePlaybackQueue.first(where: { $0.streamId == streamId }) {
+        // Build 75 (performance): scan the cached sections lazily
+        // in queue order — the same first match the flattened
+        // `livePlaybackQueue` scan produced, without building the
+        // whole queue array per call.
+        if let match = liveChannelSections.lazy.flatMap(\.streams).first(where: { $0.streamId == streamId }) {
             return match
         }
         // Lazy search: the eager flatMap+map was copying the whole catalog twice and adding

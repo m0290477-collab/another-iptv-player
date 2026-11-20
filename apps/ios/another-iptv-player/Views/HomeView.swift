@@ -551,7 +551,13 @@ struct HomeView: View {
                     // Build 65: the row spacing is the Display
                     // screen's Home-density preference (default
                     // comfortable = the long-standing 26).
-                    VStack(alignment: .leading, spacing: HomeDensityPreference.current.shelfSpacing) {
+                    // Build 75 (performance): LAZY stack — the old
+                    // eager VStack instantiated every Home row (and
+                    // each row's @Query stores) on every Home
+                    // appearance, however far below the fold the row
+                    // sat; rows now instantiate as they approach
+                    // the viewport. Same order, spacing and content.
+                    LazyVStack(alignment: .leading, spacing: HomeDensityPreference.current.shelfSpacing) {
                         // Round 10 (owner, build 46): the STRONG-style
                         // top bar — wordmark on one side, tidy square
                         // icon buttons on the other (Favorites star,
