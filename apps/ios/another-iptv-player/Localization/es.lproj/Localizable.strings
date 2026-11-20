@@ -63,6 +63,7 @@
 "dashboard.series" = "Series";
 "dashboard.channels" = "Canales";
 "dashboard.settings" = "Ajustes";
+"dashboard.sports" = "Deportes";
 "dashboard.search" = "Buscar";
 
 // MARK: - Live streams

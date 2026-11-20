@@ -63,6 +63,7 @@
 "dashboard.series" = "剧集";
 "dashboard.channels" = "频道";
 "dashboard.settings" = "设置";
+"dashboard.sports" = "体育";
 "dashboard.search" = "搜索";
 
 // MARK: - Live streams

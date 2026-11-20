@@ -129,11 +129,10 @@ struct HomeView: View {
     @State private var heroLiveMatch: MatchEvent?
     @State private var heroLiveMatchLeague: String?
 
-    /// Build 64 (B1): per-sport highlight for the dashboard tiles —
-    /// the sport's first LIVE match today, else its next upcoming
-    /// match today. Real MatchesService data only; a sport with
-    /// neither simply shows no score line on its tile.
-    @State private var sportHighlights: [MatchSport: MatchEvent] = [:]
+    // Build 72: the build-64 per-sport tile highlights
+    // (`sportHighlights`) are GONE with the Home sport tiles —
+    // Sports lives in the bottom tab bar now (DashboardView),
+    // nowhere else on Home.
 
     /// Build 64 (B1): the Top 10 rail's selected genre chip (nil =
     /// All). Filters the rail's own top-rated list — no new data.
@@ -186,70 +185,11 @@ struct HomeView: View {
         heroLiveMatchLeague = nil
     }
 
-    /// Build 64 (B1): one MatchesService pass per sport for the
-    /// dashboard tiles — first LIVE match across the sport's
-    /// leagues, else the earliest upcoming match today. Same
-    /// event-driven cadence as the hero probe (appearance +
-    /// foreground), no polling. Hidden Matches section (F6) →
-    /// no probe, no score lines.
-    private func loadSportHighlights() async {
-        guard !UserDefaults.standard.bool(forKey: "sections.hidden.matches") else {
-            sportHighlights = [:]
-            return
-        }
-        let dateParameter = MatchesService.todayParameter()
-        var highlights: [MatchSport: MatchEvent] = [:]
-        for sport in MatchSport.allCases {
-            let outcomes = await MatchesService.fetchSport(sport, dateParameter: dateParameter)
-            var firstLive: MatchEvent?
-            var firstUpcoming: MatchEvent?
-            for outcome in outcomes {
-                guard case .loaded(let result) = outcome else { continue }
-                if firstLive == nil {
-                    firstLive = result.matches.first(where: { $0.state == .live })
-                }
-                if firstUpcoming == nil {
-                    firstUpcoming = result.matches
-                        .filter { $0.state == .upcoming }
-                        .min(by: { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) })
-                }
-            }
-            if let highlight = firstLive ?? firstUpcoming {
-                highlights[sport] = highlight
-            }
-        }
-        sportHighlights = highlights
-    }
-
-    /// The tile score line for a sport's highlight: live →
-    /// "Cavaliers 103 – 102 Grizzlies" (team nicknames = the last
-    /// word of ESPN's full names; full names do not fit a tile),
-    /// upcoming → "Arsenal – Chelsea • 20:00". Nil when the sport
-    /// has no highlight.
-    private func sportHighlightLine(for sport: MatchSport) -> (line: String, isLive: Bool)? {
-        guard let match = sportHighlights[sport] else { return nil }
-        let home = Self.teamShortName(match.home.name)
-        let away = Self.teamShortName(match.away.name)
-        switch match.state {
-        case .live:
-            return ("\(home) \(match.home.score ?? "0") – \(match.away.score ?? "0") \(away)", true)
-        case .upcoming:
-            if let date = match.startDate {
-                let formatter = DateFormatter()
-                formatter.timeStyle = .short
-                formatter.dateStyle = .none
-                return ("\(home) – \(away) • \(formatter.string(from: date))", false)
-            }
-            return ("\(home) – \(away)", false)
-        case .finished:
-            return nil
-        }
-    }
-
-    private static func teamShortName(_ name: String?) -> String {
-        guard let name, !name.isEmpty else { return "—" }
-        return name.split(separator: " ").last.map(String.init) ?? name
-    }
+    // Build 72: the build-64 tile machinery that lived here —
+    // `loadSportHighlights()`, `sportHighlightLine(for:)` and its
+    // `teamShortName` helper — is REMOVED with the Home sport
+    // tiles it fed. The hero probe above (`loadHeroLiveMatch`)
+    // is untouched: it feeds the "Live now" rail, which stays.
 
     // MARK: - Build 61 fixer (F-3): O1 cross-row dedupe
     //
@@ -497,10 +437,12 @@ struct HomeView: View {
         case .matches:
             // Build 63 (owner, item 7): the bottom-of-Home Matches
             // entry is REMOVED — the sports moved to shortcut tiles
-            // at the top, beside the big category cards (see
-            // `sportTileRow`). The order store no longer emits this
-            // kind; the case stays only so persisted order arrays
-            // from earlier builds still parse.
+            // at the top, beside the big category cards. Build 72:
+            // those tiles are gone too — Sports is a bottom-bar
+            // tab now (DashboardView), its ONE entry point. The
+            // order store no longer emits this kind; the case stays
+            // only so persisted order arrays from earlier builds
+            // still parse.
             EmptyView()
         }
     }
@@ -596,9 +538,10 @@ struct HomeView: View {
 
                         // Build 65 (Home v2 style 1 'Cinematic
                         // Hero'): the hero leads the screen again —
-                        // the build-64 sports dashboard block moves
-                        // BELOW it as a compact sports strip (see
-                        // after the hero). Same F6 gate as before.
+                        // the build-64 sports dashboard block moved
+                        // BELOW it as a compact sports strip (that
+                        // strip is removed in build 72 — Sports is
+                        // a bottom-bar tab now).
 
                         // Build 66 (W3, Home-2): the owner-picked
                         // Cinematic Hero is now the DEFAULT and
@@ -628,19 +571,13 @@ struct HomeView: View {
                         // Renders nothing when nothing is live.
                         liveNowRail
 
-                        // Build 65 (Home v2 style 1): the compact
-                        // sports strip sits directly under the hero
-                        // (the Matches system stays one tap away,
-                        // with its real live scores). Same tiles,
-                        // same F6 gate as build 64's top block.
-                        if !UserDefaults.standard.bool(forKey: "sections.hidden.matches") {
-                            VStack(alignment: .leading, spacing: 12) {
-                                CinematicSectionHeader(title: L("home.sports_dashboard")) {
-                                    MatchesView()
-                                }
-                                sportTileRow
-                            }
-                        }
+                        // Build 72 (owner): the compact sports
+                        // strip that sat directly under the hero
+                        // (build-65 placement of the build-63/64
+                        // tiles) is REMOVED — Sports has exactly
+                        // ONE entry point now, its own tab in the
+                        // bottom bar (DashboardView). Nothing else
+                        // in this stack moved.
 
                         // Build 65 (Home v2 style 1, landscape):
                         // in landscape the cinematic layout pairs
@@ -851,11 +788,11 @@ struct HomeView: View {
             series: seriesHiddenIds
         )) { await recompute() }
         // Build 61 fixer (Z12): the live-match hero probe, once per
-        // Home appearance for this playlist.
-        // Build 64 (B1): the sport-tile highlights load alongside.
+        // Home appearance for this playlist. (Build 72: the
+        // build-64 sport-tile highlight load that ran alongside is
+        // gone with the tiles.)
         .task(id: playlist.id) {
             await loadHeroLiveMatch()
-            await loadSportHighlights()
         }
         // Z12: re-probe when the app returns to the foreground, so a
         // match that kicked off while the app was backgrounded can
@@ -864,7 +801,6 @@ struct HomeView: View {
             if phase == .active {
                 Task {
                     await loadHeroLiveMatch()
-                    await loadSportHighlights()
                 }
             }
         }
@@ -1399,9 +1335,10 @@ struct HomeView: View {
     /// channels) demoted to rail size with its tap behaviour
     /// unchanged: match card first (tap → MatchesView), then live
     /// channels (tap → the live player via the same Home path).
-    /// Renders nothing when nothing is live. This replaces nothing:
-    /// the sports tiles strip and the On-now row further down stay
-    /// exactly where they were.
+    /// Renders nothing when nothing is live. (Build 72: the match
+    /// card's tap into MatchesView stays as-is — it is a live-
+    /// content card in this rail, not a sports entry tile; the
+    /// On-now row further down is unchanged too.)
     @ViewBuilder
     private var liveNowRail: some View {
         let channels = liveRailChannels
@@ -1487,49 +1424,15 @@ struct HomeView: View {
     // MARK: - Category tiles
 
     private var categoryTiles: some View {
-        // Build 64 (B1): the sport tiles moved OUT of this row to
-        // the top sports-dashboard block (see body); only the three
-        // big category tiles remain here.
+        // Only the three big category tiles live here. (The
+        // build-63/64 sport tiles that once neighboured this row
+        // are removed entirely in build 72 — Sports is a tab.)
         categoryTileRow
     }
 
-    /// Build 63 (item 7) created these tiles; build 64 (B1) moves
-    /// the row to the top dashboard block and gives each tile its
-    /// real live-score / next-fixture line from `sportHighlights`.
-    private var sportTileRow: some View {
-        HStack(alignment: .top, spacing: 12) {
-            HomeSportTile(
-                title: L("matches.tab.soccer"),
-                subtitle: L("matches.subtitle"),
-                tint: AppTheme.accent,
-                iconName: "soccerball",
-                sport: .soccer,
-                liveLine: sportHighlightLine(for: .soccer)?.line,
-                isLive: sportHighlightLine(for: .soccer)?.isLive ?? false
-            )
-            HomeSportTile(
-                title: L("matches.tab.nfl"),
-                subtitle: L("matches.subtitle"),
-                tint: AppTheme.live,
-                iconName: "football.fill",
-                sport: .nfl,
-                liveLine: sportHighlightLine(for: .nfl)?.line,
-                isLive: sportHighlightLine(for: .nfl)?.isLive ?? false
-            )
-            HomeSportTile(
-                title: L("matches.tab.nba"),
-                subtitle: L("matches.subtitle"),
-                tint: SectionTheme.series,
-                iconName: "basketball.fill",
-                sport: .nba,
-                liveLine: sportHighlightLine(for: .nba)?.line,
-                isLive: sportHighlightLine(for: .nba)?.isLive ?? false
-            )
-        }
-        .padding(.horizontal, 16)
-        .frame(maxWidth: 560)
-        .frame(maxWidth: .infinity)
-    }
+    // Build 72: `sportTileRow` and its three `HomeSportTile`s
+    // (Soccer / NFL / NBA) are REMOVED — Sports' one entry point
+    // is its bottom-bar tab (DashboardView).
 
     private var categoryTileRow: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -1583,7 +1486,8 @@ struct HomeView: View {
     }
 
     // Build 63 (item 7): the B12 bottom Matches entry row was
-    // removed — sports are top shortcut tiles now (`sportTileRow`).
+    // removed; build 72 removed the top shortcut tiles too —
+    // Sports is a bottom-bar tab now (DashboardView).
 
 
     // MARK: - Shelves
@@ -2911,64 +2815,7 @@ private struct HomeCategoryTile: View {
     }
 }
 
-/// Build 63 (owner, item 7): a sport shortcut tile in the exact
-/// visual language of `HomeCategoryTile` (tinted icon disc + bold
-/// label + secondary sublabel on the shared surface card), but as
-/// a NavigationLink — each sport lands on its own Matches tab.
-private struct HomeSportTile: View {
-    let title: String
-    let subtitle: String
-    let tint: Color
-    let iconName: String
-    let sport: MatchSport
-    /// Build 64 (B1): the sport's live score / next fixture line
-    /// (real MatchesService data), nil when the sport has neither
-    /// today — the tile then shows only its subtitle, as in 63.
-    var liveLine: String? = nil
-    var isLive: Bool = false
-
-    var body: some View {
-        NavigationLink {
-            MatchesView(initialSport: sport)
-        } label: {
-            VStack(spacing: 8) {
-                ZStack {
-                    Circle()
-                        .fill(tint)
-                    Image(systemName: iconName)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 46, height: 46)
-
-                Text(title)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                if let liveLine {
-                    HStack(spacing: 4) {
-                        if isLive {
-                            Circle()
-                                .fill(AppTheme.live)
-                                .frame(width: 6, height: 6)
-                        }
-                        Text(liveLine)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(isLive ? AppTheme.live : .secondary)
-                            .lineLimit(1)
-                    }
-                }
-            }
-            .padding(.vertical, 14)
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity)
-            .background(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous).fill(AppTheme.surface))
-            .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
-        }
-        .buttonStyle(PressScaleButtonStyle())
-    }
-}
+// Build 72: the build-63 `HomeSportTile` struct that closed
+// this file is REMOVED with the Home sport tiles — Sports
+// has exactly one entry point now, its bottom-bar tab
+// (DashboardView).

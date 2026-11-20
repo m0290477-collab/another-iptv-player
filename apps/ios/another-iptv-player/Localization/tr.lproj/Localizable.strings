@@ -69,6 +69,7 @@
 "dashboard.series" = "Diziler";
 "dashboard.channels" = "Kanallar";
 "dashboard.settings" = "Ayarlar";
+"dashboard.sports" = "Spor";
 "dashboard.search" = "Arama";
 
 // MARK: - Live streams

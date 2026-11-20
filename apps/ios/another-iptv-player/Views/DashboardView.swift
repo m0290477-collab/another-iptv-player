@@ -117,6 +117,26 @@ struct DashboardView: View {
                     }
                 } label: { tabLabel(L("dashboard.home"), glyph: "TabGlyphHome", tab: DashboardTab.home) }
 
+                // Build 72 (owner): Sports gets ONE place — its own
+                // tab, SECOND in the bar (TabView child order sets
+                // the bar order). It opens the EXISTING Matches
+                // section, presented exactly as Home's entries used
+                // to present it: MatchesView carries its own title
+                // and toolbar, so there is deliberately NO
+                // dashboardNavigation wrapper here — the Matches
+                // screens are untouched. Like Movies/Series, the
+                // tab follows the ONE section-visibility store:
+                // hiding Matches in Settings ▸ Appearance removes
+                // this tab too (and the onChange below lands a
+                // user standing here on Home, same as Movies/Series).
+                if sectionVisibility.isVisible(.matches) {
+                    Tab(value: DashboardTab.sports) {
+                        NavigationStack {
+                            MatchesView()
+                        }
+                    } label: { tabLabel(L("dashboard.sports"), glyph: "TabGlyphSports", tab: DashboardTab.sports) }
+                }
+
                 Tab(value: DashboardTab.live) {
                     NavigationStack {
                         LiveStreamsView(playlist: playlist)
@@ -162,6 +182,12 @@ struct DashboardView: View {
                 // itself is untouched: it lives at the top of every
                 // content tab (HomeSearchBar → SearchView sheet), which
                 // is also the app's ONE search entry (no duplication).
+                // Build 72 (owner, explicit order, picked from
+                // mockups): a SIXTH tab joins the bar — Sports,
+                // second — so the bar is now Home / Sports / Live TV
+                // / Movies / Series / Settings. This supersedes the
+                // round-7 five-tab count by the owner's own word;
+                // Search stays exactly where it was.
             }
             // Round 16 (P3): NO container animation/offset and no
             // .sidebarAdaptable. The adaptable style presents the
@@ -216,7 +242,8 @@ struct DashboardView: View {
         // tab.
         .onChange(of: sectionVisibility.hiddenSections) { _, hidden in
             if (selectedTab == .movies && hidden.contains(.movies))
-                || (selectedTab == .series && hidden.contains(.series)) {
+                || (selectedTab == .series && hidden.contains(.series))
+                || (selectedTab == .sports && hidden.contains(.matches)) {
                 selectedTab = .home
             }
         }
@@ -401,11 +428,20 @@ private enum DashboardTab: Int, CaseIterable {
     case movies = 2
     case series = 3
     case settings = 4
+    // Build 72: Sports displays SECOND in the bar (the TabView
+    // child order above sets the bar order, not the raw values)
+    // but takes rawValue 5 so every existing tab's persisted
+    // value keeps its exact meaning — stored selections from
+    // earlier builds restore identically.
+    case sports = 5
 
     static let storageKey = "dashboard_selected_tab"
 
     /// Only content tabs are persisted; Settings is ephemeral by design.
-    var isPersisted: Bool { rawValue <= DashboardTab.series.rawValue }
+    /// (Build 72: expressed as `!= .settings` — identical results
+    /// for the original five cases, and Sports persists like the
+    /// other content tabs.)
+    var isPersisted: Bool { self != .settings }
 
     /// Round 15 (C11): the two locked tab-migration flags and their
     /// index shifting are REMOVED — the fossils dated from the era when
@@ -417,7 +453,12 @@ private enum DashboardTab: Int, CaseIterable {
     static func restoreInitialTab() -> DashboardTab {
         let defaults = UserDefaults.standard
         guard defaults.object(forKey: storageKey) != nil else { return .home }
-        let clamped = min(max(defaults.integer(forKey: storageKey), 0), DashboardTab.settings.rawValue)
+        // Build 72: the clamp's upper bound is the largest case
+        // raw value (Sports = 5), not Settings' — a stored Sports
+        // selection restores as Sports. For every value stored by
+        // earlier builds (0–4) the clamp behaves exactly as before.
+        let maxRawValue = DashboardTab.allCases.map(\.rawValue).max() ?? DashboardTab.settings.rawValue
+        let clamped = min(max(defaults.integer(forKey: storageKey), 0), maxRawValue)
         let tab = DashboardTab(rawValue: clamped) ?? .home
         return tab.isPersisted ? tab : .live
     }
