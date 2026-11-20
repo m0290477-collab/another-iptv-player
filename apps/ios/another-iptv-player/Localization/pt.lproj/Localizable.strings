@@ -453,6 +453,9 @@
 "home.top_rated_series" = "Séries mais bem avaliadas";
 "home.new_movies" = "Filmes novos";
 "home.new_series" = "Séries novas";
+"home.match_results" = "Resultados das partidas";
+"home.most_popular_movies" = "Filmes mais populares";
+"home.most_popular_series" = "Séries mais populares";
 "home.chip_all" = "Tudo";
 "home.chip_newest" = "Mais recentes";
 "home.count_channels" = "%@ canais";

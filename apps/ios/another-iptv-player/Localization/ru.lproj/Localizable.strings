@@ -453,6 +453,9 @@
 "home.top_rated_series" = "Сериалы с высоким рейтингом";
 "home.new_movies" = "Новые фильмы";
 "home.new_series" = "Новые сериалы";
+"home.match_results" = "Результаты матчей";
+"home.most_popular_movies" = "Самые популярные фильмы";
+"home.most_popular_series" = "Самые популярные сериалы";
 "home.chip_all" = "Все";
 "home.chip_newest" = "Новейшие";
 "home.count_channels" = "%@ каналов";

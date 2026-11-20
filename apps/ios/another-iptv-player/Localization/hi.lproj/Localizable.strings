@@ -453,6 +453,9 @@
 "home.top_rated_series" = "सर्वोच्च रेटिंग वाली सीरीज़";
 "home.new_movies" = "नई फ़िल्में";
 "home.new_series" = "नई सीरीज़";
+"home.match_results" = "मैच परिणाम";
+"home.most_popular_movies" = "सबसे लोकप्रिय फ़िल्में";
+"home.most_popular_series" = "सबसे लोकप्रिय सीरीज़";
 "home.chip_all" = "सभी";
 "home.chip_newest" = "नवीनतम";
 "home.count_channels" = "%@ चैनल";

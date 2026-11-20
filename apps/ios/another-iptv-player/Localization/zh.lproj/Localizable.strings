@@ -453,6 +453,9 @@
 "home.top_rated_series" = "高分剧集";
 "home.new_movies" = "最新电影";
 "home.new_series" = "最新剧集";
+"home.match_results" = "比赛结果";
+"home.most_popular_movies" = "最受欢迎的电影";
+"home.most_popular_series" = "最受欢迎的剧集";
 "home.chip_all" = "全部";
 "home.chip_newest" = "最新";
 "home.count_channels" = "%@ 个频道";

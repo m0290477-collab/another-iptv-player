@@ -7,12 +7,17 @@ import GRDBQuery
 /// The Home tab — the app's front door, built entirely from the loaded
 /// catalog (PlaylistContentStore) and the existing watch-history source.
 /// Nothing here is hard-coded: the featured carousel ranks movies/series
-/// that carry artwork by the round-3 normalized rating rule, the tiles
-/// show the real catalog totals, Top Rated rows reuse that same ranking,
-/// New rows reuse the catalog's own added/last-modified ordering, and
-/// Continue Watching is the same ContinueWatchingRow the Live tab uses,
-/// with no type filter. Every tap routes into an existing detail view,
-/// player shell, or tab — no new navigation machinery.
+/// that carry artwork by the round-3 normalized rating rule, and the
+/// Most Popular rails reuse that same ranking (the catalog carries no
+/// popularity metric — the normalized rating is the closest real
+/// ordering the data offers). Build 77 (owner-picked Design A): Home
+/// is exactly five sections in order — the hero, Match Results
+/// (per-match cards from the real MatchesService payload), Most
+/// Popular Movies, Most Popular Series, and ONE merged Continue
+/// Watching rail of wide cards. A cross-section dedupe (hero first,
+/// then the rails, then Continue) guarantees no movie/series/episode
+/// appears twice on this screen. Every tap routes into an existing
+/// detail view, player shell, or tab — no new navigation machinery.
 struct HomeView: View {
     let playlist: Playlist
     let onOpenLive: () -> Void
@@ -21,7 +26,6 @@ struct HomeView: View {
 
     @ObservedObject private var contentStore = PlaylistContentStore.shared
     @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
-    @ObservedObject private var epgStore = EPGStore.shared
     /// B3 (Round 14): quick playlist switcher — wired by the dashboard
     /// to ContentView's existing switch mechanism. Optional so this
     /// view's existing call site compiles unchanged; when nil the
@@ -72,9 +76,10 @@ struct HomeView: View {
     // cut-adjacent to the removed new-episode alerts). No state,
     // no shelf, no recompute for either remains.
     @State private var newSinceVisit: [FeaturedEntry] = []
-    @State private var tonightEntries: [TonightEntry] = []
     // Round 10: the category tiles are icon cards now — the tile-art
     // state rounds 5–9 maintained for them is gone with the photos.
+    // Build 77: the Tonight shelf is gone with the rest of the
+    // pre-Design-A rows — Home renders five sections only.
 
     // Carousel state.
     @State private var featuredIndex = 0
@@ -114,416 +119,199 @@ struct HomeView: View {
     @ObservedObject private var updateService = AppUpdateService.shared
     @State private var showOfflineAlert = false
 
-    // Build 61 (B7): J3 Home row order (persisted, O1 default) +
-    // Edit-mode state for the content rows.
-    @ObservedObject private var homeOrderStore = HomeSectionOrderStore.shared
-    @State private var editingHomeRows = false
+    // Build 77 (Design A): the J3 row-order / Edit-mode machinery is
+    // gone — the five sections have a fixed order the owner picked,
+    // and the floating "Customize Home" toggle went with it.
 
-    // Build 61 fixer (Z12, M-pack variant): the first LIVE
-    // match found in the real MatchesService data for today, plus
-    // its league name. Nil until a fetch finds one — and nil again
-    // when none is live. Build 66 (W3): this no longer drives the
-    // hero — it leads the "Live now" rail below the Cinematic
-    // Hero. No placeholder data: this is only ever set from a
-    // decoded ESPN payload.
-    @State private var heroLiveMatch: MatchEvent?
-    @State private var heroLiveMatchLeague: String?
+    // Build 77 (Design A): today's match RESULTS for the Match
+    // Results section — live matches first, then the most recent
+    // finished ones, from the real MatchesService payload only
+    // (the same fetch the Matches tab runs). Empty until a fetch
+    // lands, and empty again when today has no live/finished match.
+    @State private var matchResults: [MatchEvent] = []
 
-    /// Build 64 (B1): per-sport highlight for the dashboard tiles —
-    /// the sport's first LIVE match today, else its next upcoming
-    /// match today. Real MatchesService data only; a sport with
-    /// neither simply shows no score line on its tile.
-    @State private var sportHighlights: [MatchSport: MatchEvent] = [:]
-
-    /// Build 64 (B1): the Top 10 rail's selected genre chip (nil =
-    /// All). Filters the rail's own top-rated list — no new data.
-    @State private var top10Genre: String?
+    /// Build 77: seriesId → next-episode label ("S02 E05") for the
+    /// merged Continue rail's finished-series cards, resolved off
+    /// the history change exactly as ContinueSeriesRow resolved
+    /// them — never per body pass.
+    @State private var continueNextLabels: [String: String] = [:]
 
     private var liveHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "live") }
     private var vodHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod") }
     private var seriesHiddenIds: Set<String> { hiddenStore.hiddenIds(playlistId: playlist.id, type: "series") }
 
-    // MARK: - Build 61 (B7): Z12 hero + O1/J3 rows
+    // MARK: - Build 77 (Design A): Match Results data
 
-    /// Z12: the featured live channel — the first channel with a
-    /// programme on air right now (the On-now set), else the first
-    /// live channel in the catalog. Build 66 (W3): no longer the
-    /// hero; it is the first channel of the "Live now" rail below
-    /// the Cinematic Hero. Nil only when the playlist carries no
-    /// live channels at all.
-    private var heroLiveStream: DBLiveStream? {
-        onNowEntries.first?.stream ?? contentStore.liveStreams.first?.stream
-    }
-
-    /// Z12 (fixer): one MatchesService pass for the live match —
+    /// One MatchesService pass for the Match Results section —
     /// sports in MatchesView's tab order (soccer → NFL → NBA),
-    /// leagues in payload order, first `.live` match wins; the
-    /// pass stops at the first hit. Runs once per Home appearance
-    /// and again when the app returns to the foreground
+    /// every league's payload, keeping only matches that HAVE a
+    /// result to show: live now, or finished. Runs once per Home
+    /// appearance and again when the app returns to the foreground
     /// (event-driven, no polling loop). When the user hid the
-    /// Matches section (F6), the probe does not run and no match
-    /// card is shown. Build 66 (W3): the result feeds the "Live
-    /// now" rail, not the hero.
-    private func loadHeroLiveMatch() async {
+    /// Matches section (F6), the pass does not run and the section
+    /// is not shown. Ordering: live matches first (earliest start
+    /// first), then finished matches, most recent first; a match
+    /// carried by two payloads appears once. Capped at 8 cards —
+    /// the full day lives one tap away in MatchesView.
+    private func loadMatchResults() async {
         guard !UserDefaults.standard.bool(forKey: "sections.hidden.matches") else {
-            heroLiveMatch = nil
-            heroLiveMatchLeague = nil
+            matchResults = []
             return
         }
         let dateParameter = MatchesService.todayParameter()
+        var collected: [MatchEvent] = []
+        var seenIds = Set<String>()
         for sport in MatchSport.allCases {
             let outcomes = await MatchesService.fetchSport(sport, dateParameter: dateParameter)
-            for outcome in outcomes {
-                guard case .loaded(let result) = outcome,
-                      let match = result.matches.first(where: { $0.state == .live })
-                else { continue }
-                heroLiveMatch = match
-                heroLiveMatchLeague = result.leagueName
-                return
-            }
-        }
-        heroLiveMatch = nil
-        heroLiveMatchLeague = nil
-    }
-
-    /// Build 64 (B1): one MatchesService pass per sport for the
-    /// dashboard tiles — first LIVE match across the sport's
-    /// leagues, else the earliest upcoming match today. Same
-    /// event-driven cadence as the hero probe (appearance +
-    /// foreground), no polling. Hidden Matches section (F6) →
-    /// no probe, no score lines.
-    private func loadSportHighlights() async {
-        guard !UserDefaults.standard.bool(forKey: "sections.hidden.matches") else {
-            sportHighlights = [:]
-            return
-        }
-        let dateParameter = MatchesService.todayParameter()
-        var highlights: [MatchSport: MatchEvent] = [:]
-        for sport in MatchSport.allCases {
-            let outcomes = await MatchesService.fetchSport(sport, dateParameter: dateParameter)
-            var firstLive: MatchEvent?
-            var firstUpcoming: MatchEvent?
             for outcome in outcomes {
                 guard case .loaded(let result) = outcome else { continue }
-                if firstLive == nil {
-                    firstLive = result.matches.first(where: { $0.state == .live })
-                }
-                if firstUpcoming == nil {
-                    firstUpcoming = result.matches
-                        .filter { $0.state == .upcoming }
-                        .min(by: { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) })
+                for match in result.matches
+                where (match.state == .live || match.state == .finished)
+                    && seenIds.insert(match.id).inserted {
+                    collected.append(match)
                 }
             }
-            if let highlight = firstLive ?? firstUpcoming {
-                highlights[sport] = highlight
-            }
         }
-        sportHighlights = highlights
+        let live = collected
+            .filter { $0.state == .live }
+            .sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
+        let finished = collected
+            .filter { $0.state == .finished }
+            .sorted { ($0.startDate ?? .distantPast) > ($1.startDate ?? .distantPast) }
+        matchResults = Array((live + finished).prefix(8))
     }
 
-    /// The tile score line for a sport's highlight: live →
-    /// "Cavaliers 103 – 102 Grizzlies" (team nicknames = the last
-    /// word of ESPN's full names; full names do not fit a tile),
-    /// upcoming → "Arsenal – Chelsea • 20:00". Nil when the sport
-    /// has no highlight.
-    private func sportHighlightLine(for sport: MatchSport) -> (line: String, isLive: Bool)? {
-        guard let match = sportHighlights[sport] else { return nil }
-        let home = Self.teamShortName(match.home.name)
-        let away = Self.teamShortName(match.away.name)
-        switch match.state {
-        case .live:
-            return ("\(home) \(match.home.score ?? "0") – \(match.away.score ?? "0") \(away)", true)
-        case .upcoming:
-            if let date = match.startDate {
-                let formatter = DateFormatter()
-                formatter.timeStyle = .short
-                formatter.dateStyle = .none
-                return ("\(home) – \(away) • \(formatter.string(from: date))", false)
-            }
-            return ("\(home) – \(away)", false)
-        case .finished:
-            return nil
-        }
-    }
-
-    private static func teamShortName(_ name: String?) -> String {
-        guard let name, !name.isEmpty else { return "—" }
-        return name.split(separator: " ").last.map(String.init) ?? name
-    }
-
-    // MARK: - Build 61 fixer (F-3): O1 cross-row dedupe
+    // MARK: - Build 77 (Design A): cross-section dedupe
     //
-    // SPEC §4.5-O1 mandates ONE shared seen-IDs set threaded through
-    // the Home rows in O1 order — earlier rows win, later rows drop
-    // what was already shown. B7 assembled the rows in O1 order but
-    // never imposed the set, so an in-progress movie rendered in
-    // Continue Watching AND again in Top Rated / New (critic F-3).
-    //
-    // The seen set is built from the EARLIER rows' own data sources,
-    // replicated exactly:
-    // - Continue Watching (row 1): the row's own display algorithm
-    //   (one card per series, finished series dropped, cap 10) run
-    //   over the same history request this view already loads.
-    // - Continue Series (row 2): the latest history record per
-    //   series — the row's source set (its in-progress series are
-    //   already in row 1's set; finished-with-next series join here).
-    // - Recent Channels (row 3): live history deduped by channel,
-    //   resolved against the catalog, cap 15 — the row's algorithm.
-    // The Live shelf, the Movies/Series discovery shelves and
-    // Recently Added then exclude these IDs (see
-    // `applyCrossRowDedupe`, `onNowShelfEntries`,
-    // `recentlyAddedExclusionKeys`). Priority follows the canonical
-    // O1 order, not the user's J3 rearrangement. The hero and the
-    // banners are NOT rows and are unaffected; the Favorites shelf
-    // (user-curated) and Tonight (programme items, not channels)
-    // are not catalog shelves and keep their own contents.
+    // The owner's standing rule for Home: the same movie, series or
+    // episode NEVER appears in two sections of this screen (his
+    // build-75 recording audit found one episode in three rails and
+    // the hero films repeated in the Top 10 rail). Priority follows
+    // the Design A section order — first section wins:
+    //   1. Hero (featured) seeds the seen sets.
+    //   2. Most Popular Movies drops hero movies.
+    //   3. Most Popular Series drops hero series.
+    //   5. The merged Continue rail drops anything sections 1/3/4
+    //      already showed (see `mergedContinueItems`).
+    // (Section 2, Match Results, carries matches — no catalog IDs.)
+    // The recompute-time half runs in `applyCrossRowDedupe`, LAST in
+    // the assembly, over the final hero/rail arrays; the Continue
+    // half is a render-time filter over the same shown sets, because
+    // the rail's data is the live history query.
 
-    /// Row 1's display items, replicated from
-    /// `ContinueWatchingRow.displayItems` over this view's identical
-    /// history source (its limit-50 fetch covers the row's 30).
-    private var continueWatchingDisplayItems: [DBWatchHistory] {
-        var seenSeries = Set<String>()
-        var result: [DBWatchHistory] = []
-        for item in recentHistory.prefix(30) {
-            if item.type == "series", let seriesId = item.seriesId, !seriesId.isEmpty {
-                guard seenSeries.insert(seriesId).inserted else { continue }
-                if item.durationMs > 0,
-                   Double(item.lastTimeMs) / Double(item.durationMs) >= 0.98 {
-                    continue
-                }
-            }
-            result.append(item)
-            if result.count >= 10 { break }
-        }
-        return result
-    }
-
-    /// Movie IDs already shown by the earlier O1 rows.
-    private var homeSeenMovieIDs: Set<Int> {
-        Set(continueWatchingDisplayItems.filter { $0.type == "vod" }
-            .compactMap { Int($0.streamId) })
-    }
-
-    /// Series IDs already shown by rows 1–2 (Continue Watching's
-    /// series cards + Continue Series' source set).
-    private var homeSeenSeriesIDs: Set<Int> {
-        var ids = Set(continueWatchingDisplayItems.filter { $0.type == "series" }
-            .compactMap { $0.seriesId.flatMap(Int.init) ?? Int($0.streamId) })
-        var seenSeries = Set<String>()
-        for item in recentHistory where item.type == "series" {
-            guard let seriesId = item.seriesId, !seriesId.isEmpty,
-                  seenSeries.insert(seriesId).inserted else { continue }
-            if let value = Int(seriesId) { ids.insert(value) }
+    /// Movie IDs shown by the sections ABOVE the Continue rail:
+    /// the hero's movies plus the (already deduped) Most Popular
+    /// Movies rail.
+    private var homeShownMovieIDs: Set<Int> {
+        var ids = Set(topRatedMovies.map(\.streamId))
+        for entry in featured {
+            if case .movie(let movie) = entry { ids.insert(movie.streamId) }
         }
         return ids
     }
 
-    /// Live channel IDs already shown by row 3 (Recent Channels).
-    private var homeSeenLiveIDs: Set<Int> {
-        var seen = Set<Int>()
-        var result = Set<Int>()
-        for item in recentHistory where item.type == "live" {
-            guard let streamId = Int(item.streamId), seen.insert(streamId).inserted else { continue }
-            guard contentStore.liveStreams.contains(where: { $0.stream.streamId == streamId }) else { continue }
-            result.insert(streamId)
-            if result.count >= 15 { break }
+    /// Series IDs shown by the sections above the Continue rail.
+    private var homeShownSeriesIDs: Set<Int> {
+        var ids = Set(topRatedSeries.map(\.seriesId))
+        for entry in featured {
+            if case .series(let series) = entry { ids.insert(series.seriesId) }
         }
-        return result
+        return ids
     }
 
-    /// Filters a discovery shelf pair (FeaturedEntry lists) against
-    /// the running seen sets, adding what survives.
-    private func dedupeEntries(_ entries: [FeaturedEntry],
-                               seenMovies: inout Set<Int>,
-                               seenSeries: inout Set<Int>) -> [FeaturedEntry] {
-        entries.filter { entry in
-            switch entry {
-            case .movie(let movie): return seenMovies.insert(movie.streamId).inserted
-            case .series(let series): return seenSeries.insert(series.seriesId).inserted
-            }
-        }
-    }
-
-    /// The cross-row dedupe pass over the discovery shelves, in
-    /// their RENDERED order (`shelfOrder`): each shelf drops IDs the
-    /// earlier O1 rows — or an earlier shelf in the same block —
-    /// already showed, then contributes its own IDs to the set.
+    /// The recompute-time dedupe: the hero wins, then Most Popular
+    /// Movies, then Most Popular Series — each rail drops the IDs
+    /// the earlier sections already show, then contributes its own.
     private func applyCrossRowDedupe() {
-        var seenMovies = homeSeenMovieIDs
-        var seenSeries = homeSeenSeriesIDs
-        for kind in shelfOrder {
-            switch kind {
-            case .topMovies:
-                topRatedMovies = topRatedMovies.filter { seenMovies.insert($0.streamId).inserted }
-            case .topSeries:
-                topRatedSeries = topRatedSeries.filter { seenSeries.insert($0.seriesId).inserted }
-            case .newMovies:
-                newMovies = newMovies.filter { seenMovies.insert($0.streamId).inserted }
-            case .newSeries:
-                newSeries = newSeries.filter { seenSeries.insert($0.seriesId).inserted }
-            case .newSinceVisit:
-                newSinceVisit = dedupeEntries(newSinceVisit, seenMovies: &seenMovies, seenSeries: &seenSeries)
-            case .favorites, .tonight:
-                // Not catalog shelves: Favorites is the user's own
-                // curated set; Tonight's items are programmes on
-                // already-watched channels, not channel entries.
-                break
+        var seenMovies = Set<Int>()
+        var seenSeries = Set<Int>()
+        for entry in featured {
+            switch entry {
+            case .movie(let movie): seenMovies.insert(movie.streamId)
+            case .series(let series): seenSeries.insert(series.seriesId)
             }
         }
+        topRatedMovies = topRatedMovies.filter { seenMovies.insert($0.streamId).inserted }
+        topRatedSeries = topRatedSeries.filter { seenSeries.insert($0.seriesId).inserted }
     }
 
-    /// The Live shelf's entries after dedupe (row 4 drops channels
-    /// row 3 already showed). The HERO keeps reading the raw
-    /// `onNowEntries` — banners/hero are outside the dedupe.
-    private var onNowShelfEntries: [OnNowEntry] {
-        onNowEntries.filter { !homeSeenLiveIDs.contains($0.stream.streamId) }
-    }
-
-    /// Recently Added (row 6) exclusions, in the resolver's key
-    /// space ("vod:<id>" / "series:<id>" / "live:<id>"): everything
-    /// rows 1–5 show — Continue rows, the Live shelf and the
-    /// (already deduped) discovery shelves.
-    private var recentlyAddedExclusionKeys: Set<String> {
-        var keys = Set<String>()
-        for item in continueWatchingDisplayItems {
+    /// The merged Continue rail's items: the UNION of the two rows
+    /// Design A replaced, over this view's own history request.
+    /// - Continue Watching's rule (one card per series from its
+    ///   latest episode record; finished series dropped; movies
+    ///   and live channels pass through), PLUS
+    /// - Continue Series' rule (a series whose latest episode is
+    ///   finished stays when a next episode exists — its card then
+    ///   carries the next-episode label),
+    /// then the cross-section dedupe (hero / popular rails win),
+    /// capped at 10 cards like both source rows.
+    private var mergedContinueItems: [DBWatchHistory] {
+        var seenSeries = Set<String>()
+        var candidates: [DBWatchHistory] = []
+        for item in recentHistory {
+            if item.type == "series", let seriesId = item.seriesId, !seriesId.isEmpty {
+                guard seenSeries.insert(seriesId).inserted else { continue }
+                let finished = item.durationMs > 0
+                    && Double(item.lastTimeMs) / Double(item.durationMs) >= 0.98
+                if finished && continueNextLabels[seriesId] == nil { continue }
+            }
+            candidates.append(item)
+        }
+        let shownMovies = homeShownMovieIDs
+        let shownSeries = homeShownSeriesIDs
+        return Array(candidates.filter { item in
             switch item.type {
             case "vod":
-                if let id = Int(item.streamId) { keys.insert("vod:\(id)") }
+                guard let id = Int(item.streamId) else { return true }
+                return !shownMovies.contains(id)
             case "series":
-                if let id = item.seriesId.flatMap(Int.init) ?? Int(item.streamId) { keys.insert("series:\(id)") }
-            case "live":
-                if let id = Int(item.streamId) { keys.insert("live:\(id)") }
+                guard let id = item.seriesId.flatMap(Int.init) ?? Int(item.streamId) else { return true }
+                return !shownSeries.contains(id)
             default:
-                break
+                return true
             }
-        }
-        for id in homeSeenSeriesIDs { keys.insert("series:\(id)") }
-        for id in homeSeenLiveIDs { keys.insert("live:\(id)") }
-        for entry in onNowShelfEntries { keys.insert("live:\(entry.stream.streamId)") }
-        for movie in topRatedMovies + newMovies { keys.insert("vod:\(movie.streamId)") }
-        for series in topRatedSeries + newSeries { keys.insert("series:\(series.seriesId)") }
-        for entry in newSinceVisit {
-            switch entry {
-            case .movie(let movie): keys.insert("vod:\(movie.streamId)")
-            case .series(let series): keys.insert("series:\(series.seriesId)")
-            }
-        }
-        return keys
+        }.prefix(10))
     }
 
-    /// One J3 content row, wrapped with Edit-mode move controls
-    /// while editing. Rows render NOTHING when their content is
-    /// empty (O1: empty sections are hidden, never rendered empty).
-    @ViewBuilder
-    private func homeRow(_ kind: HomeRowKind) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if editingHomeRows {
-                HStack(spacing: 16) {
-                    Button {
-                        homeOrderStore.move(kind, by: -1)
-                    } label: {
-                        Image(systemName: "chevron.up")
-                            .font(.subheadline.weight(.bold))
-                    }
-                    .accessibilityLabel(L("b7.home.move_up"))
-                    Button {
-                        homeOrderStore.move(kind, by: 1)
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.subheadline.weight(.bold))
-                    }
-                    .accessibilityLabel(L("b7.home.move_down"))
-                    Spacer()
-                }
-                .foregroundStyle(AppTheme.accent)
-                .padding(.horizontal, 16)
-            }
-            homeRowContent(kind)
+    /// For each series whose latest episode is finished, resolve
+    /// the chain successor's label once (ContinueSeriesRow's exact
+    /// resolution, over this view's identical history source).
+    private func resolveContinueNextLabels() async {
+        var seen = Set<String>()
+        var targets: [(seriesId: String, streamId: String)] = []
+        for item in recentHistory {
+            guard let seriesId = item.seriesId, !seriesId.isEmpty, seen.insert(seriesId).inserted else { continue }
+            let finished = item.durationMs > 0
+                && Double(item.lastTimeMs) / Double(item.durationMs) >= 0.98
+            if finished { targets.append((seriesId, item.streamId)) }
         }
-    }
-
-    @ViewBuilder
-    private func homeRowContent(_ kind: HomeRowKind) -> some View {
-        switch kind {
-        case .continueWatching:
-            // B6: Continue Watching ABOVE the category tiles (O1
-            // position 1 until the user reorders).
-            ContinueWatchingRow(
-                playlist: playlist,
-                typeFilter: nil,
-                destination: {
-                    WatchHistoryListView(playlist: playlist, typeFilter: nil) { item in
-                        presentHistoryItem(item)
-                    }
-                },
-                onPlay: { item in
-                    presentHistoryItem(item)
+        guard !targets.isEmpty else { continueNextLabels = [:]; return }
+        let pid = playlist.id
+        let resolved = await Task.detached(priority: .utility) { () -> [String: String] in
+            var labels: [String: String] = [:]
+            for target in targets {
+                let ctx = try? await AppDatabase.shared.read { db in
+                    try SeriesPlaybackOrdering.navigationContext(
+                        playlistId: pid,
+                        playbackStreamId: target.streamId,
+                        seriesIdHint: target.seriesId,
+                        db: db
+                    )
                 }
-            )
-        case .continueSeries:
-            // B8 (C7) component, wired by B7 per O1 position 2.
-            ContinueSeriesRow(playlist: playlist) { item in
-                presentHistoryItem(item)
-            }
-        case .recentChannels:
-            // B8 (C9) component, wired by B7 per O1 position 3.
-            RecentChannelsRow(playlist: playlist) { stream in
-                presentLiveSelectionFromHome(stream)
-            }
-        case .live:
-            // B6: "On now on your channels" — real EPG now-titles.
-            // F-3 (fixer): the shelf renders the DEDUPED entries
-            // (Recent Channels, row 3, wins); the hero above keeps
-            // the raw set.
-            if !onNowShelfEntries.isEmpty {
-                onNowShelf
-            }
-        case .discovery:
-            // The Movies/Series discovery block: category tiles +
-            // the C6 time-bucket shelves (F6-gated inside shelfView).
-            VStack(alignment: .leading, spacing: 26) {
-                categoryTiles
-                ForEach(shelfOrder, id: \.self) { shelfKind in
-                    shelfView(shelfKind)
+                if let ctx, let next = ctx.next {
+                    let season = ctx.nextSeasonNumber ?? next.seasonId.split(separator: "_").last.flatMap { Int($0) }
+                    let episode = ctx.nextEpisodeNumber ?? next.episodeNum
+                    if let season, let episode {
+                        labels[target.seriesId] = String(format: "S%02d E%02d", season, episode)
+                    } else if let episode {
+                        labels[target.seriesId] = String(format: "E%02d", episode)
+                    }
                 }
             }
-        case .recentlyAdded:
-            // B8 (R3) component, wired by B7 per amended O1 (after
-            // Series, before Today's Matches); hidden when empty.
-            // F-3 (fixer): rows 1–5 win — their IDs are excluded here.
-            RecentlyAddedRow(playlist: playlist, excludingKeys: recentlyAddedExclusionKeys) { entry in
-                selectRecentlyAdded(entry)
-            }
-        case .matches:
-            // Build 63 (owner, item 7): the bottom-of-Home Matches
-            // entry is REMOVED — the sports moved to shortcut tiles
-            // at the top, beside the big category cards (see
-            // `sportTileRow`). The order store no longer emits this
-            // kind; the case stays only so persisted order arrays
-            // from earlier builds still parse.
-            EmptyView()
-        }
-    }
-
-    /// Routes a Recently Added tap through Home's EXISTING paths:
-    /// live → the live player shell, movie/series → the same detail
-    /// state the shelves use. Opening clears the NEW badge (R2).
-    private func selectRecentlyAdded(_ entry: RecentlyAddedEntry) {
-        FirstSeenStore.shared.markOpened(playlistId: playlist.id, itemKey: entry.key)
-        let rawId = entry.key.split(separator: ":").last.flatMap { Int($0) }
-        switch entry.kind {
-        case .live:
-            guard let streamId = rawId,
-                  let stream = contentStore.liveStreamById[streamId]
-            else { return }
-            presentLiveSelectionFromHome(stream)
-        case .vod:
-            guard let streamId = rawId else { return }
-            pendingMovieDetail = contentStore.vodStreamById[streamId]
-        case .series:
-            guard let seriesId = rawId else { return }
-            pendingSeriesDetail = contentStore.seriesById[seriesId]
-        }
+            return labels
+        }.value
+        guard !Task.isCancelled else { return }
+        continueNextLabels = resolved
     }
 
     /// Round 7 (landscape fix): the card width used to derive from the
@@ -593,30 +381,25 @@ struct HomeView: View {
                         // unchanged: Continue Watching below resumes
                         // the same item through the same handler.
 
-                        // Build 61 (B8, R4): what's-new banner — one
-                        // per refresh batch, real counts, never
-                        // stacked; a BANNER (not a J3 row), so it
-                        // stays above the content rows.
-                        WhatsNewBanner(playlist: playlist)
-                            .padding(.horizontal, 16)
+                        // Build 77 (Design A): the "What's New"
+                        // banner is REMOVED (owner order — it was
+                        // already cut once and kept surviving). Home
+                        // below the top bar is the five picked
+                        // sections and nothing else.
 
                         // Build 65 (Home v2 style 1 'Cinematic
-                        // Hero'): the hero leads the screen again —
-                        // the build-64 sports dashboard block moves
-                        // BELOW it as a compact sports strip (see
-                        // after the hero). Same F6 gate as before.
+                        // Hero'): the hero leads the screen.
+                        // Build 77 (Design A): it is section 1 of
+                        // five — hero cover only at the top.
 
                         // Build 66 (W3, Home-2): the owner-picked
-                        // Cinematic Hero is now the DEFAULT and
-                        // PRIMARY hero — the tall featured carousel
-                        // leads whenever it has entries (on any real
+                        // Cinematic Hero is the DEFAULT and PRIMARY
+                        // hero — the tall featured carousel leads
+                        // whenever it has entries (on any real
                         // playlist it does). Build 61's live-first
                         // priority (live match → live channel →
-                        // carousel) is inverted: live content no
-                        // longer outranks the picked hero; it lives
-                        // in the "Live now" rail directly below
-                        // (`liveNowRail`). The hero is NOT a
-                        // J3-reorderable row.
+                        // carousel) stays inverted: live content
+                        // never outranks the picked hero.
                         if !featured.isEmpty {
                             featuredCarousel
                         } else if !contentStore.streamsLoaded {
@@ -625,62 +408,40 @@ struct HomeView: View {
                             SkeletonShelf()
                         }
 
-                        // Build 66 (W3): the "Live now" rail —
-                        // the demoted live hero content at rail
-                        // size, directly below the hero: the live
-                        // match card first (when a match is live),
-                        // then the live channels (the old hero
-                        // channel first, then the on-now set).
-                        // Renders nothing when nothing is live.
-                        liveNowRail
+                        // Build 77 (Design A) — sections 2–5, in
+                        // the owner's picked order. Everything that
+                        // used to sit here is gone: the "Live now"
+                        // rail, the sports shortcut tiles, the
+                        // landscape Trending strip, the category
+                        // tiles, the New / Favorites / Tonight /
+                        // Recently Added rows and the floating
+                        // "Customize Home" toggle.
 
-                        // Build 65 (Home v2 style 1): the compact
-                        // sports strip sits directly under the hero
-                        // (the Matches system stays one tap away,
-                        // with its real live scores). Same tiles,
-                        // same F6 gate as build 64's top block.
+                        // Section 2: Match Results — one card per
+                        // match (live first, then latest finished),
+                        // same F6 gate the sports strip had.
                         if !UserDefaults.standard.bool(forKey: "sections.hidden.matches") {
-                            VStack(alignment: .leading, spacing: 12) {
-                                CinematicSectionHeader(title: L("home.sports_dashboard")) {
-                                    MatchesView()
-                                }
-                                sportTileRow
-                            }
+                            matchResultsSection
                         }
 
-                        // Build 65 (Home v2 style 1, landscape):
-                        // in landscape the cinematic layout pairs
-                        // the hero with a "Trending Now" list (the
-                        // mockup's right column) — the store's
-                        // shared top-rated movies, real scores
-                        // only, tap → the same detail path as the
-                        // shelves. Portrait keeps the Top 10 rail
-                        // in the rows below instead.
-                        if UIScreen.main.bounds.width > UIScreen.main.bounds.height,
-                           !topRatedMovies.isEmpty {
-                            landscapeTrendingStrip
+                        // Section 3: Most Popular Movies — the
+                        // catalog's normalized-rating ranking (see
+                        // the header note), hero-deduped, F6-gated
+                        // like the shelf it replaces.
+                        if sectionVisibility.isVisible(.movies), topRatedMovies.count >= 3 {
+                            popularMoviesRail
                         }
 
-                        // Build 61 (B7, J3): Edit-mode toggle for
-                        // the CONTENT rows below (persisted order,
-                        // O1 by default). Banners and the hero are
-                        // not rows and never move.
-                        HStack {
-                            Spacer()
-                            Button(editingHomeRows ? L("common.done") : L("b7.home.customize")) {
-                                editingHomeRows.toggle()
-                                Haptics.selection()
-                            }
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(AppTheme.accent)
+                        // Section 4: Most Popular Series — same
+                        // ranking, same gates.
+                        if sectionVisibility.isVisible(.series), topRatedSeries.count >= 3 {
+                            popularSeriesRail
                         }
-                        .padding(.horizontal, 16)
 
-                        // Build 61 (B7, O1/J3): the content rows in
-                        // the user's persisted order (O1 default).
-                        ForEach(homeOrderStore.order, id: \.self) { kind in
-                            homeRow(kind)
-                        }
+                        // Section 5: ONE Continue Watching rail of
+                        // wide cards — Continue Watching and
+                        // Continue Series merged, each item once.
+                        mergedContinueRail
 
                         // B6 per-type loading: a type that has not
                         // landed yet shows a skeleton while the others
@@ -856,26 +617,19 @@ struct HomeView: View {
             vod: vodHiddenIds,
             series: seriesHiddenIds
         )) { await recompute() }
-        // Build 61 fixer (Z12): the live-match hero probe, once per
+        // Build 77 (Design A): the Match Results pass, once per
         // Home appearance for this playlist.
-        // Build 64 (B1): the sport-tile highlights load alongside.
         .task(id: playlist.id) {
-            await loadHeroLiveMatch()
-            await loadSportHighlights()
+            await loadMatchResults()
         }
-        // Z12: re-probe when the app returns to the foreground, so a
-        // match that kicked off while the app was backgrounded can
-        // take the hero (and a finished one releases it).
+        // Re-run when the app returns to the foreground, so a match
+        // that kicked off (or finished) while the app was
+        // backgrounded updates the results.
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                Task {
-                    await loadHeroLiveMatch()
-                    await loadSportHighlights()
-                }
+                Task { await loadMatchResults() }
             }
         }
-        // C6 Tonight row: rebuild when the EPG snapshot changes.
-        .task(id: epgStore.snapshot?.version ?? 0) { await recomputeTonight() }
         .onDisappear {
             // C6: stamp the visit AFTER the shelves computed against
             // the previous stamp (New-since-last-visit baseline).
@@ -1197,16 +951,6 @@ struct HomeView: View {
         }
     }
 
-    /// "2026 • Drama" for poster cards — built only from fields the
-    /// record actually carries (its own release year, its first
-    /// genre); nil when neither exists. Shared by the ranked shelves.
-    private func cardMetaLine(year: String?, genre: String?) -> String? {
-        var parts: [String] = []
-        if let year { parts.append(year) }
-        if let first = DetailFormatting.genreList(genre).first { parts.append(first) }
-        return parts.isEmpty ? nil : parts.joined(separator: " • ")
-    }
-
     // MARK: - Featured carousel
 
     /// Build 65 (Home v2 style 1 'Cinematic Hero'): the hero is
@@ -1222,70 +966,6 @@ struct HomeView: View {
             return cardWidth * 9 / 16
         }
         return min(cardWidth * 1.08, bounds.height * 0.52)
-    }
-
-    /// Build 65: the landscape hero's companion column (mockup:
-    /// "Trending Now" list beside the hero) rendered as a wide-card
-    /// strip under the hero in the landscape scroll — same data
-    /// and detail path as the Top 10 rail.
-    private var landscapeTrendingStrip: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CinematicSectionHeader(title: L("search.trending")) {
-                AllVODView(playlist: playlist)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(topRatedMovies.prefix(6).indices, id: \.self) { index in
-                        let movie = topRatedMovies[index]
-                        Button {
-                            pendingMovieDetail = movie
-                        } label: {
-                            HStack(spacing: 12) {
-                                CachedImage(
-                                    url: moviePosterURL(movie),
-                                    width: 62,
-                                    height: 92,
-                                    cornerRadius: AppTheme.smallCornerRadius,
-                                    iconName: "film"
-                                )
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(movie.name)
-                                        .font(AppTheme.fontCardTitle)
-                                        .foregroundStyle(.primary)
-                                        .lineLimit(2)
-                                        .multilineTextAlignment(.leading)
-                                    if let meta = cardMetaLine(year: DetailFormatting.year(from: movie.releaseDate), genre: movie.genre) {
-                                        Text(meta)
-                                            .font(AppTheme.fontMetadata)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-                                    if let rating = ContentRating.normalizedDisplayText(rating: movie.rating, rating5Based: movie.rating5Based) {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "star.fill")
-                                                .font(.caption2.weight(.semibold))
-                                                .foregroundStyle(AppTheme.ratingGold)
-                                            Text(rating)
-                                                .font(AppTheme.fontMetadata.weight(.bold))
-                                                .foregroundStyle(.primary)
-                                        }
-                                    }
-                                }
-                                .frame(width: 150, alignment: .leading)
-                            }
-                            .padding(10)
-                            .background(
-                                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                                    .fill(AppTheme.surface)
-                            )
-                        }
-                        .buttonStyle(PressScaleButtonStyle())
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-            .scrollClipDisabled()
-        }
     }
 
     private var featuredCarousel: some View {
@@ -1364,97 +1044,9 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Live now rail (Build 66, W3)
-
-    /// The rail's live channels: the old hero lead channel first
-    /// (first channel with a programme on air right now, else the
-    /// first live channel), then the rest of the on-now set in EPG
-    /// order, deduped, capped at 8. Parental-blocked live categories
-    /// are excluded here too (item 17): a locked channel must not
-    /// surface in the rail even though the player path also gates
-    /// it. Session-unlocked categories pass, per the store verdict.
-    private var liveRailChannels: [DBLiveStream] {
-        var channels: [DBLiveStream] = []
-        var seen = Set<Int>()
-        func appendIfAllowed(_ stream: DBLiveStream) {
-            guard seen.insert(stream.streamId).inserted,
-                  !ParentalControlStore.shared.isBlocked(playlistId: playlist.id, type: "live", categoryId: stream.categoryId)
-            else { return }
-            channels.append(stream)
-        }
-        if let hero = heroLiveStream { appendIfAllowed(hero) }
-        for entry in onNowEntries { appendIfAllowed(entry.stream) }
-        if channels.isEmpty {
-            // No on-air channel survived (e.g. the lead is
-            // parental-blocked and the guide is empty): fall back
-            // to the first unblocked live channel in the catalog.
-            for item in contentStore.liveStreams {
-                appendIfAllowed(item.stream)
-                if !channels.isEmpty { break }
-            }
-        }
-        return Array(channels.prefix(8))
-    }
-
-    private func liveRailNowTitle(for stream: DBLiveStream) -> String? {
-        onNowEntries.first(where: { $0.stream.streamId == stream.streamId })?.nowTitle
-    }
-
-    /// Build 66 (W3): the "Live now" rail directly below the
-    /// Cinematic Hero — build 61's hero content (live match, live
-    /// channels) demoted to rail size with its tap behaviour
-    /// unchanged: match card first (tap → MatchesView), then live
-    /// channels (tap → the live player via the same Home path).
-    /// Renders nothing when nothing is live. This replaces nothing:
-    /// the sports tiles strip and the On-now row further down stay
-    /// exactly where they were.
-    @ViewBuilder
-    private var liveNowRail: some View {
-        let channels = liveRailChannels
-        if heroLiveMatch != nil || !channels.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                CinematicSectionHeader(title: L("home.live_now")) {
-                    AllLiveView(playlist: playlist)
-                }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: 12) {
-                        if let heroMatch = heroLiveMatch {
-                            NavigationLink {
-                                MatchesView()
-                            } label: {
-                                LiveMatchHeroCard(match: heroMatch, leagueName: heroLiveMatchLeague)
-                                    .frame(width: 300)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        ForEach(channels, id: \.streamId) { stream in
-                            LiveHeroCard(
-                                stream: stream,
-                                nowProgramTitle: liveRailNowTitle(for: stream),
-                                previewURL: PlaybackURLBuilder(playlist: playlist).liveURL(streamId: stream.streamId),
-                                // Home-8 safety: the live preview
-                                // decodes ONLY while no player is
-                                // presented — the same gate the
-                                // carousel timer already uses. Only
-                                // the rail's FIRST channel previews;
-                                // the rest show their channel art, so
-                                // the rail never runs parallel decodes.
-                                previewActive: isVisible && scenePhase == .active
-                                    && playerOverlay.presentation == nil
-                                    && stream.streamId == channels.first?.streamId,
-                                userAgent: playlist.trimmedUserAgent
-                            ) {
-                                presentLiveSelectionFromHome(stream)
-                            }
-                            .frame(width: 300)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-                .scrollClipDisabled()
-            }
-        }
-    }
+    // Build 77 (Design A): the build-66 "Live now" rail is removed —
+    // live matches live in section 2 (Match Results) now, and live
+    // channels live on the Live TV tab, not on Home.
 
     private func playFeatured(_ entry: FeaturedEntry) {
         switch entry {
@@ -1490,195 +1082,75 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Category tiles
+    // MARK: - Build 77 (Design A): sections 2–5
 
-    private var categoryTiles: some View {
-        // Build 64 (B1): the sport tiles moved OUT of this row to
-        // the top sports-dashboard block (see body); only the three
-        // big category tiles remain here.
-        categoryTileRow
-    }
+    private static let lastVisitKey = "home.lastVisitAt"
 
-    /// Build 63 (item 7) created these tiles; build 64 (B1) moves
-    /// the row to the top dashboard block and gives each tile its
-    /// real live-score / next-fixture line from `sportHighlights`.
-    private var sportTileRow: some View {
-        HStack(alignment: .top, spacing: 12) {
-            HomeSportTile(
-                title: L("matches.tab.soccer"),
-                subtitle: L("matches.subtitle"),
-                tint: AppTheme.accent,
-                iconName: "soccerball",
-                sport: .soccer,
-                liveLine: sportHighlightLine(for: .soccer)?.line,
-                isLive: sportHighlightLine(for: .soccer)?.isLive ?? false
-            )
-            HomeSportTile(
-                title: L("matches.tab.nfl"),
-                subtitle: L("matches.subtitle"),
-                tint: AppTheme.live,
-                iconName: "football.fill",
-                sport: .nfl,
-                liveLine: sportHighlightLine(for: .nfl)?.line,
-                isLive: sportHighlightLine(for: .nfl)?.isLive ?? false
-            )
-            HomeSportTile(
-                title: L("matches.tab.nba"),
-                subtitle: L("matches.subtitle"),
-                tint: SectionTheme.series,
-                iconName: "basketball.fill",
-                sport: .nba,
-                liveLine: sportHighlightLine(for: .nba)?.line,
-                isLive: sportHighlightLine(for: .nba)?.isLive ?? false
-            )
-        }
-        .padding(.horizontal, 16)
-        .frame(maxWidth: 560)
-        .frame(maxWidth: .infinity)
-    }
+    // MARK: Section 2 — Match Results
 
-    private var categoryTileRow: some View {
-        HStack(alignment: .top, spacing: 12) {
-            // Round 10 (owner, build 46): STRONG-style icon cards —
-            // a colored circular glyph + the section name + the REAL
-            // count beneath. The photo tiles (round 9's single
-            // representative image) are gone entirely. Hues stay
-            // inside the blue-led palette: the LIVE red is the
-            // design's reserved live color, Movies takes the accent,
-            // Series the violet preset.
-            HomeCategoryTile(
-                title: L("dashboard.live"),
-                countText: L("home.count_channels", CatalogCountFormatter.string(contentStore.liveStreams.count)),
-                tint: AppTheme.live,
-                iconName: "tv",
-                action: onOpenLive
-            )
-            // F6 (B13): the Movies/Series tiles follow the ONE
-            // section-visibility store, same as their tabs.
-            if sectionVisibility.isVisible(.movies) {
-                HomeCategoryTile(
-                    title: L("dashboard.movies"),
-                    countText: L("home.count_movies", CatalogCountFormatter.string(contentStore.vodStreams.count)),
-                    tint: AppTheme.accent,
-                    iconName: "film",
-                    action: onOpenMovies
-                )
-            }
-            if sectionVisibility.isVisible(.series) {
-                HomeCategoryTile(
-                    title: L("dashboard.series"),
-                    countText: L("home.count_series", CatalogCountFormatter.string(contentStore.seriesItems.count)),
-                    // Build 61: the Series tile follows the shared
-                    // SectionTheme (a hue-shifted sibling of the CURRENT
-                    // accent) instead of a hard-coded violet preset, so
-                    // the tile family stays inside the Design-4 system
-                    // for every accent choice.
-                    tint: SectionTheme.series,
-                    iconName: "play.tv",
-                    action: onOpenSeries
-                )
+    /// One card per match, stacked: team logos + names exactly as
+    /// the payload provides them, the score in the middle, and the
+    /// state chip (LIVE with the live clock, or FT). Every card —
+    /// and the header's See-all — opens the full Matches screen.
+    /// Renders nothing when today has no live or finished match.
+    @ViewBuilder
+    private var matchResultsSection: some View {
+        if !matchResults.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                CinematicSectionHeader(title: L("home.match_results")) {
+                    MatchesView()
+                }
+                VStack(spacing: 10) {
+                    ForEach(matchResults) { match in
+                        NavigationLink {
+                            MatchesView()
+                        } label: {
+                            HomeMatchResultCard(match: match)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
             }
         }
-        .padding(.horizontal, 16)
-        // Round 8 (audit E3): cap the row at 560 pt like the Live hero —
-        // in landscape the three tiles otherwise split the full ~820 pt
-        // width and stretch into wide strips. The second frame
-        // re-expands to full width so the capped row stays centered.
-        .frame(maxWidth: 560)
-        .frame(maxWidth: .infinity)
     }
 
-    // Build 63 (item 7): the B12 bottom Matches entry row was
-    // removed — sports are top shortcut tiles now (`sportTileRow`).
+    // MARK: Section 3 — Most Popular Movies
 
-
-    // MARK: - Shelves
-
-    /// Build 64 (B1): the Top 10 rail's genre chips — the distinct
-    /// genres of the rail's own top-rated list (capped for the
-    /// chip row), in the records' own wording.
-    private var top10Genres: [String] {
-        var seen = Set<String>()
-        var genres: [String] = []
-        for movie in topRatedMovies {
-            for genre in DetailFormatting.genreList(movie.genre) where seen.insert(genre).inserted {
-                genres.append(genre)
-            }
-        }
-        return Array(genres.prefix(6))
-    }
-
-    /// The Top 10 rail's displayed list: the full top-rated list,
-    /// or its members carrying the selected genre. Used as the
-    /// detail queue — order only, no ranks derived from it.
-    private var top10Displayed: [DBVODStream] {
-        guard let genre = top10Genre else { return topRatedMovies }
-        return topRatedMovies.filter { DetailFormatting.genreList($0.genre).contains(genre) }
-    }
-
-    /// Build 66 (W3, Home-6): the rail's rendered rows WITH their
-    /// ORIGINAL ranks — rank is the position in the UNFILTERED
-    /// top-10 list, computed before any genre filtering, so a
-    /// genre-filtered #4 still renders as 4, never renumbered to 1.
-    private var top10Ranked: [(rank: Int, movie: DBVODStream)] {
-        let ranked = topRatedMovies.enumerated().map { (rank: $0.offset + 1, movie: $0.element) }
-        guard let genre = top10Genre else { return ranked }
-        return ranked.filter { DetailFormatting.genreList($0.movie.genre).contains(genre) }
-    }
-
-    private var topRatedMoviesShelf: some View {
+    /// The Most Popular Movies rail: the `topRatedMovies` list
+    /// (the catalog's normalized-rating ranking — see the header
+    /// note) after the hero dedupe, as plain poster cards. The
+    /// header's See-all opens the full Movies list; a card opens
+    /// the movie's detail page with the rail as its queue.
+    private var popularMoviesRail: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Build 64 (B1, Home style 2): this shelf IS the
-            // dashboard's Top 10 rail (the list is capped at 10 by
-            // the recompute) — retitled, with the mockup's genre
-            // chips filtering it.
-            CinematicSectionHeader(title: L("home.top10_today")) {
+            CinematicSectionHeader(title: L("home.most_popular_movies")) {
                 AllVODView(playlist: playlist)
             }
-            if top10Genres.count > 1 {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        PillChipButton(title: L("search.all"), isSelected: top10Genre == nil) {
-                            top10Genre = nil
-                        }
-                        ForEach(top10Genres, id: \.self) { genre in
-                            PillChipButton(title: genre, isSelected: top10Genre == genre) {
-                                top10Genre = genre
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-                .scrollClipDisabled()
-            }
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(top10Ranked.indices, id: \.self) { index in
-                        let ranked = top10Ranked[index]
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(topRatedMovies.indices, id: \.self) { index in
                         NavigationLink {
-                            MovieDetailView(playlist: playlist, movie: ranked.movie, queue: top10Displayed)
+                            MovieDetailView(playlist: playlist, movie: topRatedMovies[index], queue: topRatedMovies)
                         } label: {
-                            RankedPosterCard(
-                                rank: ranked.rank,
-                                imageURL: moviePosterURL(ranked.movie),
-                                title: ranked.movie.name,
-                                ratingText: ContentRating.normalizedDisplayText(rating: ranked.movie.rating, rating5Based: ranked.movie.rating5Based),
-                                metaText: cardMetaLine(year: DetailFormatting.year(from: ranked.movie.releaseDate), genre: ranked.movie.genre),
+                            VODStreamCard(
+                                playlistId: playlist.id,
+                                stream: topRatedMovies[index],
                                 posterWidth: posterMetrics.shelfPosterWidth,
                                 posterHeight: posterMetrics.shelfPosterHeight,
-                                iconName: "film"
+                                imageLoadProfile: .shelf
                             )
                         }
                         .buttonStyle(PressScaleButtonStyle())
                         .shelfEntrance(index: index)
                         .contextMenu {
                             Button {
-                                toggleFavorite(streamId: ranked.movie.streamId, type: "vod",
-                                               currentlyFavorite: isFavoriteMovie(ranked.movie))
+                                toggleFavorite(streamId: topRatedMovies[index].streamId, type: "vod",
+                                               currentlyFavorite: isFavoriteMovie(topRatedMovies[index]))
                             } label: {
-                                Label(isFavoriteMovie(ranked.movie) ? L("favorites.remove") : L("favorites.add"), systemImage: "star")
+                                Label(isFavoriteMovie(topRatedMovies[index]) ? L("favorites.remove") : L("favorites.add"), systemImage: "star")
                             }
-                            if let categoryId = ranked.movie.categoryId {
+                            if let categoryId = topRatedMovies[index].categoryId {
                                 Button {
                                     hiddenStore.setHidden(true, playlistId: playlist.id, type: "vod", categoryId: categoryId)
                                 } label: {
@@ -1692,35 +1164,30 @@ struct HomeView: View {
             }
             .scrollClipDisabled()
         }
-        .onChange(of: top10Genres) { _, genres in
-            // A recompute can retire the selected genre — fall
-            // back to All instead of an empty rail.
-            if let genre = top10Genre, !genres.contains(genre) {
-                top10Genre = nil
-            }
-        }
     }
 
-    private var topRatedSeriesShelf: some View {
+    // MARK: Section 4 — Most Popular Series
+
+    /// The Most Popular Series rail: the same ranking over series,
+    /// hero-deduped, as plain poster cards. The header's See-all
+    /// opens the full Series list; a card opens the series' detail.
+    private var popularSeriesRail: some View {
         VStack(alignment: .leading, spacing: 12) {
-            CinematicSectionHeader(title: L("home.top_rated_series")) {
+            CinematicSectionHeader(title: L("home.most_popular_series")) {
                 AllSeriesView(playlist: playlist)
             }
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 14) {
+                LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(topRatedSeries.indices, id: \.self) { index in
                         NavigationLink {
                             SeriesDetailView(playlist: playlist, series: topRatedSeries[index])
                         } label: {
-                            RankedPosterCard(
-                                rank: index + 1,
-                                imageURL: seriesPosterURL(topRatedSeries[index]),
-                                title: topRatedSeries[index].name,
-                                ratingText: ContentRating.normalizedDisplayText(rating: topRatedSeries[index].rating, rating5Based: topRatedSeries[index].rating5Based),
-                                metaText: cardMetaLine(year: DetailFormatting.year(from: topRatedSeries[index].releaseDate), genre: topRatedSeries[index].genre),
+                            SeriesCard(
+                                playlistId: playlist.id,
+                                stream: topRatedSeries[index],
                                 posterWidth: posterMetrics.shelfPosterWidth,
                                 posterHeight: posterMetrics.shelfPosterHeight,
-                                iconName: "play.tv"
+                                imageLoadProfile: .shelf
                             )
                         }
                         .buttonStyle(PressScaleButtonStyle())
@@ -1748,366 +1215,115 @@ struct HomeView: View {
         }
     }
 
-    private var newMoviesShelf: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CinematicSectionHeader(title: L("home.new_movies")) {
-                RecentlyAddedVODDetailView(playlist: playlist, items: newMovies)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(newMovies.indices, id: \.self) { index in
-                        NavigationLink {
-                            MovieDetailView(playlist: playlist, movie: newMovies[index], queue: newMovies)
-                        } label: {
-                            VODStreamCard(
-                                playlistId: playlist.id,
-                                stream: newMovies[index],
-                                posterWidth: posterMetrics.shelfPosterWidth,
-                                posterHeight: posterMetrics.shelfPosterHeight,
-                                imageLoadProfile: .shelf
+    // MARK: Section 5 — merged Continue Watching
+
+    /// ONE Continue Watching rail of wide cards — the merged
+    /// successor of the separate Continue Watching and Continue
+    /// Series rows, fed by `mergedContinueItems` (each item once).
+    /// The header's See-all opens the full watch-history list (the
+    /// destination both source rows used); a card resumes through
+    /// Home's existing history path; long-press removes the
+    /// history entry, exactly as Continue Watching's cards did.
+    @ViewBuilder
+    private var mergedContinueRail: some View {
+        let items = mergedContinueItems
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 16) {
+                CinematicSectionHeader(title: L("continue_watching.title")) {
+                    WatchHistoryListView(playlist: playlist, typeFilter: nil) { item in
+                        presentHistoryItem(item)
+                    }
+                }
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        ForEach(items) { item in
+                            HistoryCard(
+                                item: item,
+                                backdropURL: continueBackdropURL(for: item),
+                                metaText: continueMetaText(for: item)
                             )
-                        }
-                        .buttonStyle(PressScaleButtonStyle())
-                        .shelfEntrance(index: index)
-                        .contextMenu {
-                            Button {
-                                toggleFavorite(streamId: newMovies[index].streamId, type: "vod",
-                                               currentlyFavorite: isFavoriteMovie(newMovies[index]))
-                            } label: {
-                                Label(isFavoriteMovie(newMovies[index]) ? L("favorites.remove") : L("favorites.add"), systemImage: "star")
+                            .onTapGesture {
+                                presentHistoryItem(item)
                             }
-                            if let categoryId = newMovies[index].categoryId {
-                                Button {
-                                    hiddenStore.setHidden(true, playlistId: playlist.id, type: "vod", categoryId: categoryId)
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    removeContinueHistoryItem(item)
                                 } label: {
-                                    Label(L("category_picker.hide"), systemImage: "eye.slash")
+                                    Label(L("continue_watching.remove"), systemImage: "xmark.circle")
                                 }
                             }
                         }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
                 }
-                .padding(.horizontal, 16)
             }
-            .scrollClipDisabled()
+            .padding(.vertical, 12)
+            .task(id: recentHistory.map(\.id).joined()) { await resolveContinueNextLabels() }
         }
     }
 
-    private var newSeriesShelf: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CinematicSectionHeader(title: L("home.new_series")) {
-                RecentlyAddedSeriesDetailView(playlist: playlist, items: newSeries)
+    /// Deletes the history row backing a Continue card (the same
+    /// real deletion ContinueWatchingRow's long-press performed).
+    private func removeContinueHistoryItem(_ item: DBWatchHistory) {
+        let id = item.id
+        Task {
+            try? await AppDatabase.shared.write { db in
+                try DBWatchHistory.filter(Column("id") == id).deleteAll(db)
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(newSeries.indices, id: \.self) { index in
-                        NavigationLink {
-                            SeriesDetailView(playlist: playlist, series: newSeries[index])
-                        } label: {
-                            // Round 9: portrait poster card (the series
-                            // cover), the exact Movies-shelf pattern —
-                            // the wide 16:9 card showed low-res art
-                            // upscaled (owner recording, build 45).
-                            // Destination unchanged.
-                            SeriesCard(
-                                playlistId: playlist.id,
-                                stream: newSeries[index],
-                                posterWidth: posterMetrics.shelfPosterWidth,
-                                posterHeight: posterMetrics.shelfPosterHeight,
-                                imageLoadProfile: .shelf
-                            )
-                        }
-                        .buttonStyle(PressScaleButtonStyle())
-                        .shelfEntrance(index: index)
-                        .contextMenu {
-                            Button {
-                                toggleFavorite(streamId: newSeries[index].seriesId, type: "series",
-                                               currentlyFavorite: isFavoriteSeries(newSeries[index]))
-                            } label: {
-                                Label(isFavoriteSeries(newSeries[index]) ? L("favorites.remove") : L("favorites.add"), systemImage: "star")
-                            }
-                            if let categoryId = newSeries[index].categoryId {
-                                Button {
-                                    hiddenStore.setHidden(true, playlistId: playlist.id, type: "series", categoryId: categoryId)
-                                } label: {
-                                    Label(L("category_picker.hide"), systemImage: "eye.slash")
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-            .scrollClipDisabled()
         }
     }
 
-    // MARK: - Round 14/15 shelves (B6 / C6)
-
-    private static let lastVisitKey = "home.lastVisitAt"
-
-    /// C6 first-week rule: while watch history is thin the layout is
-    /// discovery-first; once real history exists the veteran order
-    /// takes over. The threshold is a count of REAL history rows.
-    private var isVeteranHome: Bool { recentHistory.count >= 5 }
-
-    private enum HomeShelfKind: Hashable {
-        case topMovies, topSeries, newMovies, newSeries
-        case favorites, tonight, newSinceVisit
+    private func continueVODRecord(for item: DBWatchHistory) -> DBVODStream? {
+        contentStore.vodStreams.first(where: { "\($0.stream.streamId)" == item.streamId })?.stream
     }
 
-    /// C6: shelf order varies by time-of-day bucket DERIVED FROM
-    /// WATCH-HISTORY TIMESTAMPS: the modal bucket of the user's own
-    /// `lastWatchedAt` hours (morning 5-11, afternoon 11-17, evening
-    /// 17-23, night 23-5). No history -> the current hour's bucket.
-    private var shelfOrder: [HomeShelfKind] {
-        var bucketCounts: [Int: Int] = [:]
-        let cal = Calendar.current
-        for item in recentHistory {
-            let hour = cal.component(.hour, from: item.lastWatchedAt)
-            let bucket = hour < 5 ? 3 : (hour < 11 ? 0 : (hour < 17 ? 1 : (hour < 23 ? 2 : 3)))
-            bucketCounts[bucket, default: 0] += 1
-        }
-        let bucket = bucketCounts.max(by: { $0.value < $1.value })?.key
-            ?? { let h = cal.component(.hour, from: Date()); return h < 5 ? 3 : (h < 11 ? 0 : (h < 17 ? 1 : (h < 23 ? 2 : 3))) }()
-        let discovery: [HomeShelfKind] = [.topMovies, .topSeries, .newMovies, .newSeries, .tonight, .favorites, .newSinceVisit]
-        let veteran: [HomeShelfKind] = [.favorites, .tonight, .topMovies, .topSeries, .newMovies, .newSeries, .newSinceVisit]
-        let evening: [HomeShelfKind] = [.tonight, .favorites, .topMovies, .newSeries, .topSeries, .newMovies, .newSinceVisit]
-        let morning: [HomeShelfKind] = [.newMovies, .newSeries, .newSinceVisit, .topMovies, .topSeries, .tonight, .favorites]
-        if !isVeteranHome { return discovery }
-        switch bucket {
-        case 0: return morning
-        case 2: return evening
-        default: return veteran
-        }
+    private func continueSeriesRecord(for item: DBWatchHistory) -> DBSeries? {
+        guard let seriesId = item.seriesId else { return nil }
+        return contentStore.seriesItems.first(where: { "\($0.series.seriesId)" == seriesId })?.series
     }
 
-    @ViewBuilder
-    private func shelfView(_ kind: HomeShelfKind) -> some View {
-        switch kind {
-        // F6 (B13): the Movies/Series shelves and the Library
-        // (favorites) shelf follow the ONE visibility store.
-        case .topMovies:
-            if sectionVisibility.isVisible(.movies), topRatedMovies.count >= 3 { topRatedMoviesShelf }
-        case .topSeries:
-            if sectionVisibility.isVisible(.series), topRatedSeries.count >= 3 { topRatedSeriesShelf }
-        case .newMovies:
-            if sectionVisibility.isVisible(.movies), !newMovies.isEmpty { newMoviesShelf }
-        case .newSeries:
-            if sectionVisibility.isVisible(.series), !newSeries.isEmpty { newSeriesShelf }
-        case .favorites:
-            if sectionVisibility.isVisible(.library), !favoriteLive.isEmpty || !favoriteVODs.isEmpty || !favoriteSeries.isEmpty { favoritesShelf }
-        case .tonight:
-            if !tonightEntries.isEmpty { tonightShelf }
-        case .newSinceVisit:
-            if !newSinceVisit.isEmpty { newSinceVisitShelf }
+    /// The item's real 16:9 backdrop when its catalog record
+    /// carries one (ContinueWatchingRow's exact rule — backdrops
+    /// arrive with detail loads, so this is nil for a fresh
+    /// catalog and the card uses its poster treatment instead).
+    private func continueBackdropURL(for item: DBWatchHistory) -> URL? {
+        let backdrop: String?
+        switch item.type {
+        case "vod": backdrop = continueVODRecord(for: item)?.backdropPath
+        case "series": backdrop = continueSeriesRecord(for: item)?.backdropPath
+        default: backdrop = nil
         }
+        guard let raw = backdrop?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
+        return URL(string: raw)
     }
 
-    // MARK: On now (B6)
-
-    private struct OnNowEntry: Identifiable {
-        let stream: DBLiveStream
-        let nowTitle: String
-        let progress: Double?
-        var id: Int { stream.streamId }
-    }
-
-    private var onNowEntries: [OnNowEntry] {
-        guard let snapshot = epgStore.snapshot else { return [] }
-        var out: [OnNowEntry] = []
-        for item in contentStore.liveStreams where !liveHiddenIds.contains(item.stream.categoryId ?? "") {
-            let stream = item.stream
-            guard let nn = snapshot[EPGChannelKey.forXtream(stream)], let now = nn.now else { continue }
-            // F1 (B13): progress against the offset-shifted "now",
-            // matching the snapshot's own offset-aware current pick.
-            out.append(OnNowEntry(stream: stream, nowTitle: now.title, progress: now.progress(at: EPGOffsetStore.lookupNow(epgStore.nowDate))))
-            if out.count == 15 { break }
+    /// Card meta line: a series with a resolved successor shows
+    /// its "Next • S02 E05" label (ContinueSeriesRow's rule);
+    /// otherwise "2026 • Drama" from the record's own fields
+    /// (ContinueWatchingRow's rule). Nothing is derived or invented.
+    private func continueMetaText(for item: DBWatchHistory) -> String? {
+        if item.type == "series", let seriesId = item.seriesId,
+           let label = continueNextLabels[seriesId] {
+            return L("series.continue.next_format", label)
         }
-        return out
-    }
-
-    private var onNowShelf: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CinematicSectionHeader(title: L("home.on_now")) {
-                AllLiveView(playlist: playlist)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(onNowShelfEntries) { entry in
-                        LiveHeroMiniCard(stream: entry.stream, nowTitle: entry.nowTitle, progress: entry.progress) {
-                            presentLiveSelectionFromHome(entry.stream)
-                        }
-                    }
-                }
-                .padding(.horizontal, AppTheme.spacingScreenMargin)
-            }
-            .scrollClipDisabled()
-            .shelfEdgeFade()
+        let releaseDate: String?
+        let genre: String?
+        switch item.type {
+        case "vod":
+            releaseDate = continueVODRecord(for: item)?.releaseDate
+            genre = continueVODRecord(for: item)?.genre
+        case "series":
+            releaseDate = continueSeriesRecord(for: item)?.releaseDate
+            genre = continueSeriesRecord(for: item)?.genre
+        default:
+            return nil
         }
-    }
-
-    private func presentLiveSelectionFromHome(_ stream: DBLiveStream) {
-        playerOverlay.present(playlistId: playlist.id) {
-            LivePlayerShell(playlist: playlist, queue: homeLiveQueue, sections: homeLiveSections,
-                            initialStream: stream, initialHistory: nil, subtitle: nil)
-        }
-    }
-
-    // MARK: Tonight (C6)
-
-    private struct TonightEntry: Identifiable {
-        let stream: DBLiveStream
-        let programme: EPGProgramme
-        var id: String { "\(stream.streamId)|\(programme.id)" }
-    }
-
-    private func recomputeTonight() async {
-        // Most-watched channels = the live channels appearing in real
-        // watch history, most recent first, deduped, capped at 8.
-        var seen: [Int] = []
-        for item in recentHistory where item.type == "live" {
-            if let sid = Int(item.streamId), !seen.contains(sid) { seen.append(sid) }
-            if seen.count == 8 { break }
-        }
-        guard !seen.isEmpty else { tonightEntries = []; return }
-        let streams = seen.compactMap { sid in homeLiveQueue.first(where: { $0.streamId == sid }) }
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        // F1 (B13): "tonight" is a DISPLAY window (19:00–23:00 as
-        // shown), so the raw programme window shifts by −offset.
-        guard let displayWindowStart = cal.date(bySettingHour: 19, minute: 0, second: 0, of: today),
-              let displayWindowEnd = cal.date(bySettingHour: 23, minute: 0, second: 0, of: today) else { return }
-        let windowStart = displayWindowStart.addingTimeInterval(-EPGOffsetStore.offsetSeconds)
-        let windowEnd = displayWindowEnd.addingTimeInterval(-EPGOffsetStore.offsetSeconds)
-        var entries: [TonightEntry] = []
-        for stream in streams {
-            guard let key = epgStore.storedKey(idKey: stream.epgChannelId, nameKey: stream.name) else { continue }
-            let programmes = (try? await epgStore.programmes(playlistId: playlist.id, channelKey: key, from: windowStart, to: windowEnd)) ?? []
-            for programme in programmes where programme.start >= windowStart && programme.start < windowEnd {
-                entries.append(TonightEntry(stream: stream, programme: programme))
-            }
-        }
-        tonightEntries = Array(entries.sorted { $0.programme.start < $1.programme.start }.prefix(12))
-    }
-
-    private var tonightShelf: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CinematicSectionHeader(title: L("home.tonight")) {
-                AllLiveView(playlist: playlist)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(tonightEntries) { entry in
-                        LiveHeroMiniCard(stream: entry.stream, nowTitle: entry.programme.title,
-                                         progress: nil, timeText: EPGTimeFormat.time(entry.programme.start)) {
-                            presentLiveSelectionFromHome(entry.stream)
-                        }
-                    }
-                }
-                .padding(.horizontal, AppTheme.spacingScreenMargin)
-            }
-            .scrollClipDisabled()
-            .shelfEdgeFade()
-        }
-    }
-
-    // MARK: New since visit (C6)
-    // Build 66 (W3): the Because-you-watched shelf and the Home
-    // New-episodes shelf that used to live here are deleted
-    // outright (Critic kills) — not renamed, not replaced.
-
-    private var newSinceVisitShelf: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CinematicSectionHeader(title: L("home.new_since_visit")) {
-                AllVODView(playlist: playlist)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(newSinceVisit.indices, id: \.self) { index in
-                        entryPosterLink(newSinceVisit[index], queue: newSinceVisit.compactMap { if case .movie(let m) = $0 { return m } else { return nil } })
-                            .shelfEntrance(index: index)
-                    }
-                }
-                .padding(.horizontal, AppTheme.spacingScreenMargin)
-            }
-            .scrollClipDisabled()
-            .shelfEdgeFade()
-        }
-    }
-
-    @ViewBuilder
-    private func entryPosterLink(_ entry: FeaturedEntry, queue: [DBVODStream] = []) -> some View {
-        switch entry {
-        case .movie(let movie):
-            NavigationLink {
-                // B1: detail opened from a Home shelf carries THAT
-                // shelf's queue as its playlist context (prev/next).
-                MovieDetailView(playlist: playlist, movie: movie, queue: queue.isEmpty ? [movie] : queue)
-            } label: {
-                VODStreamCard(playlistId: playlist.id, stream: movie,
-                              posterWidth: posterMetrics.shelfPosterWidth,
-                              posterHeight: posterMetrics.shelfPosterHeight,
-                              imageLoadProfile: .shelf)
-            }
-            .buttonStyle(PressScaleButtonStyle())
-        case .series(let series):
-            NavigationLink {
-                SeriesDetailView(playlist: playlist, series: series)
-            } label: {
-                SeriesCard(playlistId: playlist.id, stream: series,
-                           posterWidth: posterMetrics.shelfPosterWidth,
-                           posterHeight: posterMetrics.shelfPosterHeight,
-                           imageLoadProfile: .shelf)
-            }
-            .buttonStyle(PressScaleButtonStyle())
-        }
-    }
-
-    // MARK: Favorites row (B6)
-
-    private var favoritesShelf: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CinematicSectionHeader(title: L("favorites.title")) {
-                FavoritesView(playlist: playlist, initialType: "live")
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(favoriteLive.prefix(8)) { item in
-                        LiveStreamCard(
-                            playlistId: playlist.id, stream: item.stream,
-                            width: posterMetrics.liveShelfLabelWidth,
-                            iconSize: posterMetrics.liveShelfIcon,
-                            imageLoadProfile: .shelf
-                        ) { stream, _ in presentLiveSelectionFromHome(stream) }
-                    }
-                    ForEach(favoriteVODs.prefix(8)) { item in
-                        NavigationLink {
-                            MovieDetailView(playlist: playlist, movie: item.stream, queue: favoriteVODs.map(\.stream))
-                        } label: {
-                            VODStreamCard(playlistId: playlist.id, stream: item.stream,
-                                          posterWidth: posterMetrics.shelfPosterWidth,
-                                          posterHeight: posterMetrics.shelfPosterHeight,
-                                          imageLoadProfile: .shelf)
-                        }
-                        .buttonStyle(PressScaleButtonStyle())
-                    }
-                    ForEach(favoriteSeries.prefix(8)) { item in
-                        NavigationLink {
-                            SeriesDetailView(playlist: playlist, series: item.series)
-                        } label: {
-                            SeriesCard(playlistId: playlist.id, stream: item.series,
-                                       posterWidth: posterMetrics.shelfPosterWidth,
-                                       posterHeight: posterMetrics.shelfPosterHeight,
-                                       imageLoadProfile: .shelf)
-                        }
-                        .buttonStyle(PressScaleButtonStyle())
-                    }
-                }
-                .padding(.horizontal, AppTheme.spacingScreenMargin)
-            }
-            .scrollClipDisabled()
-            .shelfEdgeFade()
-        }
+        var parts: [String] = []
+        if let year = DetailFormatting.year(from: releaseDate) { parts.append(year) }
+        if let first = DetailFormatting.genreList(genre).first { parts.append(first) }
+        return parts.isEmpty ? nil : parts.joined(separator: " • ")
     }
 
     // MARK: - B3 favorite toggle (context menus / cards)
@@ -2380,7 +1596,7 @@ struct HomeView: View {
         // shared store's) only ever contain items with a real
         // normalized rating; nothing unrated is merged in to fill
         // the rail. When fewer than 3 rated items remain, the
-        // shelf gates in `shelfView` (count >= 3) hide the rail —
+        // popular rails' body gates (count >= 3) hide the rail —
         // an honest short rail is never padded with unrated picks.
 
         let finishedMovieIds = Set(recentHistory.filter {
@@ -2613,53 +1829,58 @@ enum FeaturedEntry: Identifiable, Equatable {
     }
 }
 
-// MARK: - Live match hero (Z12, fixer)
+// MARK: - Match result card (Build 77, Design A)
 
-/// The M-pack hero variant: a match that is LIVE right now, from
-/// the real MatchesService payload only — league name (when the
-/// payload carries one), both teams' logos/names/scores exactly as
-/// provided, the LIVE badge and the live clock. M-pack discipline
-/// holds: scores and state only, nothing invented; the whole card
-/// is the tap target into MatchesView (wired by the caller).
-private struct LiveMatchHeroCard: View {
+/// One Match Results card: both teams (logo + name exactly as the
+/// payload provides them), the score between them, and the state
+/// chip — a red LIVE pill carrying the live clock while the match
+/// is in play, a quiet FT chip once it is finished. Scores, names
+/// and state come from the payload only; nothing is invented.
+private struct HomeMatchResultCard: View {
     let match: MatchEvent
-    let leagueName: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(AppTheme.accent)
-                    .frame(width: 8, height: 8)
-                Text(L("matches.live"))
-                    .font(AppTheme.fontBadge)
-                    .foregroundStyle(AppTheme.accent)
-                if let clock = liveClockText {
-                    Text(clock)
-                        .font(AppTheme.fontMetadata.weight(.semibold))
-                        .foregroundStyle(AppTheme.accent)
-                        .monospacedDigit()
-                }
-                Spacer()
-                if let leagueName, !leagueName.isEmpty {
-                    Text(leagueName)
-                        .font(AppTheme.fontMetadata)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Image(systemName: "chevron.right")
-                    .font(AppTheme.fontBadge)
-                    .foregroundStyle(.secondary)
-            }
+        HStack(spacing: 10) {
+            CachedImage(
+                url: match.home.logoURL,
+                width: 30,
+                height: 30,
+                cornerRadius: 15,
+                iconName: "shield"
+            )
+            Text(match.home.name ?? "")
+                .font(AppTheme.fontCardTitle)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            teamRow(match.home)
-            teamRow(match.away)
+            Text(scoreText)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.primary)
+                .monospacedDigit()
+                .fixedSize()
+
+            CachedImage(
+                url: match.away.logoURL,
+                width: 30,
+                height: 30,
+                cornerRadius: 15,
+                iconName: "shield"
+            )
+            Text(match.away.name ?? "")
+                .font(AppTheme.fontCardTitle)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            stateChip
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                .fill(AppTheme.elevated)
+                .fill(AppTheme.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
                         .stroke(AppTheme.cardBorderColor, lineWidth: 1)
@@ -2668,32 +1889,46 @@ private struct LiveMatchHeroCard: View {
         .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
     }
 
-    private func teamRow(_ side: MatchTeamSide) -> some View {
-        HStack(spacing: 12) {
-            CachedImage(
-                url: side.logoURL,
-                width: 34,
-                height: 34,
-                cornerRadius: 17,
-                iconName: "shield"
-            )
-            // Team name EXACTLY as the payload provides it (M6).
-            Text(side.name ?? "")
-                .font(AppTheme.fontCardTitle)
-                .lineLimit(1)
-            Spacer()
-            if let score = side.score {
-                Text(score)
-                    .font(.title3.weight(.bold))
-                    .monospacedDigit()
+    /// The payload's own score strings; a side the payload has not
+    /// scored yet reads "0", the same rule Home's score lines used.
+    private var scoreText: String {
+        "\(match.home.score ?? "0") – \(match.away.score ?? "0")"
+    }
+
+    @ViewBuilder
+    private var stateChip: some View {
+        if match.state == .live {
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(.white)
+                    .frame(width: 6, height: 6)
+                Text(L("matches.live"))
+                if let clock = liveClockText {
+                    Text(clock)
+                }
             }
+            .font(AppTheme.fontBadge)
+            .foregroundStyle(.white)
+            .monospacedDigit()
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(AppTheme.live))
+            .fixedSize()
+        } else {
+            Text(L("matches.final"))
+                .font(AppTheme.fontBadge)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(AppTheme.overlayFill(0.10)))
+                .fixedSize()
         }
     }
 
-    /// Live clock from payload fields only — the same rule as
-    /// MatchesView's rows: soccer's displayClock reads "67'";
-    /// NFL/NBA pair a period with the game clock ("Q3 2:14",
-    /// period 5+ = "OT"). Nil when the payload carries neither.
+    /// Live clock from payload fields only — the same rule as the
+    /// Matches rows: soccer's displayClock reads "67'"; NFL/NBA
+    /// pair a period with the game clock ("Q3 2:14", period 5+ =
+    /// "OT"). Nil when the payload carries neither.
     private var liveClockText: String? {
         let clock = match.displayClock?.trimmingCharacters(in: .whitespaces)
         let hasClock = clock != nil && clock != "0.0" && !(clock?.isEmpty ?? true)
@@ -2864,117 +2099,5 @@ private struct FeaturedSlide: View {
         .onAppear {
             withAnimation(Motion.animate(.easeOut(duration: 0.4).delay(0.05))) { textShown = true }
         }
-    }
-}
-
-
-// MARK: - Category tile
-
-/// Round 10: STRONG-style clean card — a colored circular icon, the
-/// section name and the REAL count beneath, on the standard surface.
-/// (Rounds 5–9 rendered catalog art here — a 2×2 collage, then one
-/// representative image; the owner replaced the whole treatment with
-/// this icon-card model on the build-46 list.)
-private struct HomeCategoryTile: View {
-    let title: String
-    let countText: String
-    let tint: Color
-    let iconName: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                ZStack {
-                    Circle()
-                        .fill(tint)
-                    Image(systemName: iconName)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 46, height: 46)
-
-                Text(title)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(countText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    // C12: counts animate with numericText when the
-                    // catalog totals change.
-                    .contentTransition(.numericText())
-                    .animation(Motion.animate(.easeOut(duration: 0.35)), value: countText)
-            }
-            .padding(.vertical, 14)
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity)
-            .background(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous).fill(AppTheme.surface))
-            .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
-        }
-        .buttonStyle(PressScaleButtonStyle())
-    }
-}
-
-/// Build 63 (owner, item 7): a sport shortcut tile in the exact
-/// visual language of `HomeCategoryTile` (tinted icon disc + bold
-/// label + secondary sublabel on the shared surface card), but as
-/// a NavigationLink — each sport lands on its own Matches tab.
-private struct HomeSportTile: View {
-    let title: String
-    let subtitle: String
-    let tint: Color
-    let iconName: String
-    let sport: MatchSport
-    /// Build 64 (B1): the sport's live score / next fixture line
-    /// (real MatchesService data), nil when the sport has neither
-    /// today — the tile then shows only its subtitle, as in 63.
-    var liveLine: String? = nil
-    var isLive: Bool = false
-
-    var body: some View {
-        NavigationLink {
-            MatchesView(initialSport: sport)
-        } label: {
-            VStack(spacing: 8) {
-                ZStack {
-                    Circle()
-                        .fill(tint)
-                    Image(systemName: iconName)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 46, height: 46)
-
-                Text(title)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                if let liveLine {
-                    HStack(spacing: 4) {
-                        if isLive {
-                            Circle()
-                                .fill(AppTheme.live)
-                                .frame(width: 6, height: 6)
-                        }
-                        Text(liveLine)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(isLive ? AppTheme.live : .secondary)
-                            .lineLimit(1)
-                    }
-                }
-            }
-            .padding(.vertical, 14)
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity)
-            .background(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous).fill(AppTheme.surface))
-            .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
-        }
-        .buttonStyle(PressScaleButtonStyle())
     }
 }

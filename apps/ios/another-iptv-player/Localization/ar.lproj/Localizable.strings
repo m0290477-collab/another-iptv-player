@@ -453,6 +453,9 @@
 "home.top_rated_series" = "المسلسلات الأعلى تقييمًا";
 "home.new_movies" = "أفلام جديدة";
 "home.new_series" = "مسلسلات جديدة";
+"home.match_results" = "نتائج المباريات";
+"home.most_popular_movies" = "الأفلام الأكثر شعبية";
+"home.most_popular_series" = "المسلسلات الأكثر شعبية";
 "home.chip_all" = "الكل";
 "home.chip_newest" = "الأحدث";
 "home.count_channels" = "%@ قناة";

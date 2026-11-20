@@ -119,6 +119,9 @@
 "home.top_rated_series" = "Top Rated Series";
 "home.new_movies" = "New Movies";
 "home.new_series" = "New Series";
+"home.match_results" = "Match Results";
+"home.most_popular_movies" = "Most Popular Movies";
+"home.most_popular_series" = "Most Popular Series";
 "home.chip_all" = "All";
 "home.chip_newest" = "Newest";
 "home.count_channels" = "%@ channels";

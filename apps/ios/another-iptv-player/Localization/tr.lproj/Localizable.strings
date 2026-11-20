@@ -119,6 +119,9 @@
 "home.top_rated_series" = "En Yüksek Puanlı Diziler";
 "home.new_movies" = "Yeni Filmler";
 "home.new_series" = "Yeni Diziler";
+"home.match_results" = "Maç Sonuçları";
+"home.most_popular_movies" = "En Popüler Filmler";
+"home.most_popular_series" = "En Popüler Diziler";
 "home.chip_all" = "Tümü";
 "home.chip_newest" = "En Yeniler";
 "home.count_channels" = "%@ kanal";
