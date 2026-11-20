@@ -58,6 +58,25 @@ enum Motion {
     static var pressSpring: Animation {
         .spring(response: 0.32, dampingFraction: 0.72)
     }
+
+    // Build 81 (item 8): the app-wide motion pass — the owner:
+    // "the app feels dead; anything dull, switch it on", section
+    // by section, button by button. Two tokens join the set;
+    // every application routes through `animate(_:)` / the
+    // EffectsGate like the rest of this file, so Reduce Motion
+    // and the intensity setting still them all.
+
+    /// Chip selection swap (category chips, filter pills): the
+    /// fill/foreground change springs instead of snapping.
+    static var chipSwap: Animation {
+        .spring(response: 0.32, dampingFraction: 0.85)
+    }
+
+    /// Content entrance / tab-content swap: a short ease-out —
+    /// opacity and small layout changes only, never a slide show.
+    static var contentIn: Animation {
+        .easeOut(duration: 0.28)
+    }
 }
 
 // MARK: - Haptics (B12 map)
@@ -152,11 +171,49 @@ struct CardHoverModifier: ViewModifier {
     }
 }
 
+// MARK: - Section entrance (build 81, item 8)
+
+/// One-shot section entrance: a section fades in with a small
+/// rise the FIRST time its view appears, then never again for
+/// that view instance. Same discipline as the shelf entrances:
+/// transform/opacity only, no timers, no blur, and fully stilled
+/// by the EffectsGate (Reduce Motion, the Q21 reduce-effects
+/// setting, motion intensity) — with any of those on, the section
+/// renders already-shown. Apply to section containers and cards,
+/// NOT to individual rows inside long Lists (the system owns
+/// those transitions).
+struct SectionAppearModifier: ViewModifier {
+    @State private var shown = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown ? 0 : 12)
+            .onAppear {
+                if shown { return }
+                guard EffectsGate.allowsHeavyEffects(reduceMotion: reduceMotion) else {
+                    shown = true
+                    return
+                }
+                withAnimation(Motion.animate(Motion.contentIn) ?? .linear(duration: 0)) {
+                    shown = true
+                }
+            }
+    }
+}
+
 extension View {
     /// B12 shelf entrance (rise 28 pt, shelfSpring, stagger 0.06);
     /// bump `replayToken` to replay the light version (tab return).
     func shelfEntrance(index: Int, replayToken: Int = 0) -> some View {
         modifier(ShelfEntranceModifier(index: index, replayToken: replayToken))
+    }
+
+    /// Build 81 (item 8): the one-shot section entrance (see
+    /// SectionAppearModifier).
+    func sectionAppear() -> some View {
+        modifier(SectionAppearModifier())
     }
 
     /// C9 iPad hover token (reuses the press spring + card border).

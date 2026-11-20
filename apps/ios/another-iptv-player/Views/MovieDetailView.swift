@@ -131,7 +131,8 @@ struct MovieDetailView: View {
                                 imageLoadProfile: .shelf
                             )
                         }
-                        .buttonStyle(.plain)
+                        // Build 81 (item 8): poster-card press feedback.
+                        .buttonStyle(PressScaleButtonStyle())
                     }
                 }
                 .padding(.horizontal, 16)
@@ -162,7 +163,8 @@ struct MovieDetailView: View {
                                 imageLoadProfile: .shelf
                             )
                         }
-                        .buttonStyle(.plain)
+                        // Build 81 (item 8): poster-card press feedback.
+                        .buttonStyle(PressScaleButtonStyle())
                     }
                 }
                 .padding(.horizontal, 16)
@@ -437,6 +439,8 @@ struct MovieDetailView: View {
                     DetailCastRow(names: DetailFormatting.peopleList(cast)) { person in
                         pendingRoute = .person(person)
                     }
+                    // Build 81 (item 8): cast row fades/rises in.
+                    .sectionAppear()
                 }
 
                 // Build 61 (B8, metadata completion): the remaining
@@ -468,6 +472,8 @@ struct MovieDetailView: View {
                 // with at least 3 same-genre matches.
                 if moreLikeThisItems.count >= 3 {
                     moreLikeThisSection
+                        // Build 81 (item 8): section entrance.
+                        .sectionAppear()
                 }
             }
             .padding(.bottom, 48)

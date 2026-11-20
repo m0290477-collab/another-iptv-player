@@ -484,8 +484,15 @@ struct TeamPageView: View {
             if !squad.isEmpty {
                 Section {
                     ForEach(squad) { player in
+                        // Build 81 (item 1, owner): squad rows carry
+                        // NO player picture — name + position only,
+                        // for every team in every sport. (Most rows
+                        // rendered the monogram fallback anyway; the
+                        // owner ordered the element gone.) The header
+                        // crest stays — it is the team logo. Match-
+                        // detail lineup/bench/pitch headshots are a
+                        // different surface and stay.
                         HStack(spacing: 10) {
-                            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 32)
                             Text(player.name)
                                 .font(AppTheme.fontCardTitle)
                                 .lineLimit(1)

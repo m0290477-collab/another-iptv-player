@@ -353,6 +353,8 @@ struct SettingsHubView: View {
                 RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
                     .stroke(AppTheme.cardBorderColor, lineWidth: 1)
             }
+            // Build 81 (item 8): hub sections fade/rise in once.
+            .sectionAppear()
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
         }
     }
@@ -385,7 +387,9 @@ struct SettingsHubView: View {
             .padding(.vertical, 11)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        // Build 81 (item 8): hub rows dim on press (was .plain —
+        // no feedback at all).
+        .buttonStyle(PressOpacityButtonStyle())
     }
 
     /// Hairline between grouped rows, inset to the title edge

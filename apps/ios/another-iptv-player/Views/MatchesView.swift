@@ -175,6 +175,11 @@ struct MatchesView: View {
 
             sportContent(model.state(for: selectedSport))
         }
+        // Build 81 (item 8): sport/day switches ease instead of
+        // snapping (contentIn token; stilled by Reduce Motion /
+        // intensity via Motion.animate).
+        .animation(Motion.animate(Motion.contentIn), value: selectedSport)
+        .animation(Motion.animate(Motion.contentIn), value: selectedDayIndex)
         .cinematicBackground()
         .navigationTitle(L("matches.title"))
         .navigationBarTitleDisplayMode(.inline)

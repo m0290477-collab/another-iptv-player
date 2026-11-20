@@ -1124,3 +1124,4 @@
 "settings.hub.playlist_count_one" = "1 个播放列表";
 "settings.hub.playlists_count_format" = "%d 个播放列表";
 "settings.hub.active_until_format" = "有效期至 %@";
+"home.sports" = "体育";

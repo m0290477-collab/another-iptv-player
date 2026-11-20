@@ -1124,3 +1124,4 @@
 "settings.hub.playlist_count_one" = "قائمة تشغيل واحدة";
 "settings.hub.playlists_count_format" = "%d قوائم تشغيل";
 "settings.hub.active_until_format" = "نشط حتى %@";
+"home.sports" = "الرياضة";

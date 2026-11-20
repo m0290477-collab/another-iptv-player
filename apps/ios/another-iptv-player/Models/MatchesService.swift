@@ -512,8 +512,11 @@ struct MatchH2HMeeting: Identifiable {
 }
 
 /// Build 80 (item 15): an official ESPN video attached to the
-/// match (summary `videos[]`) — headline + the payload's own web
-/// link; rendered only when both exist.
+/// match (summary `videos[]`). Build 81 (item 3): `url` is the
+/// payload's DIRECT playable MP4 (`links.source.href`), played
+/// in-app with AVPlayer — a video whose payload carries no
+/// direct source never reaches this type (see mapVideos), so
+/// nothing in the app links out to ESPN's website for video.
 struct MatchVideo: Identifiable {
     let id: String
     let headline: String
@@ -600,6 +603,13 @@ private struct ESPNVideo: Decodable {
     struct Links: Decodable {
         struct Web: Decodable { let href: String? }
         let web: Web?
+        // Build 81 (item 3): `links.source.href` is a DIRECT
+        // playable MP4 on ESPN's media CDN (verified live
+        // 2026-11-20 against NFL/NBA/soccer summaries: 17 of 17
+        // sampled videos carried one, HTTP 200, Accept-Ranges:
+        // bytes) — it is what lets highlights play in-app instead
+        // of opening ESPN's website.
+        let source: Web?
     }
     let id: Int?
     let headline: String?
@@ -836,12 +846,17 @@ extension MatchesService {
         return MatchH2H(title: series.title, summary: series.summary, meetings: meetings)
     }
 
-    /// Build 80 (item 15): official videos — a video renders only
-    /// with a headline AND the payload's own web link.
+    /// Build 80 (item 15): official videos. Build 81 (item 3): a
+    /// video renders only with a headline AND a direct playable
+    /// source (`links.source.href`) — videos whose payload offers
+    /// only the web page link are kept OUT rather than sending
+    /// the user to ESPN's website (owner's order). Live sampling
+    /// (2026-11-20): NFL 6/6, NBA 8/8, soccer 3/3 sampled videos
+    /// carried a direct source.
     private static func mapVideos(_ summary: ESPNSummary) -> [MatchVideo] {
         (summary.videos ?? []).compactMap { video -> MatchVideo? in
             guard let headline = video.headline, !headline.isEmpty,
-                  let href = video.links?.web?.href, let url = URL(string: href)
+                  let href = video.links?.source?.href, let url = URL(string: href)
             else { return nil }
             return MatchVideo(
                 id: video.id.map(String.init) ?? href,

@@ -1124,3 +1124,4 @@
 "settings.hub.playlist_count_one" = "1 प्लेलिस्ट";
 "settings.hub.playlists_count_format" = "%d प्लेलिस्ट";
 "settings.hub.active_until_format" = "%@ तक सक्रिय";
+"home.sports" = "खेल";

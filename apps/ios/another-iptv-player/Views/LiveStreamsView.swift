@@ -1070,7 +1070,9 @@ struct LiveStreamCard: View {
 
             }
         }
-        .buttonStyle(.plain)
+        // Build 81 (item 8): press feedback on the channel tile
+        // (was .plain — a tap gave no visible response).
+        .buttonStyle(PressScaleButtonStyle())
     }
 }
 

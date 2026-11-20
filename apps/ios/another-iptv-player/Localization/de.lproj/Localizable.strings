@@ -1124,3 +1124,4 @@
 "settings.hub.playlist_count_one" = "1 Playlist";
 "settings.hub.playlists_count_format" = "%d Playlists";
 "settings.hub.active_until_format" = "Aktiv bis %@";
+"home.sports" = "Sport";

@@ -507,6 +507,8 @@ struct ContentChipsRow: View {
                 }
             }
             .padding(.horizontal, 16)
+            // Build 81 (item 8): chip selection swap animation.
+            .animation(Motion.animate(Motion.chipSwap), value: selection)
         }
     }
 }
@@ -564,7 +566,10 @@ struct RankedPosterCard: View {
                     cornerRadius: AppTheme.cornerRadius,
                     contentMode: .fill,
                     iconName: iconName,
-                    loadProfile: .shelf
+                    loadProfile: .shelf,
+                    // Build 81 (item 5c): no-image items render the
+                    // designed title card, not an anonymous tile.
+                    title: title
                 )
 
                 rankNumeral
@@ -708,7 +713,11 @@ struct PillChipButton: View {
                 .background(Capsule().fill(isSelected ? AppTheme.accent : AppTheme.elevated))
                 .foregroundColor(isSelected ? .white : .primary)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressScaleButtonStyle())
+        // Build 81 (item 8): the selection swap springs instead of
+        // snapping (shared chipSwap token; stilled by Reduce
+        // Motion / intensity via Motion.animate).
+        .animation(Motion.animate(Motion.chipSwap), value: isSelected)
     }
 }
 

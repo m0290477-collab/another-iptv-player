@@ -339,6 +339,18 @@ struct PressScaleButtonStyle: ButtonStyle {
     }
 }
 
+/// Build 81 (item 8): press feedback for FULL-WIDTH rows (the
+/// Settings hub rows and similar) — a pressed row dims instead of
+/// scaling; a 0.94 scale on a full-width row reads as a glitch.
+/// Same press spring, same Motion routing as the card style.
+struct PressOpacityButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.55 : 1.0)
+            .animation(Motion.animate(Motion.pressSpring), value: configuration.isPressed)
+    }
+}
+
 /// One-shot shelf-card entrance: fade in with a rise the first time a
 /// card's view appears, with a per-index stagger. Round 5 strengthens
 /// round 3's version — the owner rated the subtle 10 pt / 0.35 s package

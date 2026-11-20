@@ -104,13 +104,23 @@ struct CachedImage: View {
 
     var body: some View {
         Group {
-            if let url {
+            if let url, ArtworkFailureMemo.shared.isFailed(url) {
+                // Build 81 (item 5b): this URL already failed in
+                // this session — render the designed placeholder
+                // immediately instead of re-issuing a doomed
+                // request on every scroll reappearance (the
+                // pipeline keeps no negative cache; see
+                // ArtworkFailureMemo). After the memo's TTL the
+                // URL is retried normally.
+                placeholder
+            } else if let url {
                 // A custom `transaction` can trigger multiple LazyImageContext updates in the same frame; animation is handled by the parent `Group` instead.
                 LazyImage(request: makeRequest(url: url)) { state in
                     if let image = state.image {
                         image
                             .resizable()
                             .aspectRatio(contentMode: contentMode)
+                            .onAppear { ArtworkFailureMemo.shared.recordSuccess(url) }
                     } else if state.error != nil {
                         // Round 19 (R19-2): a failed image NEVER
                         // renders as a warning glyph — it falls back
@@ -118,8 +128,14 @@ struct CachedImage: View {
                         // loading state (gradient + section symbol),
                         // and the call site is notified so it can
                         // swap in its own fallback art.
+                        // Build 81 (item 5b): the failure is also
+                        // memoized so the URL is not retried on
+                        // every reappearance.
                         placeholder
-                            .onAppear { onLoadFailed?() }
+                            .onAppear {
+                                ArtworkFailureMemo.shared.recordFailure(url)
+                                onLoadFailed?()
+                            }
                     } else {
                         placeholder
                     }

@@ -1124,3 +1124,4 @@
 "settings.hub.playlist_count_one" = "1 lista de reproducción";
 "settings.hub.playlists_count_format" = "%d listas de reproducción";
 "settings.hub.active_until_format" = "Activo hasta el %@";
+"home.sports" = "Deportes";

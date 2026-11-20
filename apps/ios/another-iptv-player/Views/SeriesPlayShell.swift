@@ -315,7 +315,7 @@ struct SeriesPlayShell: View {
                         title: ep.title,
                         containerExtension: ep.containerExtension,
                         info: ep.info?.plot,
-                        cover: ep.info?.movieImage ?? ep.info?.cover,
+                        cover: ep.stillURLString,
                         duration: ep.info?.duration,
                         rating: ep.info?.rating,
                         seasonId: seasonId

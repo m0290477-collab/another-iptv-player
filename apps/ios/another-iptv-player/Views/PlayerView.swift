@@ -2623,6 +2623,15 @@ private struct PlayerViewImpl: View {
                 .padding(.horizontal, 12)
             }
 
+            // Build 81 (item 6, owner): the VOD seek control is
+            // its OWN row directly above the bar — a thick pill
+            // that covers nothing (the build-80 line sat ON the
+            // bar's top edge, overlapping the slab). Live renders
+            // no seek row (a live stream has no position).
+            if !isLiveStream {
+                vodSeekPill
+            }
+
             // Build 66 (W6, item 11): the Build 65 Rich Bar's
             // stacked rows (identity row + control row + VOD seek
             // card) are restyled into ONE slim bar (build 80,
@@ -2644,9 +2653,9 @@ private struct PlayerViewImpl: View {
     /// on the trailing side — over the same heavily blurred
     /// flat translucent black slab (build 80, item 7; formerly
     /// the material + black wash), so the
-    /// video stays clearly visible through it. The thin red-orange
-    /// progress line sits at the bar's TOP edge (see
-    /// `slimBarProgressLine`).
+    /// video stays clearly visible through it. (Build 81, item 6:
+    /// the seek control moved OFF this bar into its own pill row
+    /// above it — see `vodSeekPill`.)
     /// Build 70: on a portrait phone the bar's single row (identity
     /// segment + play/pause + the five fixed 48pt control columns)
     /// is wider than the screen and cannot compress — the identity
@@ -2725,10 +2734,8 @@ private struct PlayerViewImpl: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color.black.opacity(0.48))
         )
-        .overlay(alignment: .top) {
-            slimBarProgressLine
-                .padding(.horizontal, 16)
-        }
+        // Build 81 (item 6): no top-edge overlay line anymore —
+        // the seek control is the `vodSeekPill` row above the bar.
         .padding(.horizontal, 4)
     }
 
@@ -2762,49 +2769,50 @@ private struct PlayerViewImpl: View {
         }
     }
 
-    /// The thin (3pt) red-orange line at the bar's TOP edge.
-    /// VOD: this IS the seek bar (see `slimBarSeekLine`). Live
-    /// renders nothing here (build 80, item 9).
-    @ViewBuilder
-    private var slimBarProgressLine: some View {
-        // Build 80 (item 9): the live branch read programme
-        // progress from the EPG snapshot — gone with the TV Guide
-        // removal. Live shows no progress line (a live stream has
-        // no position); VOD keeps its seek line.
-        if !isLiveStream {
-            slimBarSeekLine
-        }
-    }
-
-    /// The VOD seek bar, rendered thin at the bar's top edge. It
-    /// drives the EXACT state and calls the old `scrubTimelineCard`
-    /// drove through `PlayerTimeline`: the drag updates
-    /// `scrubValue` live (so `displayedSliderPosition` follows the
-    /// finger), and on release it locks the slider value, calls
+    /// Build 81 (item 6, owner — from his reference video of
+    /// another app's player): the VOD seek control as a THICK
+    /// PILL in its own row above the bar. ~30pt of visible pill
+    /// inside a 44pt touch row; the played portion fills with the
+    /// app's current accent; the current / total time sits
+    /// CENTERED INSIDE the pill and follows the finger live while
+    /// scrubbing; the whole pill is draggable. It replaces the
+    /// build-80 3pt line that rode the bar's top edge (the owner:
+    /// "مكانه لازم مايغطي شي" — its place must not cover
+    /// anything — "ويصير ثخين شوية" — and a bit thicker). The drag
+    /// drives the EXACT state and calls the old line drove through
+    /// `PlayerTimeline`: the drag updates `scrubValue` live (so
+    /// `displayedSliderPosition` follows the finger), and on
+    /// release it locks the slider value, calls
     /// `player.seek(to:)`, clears `isScrubbing`, re-arms the
     /// auto-hide timer and schedules the same 2.8 s lock release
     /// guarded by `sliderUnlockGeneration`. The VoiceOver
     /// adjustable action (±10 s jumps) and its label/value are the
-    /// old timeline's, unchanged.
-    private var slimBarSeekLine: some View {
+    /// old timeline's, unchanged. Flat styling, matching build
+    /// 80's player elements.
+    private var vodSeekPill: some View {
         GeometryReader { proxy in
             let width = max(proxy.size.width, 1)
             // Same binding the old timeline read: `sliderBinding`
             // (get = `displayedSliderPosition`).
             let fraction = CGFloat(min(max(sliderBinding.wrappedValue, 0), 1))
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.white.opacity(0.25))
-                    .frame(height: 3)
-                Capsule()
-                    .fill(AppTheme.accentStart)
-                    .frame(width: width * fraction, height: 3)
-                Circle()
-                    .fill(AppTheme.accentStart)
-                    .frame(width: 10, height: 10)
-                    .offset(x: width * fraction - 5)
+            let displayedMs = Int(sliderBinding.wrappedValue * Double(max(player.durationMs, 0)))
+            ZStack {
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.22))
+                        .frame(height: 30)
+                    Capsule()
+                        .fill(AppTheme.accent)
+                        .frame(width: width * fraction, height: 30)
+                }
+                Text("\(formatMs(displayedMs)) / \(totalDurationLabel)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .monospacedDigit()
+                    .shadow(color: .black.opacity(0.45), radius: 3, y: 1)
+                    .allowsHitTesting(false)
             }
-            .frame(height: 14)
+            .frame(height: 44)
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -2839,7 +2847,8 @@ private struct PlayerViewImpl: View {
                     }
             )
         }
-        .frame(height: 14)
+        .frame(height: 44)
+        .padding(.horizontal, 4)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(L("player.a11y.playback_position"))
         .accessibilityValue("\(formatMs(Int(player.timeMs))) / \(totalDurationLabel)")

@@ -150,10 +150,21 @@ struct VODView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        tabHeader
+                // Build 81 (item 7): FIXED header above the scroll
+                // view — see the matching note in SeriesView. Build
+                // 80's in-ScrollView field placement (first element
+                // inside the ScrollViewReader's anchored ScrollView,
+                // rebuilt by the recompute pass on every store
+                // publish, with restoreScrollAnchor re-asserting the
+                // bound scroll position) is the construct that left
+                // the field dead on the owner's device; the fixed
+                // header is the placement every working
+                // CatalogSearchField in the app uses.
+                VStack(spacing: 0) {
+                    tabHeader
 
+                    ScrollViewReader { proxy in
+                    ScrollView {
                         // The chips swap the scroll content — All keeps
                         // the shelves; Newest renders its grid.
                         // Build 80 (item 4): an active in-tab search
@@ -269,7 +280,8 @@ struct VODView: View {
                     .onAppear { restoreScrollAnchor() }
                     .onChange(of: displayCategories.map(\.id)) { _, _ in restoreScrollAnchor() }
                     .onChange(of: selectedChip) { _, _ in restoreScrollAnchor() }
-                }
+                    } // ScrollViewReader
+                } // Build 81 (item 7): fixed-header VStack
             }
         }
         .toolbar {
@@ -429,8 +441,12 @@ struct VODView: View {
             // Build 80 (item 4): a REAL text field (CatalogSearchField,
             // the same field global search uses) bound to the tab's own
             // query — typing filters this tab's catalog below.
+            // Build 81 (item 7): inset to the screen margin now that
+            // the header is a fixed block (the chips row and the
+            // count line already carry their own 16pt insets).
             CatalogSearchField(text: $tabSearchText, placeholder: L("home.search_placeholder"))
             .padding(.top, 4)
+            .padding(.horizontal, 16)
 
             Text(L("home.count_movies", CatalogCountFormatter.string(displayCategories.reduce(0) { $0 + (displayItemsByCategory[$1.id]?.count ?? 0) })))
                 .font(.subheadline)
@@ -788,7 +804,7 @@ struct VODView: View {
                 url: url,
                 title: item.title,
                 subtitle: item.secondaryTitle,
-                artworkURL: item.imageURL.flatMap { URL(string: $0) },
+                artworkURL: item.imageURL.flatMap { ArtworkURL.url(from: $0) },
                 isLiveStream: false,
                 playlistId: playlist.id,
                 streamId: item.streamId,
@@ -852,7 +868,7 @@ struct TopMoviesShelf: View, Equatable {
                             // rows use).
                             RankedPosterCard(
                                 rank: index + 1,
-                                imageURL: items[index].streamIcon.flatMap { URL(string: $0) },
+                                imageURL: items[index].streamIcon.flatMap { ArtworkURL.url(from: $0) },
                                 title: items[index].name,
                                 ratingText: ContentRating.normalizedDisplayText(
                                     rating: items[index].rating,
@@ -1079,7 +1095,7 @@ struct VODCategoryShelfRow: View, Equatable {
     private func prefetchIcons(from list: [VODWithCategory]) {
         let urls = list.prefix(VODCategoryShelf.prefetchHeadCount)
             .compactMap { $0.stream.streamIcon }
-            .compactMap { URL(string: $0) }
+            .compactMap { ArtworkURL.url(from: $0) }
         ListImagePrefetch.start(
             urls: urls,
             width: posterMetrics.shelfPosterWidth,
@@ -1096,7 +1112,7 @@ struct VODCategoryShelfRow: View, Equatable {
         guard start < list.count else { return }
         let urls = list[start..<min(start + ListImagePrefetch.scrollWindow, list.count)]
             .compactMap { $0.stream.streamIcon }
-            .compactMap { URL(string: $0) }
+            .compactMap { ArtworkURL.url(from: $0) }
         ListImagePrefetch.start(
             urls: urls,
             width: posterMetrics.shelfPosterWidth,
@@ -1109,7 +1125,7 @@ struct VODCategoryShelfRow: View, Equatable {
     private func stopPrefetchIcons(from list: [VODWithCategory]) {
         let urls = list.prefix(VODCategoryShelf.prefetchHeadCount)
             .compactMap { $0.stream.streamIcon }
-            .compactMap { URL(string: $0) }
+            .compactMap { ArtworkURL.url(from: $0) }
         ListImagePrefetch.stop(
             urls: urls,
             width: posterMetrics.shelfPosterWidth,
@@ -1148,12 +1164,18 @@ struct VODStreamCard: View {
         VStack {
             ZStack(alignment: .topTrailing) {
                 CachedImage(
-                    url: stream.streamIcon.flatMap { URL(string: $0) },
+                    // Build 81 (items 5b/5c): lenient artwork URL
+                    // (the strict URL(string:) dropped posters whose
+                    // paths carry spaces) + the title, so a movie
+                    // with no usable image renders the designed
+                    // title card instead of an anonymous blank tile.
+                    url: ArtworkURL.url(from: stream.streamIcon),
                     width: posterWidth,
                     height: posterHeight,
                     contentMode: SwiftUI.ContentMode.fill,
                     iconName: "film",
-                    loadProfile: imageLoadProfile
+                    loadProfile: imageLoadProfile,
+                    title: stream.name
                 )
 
                 if let progress = watchProgress, progress > 0 {
@@ -1537,7 +1559,7 @@ struct VODCategoryContent: View, Equatable {
         // for the whole 10k list first would be wasted O(n) work on the main thread.
         let urls = list.dropFirst(startingAt).prefix(ListImagePrefetch.maxBatch)
             .compactMap { $0.stream.streamIcon }
-            .compactMap { URL(string: $0) }
+            .compactMap { ArtworkURL.url(from: $0) }
         ListImagePrefetch.start(
             urls: urls,
             width: posterMetrics.categoryGridPosterWidth,
@@ -1649,7 +1671,7 @@ struct VODPlayerShell: View {
                 url: url,
                 title: currentMovie.name,
                 subtitle: parts.isEmpty ? nil : parts.joined(separator: " · "),
-                artworkURL: currentMovie.streamIcon.flatMap { URL(string: $0) },
+                artworkURL: currentMovie.streamIcon.flatMap { ArtworkURL.url(from: $0) },
                 isLiveStream: false,
                 playlistId: playlist.id,
                 streamId: String(currentMovie.streamId),
@@ -1747,7 +1769,7 @@ struct MovieFeaturedHero: View {
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             CachedImage(
-                url: movie.backdropPath.flatMap { URL(string: $0) } ?? movie.streamIcon.flatMap { URL(string: $0) },
+                url: movie.backdropPath.flatMap { ArtworkURL.url(from: $0) } ?? movie.streamIcon.flatMap { ArtworkURL.url(from: $0) },
                 width: UIScreen.main.bounds.width - 32,
                 height: 210,
                 cornerRadius: AppTheme.heroCornerRadius,
@@ -1953,7 +1975,7 @@ struct WatchlistView: View {
                             ForEach(unavailableEntries, id: \.id) { entry in
                                 HStack(spacing: 12) {
                                     CachedImage(
-                                        url: entry.imageURL.flatMap { URL(string: $0) },
+                                        url: entry.imageURL.flatMap { ArtworkURL.url(from: $0) },
                                         width: 44, height: 44,
                                         cornerRadius: AppTheme.smallCornerRadius,
                                         iconName: "film"
@@ -2031,7 +2053,7 @@ struct MovieCollectionsShelf: View, Equatable {
                             VStack(alignment: .leading, spacing: 6) {
                                 ZStack(alignment: .bottomTrailing) {
                                     CachedImage(
-                                        url: group.movies.first?.streamIcon.flatMap { URL(string: $0) },
+                                        url: group.movies.first?.streamIcon.flatMap { ArtworkURL.url(from: $0) },
                                         width: posterMetrics.shelfPosterWidth,
                                         height: posterMetrics.shelfPosterHeight,
                                         contentMode: .fill,

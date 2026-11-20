@@ -1,3 +1,4 @@
+import AVKit
 import GRDB
 import SwiftUI
 
@@ -44,6 +45,8 @@ struct MatchDetailView: View {
     /// excluded, because ESPN's free data does not carry them:
     /// player ratings, momentum, Player of the Match.)
     @State private var detailTab = 0
+    /// Build 81 (item 3): the highlight currently playing in-app.
+    @State private var playingHighlight: MatchVideo?
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
 
     private enum DetailTab: Hashable {
@@ -137,6 +140,13 @@ struct MatchDetailView: View {
         .navigationTitle(L("matches.title"))
         .navigationBarTitleDisplayMode(.inline)
         .task(id: eventId) { await load() }
+        // Build 81 (item 8): the FotMob tab swap eases instead of
+        // snapping.
+        .animation(Motion.animate(Motion.contentIn), value: detailTab)
+        // Build 81 (item 3): in-app highlight playback.
+        .fullScreenCover(item: $playingHighlight) { video in
+            HighlightPlayerView(url: video.url)
+        }
     }
 
     private func load() async {
@@ -844,11 +854,14 @@ struct MatchDetailView: View {
         }
     }
 
-    /// An official highlight/analysis video (item 15): thumbnail,
-    /// the payload's own headline, duration; opens the payload's
-    /// web link (the same Link path trailers use).
+    /// An official highlight/analysis video (item 15). Build 81
+    /// (item 3, owner): tapping plays the video IN-APP — the
+    /// payload's direct MP4 in an AVPlayer sheet — never out to
+    /// ESPN's website.
     private func videoRow(_ video: MatchVideo) -> some View {
-        Link(destination: video.url) {
+        Button {
+            playingHighlight = video
+        } label: {
             HStack(spacing: 12) {
                 ZStack {
                     CachedImage(
@@ -878,6 +891,7 @@ struct MatchDetailView: View {
                 Spacer(minLength: 0)
             }
         }
+        .buttonStyle(.plain)
     }
 
     /// One past meeting (item 15): date, then the two teams with
@@ -960,5 +974,50 @@ private struct PlayerPhotoView: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .accessibilityHidden(true)
+    }
+}
+
+/// Build 81 (item 3): the in-app highlight player — a plain
+/// AVKit VideoPlayer over the payload's direct MP4, presented
+/// full-screen from the Facts tab's Highlights rows. Autoplays
+/// on appear, pauses and releases on dismiss; the standard
+/// AVKit chrome (its own close via the X button) and nothing
+/// else — no custom overlays, no web view.
+private struct HighlightPlayerView: View {
+    let url: URL
+    @State private var player: AVPlayer?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black
+                .ignoresSafeArea()
+
+            if let player {
+                VideoPlayer(player: player)
+                    .ignoresSafeArea()
+            }
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(Color.black.opacity(0.55)))
+            }
+            .padding(.top, 12)
+            .padding(.trailing, 12)
+        }
+        .onAppear {
+            let avPlayer = AVPlayer(url: url)
+            player = avPlayer
+            avPlayer.play()
+        }
+        .onDisappear {
+            player?.pause()
+            player = nil
+        }
     }
 }

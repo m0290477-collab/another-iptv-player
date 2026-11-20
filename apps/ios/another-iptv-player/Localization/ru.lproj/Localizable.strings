@@ -1124,3 +1124,4 @@
 "settings.hub.playlist_count_one" = "1 плейлист";
 "settings.hub.playlists_count_format" = "%d плейлистов";
 "settings.hub.active_until_format" = "Активно до %@";
+"home.sports" = "Спорт";

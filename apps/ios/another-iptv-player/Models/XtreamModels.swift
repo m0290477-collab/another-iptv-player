@@ -486,15 +486,27 @@ struct XtreamEpisode: Codable, Identifiable {
     let title: String?
     let containerExtension: String?
     let info: XtreamEpisodeInfo?
-    
+    // Build 81 (item 5a): many panels carry the episode still at
+    // the TOP level of the episode object (`cover`, `cover_big` or
+    // `image`) rather than inside `info` — build 80 and earlier
+    // never read them, so those stills were dropped at parse time
+    // and the cards fell back to placeholders even though the data
+    // carried a picture.
+    let cover: String?
+    let coverBig: String?
+    let image: String?
+
     enum CodingKeys: String, CodingKey {
         case id
         case episodeNum = "episode_num"
         case title
         case containerExtension = "container_extension"
         case info
+        case cover
+        case coverBig = "cover_big"
+        case image
     }
-    
+
     init(from decoder: Decoder) throws {
         let container = try? decoder.container(keyedBy: CodingKeys.self)
         id = container?.decodeFlexibleStringIfPresent(forKey: .id)
@@ -502,6 +514,25 @@ struct XtreamEpisode: Codable, Identifiable {
         title = container?.decodeFlexibleStringIfPresent(forKey: .title)
         containerExtension = container?.decodeFlexibleStringIfPresent(forKey: .containerExtension)
         info = try? container?.decodeIfPresent(XtreamEpisodeInfo.self, forKey: .info)
+        cover = container?.decodeFlexibleStringIfPresent(forKey: .cover)
+        coverBig = container?.decodeFlexibleStringIfPresent(forKey: .coverBig)
+        image = container?.decodeFlexibleStringIfPresent(forKey: .image)
+    }
+}
+
+extension XtreamEpisode {
+    /// Build 81 (item 5a): the episode's still, resolved from
+    /// EVERY field panels actually use for it — `info.movie_image`,
+    /// `info.cover`, `info.cover_big`, then the episode object's
+    /// own top-level `cover` / `cover_big` / `image`. First
+    /// non-empty wins. Before build 81 the DB write read only the
+    /// first two, so stills carried in any other field were lost
+    /// at import even though the payload contained them.
+    var stillURLString: String? {
+        let candidates = [info?.movieImage, info?.cover, info?.coverBig, cover, coverBig, image]
+        return candidates
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
     }
 }
 
@@ -511,12 +542,18 @@ struct XtreamEpisodeInfo: Codable {
     let rating: String?
     let cover: String?
     let movieImage: String?
-    
+    // Build 81 (item 5a): `cover_big` inside `info` is the
+    // standard episode-still field on many panels and was never
+    // decoded — the single biggest parse-side cause of missing
+    // episode stills (see XtreamEpisode.stillURLString).
+    let coverBig: String?
+
     enum CodingKeys: String, CodingKey {
         case plot, duration, rating, cover
         case movieImage = "movie_image"
+        case coverBig = "cover_big"
     }
-    
+
     init(from decoder: Decoder) throws {
         let container = try? decoder.container(keyedBy: CodingKeys.self)
         plot = container?.decodeFlexibleStringIfPresent(forKey: .plot)
@@ -524,6 +561,7 @@ struct XtreamEpisodeInfo: Codable {
         rating = container?.decodeFlexibleStringIfPresent(forKey: .rating)
         cover = container?.decodeFlexibleStringIfPresent(forKey: .cover)
         movieImage = container?.decodeFlexibleStringIfPresent(forKey: .movieImage)
+        coverBig = container?.decodeFlexibleStringIfPresent(forKey: .coverBig)
     }
 }
 // MARK: - VOD Info

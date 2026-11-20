@@ -428,7 +428,16 @@ struct HomeView: View {
                         // Section 2: Match Results — one card per
                         // match (live first, then latest finished),
                         // same F6 gate the sports strip had.
+                        // Build 81 (item 9, owner): a Sports block
+                        // sits DIRECTLY ABOVE Match Results — one
+                        // entry per sport, each opening the existing
+                        // Matches experience with that sport
+                        // preselected (MatchesView(initialSport:),
+                        // the build-63 deep link). No second sports
+                        // system, no match lists duplicated on Home.
+                        // Same F6 gate as Match Results.
                         if !UserDefaults.standard.bool(forKey: "sections.hidden.matches") {
+                            homeSportsSection
                             matchResultsSection
                         }
 
@@ -1137,24 +1146,84 @@ struct HomeView: View {
     /// header's See-all opens the full Matches screen. Renders
     /// nothing when today has no live or finished match.
     @ViewBuilder
+    // MARK: Sports entries (build 81, item 9)
+
+    /// One card per covered sport (Soccer / NFL / NBA — the
+    /// `MatchSport` cases, in the Matches picker's own order),
+    /// deep-linking into the existing Matches destination with the
+    /// sport preselected. Design A section language: the shared
+    /// small-caps header (its See All opens Matches on the default
+    /// sport) over a tidy row of equal cards.
+    private var homeSportsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            CinematicSectionHeader(title: L("home.sports")) {
+                MatchesView()
+            }
+            HStack(spacing: 10) {
+                ForEach(MatchSport.allCases) { sport in
+                    NavigationLink {
+                        MatchesView(initialSport: sport)
+                    } label: {
+                        VStack(spacing: 8) {
+                            Image(systemName: sportSymbolName(sport))
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundStyle(AppTheme.accent)
+                            Text(L(sport.titleKey))
+                                .font(AppTheme.fontCardTitle)
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(
+                            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                                .fill(AppTheme.surface)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                                        .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+                                )
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .sectionAppear()
+    }
+
+    private func sportSymbolName(_ sport: MatchSport) -> String {
+        switch sport {
+        case .soccer: return "soccerball"
+        case .nfl: return "americanfootball.fill"
+        case .nba: return "basketball.fill"
+        }
+    }
+
     private var matchResultsSection: some View {
         if !matchResults.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 CinematicSectionHeader(title: L("home.match_results")) {
                     MatchesView()
                 }
-                VStack(spacing: 10) {
+                VStack(spacing: 8) {
                     ForEach(matchResults) { entry in
                         NavigationLink {
                             MatchDetailView(sport: entry.sport, leaguePath: entry.leaguePath, match: entry.match)
                         } label: {
                             HomeMatchResultCard(match: entry.match)
                         }
-                        .buttonStyle(.plain)
+                        // Build 81 (item 8): press feedback on the
+                        // match cards.
+                        .buttonStyle(PressScaleButtonStyle())
                     }
                 }
                 .padding(.horizontal, 16)
             }
+            // Build 81 (item 8): one-shot section entrance.
+            .sectionAppear()
         }
     }
 
@@ -1202,8 +1271,10 @@ struct HomeView: View {
             )
             .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
         }
-        .buttonStyle(.plain)
+        // Build 81 (item 8): press feedback + section entrance.
+        .buttonStyle(PressScaleButtonStyle())
         .padding(.horizontal, 16)
+        .sectionAppear()
     }
 
     // MARK: Section 3 — Most Popular Movies
@@ -1845,22 +1916,25 @@ enum FeaturedEntry: Identifiable, Equatable {
 
     /// Backdrop art when the record carries it (detail-loaded items),
     /// otherwise the poster/cover — always the item's own catalog art.
+    /// Build 81 (item 5b): built through the lenient ArtworkURL
+    /// parser — the strict URL(string:) dropped artwork whose path
+    /// carries spaces or other unencoded characters.
     var artURL: URL? {
         switch self {
         case .movie(let movie):
             if let backdrop = movie.backdropPath?.trimmingCharacters(in: .whitespaces), !backdrop.isEmpty {
-                return URL(string: backdrop)
+                return ArtworkURL.url(from: backdrop)
             }
             if let icon = movie.streamIcon?.trimmingCharacters(in: .whitespaces), !icon.isEmpty {
-                return URL(string: icon)
+                return ArtworkURL.url(from: icon)
             }
             return nil
         case .series(let series):
             if let backdrop = series.backdropPath?.trimmingCharacters(in: .whitespaces), !backdrop.isEmpty {
-                return URL(string: backdrop)
+                return ArtworkURL.url(from: backdrop)
             }
             if let cover = series.cover?.trimmingCharacters(in: .whitespaces), !cover.isEmpty {
-                return URL(string: cover)
+                return ArtworkURL.url(from: cover)
             }
             return nil
         }
@@ -1873,12 +1947,12 @@ enum FeaturedEntry: Identifiable, Equatable {
         switch self {
         case .movie(let movie):
             if let icon = movie.streamIcon?.trimmingCharacters(in: .whitespaces), !icon.isEmpty {
-                return URL(string: icon)
+                return ArtworkURL.url(from: icon)
             }
             return nil
         case .series(let series):
             if let cover = series.cover?.trimmingCharacters(in: .whitespaces), !cover.isEmpty {
-                return URL(string: cover)
+                return ArtworkURL.url(from: cover)
             }
             return nil
         }
@@ -1972,7 +2046,12 @@ private struct HomeMatchResultCard: View {
         // FULL name + that team's own score at the right end), and
         // the state chip (LIVE + live clock, or FT) sits on a slim
         // header line. Same Design A surface/radius/padding family.
-        VStack(alignment: .leading, spacing: 8) {
+        // Build 81 (item 2, owner): the two-row layout was right but
+        // the card was too tall — a few cards filled the screen.
+        // Compacted: tighter padding/spacing, 22pt logos, headline
+        // scores, slimmer chip — same two full-name rows, same tap
+        // target, roughly 5–6 cards per screenful instead of ~3.
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Spacer(minLength: 0)
                 stateChip
@@ -1980,8 +2059,8 @@ private struct HomeMatchResultCard: View {
             teamRow(match.home)
             teamRow(match.away)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
@@ -2000,12 +2079,12 @@ private struct HomeMatchResultCard: View {
     /// score at the right end. A side the payload has not scored
     /// yet reads "0", the same rule Home's score lines used.
     private func teamRow(_ side: MatchTeamSide) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             CachedImage(
                 url: side.logoURL,
-                width: 26,
-                height: 26,
-                cornerRadius: 13,
+                width: 22,
+                height: 22,
+                cornerRadius: 11,
                 iconName: "shield"
             )
             Text(side.name ?? "")
@@ -2015,7 +2094,7 @@ private struct HomeMatchResultCard: View {
                 .minimumScaleFactor(0.85)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(side.score ?? "0")
-                .font(.title3.weight(.bold))
+                .font(.headline.weight(.bold))
                 .foregroundStyle(.primary)
                 .monospacedDigit()
                 .fixedSize()
@@ -2037,16 +2116,16 @@ private struct HomeMatchResultCard: View {
             .font(AppTheme.fontBadge)
             .foregroundStyle(.white)
             .monospacedDigit()
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
             .background(Capsule().fill(AppTheme.live))
             .fixedSize()
         } else {
             Text(L("matches.final"))
                 .font(AppTheme.fontBadge)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
                 .background(Capsule().fill(AppTheme.overlayFill(0.10)))
                 .fixedSize()
         }
@@ -2134,14 +2213,32 @@ private struct FeaturedSlide: View {
     }
 
     /// The wide backdrop: real 16:9 art full-bleed when the record
-    /// carries it; otherwise the plain Design A surface (no
-    /// blurred pillars, no stretched poster). The bottom gradient
-    /// keeps the overlaid text readable on any art.
+    /// carries it. Build 81 (item 4, owner): catalog records
+    /// almost never carry a backdropPath (only detail-info fetches
+    /// fill it), so build 80's gate left nearly EVERY slide on the
+    /// plain-surface branch — the owner's hero was a black slab
+    /// with only the small poster thumb showing. Now the poster
+    /// artwork itself fills the wide frame when no backdrop
+    /// exists — the same fallback the Movies/Series tab heroes
+    /// already use (backdrop ?? streamIcon, aspect-fill) and the
+    /// reason those heroes showed images while Home's did not.
+    /// No blurred pillars (the owner rejected those); the bottom
+    /// gradient keeps the overlaid text readable on any art.
     private var backdropView: some View {
         ZStack {
             if entry.hasBackdropArt {
                 CachedImage(
                     url: entry.artURL,
+                    width: width,
+                    height: height,
+                    cornerRadius: AppTheme.heroCornerRadius,
+                    contentMode: .fill,
+                    iconName: entry.iconName,
+                    loadProfile: .high
+                )
+            } else if let poster = entry.posterURL {
+                CachedImage(
+                    url: poster,
                     width: width,
                     height: height,
                     cornerRadius: AppTheme.heroCornerRadius,

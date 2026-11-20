@@ -175,10 +175,25 @@ struct SeriesView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        tabHeader
+                // Build 81 (item 7): the header (search field + count
+                // + chips) is a FIXED block ABOVE the scroll view —
+                // the same placement as every working CatalogSearchField
+                // in the app (Favorites, Search, Live grid header).
+                // Build 80 put the real field as the first element
+                // INSIDE this ScrollView (inside the ScrollViewReader,
+                // under the bound .scrollPosition(id:) anchor, with
+                // restoreScrollAnchor + the recompute pass rebuilding
+                // the scroll content — header included — on every
+                // store publish): on the owner's device the field
+                // never took focus at all ("مايستجيب" — no keyboard,
+                // no focus ring). Out here its identity is never
+                // churned by the scroll container, and a tap focuses
+                // it exactly like the proven surfaces.
+                VStack(spacing: 0) {
+                    tabHeader
 
+                    ScrollViewReader { proxy in
+                    ScrollView {
                         // The chips swap the scroll content — All keeps
                         // the shelves; Newest renders its grid.
                         // Build 80 (item 4): an active in-tab search
@@ -291,7 +306,8 @@ struct SeriesView: View {
                     .onAppear { restoreScrollAnchor() }
                     .onChange(of: displayCategories.map(\.id)) { _, _ in restoreScrollAnchor() }
                     .onChange(of: selectedChip) { _, _ in restoreScrollAnchor() }
-                }
+                    } // ScrollViewReader
+                } // Build 81 (item 7): fixed-header VStack
             }
         }
         .toolbar {
@@ -443,8 +459,11 @@ struct SeriesView: View {
         VStack(alignment: .leading, spacing: 12) {
             // Build 80 (item 4): REAL text field bound to the tab's
             // own query (see VODView) — typing filters this tab.
+            // Build 81 (item 7): screen-margin inset in the fixed
+            // header, matching the count line and chips below.
             CatalogSearchField(text: $tabSearchText, placeholder: L("home.search_placeholder"))
             .padding(.top, 4)
+            .padding(.horizontal, 16)
 
             Text(L("home.count_series", CatalogCountFormatter.string(displayCategories.reduce(0) { $0 + (displayItemsByCategory[$1.id]?.count ?? 0) })))
                 .font(.subheadline)
@@ -624,7 +643,7 @@ struct SeriesView: View {
                     url: url,
                     title: item.title,
                     subtitle: item.secondaryTitle,
-                    artworkURL: item.imageURL.flatMap { URL(string: $0) },
+                    artworkURL: item.imageURL.flatMap { ArtworkURL.url(from: $0) },
                     isLiveStream: false,
                     playlistId: playlist.id,
                     streamId: item.streamId,
@@ -846,7 +865,7 @@ struct SeriesFeaturedHero: View {
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             CachedImage(
-                url: series.backdropPath.flatMap { URL(string: $0) } ?? series.cover.flatMap { URL(string: $0) },
+                url: series.backdropPath.flatMap { ArtworkURL.url(from: $0) } ?? series.cover.flatMap { ArtworkURL.url(from: $0) },
                 width: UIScreen.main.bounds.width - 32,
                 height: 210,
                 cornerRadius: AppTheme.heroCornerRadius,
@@ -962,7 +981,7 @@ struct PopularSeriesShelf: View, Equatable {
                             // series identity mirroring Top Movies.
                             RankedPosterCard(
                                 rank: index + 1,
-                                imageURL: items[index].cover.flatMap { URL(string: $0) },
+                                imageURL: items[index].cover.flatMap { ArtworkURL.url(from: $0) },
                                 title: items[index].name,
                                 ratingText: ContentRating.normalizedDisplayText(
                                     rating: items[index].rating,
@@ -1195,7 +1214,7 @@ struct SeriesCategoryShelfRow: View, Equatable {
         // cache key no card ever asked for.
         let urls = list.prefix(SeriesCategoryShelf.prefetchHeadCount)
             .compactMap { $0.series.cover }
-            .compactMap { URL(string: $0) }
+            .compactMap { ArtworkURL.url(from: $0) }
         ListImagePrefetch.start(
             urls: urls,
             width: posterMetrics.shelfPosterWidth,
@@ -1212,7 +1231,7 @@ struct SeriesCategoryShelfRow: View, Equatable {
         guard start < list.count else { return }
         let urls = list[start..<min(start + ListImagePrefetch.scrollWindow, list.count)]
             .compactMap { $0.series.cover }
-            .compactMap { URL(string: $0) }
+            .compactMap { ArtworkURL.url(from: $0) }
         ListImagePrefetch.start(
             urls: urls,
             width: posterMetrics.shelfPosterWidth,
@@ -1225,7 +1244,7 @@ struct SeriesCategoryShelfRow: View, Equatable {
     private func stopPrefetchCovers(from list: [SeriesWithCategory]) {
         let urls = list.prefix(SeriesCategoryShelf.prefetchHeadCount)
             .compactMap { $0.series.cover }
-            .compactMap { URL(string: $0) }
+            .compactMap { ArtworkURL.url(from: $0) }
         ListImagePrefetch.stop(
             urls: urls,
             width: posterMetrics.shelfPosterWidth,
@@ -1285,12 +1304,15 @@ struct SeriesCard: View {
         VStack {
             ZStack(alignment: .topTrailing) {
                 CachedImage(
-                    url: stream.cover.flatMap { URL(string: $0) },
+                    // Build 81 (items 5b/5c): lenient artwork URL +
+                    // title card fallback — see VODStreamCard.
+                    url: ArtworkURL.url(from: stream.cover),
                     width: posterWidth,
                     height: posterHeight,
                     contentMode: SwiftUI.ContentMode.fill,
                     iconName: "play.tv",
-                    loadProfile: imageLoadProfile
+                    loadProfile: imageLoadProfile,
+                    title: stream.name
                 )
 
                 if let progress = watchProgress, progress > 0 {
@@ -1645,7 +1667,7 @@ struct SeriesCategoryContent: View, Equatable {
     private func prefetch(_ list: [SeriesWithCategory], startingAt: Int = 0) {
         let urls = list.dropFirst(startingAt).prefix(ListImagePrefetch.maxBatch)
             .compactMap { $0.series.cover }
-            .compactMap { URL(string: $0) }
+            .compactMap { ArtworkURL.url(from: $0) }
         ListImagePrefetch.start(
             urls: urls,
             width: posterMetrics.categoryGridPosterWidth,
@@ -1774,8 +1796,8 @@ struct SeriesDetailView: View {
     private var heroConfig: DetailHeroConfig {
         DetailHeroConfig(
             title: currentSeries.name,
-            backdropURL: currentSeries.backdropPath.flatMap { let t = $0.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : URL(string: t) },
-            posterURL: currentSeries.cover.flatMap { URL(string: $0) },
+            backdropURL: ArtworkURL.url(from: currentSeries.backdropPath),
+            posterURL: currentSeries.cover.flatMap { ArtworkURL.url(from: $0) },
             year: DetailFormatting.year(from: currentSeries.releaseDate),
             releaseDate: currentSeries.releaseDate,
             runtime: DetailFormatting.seriesRuntime(currentSeries.episodeRunTime),
@@ -2140,7 +2162,7 @@ struct SeriesDetailView: View {
             showPlayFailure = true
             return
         }
-        let cover = ep.cover.flatMap { URL(string: $0) } ?? currentSeries.cover.flatMap { URL(string: $0) }
+        let cover = ep.cover.flatMap { ArtworkURL.url(from: $0) } ?? currentSeries.cover.flatMap { ArtworkURL.url(from: $0) }
         playerOverlay.present(onDismiss: { selectedEpisode = nil }, skipDownloadCheck: localOverrideURL != nil, playlistId: playlist.id) {
             PlayerView(
                 url: url,
@@ -2344,10 +2366,14 @@ struct SeriesDetailView: View {
                 // About tab held is lost; it renders under the
                 // episodes whenever the record carries any of its
                 // fields.
+                // Build 81 (item 8): detail sections fade/rise in
+                // once as the page assembles.
                 seasonsSection
+                    .sectionAppear()
 
                 if hasAboutContent {
                     aboutSection
+                        .sectionAppear()
                 }
 
                 // Build 61 (B8, J2): More Like This — same-genre
@@ -2355,6 +2381,8 @@ struct SeriesDetailView: View {
                 // one; hidden below 3 matches.
                 if moreLikeThisSeries.count >= 3 {
                     moreLikeThisSection
+                        // Build 81 (item 8): section entrance.
+                        .sectionAppear()
                 }
             }
             .padding(.bottom, 48)
@@ -2727,7 +2755,7 @@ struct SeriesDetailView: View {
                             title: ep.title,
                             containerExtension: ep.containerExtension,
                             info: ep.info?.plot,
-                            cover: ep.info?.movieImage ?? ep.info?.cover,
+                            cover: ep.stillURLString,
                             duration: ep.info?.duration,
                             rating: ep.info?.rating,
                             seasonId: seasonId
@@ -2912,11 +2940,11 @@ struct EpisodesPanel: View {
                     .padding(.horizontal, 16)
                 }
                 .onChange(of: observer.episodes) { _, newValue in
-                    let urls = newValue.compactMap(\.cover).compactMap { URL(string: $0) }
+                    let urls = newValue.compactMap(\.cover).compactMap { ArtworkURL.url(from: $0) }
                     ListImagePrefetch.start(urls: urls, width: EpisodeCardMetrics.thumbWidth, height: EpisodeCardMetrics.thumbHeight, contentMode: .fill, loadProfile: .grid)
                 }
                 .onAppear {
-                    let urls = observer.episodes.compactMap(\.cover).compactMap { URL(string: $0) }
+                    let urls = observer.episodes.compactMap(\.cover).compactMap { ArtworkURL.url(from: $0) }
                     ListImagePrefetch.start(urls: urls, width: EpisodeCardMetrics.thumbWidth, height: EpisodeCardMetrics.thumbHeight, contentMode: .fill, loadProfile: .grid)
                 }
             }
@@ -2983,19 +3011,21 @@ private struct EpisodeDetailRow: View {
     }
 
     /// Build 78 (Style 1): the thumbnail is the episode's OWN
-    /// still — full stop. The round-10 fallback to the SERIES
-    /// cover is DELETED: on panels that ship one still per series
-    /// (or none per episode) it painted the identical series art
-    /// on every row of the list — the exact defect the owner
-    /// picked Style 1 to kill. An episode with no still of its
-    /// own renders the styled number + title card instead (see
-    /// `thumbnail`). (The series cover still feeds the DOWNLOAD
-    /// item's artwork below — a different surface, unchanged.)
+    /// still. Build 81 (item 5a, owner override): an episode with
+    /// NO still of its own now falls back to the SERIES cover —
+    /// the owner explicitly ordered pictures on the cards ("كل
+    /// الصور ماكو") over build 78's no-fallback rule; the styled
+    /// number + title card renders only when the series has no
+    /// cover either. (The parse side also widened — see
+    /// XtreamEpisode.stillURLString — so far fewer episodes reach
+    /// this fallback than in build 80.)
     private var stillURL: URL? {
-        guard let cover = episode.cover?.trimmingCharacters(in: .whitespaces), !cover.isEmpty else {
-            return nil
-        }
-        return URL(string: cover)
+        ArtworkURL.url(from: episode.cover)
+    }
+
+    /// Build 81 (item 5a): the series-cover fallback image.
+    private var seriesCoverURL: URL? {
+        ArtworkURL.url(from: seriesCover)
     }
 
     /// "EP 3" — a code, not prose: identical in every language
@@ -3083,17 +3113,18 @@ private struct EpisodeDetailRow: View {
         }
     }
 
-    /// The card's 16:9 still box. With the episode's OWN still:
-    /// the image + the mockup's accent-ringed play badge. Without
-    /// one: the styled fallback — the episode's NUMBER + TITLE on
-    /// the elevated surface, never the series poster (build 78;
-    /// see `stillURL`).
+    /// The card's 16:9 still box. With the episode's OWN still
+    /// (or, build 81, the series cover standing in for it): the
+    /// image + the mockup's accent-ringed play badge. With
+    /// neither: the styled fallback — the episode's NUMBER +
+    /// TITLE on the elevated surface. The EP badge/label rides
+    /// the card's meta line in every variant.
     @ViewBuilder
     private var thumbnail: some View {
         ZStack {
-            if let stillURL {
+            if let thumbURL = stillURL ?? seriesCoverURL {
                 CachedImage(
-                    url: stillURL,
+                    url: thumbURL,
                     width: EpisodeCardMetrics.thumbWidth,
                     height: EpisodeCardMetrics.thumbHeight,
                     cornerRadius: AppTheme.smallCornerRadius,
@@ -3366,7 +3397,7 @@ struct WatchlistSeriesView: View {
                             ForEach(unavailableEntries, id: \.id) { entry in
                                 HStack(spacing: 12) {
                                     CachedImage(
-                                        url: entry.imageURL.flatMap { URL(string: $0) },
+                                        url: entry.imageURL.flatMap { ArtworkURL.url(from: $0) },
                                         width: 44, height: 44,
                                         cornerRadius: AppTheme.smallCornerRadius,
                                         iconName: "play.tv"
