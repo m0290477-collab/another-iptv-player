@@ -51,6 +51,20 @@ struct DashboardView: View {
         )
     }
 
+    /// Build 73: the bar's visible destinations, in bar order —
+    /// the SAME F6 visibility conditions as the Tab children below
+    /// (Home/Live/Settings always; Sports/Movies/Series gated by
+    /// the ONE section-visibility store).
+    private var visibleTabs: [DashboardTab] {
+        var tabs: [DashboardTab] = [.home]
+        if sectionVisibility.isVisible(.matches) { tabs.append(.sports) }
+        tabs.append(.live)
+        if sectionVisibility.isVisible(.movies) { tabs.append(.movies) }
+        if sectionVisibility.isVisible(.series) { tabs.append(.series) }
+        tabs.append(.settings)
+        return tabs
+    }
+
     /// Round 14/15 (B9 + C12): one tab label for every tab — a single
     /// icon weight family (semibold, filled symbols) and the selected
     /// tab's icon carries the accent under-glow.
@@ -114,6 +128,7 @@ struct DashboardView: View {
                         // Round 11: the large "Home" title goes too —
                         // Home's own top bar is the top of the screen.
                         .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.home"), hidesNavigationBar: true)
+                        .phoneTabBar(selection: tabBinding, visibleTabs: visibleTabs)
                     }
                 } label: { tabLabel(L("dashboard.home"), glyph: "TabGlyphHome", tab: DashboardTab.home) }
 
@@ -133,6 +148,7 @@ struct DashboardView: View {
                     Tab(value: DashboardTab.sports) {
                         NavigationStack {
                             MatchesView()
+                                .phoneTabBar(selection: tabBinding, visibleTabs: visibleTabs)
                         }
                     } label: { tabLabel(L("dashboard.sports"), glyph: "TabGlyphSports", tab: DashboardTab.sports) }
                 }
@@ -141,6 +157,7 @@ struct DashboardView: View {
                     NavigationStack {
                         LiveStreamsView(playlist: playlist)
                             .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.live"), type: "live")
+                            .phoneTabBar(selection: tabBinding, visibleTabs: visibleTabs)
                     }
                 } label: { tabLabel(L("dashboard.live"), glyph: "TabGlyphLive", tab: DashboardTab.live) }
 
@@ -151,6 +168,7 @@ struct DashboardView: View {
                         NavigationStack {
                             VODView(playlist: playlist)
                                 .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.movies"), type: "vod")
+                                .phoneTabBar(selection: tabBinding, visibleTabs: visibleTabs)
                         }
                     } label: { tabLabel(L("dashboard.movies"), glyph: "TabGlyphMovies", tab: DashboardTab.movies) }
                 }
@@ -160,6 +178,7 @@ struct DashboardView: View {
                         NavigationStack {
                             SeriesView(playlist: playlist)
                                 .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.series"), type: "series")
+                                .phoneTabBar(selection: tabBinding, visibleTabs: visibleTabs)
                         }
                     } label: { tabLabel(L("dashboard.series"), glyph: "TabGlyphSeries", tab: DashboardTab.series) }
                 }
@@ -171,6 +190,7 @@ struct DashboardView: View {
                         // form lives one tap inside it.
                         SettingsHubView(playlist: playlist, onDismiss: onDismiss, onSwitchPlaylist: onSwitchPlaylist)
                             .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.settings"))
+                            .phoneTabBar(selection: tabBinding, visibleTabs: visibleTabs)
                     }
                 } label: { tabLabel(L("dashboard.settings"), glyph: "TabGlyphSettings", tab: DashboardTab.settings) }
 
@@ -188,6 +208,19 @@ struct DashboardView: View {
                 // / Movies / Series / Settings. This supersedes the
                 // round-7 five-tab count by the owner's own word;
                 // Search stays exactly where it was.
+                // Build 73 (owner): the sixth tab overflowed the
+                // SYSTEM bar into its automatic "More" tab on the
+                // owner's phone — Series + Settings buried in a
+                // list page, the round-5 lesson again. The phone bar
+                // is now the owner-picked custom pill (Option 2,
+                // from mockups): on compact width the system bar is
+                // hidden (PhoneSystemTabBarHider below) and each
+                // tab's root carries the pill as a bottom safe-area
+                // inset (.phoneTabBar), all visible destinations
+                // always in the bar, the selected tab expanded into
+                // the brand-gradient pill with icon + label, the
+                // rest icon-only. The Tab labels above now serve
+                // the regular-width iPad sidebar only.
             }
             // Round 16 (P3): NO container animation/offset and no
             // .sidebarAdaptable. The adaptable style presents the
@@ -200,6 +233,11 @@ struct DashboardView: View {
             // iOS 18 the AppChrome opaque dark bar), there is
             // exactly one bar instance at all times, and its
             // targets are the platform-standard size.
+            // Build 73: on compact width the system bar is hidden
+            // entirely (it is the thing that manufactures the
+            // "More" tab) and the per-root pill insets above are
+            // the bar; regular width keeps the system sidebar.
+            .modifier(PhoneSystemTabBarHider())
             .environment(\.posterMetrics, posterMetrics)
             // W2b (B7): regular-width iPad gets the sidebar form of
             // the SAME tab bar; compact width is unchanged.
@@ -508,5 +546,189 @@ extension View {
     // and all five call sites.
     func dashboardNavigation(playlist: Playlist, tabTitle: String, type: String? = nil, hidesNavigationBar: Bool = false) -> some View {
         modifier(DashboardNavigationModifier(playlist: playlist, tabTitle: tabTitle, type: type, hidesNavigationBar: hidesNavigationBar))
+    }
+}
+
+// MARK: - Build 73 phone tab bar (owner-picked Option 2)
+
+/// Build 73: on compact width the system tab bar is hidden — with
+/// six tabs it collapses everything past the fifth into an
+/// automatic "More" tab (the round-5 lesson, re-proven when build
+/// 72's Sports tab pushed Series + Settings into a list page on
+/// the owner's phone). Regular width is untouched: the iPad
+/// sidebar form stays the system's.
+private struct PhoneSystemTabBarHider: ViewModifier {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    func body(content: Content) -> some View {
+        if horizontalSizeClass == .compact {
+            content.toolbar(.hidden, for: .tabBar)
+        } else {
+            content
+        }
+    }
+}
+
+/// Build 73: attaches the custom pill bar to ONE tab's root view
+/// as a bottom safe-area inset. Because the inset belongs to the
+/// root, the bar reserves its space exactly like the system bar
+/// did (nothing scrolls underneath it), and it leaves with the
+/// root when a screen is pushed — pushed screens keep the
+/// full-height treatment the app already gives them (the 21
+/// `.toolbar(.hidden, for: .tabBar)` call sites). Compact width
+/// only; regular-width iPad keeps the sidebar and no pill.
+private struct PhoneTabBarModifier: ViewModifier {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    let selection: Binding<DashboardTab>
+    let visibleTabs: [DashboardTab]
+
+    func body(content: Content) -> some View {
+        if horizontalSizeClass == .compact {
+            content.safeAreaInset(edge: .bottom, spacing: 0) {
+                DashboardPhoneTabBarView(selection: selection, visibleTabs: visibleTabs)
+            }
+        } else {
+            content
+        }
+    }
+}
+
+private extension View {
+    func phoneTabBar(selection: Binding<DashboardTab>, visibleTabs: [DashboardTab]) -> some View {
+        modifier(PhoneTabBarModifier(selection: selection, visibleTabs: visibleTabs))
+    }
+}
+
+/// Build 73 (owner-picked Option 2, built from his mockup): the
+/// floating pill bar. ALL visible destinations are always in the
+/// bar — there is no "More" at any width: unselected tabs are
+/// icon-only (muted white), and the SELECTED tab expands into a
+/// filled Design-4 brand-gradient pill carrying its icon + label
+/// in white. When the selection changes, the spring on the bar
+/// animates the pill to the newly selected tab. The icon-only
+/// slots flex to share whatever width the selected pill leaves,
+/// so the bar adapts automatically to the real screen width and
+/// to however many tabs the F6 visibility store leaves visible.
+/// Selection goes through DashboardView's ONE tab binding, so the
+/// B12 haptic and the tab persistence are unchanged; icon-only
+/// tabs keep their localized titles as accessibility labels.
+private struct DashboardPhoneTabBarView: View {
+    @Binding var selection: DashboardTab
+    let visibleTabs: [DashboardTab]
+
+    /// What the pill highlights: the real selection while its tab
+    /// exists. If a stored selection names a section the F6 store
+    /// has since hidden, the TabView itself falls back to the
+    /// first tab — the pill mirrors that instead of highlighting
+    /// nothing.
+    private var displayedTab: DashboardTab {
+        visibleTabs.contains(selection) ? selection : (visibleTabs.first ?? .home)
+    }
+
+    private func title(for tab: DashboardTab) -> String {
+        switch tab {
+        case .home: return L("dashboard.home")
+        case .sports: return L("dashboard.sports")
+        case .live: return L("dashboard.live")
+        case .movies: return L("dashboard.movies")
+        case .series: return L("dashboard.series")
+        case .settings: return L("dashboard.settings")
+        }
+    }
+
+    private func glyph(for tab: DashboardTab) -> String {
+        switch tab {
+        case .home: return "TabGlyphHome"
+        case .sports: return "TabGlyphSports"
+        case .live: return "TabGlyphLive"
+        case .movies: return "TabGlyphMovies"
+        case .series: return "TabGlyphSeries"
+        case .settings: return "TabGlyphSettings"
+        }
+    }
+
+    private func glyphImage(for tab: DashboardTab, size: CGFloat) -> some View {
+        Image(glyph(for: tab))
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+    }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(visibleTabs, id: \.self) { tab in
+                if tab == displayedTab {
+                    selectedButton(tab)
+                } else {
+                    unselectedButton(tab)
+                }
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
+        .background {
+            Capsule()
+                .fill(AppTheme.elevated)
+                .overlay {
+                    Capsule().stroke(AppTheme.cardBorderColor, lineWidth: 1)
+                }
+                .shadow(color: AppTheme.cardShadowColor,
+                        radius: AppTheme.cardShadowRadius, y: AppTheme.cardShadowY)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 6)
+        .padding(.bottom, 4)
+        .animation(.spring(response: 0.35, dampingFraction: 0.86), value: displayedTab)
+    }
+
+    /// The picked design's expanded state: brand-gradient pill,
+    /// white icon + label. (Design-4's `onAccent` black belongs to
+    /// the gate's primary buttons; the owner-picked mockup shows
+    /// the pill's contents in white.)
+    private func selectedButton(_ tab: DashboardTab) -> some View {
+        Button {
+            selection = tab
+        } label: {
+            HStack(spacing: 7) {
+                glyphImage(tab, size: 22)
+                // Same Arabic treatment as the system-bar labels
+                // (ST5): IBM Plex Sans Arabic when the app language
+                // is Arabic, the bar's own font otherwise.
+                if AppFont.isArabic {
+                    Text(title(for: tab))
+                        .font(AppFont.uiFont(size: 15, semibold: true))
+                } else {
+                    Text(title(for: tab))
+                        .font(.system(size: 15, weight: .semibold))
+                }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(AppTheme.brandGradient, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title(for: tab))
+        .accessibilityAddTraits(.isSelected)
+    }
+
+    /// Icon-only slot; flexes to share the width the selected pill
+    /// leaves, so all six tabs fit any phone width automatically.
+    private func unselectedButton(_ tab: DashboardTab) -> some View {
+        Button {
+            selection = tab
+        } label: {
+            glyphImage(tab, size: 23)
+                .foregroundStyle(Color.white.opacity(0.55))
+                .frame(maxWidth: .infinity)
+                .frame(height: 40)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title(for: tab))
     }
 }
