@@ -506,13 +506,22 @@ enum PlayerProfileService {
         let position: Position?
         let citizenship: String?
         /// Build 85: baseball's bats/throws objects
-        /// ({type, abbreviation, displayValue}).
+        /// ({type, abbreviation, displayValue}). The throwing
+        /// hand's Swift name is `throwingHand` — `throws` is a
+        /// reserved keyword and cannot be a bare identifier;
+        /// the payload's wire key stays "throws" via CodingKeys
+        /// (build 85 fix round 1).
         let bats: Hand?
-        let throws: Hand?
+        let throwingHand: Hand?
         let headshot: Headshot?
         let team: Ref?
         let statistics: Ref?
         let events: Ref?
+        enum CodingKeys: String, CodingKey {
+            case displayName, age, jersey, position, citizenship, bats
+            case throwingHand = "throws"
+            case headshot, team, statistics, events
+        }
         struct Position: Decodable { let displayName: String?; let name: String? }
         struct Hand: Decodable { let displayValue: String?; let abbreviation: String? }
         struct Headshot: Decodable { let href: String? }
@@ -602,7 +611,7 @@ enum PlayerProfileService {
             positionName: athlete.position?.displayName ?? athlete.position?.name,
             citizenship: athlete.citizenship,
             batsText: athlete.bats?.displayValue ?? athlete.bats?.abbreviation,
-            throwsText: athlete.throws?.displayValue ?? athlete.throws?.abbreviation,
+            throwsText: athlete.throwingHand?.displayValue ?? athlete.throwingHand?.abbreviation,
             headshotURL: CoreCoordinates.headshotURL(sport: sport, athleteId: athleteId, href: athlete.headshot?.href),
             teamId: teamId,
             teamName: team.name,
