@@ -1247,3 +1247,28 @@
 "player.channel_list.title" = "Kanallar";
 "settings.hub.refresh" = "Yenile";
 "matches.live_none_now" = "Şu anda canlı maç yok";
+
+// Build 90
+"matches.today" = "Bugün";
+"playlists.actions" = "Oynatma listesi işlemleri";
+"search.sports" = "Takımlar ve oyuncular";
+"search.sports.row" = "Takım ve oyuncu ara";
+"matches.info.broadcast" = "Yayın";
+"matches.detail.goalies" = "Kaleciler";
+"matches.detail.starter" = "İlk 11";
+"matches.pbp.goal" = "Gol";
+"matches.pbp.penalty" = "Penaltı";
+"matches.pbp.shot" = "Kaleye şut";
+"matches.pbp.missed_shot" = "Kaçan şut";
+"matches.pbp.blocked_shot" = "Bloklanan şut";
+"matches.pbp.hit" = "Vuruş";
+"matches.f1.wins" = "Galibiyetler";
+"matches.f1.next_race" = "Sonraki Yarış";
+"matches.f1.sessions" = "Seanslar";
+"matches.f1.qualifying" = "Sıralama";
+"matches.f1.sprint" = "Sprint";
+"matches.f1.grid" = "Grid";
+"matches.f1.laps" = "tur";
+"matches.rankings" = "Sıralamalar";
+"matches.golf.round" = "Tur";
+"matches.golf.scorecard" = "Skor kartı";

@@ -15,15 +15,26 @@ import SwiftUI
 // real content, in the app's own design language.
 
 struct SplashView: View {
-    @State private var shown = false
+    /// Build 90: the entrance plays ONCE per process. AppRootView
+    /// rebuilds the whole hierarchy on a language change (see
+    /// ContentView), which hands this view fresh @State while
+    /// ContentView's static launch clock has long elapsed — the
+    /// rebuilt splash dismisses within a beat, but without this
+    /// guard it REPLAYED the ignition from a 0.55-scale spark and
+    /// snapped the collage back to scale 1.0 for that beat. When
+    /// the entrance already played, every animated state starts
+    /// at its settled value and onAppear starts nothing.
+    private static var entrancePlayed = false
+
+    @State private var shown = SplashView.entrancePlayed
     /// X1 (B7): the one-shot ignition — the flame scales up from a
     /// spark with a bright flash, ~0.8 s total, once per cold start.
-    @State private var ignited = false
+    @State private var ignited = SplashView.entrancePlayed
     /// Build 87 (per-surface motion): the collage's very slow
     /// Ken Burns push-in (one settle, never a loop) and the
     /// flame's soft breathing glow — both effects-gated.
-    @State private var kenBurns = false
-    @State private var glowPulse = false
+    @State private var kenBurns = SplashView.entrancePlayed
+    @State private var glowPulse = SplashView.entrancePlayed
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// X1 guards: ignition is a heavy effect — skipped entirely
@@ -134,6 +145,10 @@ struct SplashView: View {
             }
         }
         .onAppear {
+            // Build 90: a rebuilt splash (language change) starts
+            // settled — no entrance replays, nothing restarts.
+            guard !Self.entrancePlayed else { return }
+            Self.entrancePlayed = true
             // Subtle fade-in, one shot; instant under Reduce Motion
             // (Motion.animate collapses to nil there).
             withAnimation(Motion.animate(.easeOut(duration: 0.45))) {

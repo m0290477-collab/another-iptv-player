@@ -33,11 +33,32 @@ import Foundation
 //   4. The monogram (unchanged).
 //
 // A wrong person's photo is a worse failure than a monogram —
-// every gate fails closed. Results (photo AND no-photo)
-// persist in UserDefaults keyed by athlete id, so a player is
-// resolved at most once, ever, until eviction; lookups run
+// every gate fails closed. PHOTO results persist in
+// UserDefaults keyed by athlete id, so a player with a photo
+// is resolved at most once, ever, until eviction; lookups run
 // lazily per visible row, in flight-deduped, at most four at
 // a time, and never block rendering.
+//
+// Build 90 (SP9): NO-PHOTO results no longer persist forever.
+// A negative recorded today may be wrong next month — a
+// Wikipedia article gets an infobox image, a Wikidata item
+// gains P18, a squad turns over — so a negative now carries
+// a 7-day TTL: after it lapses the chain runs again and the
+// coverage can grow. (Build 86's 77% was frozen by the old
+// permanent negatives.)
+//
+// Build 90 (SP11): between the FPL step and the per-player
+// Wikidata search sits a CLUB BATCH step — one SPARQL query
+// per club returns every Wikidata player with a P54
+// membership of that club AND a P18 image (verified live
+// 2026-11-21: Arsenal Q9617 → 463 bindings / 444 distinct
+// players, each with image + date of birth). Club membership
+// in the payload IS the team corroboration; the name gate
+// stays exact-normalized, two entities sharing one normalized
+// name in a club are ambiguous and excluded, and when both
+// the query and the entity carry a date of birth they must
+// agree. One query replaces dozens of per-player searches
+// for the common case (a whole squad page opening at once).
 
 /// Everything a soccer surface knows about the player whose
 /// photo is missing — the resolver's corroboration inputs.
@@ -55,18 +76,58 @@ struct SoccerPhotoQuery {
 actor SoccerPhotoResolver {
     static let shared = SoccerPhotoResolver()
 
+    /// Positive results only (athlete id → photo URL string).
     private var cache: [String: String]
+    /// Build 90 (SP9): no-photo results with the epoch second
+    /// they were recorded; a negative older than the TTL is
+    /// re-resolved instead of served.
+    private var negatives: [String: TimeInterval]
     private var inFlight: [String: Task<URL?, Never>] = [:]
     private var slots = 4
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private var fplData: Data?
     private var fplTask: Task<Data?, Never>?
+    /// Build 90 (SP11): club photo maps (normalized team name
+    /// → normalized player name → photo), session-cached and
+    /// in-flight deduped, one SPARQL query per club.
+    private var clubMaps: [String: [String: ClubPhoto]] = [:]
+    private var clubTasks: [String: Task<[String: ClubPhoto], Never>] = [:]
 
     private static let cacheKey = "soccerphoto.cache.v1"
+    private static let negativesKey = "soccerphoto.negatives.v1"
+    /// Seven days: long enough that a squad page doesn't
+    /// re-run the chain on every open, short enough that new
+    /// photos surface within a week of appearing upstream.
+    private static let negativeTTL: TimeInterval = 7 * 24 * 60 * 60
     private static let footballerOccupation = "Q937857"
 
+    /// One club-batch hit: the Commons image URL and the
+    /// entity's date of birth (leading YYYY-MM-DD) when the
+    /// payload carries one.
+    private struct ClubPhoto {
+        let url: URL
+        let dateOfBirth: String?
+    }
+
     init() {
-        cache = UserDefaults.standard.dictionary(forKey: Self.cacheKey) as? [String: String] ?? [:]
+        var stored = UserDefaults.standard.dictionary(forKey: Self.cacheKey) as? [String: String] ?? [:]
+        var storedNegatives = UserDefaults.standard.dictionary(forKey: Self.negativesKey) as? [String: TimeInterval] ?? [:]
+        // Migration: the pre-SP9 cache stored negatives as
+        // empty strings with no timestamp. They become TTL
+        // negatives stamped NOW — no re-resolution storm on
+        // upgrade, and they lapse a week later like any other.
+        let legacyNegatives = stored.filter { $0.value.isEmpty }.map { $0.key }
+        if !legacyNegatives.isEmpty {
+            let now = Date().timeIntervalSince1970
+            for key in legacyNegatives {
+                stored[key] = nil
+                if storedNegatives[key] == nil { storedNegatives[key] = now }
+            }
+            UserDefaults.standard.set(stored, forKey: Self.cacheKey)
+            UserDefaults.standard.set(storedNegatives, forKey: Self.negativesKey)
+        }
+        cache = stored
+        negatives = storedNegatives
     }
 
     /// The verified fallback photo URL for a soccer player, or
@@ -74,8 +135,12 @@ actor SoccerPhotoResolver {
     func photo(for query: SoccerPhotoQuery) async -> URL? {
         let key = query.athleteId.trimmingCharacters(in: .whitespaces)
         guard !key.isEmpty, !query.name.isEmpty else { return nil }
-        if let cached = cache[key] {
-            return cached.isEmpty ? nil : URL(string: cached)
+        if let cached = cache[key], !cached.isEmpty {
+            return URL(string: cached)
+        }
+        if let stamped = negatives[key],
+           Date().timeIntervalSince1970 - stamped < Self.negativeTTL {
+            return nil
         }
         if let task = inFlight[key] {
             return await task.value
@@ -84,8 +149,15 @@ actor SoccerPhotoResolver {
         inFlight[key] = task
         let result = await task.value
         inFlight[key] = nil
-        cache[key] = result?.absoluteString ?? ""
-        UserDefaults.standard.set(cache, forKey: Self.cacheKey)
+        if let result {
+            cache[key] = result.absoluteString
+            negatives[key] = nil
+            UserDefaults.standard.set(cache, forKey: Self.cacheKey)
+            UserDefaults.standard.set(negatives, forKey: Self.negativesKey)
+        } else {
+            negatives[key] = Date().timeIntervalSince1970
+            UserDefaults.standard.set(negatives, forKey: Self.negativesKey)
+        }
         return result
     }
 
@@ -107,6 +179,9 @@ actor SoccerPhotoResolver {
         await acquire()
         defer { release() }
         if query.leaguePath == "soccer/eng.1", let url = await fplPhoto(query) {
+            return url
+        }
+        if let url = await clubBatchPhoto(query) {
             return url
         }
         if let url = await wikidataPhoto(query) {
@@ -179,6 +254,128 @@ actor SoccerPhotoResolver {
         }
         guard hits.count == 1, let code = hits[0].code else { return nil }
         return URL(string: "https://resources.premierleague.com/premierleague/photos/players/110x140/p\(code).png")
+    }
+
+    // MARK: - Step 1.5: Wikidata club batch (build 90, SP11)
+
+    /// The club-batch step: the player's club is resolved to
+    /// exactly ONE Wikidata entity whose label team-matches
+    /// the ESPN team name, then ONE SPARQL query returns every
+    /// player with a P54 membership of that club and a P18
+    /// image. The map is intersected with the squad by
+    /// normalized name. Gates: P54 membership of THIS club is
+    /// the team corroboration (the payload's own claim, not a
+    /// text guess); two entities sharing one normalized name
+    /// in the same club are ambiguous and excluded; when both
+    /// sides carry a date of birth they must agree — a
+    /// mismatch means a different person and the chain falls
+    /// through to the per-player steps rather than failing.
+    private func clubBatchPhoto(_ query: SoccerPhotoQuery) async -> URL? {
+        guard let teamName = query.teamName, !teamName.isEmpty else { return nil }
+        let map = await clubPhotoMap(teamName: teamName)
+        guard let hit = map[Self.normName(query.name)] else { return nil }
+        if let queryDob = query.dateOfBirth, queryDob.count >= 10,
+           let entityDob = hit.dateOfBirth {
+            guard String(queryDob.prefix(10)) == entityDob else { return nil }
+        }
+        return hit.url
+    }
+
+    private func clubPhotoMap(teamName: String) async -> [String: ClubPhoto] {
+        let key = Self.normName(teamName)
+        if let cached = clubMaps[key] { return cached }
+        if let task = clubTasks[key] { return await task.value }
+        let task = Task<[String: ClubPhoto], Never> {
+            await self.fetchClubPhotoMap(teamName: teamName)
+        }
+        clubTasks[key] = task
+        let map = await task.value
+        clubTasks[key] = nil
+        clubMaps[key] = map
+        return map
+    }
+
+    private func fetchClubPhotoMap(teamName: String) async -> [String: ClubPhoto] {
+        guard let clubId = await wikidataClubId(teamName: teamName) else { return [:] }
+        let sparql = """
+            SELECT ?player ?playerLabel ?image ?dob WHERE {
+              ?player wdt:P54 wd:\(clubId); wdt:P18 ?image.
+              OPTIONAL { ?player wdt:P569 ?dob. }
+              SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+            }
+            """
+        guard let data = await fetchSPARQL(sparql),
+              let wire = try? JSONDecoder().decode(SPARQLResponse.self, from: data)
+        else { return [:] }
+        var map: [String: ClubPhoto] = [:]
+        var ambiguous = Set<String>()
+        var seenEntities: [String: String] = [:]
+        for binding in wire.results.bindings {
+            guard let label = binding.playerLabel?.value, !label.isEmpty,
+                  let image = binding.image?.value, !image.isEmpty,
+                  let entity = binding.player?.value, !entity.isEmpty
+            else { continue }
+            let nameKey = Self.normName(label)
+            guard !nameKey.isEmpty else { continue }
+            if let previous = seenEntities[nameKey], previous != entity {
+                ambiguous.insert(nameKey)
+                continue
+            }
+            seenEntities[nameKey] = entity
+            let dob = binding.dob?.value.flatMap { value -> String? in
+                let trimmed = value.hasPrefix("+") ? String(value.dropFirst()) : value
+                guard trimmed.count >= 10 else { return nil }
+                return String(trimmed.prefix(10))
+            }
+            let separator = image.contains("?") ? "&" : "?"
+            if let url = URL(string: "\(image)\(separator)width=200") {
+                map[nameKey] = ClubPhoto(url: url, dateOfBirth: dob)
+            }
+        }
+        for nameKey in ambiguous { map[nameKey] = nil }
+        return map
+    }
+
+    /// The ONE Wikidata entity for a club name: search
+    /// candidates whose English label team-matches the ESPN
+    /// name; ambiguity (or none) resolves to no batch step.
+    private func wikidataClubId(teamName: String) async -> String? {
+        guard let searchData = await fetchJSON(
+            "https://www.wikidata.org/w/api.php?action=wbsearchentities&search=\(Self.encode(teamName))&language=en&format=json&limit=5"
+        ),
+        let search = try? JSONDecoder().decode(WikiSearchResponse.self, from: searchData)
+        else { return nil }
+        let candidateIds = search.search.map(\.id).filter { !$0.isEmpty }
+        guard !candidateIds.isEmpty else { return nil }
+        guard let labelData = await fetchJSON(
+            "https://www.wikidata.org/w/api.php?action=wbgetentities&ids=\(candidateIds.joined(separator: "%7C"))&props=labels&languages=en&format=json"
+        ),
+        let entities = (try? JSONDecoder().decode(WikiEntitiesResponse.self, from: labelData))?.entities
+        else { return nil }
+        let matching = candidateIds.filter { id in
+            guard let label = entities[id]?.labels["en"]?.value else { return false }
+            return Self.teamMatch(label, teamName)
+        }
+        guard matching.count == 1 else { return nil }
+        return matching.first
+    }
+
+    private func fetchSPARQL(_ query: String) async -> Data? {
+        var components = URLComponents(string: "https://query.wikidata.org/sparql")
+        components?.queryItems = [
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "format", value: "json")
+        ]
+        guard let url = components?.url else { return nil }
+        var request = URLRequest(url: url)
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/sparql-results+json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 20
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200 else {
+            return nil
+        }
+        return data
     }
 
     // MARK: - Step 2: Wikidata / Wikipedia
@@ -687,4 +884,20 @@ private struct WikiSummaryResponse: Decodable {
     struct Thumbnail: Decodable { let source: String? }
     let type: String?
     let thumbnail: Thumbnail?
+}
+
+/// Build 90 (SP11): the SPARQL results shape — every field a
+/// binding carries arrives as a {type, value} term.
+private struct SPARQLResponse: Decodable {
+    struct Results: Decodable {
+        struct Binding: Decodable {
+            struct Term: Decodable { let value: String? }
+            let player: Term?
+            let playerLabel: Term?
+            let image: Term?
+            let dob: Term?
+        }
+        let bindings: [Binding]
+    }
+    let results: Results
 }

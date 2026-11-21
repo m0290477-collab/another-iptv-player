@@ -1229,3 +1229,28 @@
 "player.channel_list.title" = "القنوات";
 "settings.hub.refresh" = "تحديث";
 "matches.live_none_now" = "لا توجد مباريات مباشرة الآن";
+
+// Build 90
+"matches.today" = "اليوم";
+"playlists.actions" = "إجراءات قائمة التشغيل";
+"search.sports" = "الفرق واللاعبون";
+"search.sports.row" = "ابحث عن الفرق واللاعبين";
+"matches.info.broadcast" = "البث";
+"matches.detail.goalies" = "حراس المرمى";
+"matches.detail.starter" = "أساسي";
+"matches.pbp.goal" = "هدف";
+"matches.pbp.penalty" = "ركلة جزاء";
+"matches.pbp.shot" = "تسديدة على المرمى";
+"matches.pbp.missed_shot" = "تسديدة ضائعة";
+"matches.pbp.blocked_shot" = "تسديدة محجوبة";
+"matches.pbp.hit" = "التحام";
+"matches.f1.wins" = "انتصارات";
+"matches.f1.next_race" = "السباق التالي";
+"matches.f1.sessions" = "الحصص";
+"matches.f1.qualifying" = "التصفيات";
+"matches.f1.sprint" = "سباق السرعة";
+"matches.f1.grid" = "شبكة الانطلاق";
+"matches.f1.laps" = "لفات";
+"matches.rankings" = "التصنيفات";
+"matches.golf.round" = "جولة";
+"matches.golf.scorecard" = "بطاقة النتائج";

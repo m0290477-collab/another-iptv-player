@@ -1033,9 +1033,10 @@ struct HomeView: View {
     /// screen width, 3:4) with the previous/next cards peeking
     /// at the edges, scaled down and darkened by the scroll
     /// transition; page dots CENTERED below. Portrait posters
-    /// are the design's native art; wide backdrops show whole
-    /// in the same card (build 89, item 2 — HeroPosterCard
-    /// owns the art chain and the fit treatment). The
+    /// are the design's native art; an item with no poster
+    /// fills the card with its wide backdrop instead (build
+    /// 90, F1 — HeroPosterCard owns the art chain and the
+    /// fit/fill treatment). The
     /// pager stays a horizontal ScrollView (the build-80
     /// gesture negotiation with the page scroll is unchanged),
     /// snapping view-aligned; the auto-advance timer, the
@@ -1133,6 +1134,50 @@ struct HomeView: View {
             .frame(maxWidth: .infinity)
         }
         .task(id: featured.count) { await runCarouselTimer() }
+        .task(id: featured.map(\.id)) { warmHeroArt() }
+    }
+
+    /// Build 90 (F6): warm the exact request each hero card
+    /// renders FIRST, so the centered card and its peeks open
+    /// decoded instead of loading on arrival. The chain is
+    /// the card's own (HeroPosterCard, build 90 F1): the
+    /// PORTRAIT poster at the card's size, fitted, high
+    /// profile; an item with no poster warms its wide
+    /// backdrop filled — the same URL, size, content mode
+    /// and profile the render path requests, so the memory
+    /// cache hits (ListImagePrefetch builds via
+    /// CachedImage.request). One pass per featured set, no
+    /// loop; the batch cap inside ListImagePrefetch bounds it.
+    private func warmHeroArt() {
+        var posterURLs: [URL] = []
+        var backdropURLs: [URL] = []
+        for entry in featured {
+            if let poster = entry.posterURL {
+                posterURLs.append(poster)
+            } else if let backdrop = entry.artURL {
+                // No poster: artURL IS the backdrop here —
+                // the card fills the card with it.
+                backdropURLs.append(backdrop)
+            }
+        }
+        if !posterURLs.isEmpty {
+            ListImagePrefetch.start(
+                urls: posterURLs,
+                width: heroCardWidth,
+                height: heroCardHeight,
+                contentMode: .fit,
+                loadProfile: .high
+            )
+        }
+        if !backdropURLs.isEmpty {
+            ListImagePrefetch.start(
+                urls: backdropURLs,
+                width: heroCardWidth,
+                height: heroCardHeight,
+                contentMode: .fill,
+                loadProfile: .high
+            )
+        }
     }
 
     /// scrollPosition's optional-id binding over the carousel's
@@ -1233,7 +1278,7 @@ struct HomeView: View {
                         NavigationLink {
                             MatchesView(initialSport: sport)
                         } label: {
-                            sportCard(symbol: sportSymbolName(sport), title: L(sport.titleKey))
+                            sportCard(symbol: MatchesView.sportSymbolName(sport), title: L(sport.titleKey))
                         }
                         .buttonStyle(PressScaleButtonStyle())
                     }
@@ -1303,27 +1348,12 @@ struct HomeView: View {
         .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
     }
 
-    private func sportSymbolName(_ sport: MatchSport) -> String {
-        switch sport {
-        case .soccer: return "soccerball"
-        // Build 82 (item 7): "americanfootball.fill" is NOT an
-        // SF Symbols name — Image(systemName:) with an unknown
-        // name renders zero-size, which is why the NFL card had
-        // no icon and collapsed shorter than its neighbours.
-        // The canonical names are "american.football" /
-        // "american.football.fill".
-        case .nfl: return "american.football.fill"
-        case .nba: return "basketball.fill"
-        // Build 85: "baseball.fill" is the canonical SF
-        // Symbols name for the baseball (same naming family
-        // as basketball.fill) — the fourth card joins the
-        // row at the same fixed 80pt height by construction.
-        case .mlb: return "baseball.fill"
-        // Build 87: "hockey.puck.fill" (SF Symbols 5+, the
-        // deployment target is iOS 18) — the fifth card.
-        case .nhl: return "hockey.puck.fill"
-        }
-    }
+    // Build 90 (SP33): the sport-symbol map lives ONCE, on
+    // MatchesView (MatchesView.sportSymbolName) — Home's
+    // private copy is deleted. The map was duplicated in both
+    // files, the build-82 icon-bug class (a wrong SF Symbols
+    // name in one copy collapses one surface's card); the
+    // sports cards above call the shared one.
 
     /// Build 87 (owner decision, design 15): the hairline that
     /// separates Home's sections in the Apple-clean system.
@@ -1607,7 +1637,7 @@ struct HomeView: View {
         default: backdrop = nil
         }
         guard let raw = backdrop?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
-        return URL(string: raw)
+        return ArtworkURL.url(from: raw)
     }
 
     /// Card meta line: a series with a resolved successor shows
@@ -1670,12 +1700,12 @@ struct HomeView: View {
 
     private func moviePosterURL(_ movie: DBVODStream) -> URL? {
         guard let icon = movie.streamIcon?.trimmingCharacters(in: .whitespaces), !icon.isEmpty else { return nil }
-        return URL(string: icon)
+        return ArtworkURL.url(from: icon)
     }
 
     private func seriesPosterURL(_ series: DBSeries) -> URL? {
         guard let cover = series.cover?.trimmingCharacters(in: .whitespaces), !cover.isEmpty else { return nil }
-        return URL(string: cover)
+        return ArtworkURL.url(from: cover)
     }
 
     // MARK: - Continue Watching playback (same routing as the Live tab)
@@ -1725,7 +1755,7 @@ struct HomeView: View {
                     url: url,
                     title: item.title,
                     subtitle: item.secondaryTitle,
-                    artworkURL: item.imageURL.flatMap { URL(string: $0) },
+                    artworkURL: item.imageURL.flatMap { ArtworkURL.url(from: $0) },
                     isLiveStream: false,
                     playlistId: playlist.id,
                     streamId: item.streamId,
@@ -2366,37 +2396,3 @@ private struct HomeSectionHeader<Destination: View>: View {
     }
 }
 
-/// Build 87 (per-surface motion), build 89 (item 10): a live
-/// score — digits roll on a change (numeric content
-/// transition) and the changed score gets ONE brief accent
-/// flash, then settles. Nothing loops; the flash is driven
-/// solely by an actual score change in the data. Built for
-/// the (now removed) live-scores strip; since build 89 it
-/// renders the Match Results cards' scores, so the effect
-/// survives on Home's one remaining match surface.
-private struct RollingScoreView: View {
-    let text: String
-    @State private var flash = false
-
-    var body: some View {
-        Text(text)
-            .fontWeight(.bold)
-            .monospacedDigit()
-            .fixedSize()
-            .contentTransition(.numericText())
-            .padding(.horizontal, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(AppTheme.accent.opacity(flash ? 0.35 : 0))
-            )
-            .animation(Motion.animate(.easeOut(duration: 0.65)), value: flash)
-            .onChange(of: text) { _, _ in
-                guard Motion.animate(.easeOut(duration: 0.3)) != nil else { return }
-                flash = true
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(650))
-                    flash = false
-                }
-            }
-    }
-}

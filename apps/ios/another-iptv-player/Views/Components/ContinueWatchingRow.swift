@@ -70,7 +70,7 @@ struct ContinueWatchingRow<Destination: View>: View {
                 CinematicSectionHeader(title: L("continue_watching.title"), destination: destination)
 
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
+                    HStack(alignment: .top, spacing: 16) {
                         ForEach(displayItems) { item in
                             HistoryCard(
                                 item: item,
@@ -206,7 +206,7 @@ struct HistoryCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
                     .font(.caption.weight(.bold))
-                    .lineLimit(1)
+                    .lineLimit(2)
 
                 if let subtitle = subtitleText {
                     Text(subtitle)
@@ -240,7 +240,8 @@ struct HistoryCard: View {
                 height: 90,
                 cornerRadius: AppTheme.cornerRadius,
                 contentMode: .fill,
-                iconName: item.type == "series" ? "play.tv" : "film"
+                iconName: item.type == "series" ? "play.tv" : "film",
+                title: item.title
             )
         } else {
             ZStack {
@@ -262,7 +263,8 @@ struct HistoryCard: View {
                     height: 90,
                     cornerRadius: AppTheme.cornerRadius,
                     contentMode: .fit,
-                    iconName: item.type == "series" ? "play.tv" : "film"
+                    iconName: item.type == "series" ? "play.tv" : "film",
+                    title: item.title
                 )
             }
         }

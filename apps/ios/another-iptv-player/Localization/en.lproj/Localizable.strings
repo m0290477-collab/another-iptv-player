@@ -1247,3 +1247,28 @@
 "player.channel_list.title" = "Channels";
 "settings.hub.refresh" = "Refresh";
 "matches.live_none_now" = "No matches live right now";
+
+// Build 90
+"matches.today" = "Today";
+"playlists.actions" = "Playlist actions";
+"search.sports" = "Teams & Players";
+"search.sports.row" = "Search teams and players";
+"matches.info.broadcast" = "Broadcast";
+"matches.detail.goalies" = "Goalies";
+"matches.detail.starter" = "Starter";
+"matches.pbp.goal" = "Goal";
+"matches.pbp.penalty" = "Penalty";
+"matches.pbp.shot" = "Shot on goal";
+"matches.pbp.missed_shot" = "Missed shot";
+"matches.pbp.blocked_shot" = "Blocked shot";
+"matches.pbp.hit" = "Hit";
+"matches.f1.wins" = "Wins";
+"matches.f1.next_race" = "Next Race";
+"matches.f1.sessions" = "Sessions";
+"matches.f1.qualifying" = "Qualifying";
+"matches.f1.sprint" = "Sprint";
+"matches.f1.grid" = "Grid";
+"matches.f1.laps" = "laps";
+"matches.rankings" = "Rankings";
+"matches.golf.round" = "Round";
+"matches.golf.scorecard" = "Scorecard";

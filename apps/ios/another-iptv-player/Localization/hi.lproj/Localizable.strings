@@ -1229,3 +1229,28 @@
 "player.channel_list.title" = "चैनल";
 "settings.hub.refresh" = "रीफ़्रेश";
 "matches.live_none_now" = "अभी कोई मैच लाइव नहीं है";
+
+// Build 90
+"matches.today" = "आज";
+"playlists.actions" = "प्लेलिस्ट कार्रवाइयाँ";
+"search.sports" = "टीमें और खिलाड़ी";
+"search.sports.row" = "टीमें और खिलाड़ी खोजें";
+"matches.info.broadcast" = "प्रसारण";
+"matches.detail.goalies" = "गोलकीपर";
+"matches.detail.starter" = "स्टार्टर";
+"matches.pbp.goal" = "गोल";
+"matches.pbp.penalty" = "पेनल्टी";
+"matches.pbp.shot" = "लक्ष्य पर शॉट";
+"matches.pbp.missed_shot" = "चूका हुआ शॉट";
+"matches.pbp.blocked_shot" = "ब्लॉक किया शॉट";
+"matches.pbp.hit" = "हिट";
+"matches.f1.wins" = "जीत";
+"matches.f1.next_race" = "अगली रेस";
+"matches.f1.sessions" = "सत्र";
+"matches.f1.qualifying" = "क्वालीफाइंग";
+"matches.f1.sprint" = "स्प्रिंट";
+"matches.f1.grid" = "ग्रिड";
+"matches.f1.laps" = "लैप्स";
+"matches.rankings" = "रैंकिंग";
+"matches.golf.round" = "राउंड";
+"matches.golf.scorecard" = "स्कोरकार्ड";

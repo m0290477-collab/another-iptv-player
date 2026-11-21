@@ -13,27 +13,37 @@ import SwiftUI
 // accent) + Details (glass) actions as rounded rectangles
 // beneath. The centered card carries the accent border +
 // glow (build 88, owner-approved "max" mockup); peeks stay
-// quiet. Portrait posters are this design's native art; a
-// wide backdrop fills the same card. The art chain is the
-// build-81/82 one: backdrop first, a load failure swaps to
-// the poster, and an item with no working art renders
-// CachedImage's designed placeholder (gradient + icon — the
-// overlay title is the ONE title in that state, build 88
-// F8) — never a blank slab.
+// quiet. Portrait posters are this design's native art.
 //
 // Build 89 (item 2, owner — "مش صورة كامله، يقص الصور"):
-// the art is now aspect-FITTED and shown WHOLE. Builds
-// 87/88 aspect-FILLED it into this 3:4 card, which crops
-// roughly a tenth of a 2:3 poster's height (the cut heads
-// and titles in the owner's recording) and over half of a
-// wide backdrop's width. The fitted picture rests on the
-// card's near-black ground — no blurred pillars (the owner
+// the art is aspect-FITTED and shown WHOLE. Builds 87/88
+// aspect-FILLED it into this 3:4 card, which crops roughly
+// a tenth of a 2:3 poster's height (the cut heads and
+// titles in the owner's recording) and over half of a wide
+// backdrop's width. The fitted picture rests on the card's
+// near-black ground — no blurred pillars (the owner
 // rejected those in build 81) — and the scrim, glass panel,
 // failure-swap chain and title-card fallback are unchanged.
 // The same round fixes the recording's mid-swipe ghosting:
 // the glass info panel now fades with the card's distance
 // from the centre (see panelVisibility), so two panels can
 // never overlap mid-transition — only the art travels.
+//
+// Build 90 (F1, owner recording of build 89): the chain
+// picked the BACKDROP first, so an item whose only wide
+// art is a 16:9 backdrop fitted it whole into this tall
+// card — the picture floated in a middle band over a huge
+// pure-black void filling the top third of the card (H1).
+// The chain is now POSTER FIRST: the portrait poster (this
+// design's native art) renders fitted and whole, exactly
+// as build 89 left it. Only when an item has NO poster
+// does the wide backdrop render — and then it aspect-
+// FILLS the card full-bleed, so no void can appear. A
+// load failure swaps to the other art (poster → backdrop,
+// backdrop → poster); an item with no working art renders
+// CachedImage's designed placeholder (gradient + icon —
+// the overlay title is the ONE title in that state,
+// build 88 F8) — never a blank slab.
 
 struct HeroPosterCard: View {
     let title: String
@@ -53,8 +63,10 @@ struct HeroPosterCard: View {
     let onPlay: () -> Void
     let onDetails: () -> Void
 
-    /// Build 82 (item 1): a backdrop that exists but fails to
-    /// load swaps to the poster instead of stranding the card.
+    /// Build 82 (item 1) / build 90 (F1): a piece of art that
+    /// exists but fails to load swaps to the other one instead
+    /// of stranding the card — each URL carries its own flag.
+    @State private var posterLoadFailed = false
     @State private var backdropLoadFailed = false
     /// Build 89 (item 2): the card's signed distance from
     /// the screen centre in points, measured by the
@@ -91,9 +103,36 @@ struct HeroPosterCard: View {
 
     private var height: CGFloat { width * 4 / 3 }
 
-    private var artURL: URL? {
-        if let backdropURL, !backdropLoadFailed { return backdropURL }
-        return posterURL
+    /// Build 90 (F1): which piece of art the card renders,
+    /// and how. The PORTRAIT poster wins whenever it exists
+    /// and has not failed — it is the design's native art and
+    /// renders FITTED, whole (build 89). The wide backdrop is
+    /// the fallback: with no working poster it renders FILLED
+    /// full-bleed, never fitted into a black void (H1). Nil
+    /// when neither piece of art is usable — CachedImage then
+    /// renders the designed placeholder.
+    private enum ArtKind {
+        case poster
+        case backdrop
+    }
+
+    private var activeArt: (url: URL, kind: ArtKind)? {
+        if let posterURL, !posterLoadFailed {
+            return (posterURL, .poster)
+        }
+        if let backdropURL, !backdropLoadFailed {
+            return (backdropURL, .backdrop)
+        }
+        return nil
+    }
+
+    private var activeArtURL: URL? { activeArt?.url }
+
+    /// Poster art fits whole; backdrop-only art fills the
+    /// card edge to edge. (A nil active art renders the
+    /// placeholder, where the mode is irrelevant.)
+    private var activeContentMode: ContentMode {
+        activeArt?.kind == .backdrop ? .fill : .fit
     }
 
     /// Build 88 (F7): the rating renders ONCE — one gold star
@@ -143,20 +182,23 @@ struct HeroPosterCard: View {
             ZStack {
                 // The near-black ground: visible while art
                 // loads, when the title card renders, and —
-                // build 89 (item 2) — as the bands around the
-                // aspect-fitted whole picture (thin side bands
-                // for a portrait poster; top/bottom bands for
-                // a wide backdrop, under the scrim below).
+                // build 89 (item 2) — as the thin side bands
+                // around the aspect-fitted portrait poster.
+                // Build 90 (F1): a backdrop-only card fills
+                // edge to edge, so no ground band shows there.
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(Color.black)
                 CachedImage(
-                    url: artURL,
+                    url: activeArtURL,
                     width: width,
                     height: height,
                     cornerRadius: 24,
-                    // Build 89 (item 2): FIT, not fill — the
-                    // whole picture shows, nothing is cut.
-                    contentMode: .fit,
+                    // Build 89 (item 2) / build 90 (F1): the
+                    // portrait poster FITS — the whole picture
+                    // shows, nothing is cut; a backdrop-only
+                    // card FILLS full-bleed instead of floating
+                    // in a black void (see activeContentMode).
+                    contentMode: activeContentMode,
                     iconName: iconName,
                     loadProfile: .high,
                     // Build 88 (F8): NO title is passed. The
@@ -170,7 +212,15 @@ struct HeroPosterCard: View {
                     // + section icon.
                     title: nil,
                     onLoadFailed: {
-                        if artURL == backdropURL { backdropLoadFailed = true }
+                        // Build 90 (F1): the ACTIVE art failed
+                        // — mark ITS flag so the chain swaps to
+                        // the other piece (or the placeholder
+                        // when neither is left).
+                        guard let active = activeArt else { return }
+                        switch active.kind {
+                        case .poster: posterLoadFailed = true
+                        case .backdrop: backdropLoadFailed = true
+                        }
                     }
                 )
                 // Build 89 (item 2): NO scale and NO offset on
@@ -179,6 +229,7 @@ struct HeroPosterCard: View {
                 // the whole picture past the card's clip and
                 // cut it again.
                 .onChange(of: backdropURL) { _, _ in backdropLoadFailed = false }
+                .onChange(of: posterURL) { _, _ in posterLoadFailed = false }
 
                 // Build 88 (F9): a stronger scrim — the fade
                 // starts higher and lands near-opaque, so the

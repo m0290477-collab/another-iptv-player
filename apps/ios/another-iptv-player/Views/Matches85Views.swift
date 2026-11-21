@@ -8,6 +8,12 @@ import SwiftUI
 // with a known athlete id opens the player page, with the
 // shared press feedback; nothing here animates over
 // playback.
+//
+// Build 90 (SP34): these were the only sports pages with
+// NO Motion tokens at all — their sections now take the
+// shared one-shot section entrance (sectionAppear), the
+// same language the hub pages use; it self-stills under
+// Reduce Motion / reduced intensity via the EffectsGate.
 
 // MARK: - League injuries (sweep)
 
@@ -65,6 +71,7 @@ struct LeagueInjuriesView: View {
                         .foregroundStyle(AppTheme.accent)
                 }
                 .listRowBackground(AppTheme.surface)
+                .sectionAppear()
             }
         }
         .listStyle(.insetGrouped)
@@ -153,6 +160,7 @@ struct LeagueTransactionsView: View {
                 }
             }
             .listRowBackground(AppTheme.surface)
+            .sectionAppear()
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)

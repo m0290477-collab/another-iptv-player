@@ -142,7 +142,40 @@ struct MovieDetailView: View {
             }
             .scrollClipDisabled()
             .shelfEdgeFade()
+            .onAppear { prefetchDetailShelf(moreLikeThisItems) }
+            .onDisappear { stopDetailShelf(moreLikeThisItems) }
         }
+    }
+
+    /// Build 90: warm a detail shelf's exact render request
+    /// (moviePosterCard's chain — icon, then the stored
+    /// backdrop — at search-card size, .fill, .shelf); both
+    /// shelves on this page rendered cold before. Retracted
+    /// when the shelf leaves.
+    private func prefetchDetailShelf(_ items: [DBVODStream]) {
+        let urls = items.compactMap {
+            ArtworkURL.url(from: $0.streamIcon) ?? ArtworkURL.url(from: $0.backdropPath)
+        }
+        ListImagePrefetch.start(
+            urls: urls,
+            width: posterMetrics.searchCardWidth,
+            height: posterMetrics.searchCardHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
+    }
+
+    private func stopDetailShelf(_ items: [DBVODStream]) {
+        let urls = items.compactMap {
+            ArtworkURL.url(from: $0.streamIcon) ?? ArtworkURL.url(from: $0.backdropPath)
+        }
+        ListImagePrefetch.stop(
+            urls: urls,
+            width: posterMetrics.searchCardWidth,
+            height: posterMetrics.searchCardHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
     }
 
     /// C7 franchise shelf: the other entries of this movie's
@@ -176,6 +209,8 @@ struct MovieDetailView: View {
             }
             .scrollClipDisabled()
             .shelfEdgeFade()
+            .onAppear { prefetchDetailShelf(franchiseItems) }
+            .onDisappear { stopDetailShelf(franchiseItems) }
         }
     }
 
@@ -439,9 +474,12 @@ struct MovieDetailView: View {
                     // Build 65 (Cinematic detail) / build 78
                     // (shared component): the cast renders as the
                     // mockup's round-avatar row. Provider data
-                    // carries cast NAMES only — no headshot URLs
-                    // exist — so each avatar is a monogram of the
-                    // REAL name (never an invented photo). Tapping
+                    // carries cast NAMES only; each avatar starts
+                    // as a monogram of the REAL name and swaps in
+                    // a real photo ONLY when the build-80
+                    // CastPhotoResolver verifies one for that name
+                    // (Wikidata/Wikipedia, wrong-person-guarded —
+                    // see DetailCastRow/CastAvatarView). Tapping
                     // still browses that person's titles (the C7
                     // person route), and the full list scrolls —
                     // nothing is clipped away.
@@ -471,10 +509,17 @@ struct MovieDetailView: View {
 
                 if editions.count > 1 {
                     editionsSection
+                        // Build 90: the build-81 section entrance
+                        // the cast / More Like This sections on
+                        // this page already carry (EffectsGate-
+                        // stilled under Reduce Motion).
+                        .sectionAppear()
                 }
 
                 if !franchiseItems.isEmpty {
                     franchiseSection
+                        // Build 90: section entrance, as above.
+                        .sectionAppear()
                 }
 
                 // Build 61 (B8, J2): More Like This renders only

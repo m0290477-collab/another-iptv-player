@@ -89,7 +89,10 @@ struct SeriesView: View {
     @State private var shelfCategories: [DBCategory] = []
     @State private var shelfItemsByCategory: [String: [SeriesWithCategory]] = [:]
     @State private var recentlyAddedSeries: [DBSeries] = []
-    @State private var newestSeries: [DBSeries] = []
+    // Build 90: the old `newestSeries` state was removed — it
+    // was computed every recompute pass and read NOWHERE (the
+    // Newest grid paginates `newestAll`; the shelves use
+    // recentlyAddedSeries). Dead state, dead per-pass work.
     @State private var topRatedSeries: [DBSeries] = []
     /// B8: seriesId (string key) → in-progress state for shelf cards.
     @State private var progressBySeriesId: [String: SeriesProgressInfo] = [:]
@@ -136,6 +139,12 @@ struct SeriesView: View {
     @State private var tabDebouncedQuery = ""
     @State private var tabSearchResults: [SeriesWithCategory] = []
     @State private var tabSearchVisibleCount = 90
+    /// Build 90 (RC2a): per-shelf window-prefetch batches the
+    /// category shelves started, keyed by category id, so a
+    /// shelf's disappearance retracts them too (build 89 and
+    /// earlier retracted only the head batch — see
+    /// stopSeriesPrefetch).
+    @State private var seriesWindowPrefetchURLs: [String: [URL]] = [:]
 
     var body: some View {
         Group {
@@ -302,6 +311,13 @@ struct SeriesView: View {
                                         .buttonStyle(.plain)
                                     }
                                 )
+                                // Build 90: head prefetch for this
+                                // shelf too — the category shelves
+                                // below always had it; the tab's
+                                // three lead shelves never did, so
+                                // their cards cold-loaded on open.
+                                .onAppear { prefetchSeriesCovers(topRatedSeries) }
+                                .onDisappear { stopSeriesPrefetch(topRatedSeries) }
                             }
 
                             if !recentlyAddedSeries.isEmpty {
@@ -327,6 +343,10 @@ struct SeriesView: View {
                                         .buttonStyle(.plain)
                                     }
                                 )
+                                // Build 90: head prefetch (see the
+                                // Top Rated shelf above).
+                                .onAppear { prefetchSeriesCovers(recentlyAddedSeries) }
+                                .onDisappear { stopSeriesPrefetch(recentlyAddedSeries) }
                             }
 
                             // Build 61 (B8, C2): series Watch Later shelf.
@@ -351,6 +371,10 @@ struct SeriesView: View {
                                         .buttonStyle(.plain)
                                     }
                                 )
+                                // Build 90: head prefetch (see the
+                                // Top Rated shelf above).
+                                .onAppear { prefetchSeriesCovers(watchlistSeries) }
+                                .onDisappear { stopSeriesPrefetch(watchlistSeries) }
                             }
 
                             LazyVStack(spacing: 0) {
@@ -383,14 +407,14 @@ struct SeriesView: View {
                                             // visible cell.
                                             .onAppear {
                                                 if let index = seriesItems.firstIndex(of: series) {
-                                                    prefetchSeriesWindow(seriesItems, after: index)
+                                                    prefetchSeriesWindow(seriesItems, after: index, shelfKey: category.id)
                                                 }
                                             }
                                         }
                                     )
                                     .id(category.id)
                                     .onAppear { prefetchSeriesCovers(seriesItems) }
-                                    .onDisappear { stopSeriesPrefetch(seriesItems) }
+                                    .onDisappear { stopSeriesPrefetch(seriesItems, shelfKey: category.id) }
                                 }
                             }
                             .scrollTargetLayout()
@@ -537,6 +561,24 @@ struct SeriesView: View {
         tabSearchResults = result
     }
 
+    /// Build 90: page-in prefetch for the tab's own grids —
+    /// warm the newly revealed slice with the grid's exact
+    /// render request (SeriesCard's chain at grid size, .fill,
+    /// .grid), the treatment SeriesCategoryContent's grid gets
+    /// from its loadMore; the tab's own grids paged in cold.
+    private func prefetchGridCovers(_ list: [DBSeries], startingAt start: Int) {
+        guard start < list.count else { return }
+        let urls = list.dropFirst(start).prefix(ListImagePrefetch.maxBatch)
+            .compactMap { seriesArtworkURL($0) }
+        ListImagePrefetch.start(
+            urls: urls,
+            width: posterMetrics.categoryGridPosterWidth,
+            height: posterMetrics.categoryGridPosterHeight,
+            contentMode: .fill,
+            loadProfile: .grid
+        )
+    }
+
     /// Build 80 (item 4): in-tab search results grid (the tab's own
     /// cards + detail destination, 90-per-page pagination).
     private var tabSearchResultsGrid: some View {
@@ -561,7 +603,11 @@ struct SeriesView: View {
                         .buttonStyle(PressScaleButtonStyle())
                         .onAppear {
                             if index >= tabSearchVisibleCount - 15 {
+                                let oldCount = tabSearchVisibleCount
                                 tabSearchVisibleCount = min(tabSearchVisibleCount + 90, tabSearchResults.count)
+                                if tabSearchVisibleCount > oldCount {
+                                    prefetchGridCovers(tabSearchResults.map(\.series), startingAt: oldCount)
+                                }
                             }
                         }
                     }
@@ -640,6 +686,16 @@ struct SeriesView: View {
         progressBySeriesId[String(series.seriesId)]?.positionText
     }
 
+    /// Build 90 (RC5): the ONE artwork resolution the tab's
+    /// cards render — the record's cover, then its stored
+    /// backdrop (seriesPosterCard's chain). The prefetchers
+    /// below resolve through this same chain: they used to warm
+    /// the cover field only, so a series living on its backdrop
+    /// was never warmed and cold-loaded on first appearance.
+    private func seriesArtworkURL(_ series: DBSeries) -> URL? {
+        ArtworkURL.url(from: series.cover) ?? ArtworkURL.url(from: series.backdropPath)
+    }
+
     // Build 88 (Part 2-B): cover prefetch for the category
     // shelves, carried over from the deleted
     // SeriesCategoryShelfRow (rounds 7/9/20 behaviour) — the
@@ -647,10 +703,12 @@ struct SeriesView: View {
     // exactly what its cells render: the cover at shelf size,
     // head batch + the window ahead of the visible cell, with
     // the head batch retracted when the shelf leaves.
+    // Build 90: the Top Rated / Recently Added / Watchlist
+    // shelves attach the same head prefetch (they had none),
+    // and category-shelf window batches are retracted too.
     private func prefetchSeriesCovers(_ list: [DBSeries]) {
         let urls = list.prefix(16)
-            .compactMap { $0.cover }
-            .compactMap { ArtworkURL.url(from: $0) }
+            .compactMap { seriesArtworkURL($0) }
         ListImagePrefetch.start(
             urls: urls,
             width: posterMetrics.shelfPosterWidth,
@@ -660,12 +718,11 @@ struct SeriesView: View {
         )
     }
 
-    private func prefetchSeriesWindow(_ list: [DBSeries], after index: Int) {
+    private func prefetchSeriesWindow(_ list: [DBSeries], after index: Int, shelfKey: String) {
         let start = index + 1
         guard start < list.count else { return }
         let urls = list[start..<min(start + ListImagePrefetch.scrollWindow, list.count)]
-            .compactMap { $0.cover }
-            .compactMap { ArtworkURL.url(from: $0) }
+            .compactMap { seriesArtworkURL($0) }
         ListImagePrefetch.start(
             urls: urls,
             width: posterMetrics.shelfPosterWidth,
@@ -673,12 +730,18 @@ struct SeriesView: View {
             contentMode: .fill,
             loadProfile: .shelf
         )
+        // Build 90 (RC2a): remember the batch under its shelf
+        // so stopSeriesPrefetch can retract it.
+        var tracked = seriesWindowPrefetchURLs[shelfKey] ?? []
+        for url in urls where !tracked.contains(url) {
+            tracked.append(url)
+        }
+        seriesWindowPrefetchURLs[shelfKey] = tracked
     }
 
-    private func stopSeriesPrefetch(_ list: [DBSeries]) {
+    private func stopSeriesPrefetch(_ list: [DBSeries], shelfKey: String? = nil) {
         let urls = list.prefix(16)
-            .compactMap { $0.cover }
-            .compactMap { ArtworkURL.url(from: $0) }
+            .compactMap { seriesArtworkURL($0) }
         ListImagePrefetch.stop(
             urls: urls,
             width: posterMetrics.shelfPosterWidth,
@@ -686,6 +749,19 @@ struct SeriesView: View {
             contentMode: .fill,
             loadProfile: .shelf
         )
+        // Build 90 (RC2a): retract this shelf's window batches
+        // too, chunked to the prefetcher's batch cap.
+        guard let shelfKey, let windows = seriesWindowPrefetchURLs[shelfKey] else { return }
+        seriesWindowPrefetchURLs[shelfKey] = nil
+        for chunkStart in stride(from: 0, to: windows.count, by: ListImagePrefetch.maxBatch) {
+            ListImagePrefetch.stop(
+                urls: Array(windows[chunkStart..<min(chunkStart + ListImagePrefetch.maxBatch, windows.count)]),
+                width: posterMetrics.shelfPosterWidth,
+                height: posterMetrics.shelfPosterHeight,
+                contentMode: .fill,
+                loadProfile: .shelf
+            )
+        }
     }
 
     @Environment(\.posterMetrics) private var posterMetrics
@@ -723,7 +799,11 @@ struct SeriesView: View {
                         .buttonStyle(PressScaleButtonStyle())
                         .onAppear {
                             if index >= newestVisibleCount - 15 {
+                                let oldCount = newestVisibleCount
                                 newestVisibleCount = min(newestVisibleCount + Self.newestPageSize, newestAll.count)
+                                if newestVisibleCount > oldCount {
+                                    prefetchGridCovers(newestAll, startingAt: oldCount)
+                                }
                             }
                         }
                     }
@@ -799,7 +879,11 @@ struct SeriesView: View {
                         .buttonStyle(PressScaleButtonStyle())
                         .onAppear {
                             if index >= categoryVisibleCount - 15 {
+                                let oldCount = categoryVisibleCount
                                 categoryVisibleCount = min(categoryVisibleCount + 90, items.count)
+                                if categoryVisibleCount > oldCount {
+                                    prefetchGridCovers(items.map(\.series), startingAt: oldCount)
+                                }
                             }
                         }
                     }
@@ -873,7 +957,7 @@ struct SeriesView: View {
     /// (the same simplification Live got in round 3).
     private func recomputeFilter() async {
         guard playlist.id == contentStore.activePlaylistId else {
-            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedSeries = []; newestSeries = []; topRatedSeries = []; newestAll = []; progressBySeriesId = [:]; shelfCategories = []; shelfItemsByCategory = [:]; return
+            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedSeries = []; topRatedSeries = []; newestAll = []; progressBySeriesId = [:]; shelfCategories = []; shelfItemsByCategory = [:]; return
         }
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")
         let allCats = orderStore.applyOrder(
@@ -898,7 +982,6 @@ struct SeriesView: View {
         let sharedNewest = contentStore.sharedNewestSeries
         topRatedSeries = Array(sharedTop.filter { visibleCatIds.contains($0.categoryId ?? "") }.prefix(15))
         recentlyAddedSeries = Array(sharedNewest.filter { visibleCatIds.contains($0.categoryId ?? "") }.prefix(20))
-        newestSeries = Array(sharedNewest.filter { visibleCatIds.contains($0.categoryId ?? "") }.prefix(60))
 
         // The Newest GRID paginates past the shared cap, so it keeps
         // a full ordering (tolerant timestamp parsing, C8).
@@ -1191,9 +1274,11 @@ struct RecentlyAddedSeriesDetailView: View {
 }
 
 // MARK: - Category shelf
-// Build 88 (Part 2-B): SeriesCategoryShelfRow (+ its prefetch helpers) was
-// replaced by the shared CatalogShelfRow in SeriesView — the shared shelf
-// owns poster prefetch at shelf size. See Views/CatalogComponents.swift.
+// Build 88 (Part 2-B): SeriesCategoryShelfRow was replaced by
+// the shared CatalogShelfRow in SeriesView. The shared shelf
+// owns NO prefetch — SeriesView attaches its own per shelf
+// (see prefetchSeriesCovers in SeriesView). See
+// Views/CatalogComponents.swift.
 
 struct SeriesCard: View {
     let playlistId: UUID
@@ -1608,9 +1693,11 @@ struct SeriesCategoryContent: View, Equatable {
     }
 
     private func prefetch(_ list: [SeriesWithCategory], startingAt: Int = 0) {
+        // Build 90 (RC5): resolve the same chain the grid cards
+        // render (cover, then the stored backdrop — SeriesCard)
+        // instead of the cover field alone.
         let urls = list.dropFirst(startingAt).prefix(ListImagePrefetch.maxBatch)
-            .compactMap { $0.series.cover }
-            .compactMap { ArtworkURL.url(from: $0) }
+            .compactMap { ArtworkURL.url(from: $0.series.cover) ?? ArtworkURL.url(from: $0.series.backdropPath) }
         ListImagePrefetch.start(
             urls: urls,
             width: posterMetrics.categoryGridPosterWidth,
@@ -2473,7 +2560,39 @@ struct SeriesDetailView: View {
             }
             .scrollClipDisabled()
             .shelfEdgeFade()
+            .onAppear { prefetchMoreLikeThis() }
+            .onDisappear { stopPrefetchMoreLikeThis() }
         }
+    }
+
+    /// Build 90: warm the More Like This cards' exact render
+    /// request (SeriesCard's chain — cover, then the stored
+    /// backdrop — at search-card size, .fill, .shelf); the
+    /// section rendered cold before. Retracted on disappear.
+    private func prefetchMoreLikeThis() {
+        let urls = moreLikeThisSeries.compactMap {
+            ArtworkURL.url(from: $0.cover) ?? ArtworkURL.url(from: $0.backdropPath)
+        }
+        ListImagePrefetch.start(
+            urls: urls,
+            width: posterMetrics.searchCardWidth,
+            height: posterMetrics.searchCardHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
+    }
+
+    private func stopPrefetchMoreLikeThis() {
+        let urls = moreLikeThisSeries.compactMap {
+            ArtworkURL.url(from: $0.cover) ?? ArtworkURL.url(from: $0.backdropPath)
+        }
+        ListImagePrefetch.stop(
+            urls: urls,
+            width: posterMetrics.searchCardWidth,
+            height: posterMetrics.searchCardHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
     }
 
     /// J2: same-genre series from the loaded catalog (genre overlap
@@ -3004,12 +3123,10 @@ struct EpisodesPanel: View {
                     .padding(.horizontal, 16)
                 }
                 .onChange(of: observer.episodes) { _, newValue in
-                    let urls = newValue.compactMap(\.cover).compactMap { ArtworkURL.url(from: $0) }
-                    ListImagePrefetch.start(urls: urls, width: EpisodeCardMetrics.thumbWidth, height: EpisodeCardMetrics.thumbHeight, contentMode: .fill, loadProfile: .grid)
+                    prefetchStills(newValue)
                 }
                 .onAppear {
-                    let urls = observer.episodes.compactMap(\.cover).compactMap { ArtworkURL.url(from: $0) }
-                    ListImagePrefetch.start(urls: urls, width: EpisodeCardMetrics.thumbWidth, height: EpisodeCardMetrics.thumbHeight, contentMode: .fill, loadProfile: .grid)
+                    prefetchStills(observer.episodes)
                 }
             }
         }
@@ -3019,6 +3136,29 @@ struct EpisodesPanel: View {
         .onChange(of: seasonId) { _, newId in
             observer.load(seasonId: newId, db: appDatabase)
         }
+    }
+
+    /// Build 90 (RC5): warm exactly what the episode cards
+    /// render — each episode's own still at the card's 128×72
+    /// request; an episode with NO usable still renders the
+    /// SERIES cover in the same box (EpisodeDetailRow's chain),
+    /// so the cover joins the batch once when any episode
+    /// needs it. (Before: stills only — cover-fallback rows
+    /// cold-loaded inside a "prefetched" panel.)
+    private func prefetchStills(_ episodes: [DBEpisode]) {
+        var urls: [URL] = []
+        var needsSeriesCover = false
+        for episode in episodes {
+            if let url = ArtworkURL.url(from: episode.cover) {
+                urls.append(url)
+            } else {
+                needsSeriesCover = true
+            }
+        }
+        if needsSeriesCover, let coverURL = ArtworkURL.url(from: seriesCover) {
+            urls.append(coverURL)
+        }
+        ListImagePrefetch.start(urls: urls, width: EpisodeCardMetrics.thumbWidth, height: EpisodeCardMetrics.thumbHeight, contentMode: .fill, loadProfile: .grid)
     }
 }
 

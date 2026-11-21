@@ -460,6 +460,15 @@ enum MatchesService {
         }
     }
 
+    /// Build 90 (SP6): ONE league's full-window outcome,
+    /// public so the Matches tab's view model can publish
+    /// each league as it lands instead of waiting for the
+    /// whole sport pass to drain (fetchSport above keeps
+    /// serving its existing callers unchanged).
+    static func fetchLeagueWindow(path: String) async -> MatchLeagueOutcome {
+        await fetchLeagueAcrossDays(path: path, dayParameters: dayParameters())
+    }
+
     /// One league across the whole day window: days load
     /// concurrently; events merge de-duplicated by id and sort by
     /// kickoff (today's live/finished first by time, then upcoming
@@ -604,6 +613,16 @@ struct MatchTimelineEvent: Identifiable {
     let headshotURL: URL?
     let teamName: String?
     let kind: Kind
+    /// Build 90 (SP1): the payload's raw key-event type id
+    /// ("substitution", "goal---volley", "penalty---saved", …)
+    /// when the row came from the summary's `keyEvents`; nil
+    /// for rows built from header details or play lists. The
+    /// view can label/icon substitution and penalty rows
+    /// distinctly from this without widening the Kind enum
+    /// (MatchDetailView's kind switch is exhaustive over the
+    /// five shipped cases). Defaulted so every existing
+    /// construction site keeps compiling unchanged.
+    var keyEventTypeId: String? = nil
 }
 
 struct MatchTeamStatLine: Identifiable {
@@ -694,12 +713,44 @@ struct MatchDetail {
     /// in Facts; tapping opens the publisher page. Nil when
     /// the payload carries none.
     let article: MatchArticle?
+    /// Build 90 (SP3): both teams' last-five form from the
+    /// summary's `lastFiveGames` — empty when the payload
+    /// carries no form blocks (the Facts form section then
+    /// simply doesn't render).
+    let form: [MatchTeamForm]
 
     var isEmpty: Bool {
         timeline.isEmpty && stats.isEmpty && leaders.isEmpty && lineups.isEmpty
             && videos.isEmpty && commentary.isEmpty && h2h == nil
             && boxScore.isEmpty && playsFeed.isEmpty && article == nil
     }
+}
+
+/// Build 90 (SP3): one team's recent-form block from the
+/// summary's `lastFiveGames`, mapped verbatim.
+struct MatchTeamForm: Identifiable {
+    let teamId: String?
+    let teamName: String?
+    let logoURL: URL?
+    let results: [MatchFormResult]
+    var id: String { teamId ?? teamName ?? "" }
+}
+
+/// Build 90 (SP3): one result inside a form block — the
+/// opponent, the score as played, and the W/D/L outcome
+/// from the form team's perspective, all payload-verbatim.
+struct MatchFormResult: Identifiable {
+    let id: String
+    let date: Date?
+    /// "W" / "D" / "L" from the form team's perspective.
+    let result: String?
+    /// The score as played ("2-1", home–away of that match).
+    let scoreText: String?
+    let opponentName: String?
+    let opponentLogoURL: URL?
+    /// "@" when the form team played away, "vs" at home.
+    let atVs: String?
+    let competitionName: String?
 }
 
 /// Build 85 (sweep): the summary payload's own article —
@@ -852,6 +903,12 @@ struct MatchLineupSide: Identifiable {
 
 private struct ESPNSummary: Decodable {
     let header: ESPNHeader?
+    /// Build 90 (SP1): the summary's full key-events feed
+    /// (goals, cards, substitutions, penalties — see
+    /// ESPNKeyEvent). Soccer summaries carry it; US-sport
+    /// summaries do not, so it stays nil there and their
+    /// timeline paths are untouched.
+    let keyEvents: [ESPNKeyEvent]?
     let boxscore: ESPNBoxscore?
     let leaders: [ESPNLeaderTeamGroup]?
     let scoringPlays: [ESPNPlay]?
@@ -872,6 +929,59 @@ private struct ESPNSummary: Decodable {
     let broadcasts: [ESPNBroadcast]?
     // Build 85 (sweep): the summary's recap/preview article.
     let article: ESPNArticle?
+    // Build 90 (SP3): both teams' last-five results, carried
+    // by the same summary payload (verified live 2026-11-21).
+    let lastFiveGames: [ESPNLastFiveTeam]?
+}
+
+/// Build 90 (SP3): one team's `lastFiveGames` block — the
+/// team plus its recent events (opponent, the score as
+/// played, the W/D/L `gameResult` from THIS team's
+/// perspective, the competition name; all verbatim).
+private struct ESPNLastFiveTeam: Decodable {
+    struct Team: Decodable {
+        let id: String?
+        let displayName: String?
+        let logo: String?
+    }
+    struct Event: Decodable {
+        let id: String?
+        let gameDate: String?
+        let gameResult: String?
+        let score: String?
+        let competitionName: String?
+        let atVs: String?
+        let opponent: Team?
+        let opponentLogo: String?
+    }
+    let team: Team?
+    let events: [Event]?
+}
+
+/// Build 90 (SP1): one entry of the summary's `keyEvents`
+/// feed — verified live 2026-11-21 (eng.1 event 401879233:
+/// 19 entries; esp.1 401882806: 31; usa.1: 18;
+/// uefa.champions: 13). `type.type` is the machine id
+/// ("goal---volley", "yellow-card", "substitution",
+/// "penalty---saved", "own-goal", plus period markers);
+/// `type.text` is its payload label ("Goal - Volley").
+/// Participants: for a goal the scorer then the assist; for
+/// a substitution the player coming ON then the player
+/// going OFF ("Hugo Larsson replaces Josh King" — Larsson
+/// is participants[0]); for a card the booked player.
+private struct ESPNKeyEvent: Decodable {
+    struct EventType: Decodable {
+        let text: String?
+        let type: String?
+    }
+    let id: String?
+    let type: EventType?
+    let text: String?
+    let shortText: String?
+    let clock: ESPNClock?
+    let scoringPlay: Bool?
+    let team: ESPNTeam?
+    let participants: [ESPNParticipant]?
 }
 
 private struct ESPNArticle: Decodable {
@@ -1156,13 +1266,17 @@ extension MatchesService {
         var components = URLComponents(string: "\(baseURL)/\(leaguePath)/summary")
         components?.queryItems = [URLQueryItem(name: "event", value: eventId)]
         guard let url = components?.url else { throw URLError(.badURL) }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 20
-        let (data, response) = try await URLSession.shared.data(for: request)
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+        // Build 90 (SP21): the detail fetch rides the SAME
+        // sports disk cache as the scoreboards, standings and
+        // leaders — a success saves the payload, a network
+        // failure serves the last real payload, and only both
+        // failing throws (the old direct fetch was a hard
+        // error screen offline, unlike every sibling surface).
+        let cacheKey = "detail|\(leaguePath)|\(eventId)"
+        guard let result = await SportsDiskCache.espnData(url: url, cacheKey: cacheKey) else {
             throw URLError(.badServerResponse)
         }
-        let decoded = try JSONDecoder().decode(ESPNSummary.self, from: data)
+        let decoded = try JSONDecoder().decode(ESPNSummary.self, from: result.data)
         return mapDetail(decoded, sport: sport)
     }
 
@@ -1192,8 +1306,39 @@ extension MatchesService {
             homeErrors: homeCompetitor?.errors.map(String.init),
             awayHits: awayCompetitor?.hits.map(String.init),
             awayErrors: awayCompetitor?.errors.map(String.init),
-            article: mapArticle(summary)
+            article: mapArticle(summary),
+            form: mapForm(summary)
         )
+    }
+
+    /// Build 90 (SP3): the summary's `lastFiveGames` mapped
+    /// verbatim — a team block renders only when the payload
+    /// carries it AND it holds results; zero new requests
+    /// (the summary fetch already downloaded the field).
+    private static func mapForm(_ summary: ESPNSummary) -> [MatchTeamForm] {
+        (summary.lastFiveGames ?? []).compactMap { block -> MatchTeamForm? in
+            guard let team = block.team else { return nil }
+            let results = (block.events ?? []).enumerated().map { index, event in
+                MatchFormResult(
+                    id: event.id ?? "form-\(index)",
+                    date: event.gameDate.flatMap { parseEventDate($0) },
+                    result: event.gameResult,
+                    scoreText: event.score,
+                    opponentName: event.opponent?.displayName,
+                    opponentLogoURL: (event.opponentLogo ?? event.opponent?.logo)
+                        .flatMap { URL(string: $0) },
+                    atVs: event.atVs,
+                    competitionName: event.competitionName
+                )
+            }
+            guard !results.isEmpty else { return nil }
+            return MatchTeamForm(
+                teamId: team.id,
+                teamName: team.displayName,
+                logoURL: team.logo.flatMap { URL(string: $0) },
+                results: results
+            )
+        }
     }
 
     /// Build 85 (sweep): the summary's recap/preview article —
@@ -1469,6 +1614,20 @@ extension MatchesService {
         competition: ESPNHeaderCompetition?,
         sport: MatchSport
     ) -> [MatchTimelineEvent] {
+        // 0) Build 90 (SP1): the summary's `keyEvents` — the
+        // FULL event feed. In the current feed shape the
+        // header `details` below carry only the goals
+        // (verified live 2026-11-21: eng.1 details = 2 goals
+        // vs keyEvents = 19 events incl. 4 yellow cards and
+        // 5 substitutions; esp.1: 4 vs 31, incl. an own goal
+        // and a penalty saved), so when keyEvents is present
+        // it IS the timeline — same payload, zero new
+        // requests. Any league whose summary omits it falls
+        // through to the details chain exactly as before.
+        if let keyEvents = summary.keyEvents, !keyEvents.isEmpty {
+            let mapped = mapKeyEvents(keyEvents, sport: sport)
+            if !mapped.isEmpty { return mapped }
+        }
         // 1) Header details — soccer-style scoring plays + cards.
         if let details = competition?.details, !details.isEmpty {
             return details.enumerated().map { index, detail in
@@ -1481,10 +1640,17 @@ extension MatchesService {
                 else { kind = .other }
                 var title = detail.type?.text ?? detail.text ?? scorer?.displayName ?? ""
                 if title.isEmpty, kind == .goal { title = scorer?.displayName ?? "" }
-                var detailText = detail.team?.displayName
+                // Build 90 (SP1 / S1 A8): the team name and
+                // the assist BOTH survive — the old mapping
+                // replaced the team name with the assist name,
+                // so a row could show one or the other, never
+                // both.
+                var detailParts: [String] = []
+                if let teamName = detail.team?.displayName { detailParts.append(teamName) }
                 if participants.count > 1, let assist = participants[1].athlete?.displayName {
-                    detailText = assist
+                    detailParts.append(assist)
                 }
+                let detailText = detailParts.isEmpty ? nil : detailParts.joined(separator: " · ")
                 return MatchTimelineEvent(
                     id: "detail-\(index)",
                     minuteText: detail.clock?.displayValue,
@@ -1513,6 +1679,76 @@ extension MatchesService {
             }
         }
         return []
+    }
+
+    /// Build 90 (SP1): period markers the keyEvents feed
+    /// interleaves with the real events — rendered nowhere
+    /// (the detail header already carries the match state).
+    private static let keyEventMarkerTypes: Set<String> = [
+        "kickoff", "halftime", "start-2nd-half", "end-regular-time",
+        "start-delay", "end-delay"
+    ]
+
+    /// Build 90 (SP1): keyEvents → timeline rows, in payload
+    /// (chronological) order. Every goal in keyEvents matches
+    /// a header `details` goal one-for-one in the verified
+    /// samples, so the goals the timeline already showed are
+    /// unchanged — cards, substitutions and penalty events
+    /// are what this adds. Title leads with the player the
+    /// event is about (the details path's effective rendering
+    /// today: its `type.text` is nil in the current feed, so
+    /// its rows already fall back to the scorer's name); the
+    /// detail line carries the payload's type label, the
+    /// team, and the second participant (the assist on a
+    /// goal, the player replaced in a substitution) — the
+    /// A8 fix: team and second participant both survive.
+    private static func mapKeyEvents(
+        _ events: [ESPNKeyEvent], sport: MatchSport
+    ) -> [MatchTimelineEvent] {
+        events.enumerated().compactMap { index, event -> MatchTimelineEvent? in
+            let typeId = event.type?.type ?? ""
+            if keyEventMarkerTypes.contains(typeId) { return nil }
+            let participants = event.participants ?? []
+            let primary = participants.first?.athlete
+            let secondary = participants.count > 1 ? participants[1].athlete : nil
+            let kind: MatchTimelineEvent.Kind
+            let isGoalType = typeId.hasPrefix("goal") || typeId == "own-goal"
+            if event.scoringPlay == true || isGoalType {
+                kind = .goal
+            } else if typeId == "yellow-card" {
+                kind = .yellowCard
+            } else if typeId == "red-card" {
+                kind = .redCard
+            } else {
+                kind = .other
+            }
+            var title = primary?.displayName ?? primary?.shortName ?? ""
+            if title.isEmpty {
+                title = event.type?.text ?? event.shortText ?? event.text ?? ""
+            }
+            var detailParts: [String] = []
+            if let typeText = event.type?.text, typeText != title {
+                detailParts.append(typeText)
+            }
+            if let teamName = event.team?.displayName {
+                detailParts.append(teamName)
+            }
+            if let secondaryName = secondary?.displayName ?? secondary?.shortName {
+                detailParts.append(secondaryName)
+            }
+            return MatchTimelineEvent(
+                id: event.id.map { "key-\($0)" } ?? "key-\(index)",
+                minuteText: event.clock?.displayValue,
+                title: title,
+                detail: detailParts.isEmpty ? nil : detailParts.joined(separator: " · "),
+                playerName: primary?.displayName ?? primary?.shortName,
+                athleteId: primary?.id,
+                headshotURL: headshotURL(sport: sport, athlete: primary),
+                teamName: event.team?.displayName,
+                kind: kind,
+                keyEventTypeId: typeId.isEmpty ? nil : typeId
+            )
+        }
     }
 
     private static func mapPlay(_ play: ESPNPlay, index: Int, sport: MatchSport) -> MatchTimelineEvent {

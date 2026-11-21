@@ -127,7 +127,17 @@ struct DashboardView: View {
                 Tab(value: DashboardTab.live) {
                     NavigationStack {
                         LiveStreamsView(playlist: playlist)
-                            .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.live"), type: "live")
+                            // Build 90 (F2): the bar is hidden on this
+                            // tab too — build 89 moved the title and
+                            // actions into the in-scroll header pill,
+                            // but this modifier still rendered its own
+                            // large "Live TV" title and Favorites star
+                            // above the pill (title twice, star twice
+                            // in the owner's recording). Home's
+                            // pattern: hide the bar here; pushed
+                            // screens declare their own titles and
+                            // get it back.
+                            .dashboardNavigation(playlist: playlist, tabTitle: L("dashboard.live"), type: "live", hidesNavigationBar: true)
                     }
                 } label: { tabLabel(L("dashboard.live"), glyph: "TabGlyphLive", tab: DashboardTab.live) }
 
@@ -393,7 +403,7 @@ struct DashboardView: View {
                     url: url,
                     title: item.title,
                     subtitle: item.secondaryTitle,
-                    artworkURL: item.imageURL.flatMap { URL(string: $0) },
+                    artworkURL: item.imageURL.flatMap { ArtworkURL.url(from: $0) },
                     isLiveStream: false,
                     playlistId: playlist.id,
                     streamId: item.streamId,

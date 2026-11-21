@@ -324,7 +324,7 @@ struct LiveHeroCard: View {
                     endPoint: .bottomTrailing
                 )
 
-                if let icon = stream.streamIcon, let url = URL(string: icon) {
+                if let url = ArtworkURL.url(from: stream.streamIcon) {
                     // Round 9 (owner recording, build 45): the hero used
                     // to request its logo ONLY at 210×118 / .high — a
                     // cache key no other surface produces, so at tab
@@ -912,7 +912,7 @@ struct LiveHeroMiniCard: View {
                         colors: [SectionTheme.live.opacity(0.25), AppTheme.surface],
                         startPoint: .topLeading, endPoint: .bottomTrailing
                     )
-                    if let icon = stream.streamIcon, let url = URL(string: icon) {
+                    if let url = ArtworkURL.url(from: stream.streamIcon) {
                         CachedImage(url: url, width: 150, height: 84, cornerRadius: AppTheme.cornerRadius,
                                     contentMode: .fit, iconName: "tv", loadProfile: .shelf)
                             .frame(width: 150, height: 84)

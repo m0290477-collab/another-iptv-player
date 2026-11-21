@@ -15,7 +15,6 @@ struct M3UChannelsView: View {
     @State private var searchText = ""
     @State private var debouncedQuery = ""
     @State private var debounceTask: Task<Void, Never>?
-    @State private var isSearchActive = false
 
     /// The groups filtered after a search.
     @State private var displayGroups: [String] = []
@@ -37,7 +36,25 @@ struct M3UChannelsView: View {
     }
 
     var body: some View {
-        Group {
+        // Build 90 (M3U parity, the build-89 item 3 pattern): the
+        // header/search moved out of the navigation bar — the
+        // app's shared in-view search field sits fixed above the
+        // content (the Favorites pattern; NEVER inside the
+        // ScrollViewReader-anchored scroll view — the build-81
+        // lesson), the title + actions live in an in-scroll
+        // header row (see shelvesList), and the navigation bar
+        // is hidden on this tab root. Search wiring is
+        // unchanged: the same searchText → 250 ms debounce →
+        // debouncedQuery → recomputeFilter chain, and clearing
+        // the field restores the full list instantly through
+        // the same empty-query path the old `.searchable`
+        // dismissal used.
+        VStack(spacing: 0) {
+            CatalogSearchField(text: $searchText, placeholder: L("m3u.search_placeholder"))
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
+
             if store.isLoading && store.channels.isEmpty {
                 VStack(spacing: 16) {
                     BrandedLoader()
@@ -56,41 +73,34 @@ struct M3UChannelsView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if visibleShelfGroups.isEmpty {
-                VStack(spacing: 12) {
-                    Spacer()
+                // Build 90: the designed surface-card empty state
+                // (the Favorites pattern) instead of a bare icon
+                // floating on the background.
+                VStack(spacing: 14) {
                     Image(systemName: "magnifyingglass")
-                        .font(.largeTitle)
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                        .frame(width: 72, height: 72)
+                        .background(Circle().fill(AppTheme.elevated))
                     Text(L("list.no_result"))
-                        .foregroundColor(.secondary)
-                    Spacer()
+                        .font(AppTheme.fontCardTitle)
                 }
+                .padding(24)
+                .background(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous).fill(AppTheme.surface))
+                .padding(.horizontal, 32)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 shelvesList
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                NavigationLink {
-                    M3UFavoritesView(playlist: playlist)
-                } label: {
-                    Image(systemName: "star.fill")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(AppTheme.accent)
-                }
-                .accessibilityLabel(L("favorites.title"))
-            }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showingCategoryPicker = true
-                } label: {
-                    Image(systemName: "list.bullet.indent")
-                        .font(.body.weight(.semibold))
-                }
-                .disabled(displayGroups.isEmpty)
-                .accessibilityLabel(L("list.jump_to_category"))
-            }
-        }
+        // Build 90: the navigation bar is hidden on this tab
+        // root (the dashboardNavigation hidden-branch idiom);
+        // the two actions its toolbar carried — Favorites and
+        // the category jump — live in the in-scroll header pill
+        // now, in exactly one place.
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
         .alert(L("playback.error.failed_to_start"), isPresented: $showPlayFailure) {
             Button(L("common.ok")) { showPlayFailure = false }
         }
@@ -113,7 +123,6 @@ struct M3UChannelsView: View {
                 pendingScrollTarget = id
             }
         }
-        .searchable(text: $searchText, isPresented: $isSearchActive, prompt: L("m3u.search_placeholder"))
         .onChange(of: searchText) { _, new in
             debounceTask?.cancel()
             // On switching to an empty search there is no debounce wait — show the full list instantly.
@@ -127,14 +136,6 @@ struct M3UChannelsView: View {
                 try? await Task.sleep(nanoseconds: 250_000_000)
                 guard !Task.isCancelled else { return }
                 await MainActor.run { debouncedQuery = new }
-            }
-        }
-        .onChange(of: isSearchActive) { _, active in
-            if !active {
-                debounceTask?.cancel()
-                searchText = ""
-                debouncedQuery = ""
-                applyFull()
             }
         }
         .task(id: debouncedQuery) { await recomputeFilter() }
@@ -178,6 +179,11 @@ struct M3UChannelsView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
+                    // Build 90: the in-scroll tab header (title +
+                    // actions pill) — it scrolls away with the
+                    // content, the build-89 item 3 pattern.
+                    m3uHeaderRow
+
                     // Continue watching: at the top when there is no search.
                     if debouncedQuery.isEmpty {
                         ContinueWatchingRow(
@@ -230,6 +236,51 @@ struct M3UChannelsView: View {
         }
     }
 
+    /// Build 90: the tab's title + actions pill, built to sit
+    /// INSIDE the scroll flow (the navigation bar is hidden on
+    /// this tab — see the body note). The pill carries the exact
+    /// actions the nav toolbar carried: the Favorites star and
+    /// the category jump. One pill, one place — no action exists
+    /// twice on this tab. Mirrors Live TV's liveTabHeaderRow.
+    private var m3uHeaderRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(L("dashboard.channels"))
+                .font(.largeTitle.weight(.bold))
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            HStack(spacing: 2) {
+                NavigationLink {
+                    M3UFavoritesView(playlist: playlist)
+                } label: {
+                    Image(systemName: "star.fill")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L("favorites.title"))
+
+                Button {
+                    showingCategoryPicker = true
+                } label: {
+                    Image(systemName: "list.bullet.indent")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(displayGroups.isEmpty)
+                .accessibilityLabel(L("list.jump_to_category"))
+            }
+            .padding(.horizontal, 6)
+            .background(Capsule().fill(AppTheme.elevated))
+            .overlay(Capsule().stroke(AppTheme.cardBorderColor, lineWidth: 1))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+    }
+
     /// Pull-to-refresh: on a URL-based playlist, a full re-download + import (the same path as the refresh in Settings);
     /// on a local-file playlist, only a reload from the DB
     /// (the content cannot change without the file being re-selected).
@@ -270,40 +321,46 @@ struct M3UChannelsView: View {
         let dead: Set<String> = ChannelHealthStore.hideDeadEnabled
             ? ChannelHealthStore.shared.deadKeys() : []
         let playlistId = playlist.id
-        func alive(_ channels: [DBM3UChannel]) -> [DBM3UChannel] {
-            guard !dead.isEmpty else { return channels }
-            return channels.filter {
-                !dead.contains(ImportedSubtitleStore.contentKey(
-                    playlistId: playlistId, type: "live", streamId: $0.id
-                ))
-            }
-        }
-        // Build 61 (B8, C10/H2): per-channel hides drop out and pins
-        // lead each group (O7) — same stores as the card menus.
-        let byGroup = Self.processedByGroup(rawByGroup, playlistId: playlist.id)
 
-        if q.isEmpty {
-            displayGroups = groups
-            displayChannelsByGroup = byGroup.mapValues { alive($0) }
-            if !dead.isEmpty {
-                displayGroups = groups.filter { !(displayChannelsByGroup[$0]?.isEmpty ?? true) }
+        // Build 90: the pin/hide transform and the dead filter
+        // now run in ONE detached pass for BOTH the full and the
+        // searched paths. The searched path already detached its
+        // filtering, but `processedByGroup`'s O(n) walk over the
+        // whole catalog ran on the main actor on every store /
+        // pin / hide change — on 100K+ channel catalogs that
+        // hitched the tab on every toggle. Its inputs are
+        // UserDefaults-backed nonisolated statics, safe off-main.
+        // Same inputs, same outputs; only the publish lands on
+        // the main actor. (applyFull keeps its synchronous
+        // instant-restore contract and is unchanged.)
+        let result = await Task.detached(priority: .userInitiated) { () -> ([String], [String: [DBM3UChannel]]) in
+            // Build 61 (B8, C10/H2): per-channel hides drop out
+            // and pins lead each group (O7) — same stores as the
+            // card menus.
+            let processed = Self.processedByGroup(rawByGroup, playlistId: playlistId)
+            func alive(_ channels: [DBM3UChannel]) -> [DBM3UChannel] {
+                guard !dead.isEmpty else { return channels }
+                return channels.filter {
+                    !dead.contains(ImportedSubtitleStore.contentKey(
+                        playlistId: playlistId, type: "live", streamId: $0.id
+                    ))
+                }
             }
-            return
-        }
 
-        let result = await Task.detached(priority: .userInitiated) {
+            if q.isEmpty {
+                let byGroup = processed.mapValues { alive($0) }
+                var outGroups = groups
+                if !dead.isEmpty {
+                    outGroups = groups.filter { !(byGroup[$0]?.isEmpty ?? true) }
+                }
+                return (outGroups, byGroup)
+            }
+
             var outGroups: [String] = []
             var outBy: [String: [DBM3UChannel]] = [:]
             for g in groups {
                 let groupMatch = CatalogTextSearch.matches(search: q, text: g)
-                var items = byGroup[g] ?? []
-                if !dead.isEmpty {
-                    items = items.filter {
-                        !dead.contains(ImportedSubtitleStore.contentKey(
-                            playlistId: playlistId, type: "live", streamId: $0.id
-                        ))
-                    }
-                }
+                let items = alive(processed[g] ?? [])
                 // Build 61 (B8, C11/H5): name OR provider number.
                 let filtered = groupMatch ? items : items.filter {
                     CatalogTextSearch.matches(search: q, text: $0.name)
@@ -372,8 +429,6 @@ private extension String {
 // MARK: - Group shelf (horizontal preview)
 
 private enum M3UShelf {
-    /// How many subsequent logos to preload when a card appears.
-    static let lookAhead = 10
     /// Preparation for the visible window before the user scrolls, on first open.
     static let initialWarmup = 6
 }
@@ -385,35 +440,36 @@ struct M3UGroupShelfRow: View, Equatable {
     var onChannelSelected: ((DBM3UChannel) -> Void)? = nil
 
     static func == (lhs: M3UGroupShelfRow, rhs: M3UGroupShelfRow) -> Bool {
-        lhs.playlist.id == rhs.playlist.id &&
-        lhs.group == rhs.group &&
-        lhs.items == rhs.items
+        // Build 90: the cheap boundary signature, staged into
+        // separate statements (the build-89 fix-round-1 lesson —
+        // one chained expression in LiveStreamsView timed out
+        // the type-checker). The full-array equality this
+        // replaces walked EVERY channel of the row (all fields,
+        // including URL strings) on every parent re-render —
+        // the same heaviness class as Live TV's F8 fix. A
+        // mid-list change with identical boundaries is invisible
+        // until another input moves — the same accepted
+        // trade-off as LiveCategoryShelfRow.==.
+        let samePlaylist = lhs.playlist.id == rhs.playlist.id
+        let sameGroup = lhs.group == rhs.group
+        let sameCount = lhs.items.count == rhs.items.count
+        let sameFirst = lhs.items.first?.id == rhs.items.first?.id
+        let sameLast = lhs.items.last?.id == rhs.items.last?.id
+        return samePlaylist && sameGroup && sameCount && sameFirst && sameLast
     }
-
-    @Environment(\.posterMetrics) private var posterMetrics
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                NavigationLink {
-                    M3UGroupDetailView(playlist: playlist, group: group)
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(M3UContentStore.displayName(forGroup: group))
-                            .font(.headline)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .foregroundStyle(.primary)
-                }
-                Spacer()
-                Text("\(items.count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+            // Build 90: the ONE shelf-header style every Live
+            // shelf uses (CinematicSectionHeader with the real
+            // per-group count badge) — replaces the local
+            // headline + chevron + caption-count arrangement.
+            CinematicSectionHeader(
+                title: M3UContentStore.displayName(forGroup: group),
+                count: items.isEmpty ? nil : items.count
+            ) {
+                M3UGroupDetailView(playlist: playlist, group: group)
             }
-            .padding(.horizontal, 16)
 
             if items.isEmpty {
                 Text(L("live.empty.no_channel_in_category"))
@@ -426,39 +482,80 @@ struct M3UGroupShelfRow: View, Equatable {
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, channel in
                             M3UChannelCard(
                                 channel: channel,
-                                width: posterMetrics.liveShelfLabelWidth,
-                                iconSize: posterMetrics.liveShelfIcon,
                                 imageLoadProfile: .shelf,
                                 onChannelSelected: onChannelSelected
                             )
-                            .onAppear { prefetchAhead(from: index) }
+                            .onAppear { prefetchWindow(from: index, channelId: channel.id) }
+                            .onDisappear { ListImagePrefetch.stop(keyed: windowKey(channelId: channel.id)) }
                         }
                     }
                     .padding(.horizontal, 16)
                 }
                 .onAppear {
                     // Only warm the initially visible window; the rest loads on scroll.
-                    prefetchAhead(from: -1, count: M3UShelf.initialWarmup)
+                    prefetchHead()
+                }
+                .onDisappear {
+                    // Retract the head batch (the round-20
+                    // contract): a shelf that scrolled off must
+                    // not leave its queued prefetches behind.
+                    stopHead()
                 }
             }
         }
         .padding(.vertical, 6)
     }
 
-    /// When the `index` card becomes visible, it prefetches the `index+1 ..< index+1+count` range.
-    /// Because the Nuke memory cache already dedupes, overlapping calls are cheap.
-    private func prefetchAhead(from index: Int, count: Int = M3UShelf.lookAhead) {
-        let start = max(0, index + 1)
-        let end = min(items.count, start + count)
+    /// The keyed window batch for one visible card (build 90,
+    /// the F5a pattern): started on the card's appear with the
+    /// tile's REAL render size, retracted by key on disappear,
+    /// so a fast fling cannot strand stale low-priority
+    /// requests in the shared prefetcher.
+    private func windowKey(channelId: String) -> String {
+        "m3u-shelf-\(group)-\(channelId)"
+    }
+
+    private func prefetchWindow(from index: Int, channelId: String) {
+        let start = index + 1
+        let end = min(items.count, start + ListImagePrefetch.scrollWindow)
         guard start < end else { return }
         let urls = items[start..<end]
             .compactMap { $0.tvgLogo }
             .compactMap { ArtworkURL.url(from: $0) }
         guard !urls.isEmpty else { return }
         ListImagePrefetch.start(
+            keyed: windowKey(channelId: channelId),
             urls: urls,
-            width: posterMetrics.liveShelfIcon,
-            height: posterMetrics.liveShelfIcon,
+            width: M3UChannelTileMetrics.logoWidth,
+            height: M3UChannelTileMetrics.logoHeight,
+            loadProfile: .shelf
+        )
+    }
+
+    private func headURLs() -> [URL] {
+        items.prefix(M3UShelf.initialWarmup)
+            .compactMap { $0.tvgLogo }
+            .compactMap { ArtworkURL.url(from: $0) }
+    }
+
+    private func prefetchHead() {
+        let urls = headURLs()
+        guard !urls.isEmpty else { return }
+        ListImagePrefetch.start(
+            urls: urls,
+            width: M3UChannelTileMetrics.logoWidth,
+            height: M3UChannelTileMetrics.logoHeight,
+            loadProfile: .shelf
+        )
+    }
+
+    private func stopHead() {
+        let urls = headURLs()
+        guard !urls.isEmpty else { return }
+        ListImagePrefetch.stop(
+            urls: urls,
+            width: M3UChannelTileMetrics.logoWidth,
+            height: M3UChannelTileMetrics.logoHeight,
             loadProfile: .shelf
         )
     }
@@ -466,10 +563,32 @@ struct M3UGroupShelfRow: View, Equatable {
 
 // MARK: - Channel card
 
+/// Build 90: the M3U tile metrics mirror `LiveChannelTileMetrics`
+/// (the Xtream tile family) value for value, so both systems
+/// render — and prefetch — the identical logo request and a
+/// channel's logo is decoded once across surfaces.
+enum M3UChannelTileMetrics {
+    static let width: CGFloat = 192
+    static let height: CGFloat = 108
+    static let logoWidth: CGFloat = 168
+    static let logoHeight: CGFloat = 92
+}
+
+/// Build 90: the M3U channel card joins the ONE wide-tile
+/// system the Xtream surfaces unified on in build 89 — a 16:9
+/// glass tile with a generous aspect-fit logo box, the full
+/// channel name under it, and the provider number when the
+/// playlist carries one. The old square icon box (112 pt shelf
+/// / 180 pt grid, device-scaled) aspect-fit wide wordmark
+/// logos into a thin strip in the middle of the square — the
+/// tiny-inset defect the Xtream F3 fix removed on its side.
 struct M3UChannelCard: View {
     let channel: DBM3UChannel
-    var width: CGFloat = 120
-    var iconSize: CGFloat = 120
+    /// Grid form: the tile fills its cell's width at the 16:9
+    /// ratio instead of the fixed shelf size (LiveChannelTile's
+    /// flexibleWidth pattern). The logo request size is the
+    /// shared metrics size in both forms.
+    var flexibleWidth: Bool = false
     var imageLoadProfile: ImageLoadProfile = .standard
     var onChannelSelected: ((DBM3UChannel) -> Void)? = nil
 
@@ -478,22 +597,32 @@ struct M3UChannelCard: View {
         Button {
             onChannelSelected?(channel)
         } label: {
-            VStack(alignment: .center, spacing: 10) {
-                CachedImage(
-                    url: channel.tvgLogo.flatMap { ArtworkURL.url(from: $0) },
-                    width: iconSize,
-                    height: iconSize,
-                    cornerRadius: 12,
-                    iconName: "tv",
-                    loadProfile: imageLoadProfile
-                )
+            VStack(alignment: .center, spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                        .fill(AppTheme.cardGradient)
+                    RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                        .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+                    CachedImage(
+                        url: channel.tvgLogo.flatMap { ArtworkURL.url(from: $0) },
+                        width: M3UChannelTileMetrics.logoWidth,
+                        height: M3UChannelTileMetrics.logoHeight,
+                        cornerRadius: AppTheme.smallCornerRadius,
+                        iconName: "tv",
+                        loadProfile: imageLoadProfile
+                    )
+                }
+                .frame(width: flexibleWidth ? nil : M3UChannelTileMetrics.width,
+                       height: flexibleWidth ? nil : M3UChannelTileMetrics.height)
+                .frame(maxWidth: flexibleWidth ? .infinity : nil)
+                .aspectRatio(flexibleWidth ? 16.0 / 9.0 : nil, contentMode: .fit)
 
                 Text(channel.name)
-                    .font(.caption)
-                    .fontWeight(.medium)
+                    .font(.subheadline.weight(.medium))
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
-                    .frame(width: width)
+                    .frame(width: flexibleWidth ? nil : M3UChannelTileMetrics.width)
+                    .frame(maxWidth: flexibleWidth ? .infinity : nil)
                     .foregroundColor(.primary)
 
                 // Build 61 (B8, H5): provider channel number
@@ -508,7 +637,7 @@ struct M3UChannelCard: View {
 
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressScaleButtonStyle())
         .contextMenu {
             // Observing the store with @ObservedObject was re-rendering the THOUSANDS of cards the lazy
             // stack kept alive on a single favorite change. The favorite state is
@@ -570,6 +699,8 @@ struct M3UGroupDetailView: View {
     @State private var displayItems: [DBM3UChannel] = []
 
     @ObservedObject private var store = M3UContentStore.shared
+    @ObservedObject private var pinnedStore = PinnedChannelStore.shared
+    @ObservedObject private var hiddenChannelStore = HiddenChannelStore.shared
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
 
     var body: some View {
@@ -597,11 +728,25 @@ struct M3UGroupDetailView: View {
         .onDisappear { debounceTask?.cancel(); debounceTask = nil }
         .task(id: debouncedQuery) { await recomputeItems() }
         .onChange(of: store.channels) { _, _ in Task { await recomputeItems() } }
+        // Build 90: pin/hide changes re-run the filter (same
+        // triggers as the channels tab), so the grid's own card
+        // menus take effect in place.
+        .onChange(of: pinnedStore.version) { _, _ in Task { await recomputeItems() } }
+        .onChange(of: hiddenChannelStore.version) { _, _ in Task { await recomputeItems() } }
     }
 
     private func recomputeItems() async {
         guard playlist.id == store.activePlaylistId else { displayItems = []; return }
-        var base = store.channelsByGroup[group] ?? []
+        // Build 90: the SAME pin/hide transform the shelf list
+        // publishes (processedByGroup). This grid used to read
+        // the raw group, so channels hidden from a shelf card's
+        // menu still appeared here (and stayed in the playback
+        // queue, which is built from displayItems) and pinned
+        // channels did not lead.
+        var base = M3UChannelsView.processedByGroup(
+            [group: store.channelsByGroup[group] ?? []],
+            playlistId: playlist.id
+        )[group] ?? []
         // Build 61 (B9, Q10): hide dead channels when the toggle is on.
         if ChannelHealthStore.hideDeadEnabled {
             let dead = ChannelHealthStore.shared.deadKeys()
@@ -647,33 +792,54 @@ struct M3UGroupGridContent: View {
 
     @Environment(\.posterMetrics) private var posterMetrics
 
-    /// As grid cards appear, download the next row/window ahead.
-    private func prefetchAhead(from index: Int, count: Int = 16) {
-        let start = max(0, index + 1)
-        let end = min(items.count, start + count)
+    /// Build 90: as grid cards appear, warm the next window
+    /// ahead as a KEYED batch (the F5a pattern) at the tile's
+    /// real render size, retracted by key when the card
+    /// disappears. The unkeyed per-appear batches this replaces
+    /// were never retracted, so a fast fling stranded stale
+    /// requests in the shared prefetcher.
+    private func prefetchWindow(from index: Int, channelId: String) {
+        let start = index + 1
+        let end = min(items.count, start + ListImagePrefetch.scrollWindow)
         guard start < end else { return }
         let urls = items[start..<end]
             .compactMap { $0.tvgLogo }
             .compactMap { ArtworkURL.url(from: $0) }
         guard !urls.isEmpty else { return }
-        ListImagePrefetch.start(urls: urls, width: posterMetrics.liveGridIconSize, height: posterMetrics.liveGridIconSize, loadProfile: .grid)
+        ListImagePrefetch.start(
+            keyed: "m3u-grid-\(channelId)",
+            urls: urls,
+            width: M3UChannelTileMetrics.logoWidth,
+            height: M3UChannelTileMetrics.logoHeight,
+            loadProfile: .grid
+        )
     }
 
     var body: some View {
         Group {
             if items.isEmpty {
-                VStack(spacing: 12) {
-                    Spacer()
+                // Build 90: the designed surface-card empty
+                // state (the Favorites pattern).
+                VStack(spacing: 14) {
                     Image(systemName: "magnifyingglass")
-                        .font(.largeTitle)
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                        .frame(width: 72, height: 72)
+                        .background(Circle().fill(AppTheme.elevated))
                     Text(L("list.no_channel"))
-                        .foregroundColor(.secondary)
-                    Spacer()
+                        .font(AppTheme.fontCardTitle)
                 }
+                .padding(24)
+                .background(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous).fill(AppTheme.surface))
+                .padding(.horizontal, 32)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                // Build 90: the wide-tile grid — the same
+                // adaptive 168 pt minimum the Xtream flat grid
+                // uses for its flexible tiles (the old grid
+                // sized its columns from the square icon metric).
                 let columns = [
-                    GridItem(.adaptive(minimum: posterMetrics.liveGridIconSize),
+                    GridItem(.adaptive(minimum: 168),
                              spacing: posterMetrics.gridSpacing)
                 ]
                 ScrollView {
@@ -681,8 +847,7 @@ struct M3UGroupGridContent: View {
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, channel in
                             M3UChannelCard(
                                 channel: channel,
-                                width: posterMetrics.liveGridIconSize,
-                                iconSize: posterMetrics.liveGridIconSize,
+                                flexibleWidth: true,
                                 imageLoadProfile: .grid,
                                 onChannelSelected: onChannelSelected
                             )
@@ -701,7 +866,8 @@ struct M3UGroupGridContent: View {
                                     }
                                 }
                             }
-                            .onAppear { prefetchAhead(from: index) }
+                            .onAppear { prefetchWindow(from: index, channelId: channel.id) }
+                            .onDisappear { ListImagePrefetch.stop(keyed: "m3u-grid-\(channel.id)") }
                         }
                     }
                     .padding()

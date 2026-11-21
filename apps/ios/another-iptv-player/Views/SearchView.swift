@@ -125,24 +125,40 @@ struct SearchView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                     Spacer()
+                    // Build 90 (B-SEARCH): the sports door is
+                    // present even in the bare hint state — teams
+                    // & players are part of "everything the app
+                    // holds" from the first open, not only once
+                    // the user has a search history.
+                    SportsSearchEntry()
+                        .padding(.bottom, 16)
                 } else {
                     // Build 64 (B2): the empty-query state is a
                     // scrollable discovery surface — recent
                     // searches (Q14, unchanged store/semantics) and
                     // the Trending Now poster strip from the
                     // catalog's real top-rated lists.
+                    // Build 90 (B-SEARCH): the sections take the
+                    // shared one-shot entrance (Motion tokens,
+                    // Reduce Motion stilled) and the sports door
+                    // sits between them.
                     ScrollView {
                         VStack(alignment: .leading, spacing: 18) {
                             if !historyQueries.isEmpty {
                                 recentsSection
+                                    .sectionAppear()
                             }
+                            SportsSearchEntry()
+                                .sectionAppear()
                             if !trendingItems.isEmpty {
                                 trendingSection
+                                    .sectionAppear()
                             }
                         }
                         .padding(.top, 10)
                         .padding(.bottom, 16)
                     }
+                    .scrollDismissesKeyboard(.interactively)
                 }
             } else {
                 SearchResultsView(
@@ -277,6 +293,24 @@ struct SearchView: View {
             }
             .scrollClipDisabled()
         }
+        // Build 90 (B-SEARCH): warm the strip's posters with the
+        // cards' EXACT render request (110×165, .fill, .shelf —
+        // ListImagePrefetch's cache-key rule), so swiping the
+        // strip never meets a placeholder storm. The cards render
+        // poster/cover only (no backdrop chain) — the warm uses
+        // the same single URL each card renders.
+        .onAppear {
+            let urls = trendingItems.compactMap { item -> URL? in
+                switch item {
+                case .movie(let movie): return ArtworkURL.url(from: movie.streamIcon)
+                case .series(let series): return ArtworkURL.url(from: series.cover)
+                }
+            }
+            ListImagePrefetch.start(
+                urls: urls, width: 110, height: 165,
+                contentMode: .fill, loadProfile: .shelf
+            )
+        }
     }
 
     @ViewBuilder
@@ -288,7 +322,7 @@ struct SearchView: View {
             } label: {
                 RankedPosterCard(
                     rank: rank,
-                    imageURL: movie.streamIcon.flatMap { $0.isEmpty ? nil : URL(string: $0) },
+                    imageURL: ArtworkURL.url(from: movie.streamIcon),
                     title: movie.name,
                     ratingText: ContentRating.normalizedDisplayText(rating: movie.rating, rating5Based: movie.rating5Based),
                     metaText: searchMetaLine(year: DetailFormatting.year(from: movie.releaseDate), genre: movie.genre),
@@ -304,7 +338,7 @@ struct SearchView: View {
             } label: {
                 RankedPosterCard(
                     rank: rank,
-                    imageURL: series.cover.flatMap { $0.isEmpty ? nil : URL(string: $0) },
+                    imageURL: ArtworkURL.url(from: series.cover),
                     title: series.name,
                     ratingText: ContentRating.normalizedDisplayText(rating: series.rating, rating5Based: series.rating5Based),
                     metaText: searchMetaLine(year: DetailFormatting.year(from: series.releaseDate), genre: series.genre),
@@ -349,6 +383,50 @@ struct SearchView: View {
     }
 }
 
+// MARK: - Sports door (build 90, B-SEARCH)
+
+/// The door from the global search to the SPORTS search. The
+/// global search covers the playlist catalog (live / movies /
+/// series); teams & players live in their own search (build 84,
+/// item 9 — `TeamSearchView`, teams across every sport plus the
+/// ESPN player search) and until build 90 that search was only
+/// reachable from inside the Matches tab — a user typing a team
+/// name here found nothing and had no way onward. This entry
+/// opens that existing search; it is shown in the discovery
+/// state and under the no-results state. `TeamSearchView`
+/// carries its own field and takes no initial query (its state
+/// is private to the Matches file), so the door opens it fresh
+/// rather than deep-linking the typed text.
+private struct SportsSearchEntry: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L("search.sports"))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+            NavigationLink {
+                TeamSearchView()
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "person.3.fill")
+                        .foregroundStyle(.secondary)
+                    Text(L("search.sports.row"))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
 // MARK: - Results
 
 /// Build 64 (B2): one result on the All tab — a movie, series or
@@ -384,7 +462,6 @@ private struct SearchResultsView: View {
     @ObservedObject private var contentStore = PlaylistContentStore.shared
     @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
     @ObservedObject private var parentalStore = ParentalControlStore.shared
-    @Environment(\.posterMetrics) private var posterMetrics
 
     @State private var liveResults: [LiveStreamWithCategory] = []
     @State private var movieResults: [VODWithCategory] = []
@@ -392,6 +469,23 @@ private struct SearchResultsView: View {
     /// Build 64 (B2): the All tab's merged results (one rich-row
     /// list across movies/series/live, relevance-merged).
     @State private var allResults: [UnifiedSearchResult] = []
+    /// Build 90 (B-SEARCH): a search pass is in flight. Starts
+    /// true — this view exists only to search, so its honest
+    /// first state is "searching", never "no results" — and the
+    /// body shows the searching state instead of a false empty
+    /// state while a pass runs (the old body flashed
+    /// `ContentUnavailableView.search` on the first keystroke of
+    /// every session, before the detached pass had landed).
+    @State private var isSearching = true
+    /// Build 90 (B-SEARCH): the query the per-type slices belong
+    /// to. A new query invalidates every slice up front, so the
+    /// All tab's progressive publishes can never mix two
+    /// queries' rows in one merged list.
+    @State private var slicesQuery = ""
+    /// Build 90 (B-SEARCH): monotonic pass stamp. Overlapping
+    /// passes (the five `.task` triggers below can coincide) may
+    /// only publish while their stamp is still the latest.
+    @State private var searchRunID = 0
 
     /// The play queue handed to the player shell: every live result.
     private var liveQueue: [DBLiveStream] { liveResults.map(\.stream) }
@@ -432,10 +526,16 @@ private struct SearchResultsView: View {
     var body: some View {
         Group {
             if selectedIsEmpty {
-                if !contentStore.streamsLoaded {
-                    // The catalog is still loading: showing a false "no results" makes it look to the user
-                    // as if the content has disappeared. When streamsLoaded [becomes true], the [real state] below
-                    // .task tekrar arar.
+                if isSearching || !contentStore.streamsLoaded {
+                    // Searching (build 90, B-SEARCH): the same
+                    // branded loading state the catalog-loading
+                    // case always showed — showing a false "no
+                    // results" while a pass is in flight (or the
+                    // catalog is still loading) makes it look to
+                    // the user as if the content has disappeared.
+                    // When the pass lands (or streamsLoaded flips
+                    // and the .task below re-runs), the real state
+                    // takes over.
                     VStack(spacing: 12) {
                         BrandedLoader()
                         Text(L("common.loading"))
@@ -444,7 +544,7 @@ private struct SearchResultsView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ContentUnavailableView.search(text: query)
+                    noResultsState
                 }
             } else {
                 switch filter {
@@ -455,11 +555,43 @@ private struct SearchResultsView: View {
                 }
             }
         }
+        .sectionAppear()
         .task(id: query) { await runSearch() }
         .task(id: filter) { await runSearch() }
         .task(id: hiddenStore.version) { await runSearch() }
         .task(id: parentalStore.version) { await runSearch() }
         .task(id: contentStore.streamsLoaded) { await runSearch() }
+    }
+
+    /// Build 90 (B-SEARCH): the no-results state in the app's own
+    /// design language — the same icon + type treatment as this
+    /// page's min-chars hint (the system `ContentUnavailableView`
+    /// was the last default-looking surface in search). The query
+    /// is echoed under the message, and the sports door sits at
+    /// the bottom: a team or player name is the most likely
+    /// reason a catalog search comes back empty.
+    private var noResultsState: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            Image(systemName: "magnifyingglass")
+                .font(.largeTitle)
+                .foregroundColor(.secondary.opacity(0.4))
+                .padding(.bottom, 8)
+            Text(L("list.no_result"))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+            Text(query)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+                .padding(.top, 2)
+            Spacer()
+            SportsSearchEntry()
+                .padding(.bottom, 16)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: Result lists (build 64, B2 — rich rows)
@@ -474,70 +606,100 @@ private struct SearchResultsView: View {
         let movieQueue = allResults.compactMap { result -> DBVODStream? in
             if case .movie(let item) = result { return item.stream } else { return nil }
         }
+        // Build 90 (B-SEARCH): the live queue + category sections
+        // are built ONCE per list render — the old body rebuilt
+        // them inside every live row's closure (an O(N) grouping
+        // pass per row, O(N²) per render).
+        let liveQueue = liveItems.map(\.stream)
+        let sections = Self.liveSections(for: liveItems)
         return ScrollView {
             LazyVStack(spacing: 2) {
-                ForEach(allResults) { result in
-                    switch result {
-                    case .movie(let item):
-                        movieRow(item, queue: movieQueue, typeBadge: SearchView.SearchFilter.movies.displayName)
-                    case .series(let item):
-                        seriesRow(item, typeBadge: SearchView.SearchFilter.series.displayName)
-                    case .live(let item):
-                        liveRow(item, queue: liveItems.map(\.stream), sections: Self.liveSections(for: liveItems), typeBadge: SearchView.SearchFilter.live.displayName)
+                ForEach(Array(allResults.enumerated()), id: \.element.id) { index, result in
+                    Group {
+                        switch result {
+                        case .movie(let item):
+                            movieRow(item, queue: movieQueue, typeBadge: SearchView.SearchFilter.movies.displayName)
+                        case .series(let item):
+                            seriesRow(item, typeBadge: SearchView.SearchFilter.series.displayName)
+                        case .live(let item):
+                            liveRow(item, queue: liveQueue, sections: sections, typeBadge: SearchView.SearchFilter.live.displayName)
+                        }
                     }
+                    .onAppear { prefetchAllWindow(from: index) }
+                    .onDisappear { stopAllWindow(id: result.id) }
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
         }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     private var movieList: some View {
-        ScrollView {
+        // Build 90 (B-SEARCH): the play queue is mapped ONCE per
+        // render (the old body re-mapped the whole result array
+        // inside every row's closure).
+        let queue = movieResults.map(\.stream)
+        return ScrollView {
             LazyVStack(spacing: 2) {
-                ForEach(movieResults) { item in
-                    movieRow(item, queue: movieResults.map(\.stream), typeBadge: nil)
+                ForEach(Array(movieResults.enumerated()), id: \.element.id) { index, item in
+                    movieRow(item, queue: queue, typeBadge: nil)
+                        .onAppear { prefetchMovieWindow(from: index) }
+                        .onDisappear { stopMovieWindow(streamId: item.stream.streamId) }
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
         }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     private var seriesList: some View {
         ScrollView {
             LazyVStack(spacing: 2) {
-                ForEach(seriesResults) { item in
+                ForEach(Array(seriesResults.enumerated()), id: \.element.id) { index, item in
                     seriesRow(item, typeBadge: nil)
+                        .onAppear { prefetchSeriesWindow(from: index) }
+                        .onDisappear { stopSeriesWindow(seriesId: item.series.seriesId) }
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
         }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     private var liveList: some View {
-        ScrollView {
+        // Build 90 (B-SEARCH): queue + sections bound ONCE per
+        // render — the computed properties re-ran their O(N)
+        // passes on every row's closure before.
+        let queue = liveQueue
+        let sections = liveSections
+        return ScrollView {
             LazyVStack(spacing: 2) {
-                ForEach(liveResults) { item in
-                    liveRow(item, queue: liveQueue, sections: liveSections, typeBadge: nil)
+                ForEach(Array(liveResults.enumerated()), id: \.element.id) { index, item in
+                    liveRow(item, queue: queue, sections: sections, typeBadge: nil)
+                        .onAppear { prefetchLiveWindow(from: index) }
+                        .onDisappear { stopLiveWindow(streamId: item.stream.streamId) }
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
         }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     // MARK: Rows
 
     /// The landscape thumbnail URL for a rich row: the record's
     /// backdrop when it carries one, else its poster/cover.
+    /// Build 90 (F7): parsed through the lenient ArtworkURL front
+    /// door like every other artwork site — the strict parser
+    /// dropped space-carrying provider paths to nil (a permanent
+    /// placeholder, not a slow load).
     private func backdropURL(backdrop: String?, poster: String?) -> URL? {
-        if let backdrop = backdrop?.trimmingCharacters(in: .whitespaces), !backdrop.isEmpty {
-            return URL(string: backdrop)
-        }
-        guard let poster = poster?.trimmingCharacters(in: .whitespaces), !poster.isEmpty else { return nil }
-        return URL(string: poster)
+        if let url = ArtworkURL.url(from: backdrop) { return url }
+        return ArtworkURL.url(from: poster)
     }
 
     /// The ★ rating capsule (real normalized score only — rows
@@ -599,10 +761,14 @@ private struct SearchResultsView: View {
                         .fill(AppTheme.surface)
                 }
                 VStack(alignment: .leading, spacing: 3) {
+                    // Build 90 (B-SEARCH): result titles wrap to
+                    // two lines instead of truncating at one — the
+                    // build-80 full-title rule the grids and rails
+                    // already follow (meta/category stay one line).
                     Text(item.stream.name)
                         .font(.body.weight(.medium))
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                     if let meta = rowMetaLine(year: DetailFormatting.year(from: item.stream.releaseDate), genre: item.stream.genre) {
                         Text(meta)
                             .font(.caption)
@@ -646,10 +812,12 @@ private struct SearchResultsView: View {
                         .fill(AppTheme.surface)
                 }
                 VStack(alignment: .leading, spacing: 3) {
+                    // Build 90 (B-SEARCH): two-line title wrap
+                    // (see movieRow).
                     Text(item.series.name)
                         .font(.body.weight(.medium))
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                     if let meta = rowMetaLine(year: DetailFormatting.year(from: item.series.releaseDate), genre: item.series.genre) {
                         Text(meta)
                             .font(.caption)
@@ -683,7 +851,7 @@ private struct SearchResultsView: View {
         } label: {
             HStack(spacing: 12) {
                 CachedImage(
-                    url: item.stream.streamIcon.flatMap { URL(string: $0) },
+                    url: ArtworkURL.url(from: item.stream.streamIcon),
                     width: 64,
                     height: 44,
                     cornerRadius: AppTheme.smallCornerRadius,
@@ -696,10 +864,12 @@ private struct SearchResultsView: View {
                         .fill(AppTheme.surface)
                 }
                 VStack(alignment: .leading, spacing: 2) {
+                    // Build 90 (B-SEARCH): two-line title wrap
+                    // (see movieRow).
                     Text(item.stream.name)
                         .font(.body)
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                     Text(item.categoryName)
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -724,6 +894,118 @@ private struct SearchResultsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: Artwork window prefetch (build 90, B-SEARCH)
+
+    /// Search rows never prefetched before build 90: a fast
+    /// scroll through a long result list met the placeholder on
+    /// every row and waited on the render path — the shelf
+    /// placeholder-storm defect (D1) on the one surface that had
+    /// no window warming at all. Each visible row now warms the
+    /// next `ListImagePrefetch.scrollWindow` items with the rows'
+    /// EXACT render requests (movie/series: the backdrop-chain
+    /// URL at 84×62, .fill, .grid; live: the logo at 64×44, .fit,
+    /// .grid — ListImagePrefetch's cache-key rule) and retracts
+    /// its batch under a per-row key on disappear (the keyed API
+    /// B-IMG added for the shelves, F5a).
+    private func prefetchMovieWindow(from index: Int) {
+        guard movieResults.indices.contains(index) else { return }
+        let urls = movieResults[index...].dropFirst()
+            .prefix(ListImagePrefetch.scrollWindow)
+            .compactMap { backdropURL(backdrop: $0.stream.backdropPath, poster: $0.stream.streamIcon) }
+        ListImagePrefetch.start(
+            keyed: "search-movies-\(movieResults[index].stream.streamId)",
+            urls: urls, width: 84, height: 62, contentMode: .fill, loadProfile: .grid
+        )
+    }
+
+    /// Build 90 (fixer, opponent m4): every stop below takes
+    /// the row's OWN identity, captured by its ForEach
+    /// closure — never an index back into the results array.
+    /// A new search can replace the results between a row's
+    /// appear and its disappear; the old index-based key
+    /// derivation then named a different row's batch, or fell
+    /// out of bounds and skipped the stop entirely, leaving
+    /// the batch orphaned in ListImagePrefetch's keyed
+    /// dictionary. The stops are now unconditional: stopping
+    /// a key that was never started is a no-op there.
+    private func stopMovieWindow(streamId: Int) {
+        ListImagePrefetch.stop(keyed: "search-movies-\(streamId)")
+    }
+
+    private func prefetchSeriesWindow(from index: Int) {
+        guard seriesResults.indices.contains(index) else { return }
+        let urls = seriesResults[index...].dropFirst()
+            .prefix(ListImagePrefetch.scrollWindow)
+            .compactMap { backdropURL(backdrop: $0.series.backdropPath, poster: $0.series.cover) }
+        ListImagePrefetch.start(
+            keyed: "search-series-\(seriesResults[index].series.seriesId)",
+            urls: urls, width: 84, height: 62, contentMode: .fill, loadProfile: .grid
+        )
+    }
+
+    private func stopSeriesWindow(seriesId: Int) {
+        ListImagePrefetch.stop(keyed: "search-series-\(seriesId)")
+    }
+
+    private func prefetchLiveWindow(from index: Int) {
+        guard liveResults.indices.contains(index) else { return }
+        let urls = liveResults[index...].dropFirst()
+            .prefix(ListImagePrefetch.scrollWindow)
+            .compactMap { ArtworkURL.url(from: $0.stream.streamIcon) }
+        ListImagePrefetch.start(
+            keyed: "search-live-\(liveResults[index].stream.streamId)",
+            urls: urls, width: 64, height: 44, contentMode: .fit, loadProfile: .grid
+        )
+    }
+
+    private func stopLiveWindow(streamId: Int) {
+        ListImagePrefetch.stop(keyed: "search-live-\(streamId)")
+    }
+
+    /// The All tab's window mixes both thumbnail kinds, so one
+    /// row starts two batches — one per render size — under
+    /// suffixed keys.
+    private func prefetchAllWindow(from index: Int) {
+        guard allResults.indices.contains(index) else { return }
+        var vodURLs: [URL] = []
+        var liveURLs: [URL] = []
+        for result in allResults[index...].dropFirst().prefix(ListImagePrefetch.scrollWindow) {
+            switch result {
+            case .movie(let item):
+                if let url = backdropURL(backdrop: item.stream.backdropPath, poster: item.stream.streamIcon) {
+                    vodURLs.append(url)
+                }
+            case .series(let item):
+                if let url = backdropURL(backdrop: item.series.backdropPath, poster: item.series.cover) {
+                    vodURLs.append(url)
+                }
+            case .live(let item):
+                if let url = ArtworkURL.url(from: item.stream.streamIcon) {
+                    liveURLs.append(url)
+                }
+            }
+        }
+        let base = "search-all-\(allResults[index].id)"
+        if !vodURLs.isEmpty {
+            ListImagePrefetch.start(
+                keyed: base + "-vod",
+                urls: vodURLs, width: 84, height: 62, contentMode: .fill, loadProfile: .grid
+            )
+        }
+        if !liveURLs.isEmpty {
+            ListImagePrefetch.start(
+                keyed: base + "-live",
+                urls: liveURLs, width: 64, height: 44, contentMode: .fit, loadProfile: .grid
+            )
+        }
+    }
+
+    private func stopAllWindow(id: String) {
+        let base = "search-all-\(id)"
+        ListImagePrefetch.stop(keyed: base + "-vod")
+        ListImagePrefetch.stop(keyed: base + "-live")
     }
 
     // MARK: Search engine
@@ -814,16 +1096,77 @@ private struct SearchResultsView: View {
         return Array(CatalogTextSearch.sortLiveByRelevance(filtered, search: q).prefix(Self.resultCap))
     }
 
+    /// Build 90 (B-SEARCH): one per-type landing of an All-tab
+    /// pass — the three searches run concurrently and each
+    /// publishes the moment IT lands, instead of the old single
+    /// detached pass that held every type hostage to the slowest.
+    private enum SearchPartial {
+        case movies([VODWithCategory])
+        case series([SeriesWithCategory])
+        case live([LiveStreamWithCategory])
+    }
+
+    /// Build 64 (B2) merge, extracted verbatim (build 90) so an
+    /// All pass can re-merge after EACH per-type landing: the
+    /// three per-type lists merged by the catalog's own relevance
+    /// tiering — exact → prefix → fuzzy — with each type's
+    /// internal order as the final tiebreak, so the unified list
+    /// is deterministic at every partial step and final.
+    private static func mergeAll(
+        movies: [VODWithCategory],
+        series: [SeriesWithCategory],
+        live: [LiveStreamWithCategory],
+        q: String
+    ) -> [UnifiedSearchResult] {
+        var combined: [(result: UnifiedSearchResult, seq: Int)] = []
+        var seq = 0
+        for item in movies { combined.append((.movie(item), seq)); seq += 1 }
+        for item in series { combined.append((.series(item), seq)); seq += 1 }
+        for item in live { combined.append((.live(item), seq)); seq += 1 }
+        let merged = combined.sorted { a, b in
+            let tierA = CatalogTextSearch.rankingTier(search: q, text: a.result.title)
+            let tierB = CatalogTextSearch.rankingTier(search: q, text: b.result.title)
+            if tierA != tierB { return tierA < tierB }
+            let scoreA = CatalogTextSearch.fuzzyScore(search: q, text: a.result.title) ?? .max
+            let scoreB = CatalogTextSearch.fuzzyScore(search: q, text: b.result.title) ?? .max
+            if scoreA != scoreB { return scoreA < scoreB }
+            return a.seq < b.seq
+        }
+        return Array(merged.prefix(Self.resultCap).map(\.result))
+    }
+
     private func runSearch() async {
         let q = query
+        // Build 90 (B-SEARCH): stamp this pass; only the latest
+        // pass publishes (the five .task triggers can overlap).
+        searchRunID += 1
+        let runID = searchRunID
+        if slicesQuery != q {
+            // A new query invalidates every slice up front, so a
+            // partial publish can never mix two queries' rows.
+            slicesQuery = q
+            liveResults = []
+            movieResults = []
+            seriesResults = []
+            allResults = []
+        }
+        isSearching = true
+        defer {
+            // A superseded or cancelled pass leaves the flag to
+            // the pass that replaced it.
+            if runID == searchRunID && !Task.isCancelled { isSearching = false }
+        }
         switch filter {
         case .all:
-            // Build 64 (B2): one detached pass runs the three
-            // per-type searches (the same helpers the tabs use)
-            // and merges them by the catalog's own relevance
-            // tiering — exact → prefix → fuzzy — with each type's
-            // internal order as the final tiebreak, so the unified
-            // list is deterministic.
+            // Build 90 (B-SEARCH): the three per-type searches
+            // (the same helpers the tabs use) run CONCURRENTLY in
+            // a task group; each landing publishes its slice and
+            // re-merges the All list immediately — the unified
+            // list grows type by type instead of arriving in one
+            // late render gated on the slowest type. Per-type
+            // slices are kept (not cleared), so switching to a
+            // single-type pill mid-pass shows that type's rows
+            // instantly while its own pass re-runs.
             let vodSource = contentStore.vodStreams
             let seriesSource = contentStore.seriesItems
             let liveSource = contentStore.liveStreams
@@ -833,31 +1176,28 @@ private struct SearchResultsView: View {
             let vodBlocked = parentalBlockedIds(type: "vod")
             let seriesBlocked = parentalBlockedIds(type: "series")
             let liveBlocked = parentalBlockedIds(type: "live")
-            let result = await Task.detached(priority: .userInitiated) { () -> [UnifiedSearchResult] in
-                let movies = Self.searchMovies(source: vodSource, hidden: vodHidden, blocked: vodBlocked, q: q)
-                let series = Self.searchSeries(source: seriesSource, hidden: seriesHidden, blocked: seriesBlocked, q: q)
-                let live = Self.searchLive(source: liveSource, hidden: liveHidden, blocked: liveBlocked, q: q)
-                var combined: [(result: UnifiedSearchResult, seq: Int)] = []
-                var seq = 0
-                for item in movies { combined.append((.movie(item), seq)); seq += 1 }
-                for item in series { combined.append((.series(item), seq)); seq += 1 }
-                for item in live { combined.append((.live(item), seq)); seq += 1 }
-                let merged = combined.sorted { a, b in
-                    let tierA = CatalogTextSearch.rankingTier(search: q, text: a.result.title)
-                    let tierB = CatalogTextSearch.rankingTier(search: q, text: b.result.title)
-                    if tierA != tierB { return tierA < tierB }
-                    let scoreA = CatalogTextSearch.fuzzyScore(search: q, text: a.result.title) ?? .max
-                    let scoreB = CatalogTextSearch.fuzzyScore(search: q, text: b.result.title) ?? .max
-                    if scoreA != scoreB { return scoreA < scoreB }
-                    return a.seq < b.seq
+            await withTaskGroup(of: SearchPartial.self) { group in
+                group.addTask(priority: .userInitiated) {
+                    .movies(Self.searchMovies(source: vodSource, hidden: vodHidden, blocked: vodBlocked, q: q))
                 }
-                return Array(merged.prefix(Self.resultCap).map(\.result))
-            }.value
-            guard !Task.isCancelled else { return }
-            allResults = result
-            movieResults = []
-            seriesResults = []
-            liveResults = []
+                group.addTask(priority: .userInitiated) {
+                    .series(Self.searchSeries(source: seriesSource, hidden: seriesHidden, blocked: seriesBlocked, q: q))
+                }
+                group.addTask(priority: .userInitiated) {
+                    .live(Self.searchLive(source: liveSource, hidden: liveHidden, blocked: liveBlocked, q: q))
+                }
+                for await partial in group {
+                    guard runID == searchRunID, !Task.isCancelled else { return }
+                    switch partial {
+                    case .movies(let result): movieResults = result
+                    case .series(let result): seriesResults = result
+                    case .live(let result): liveResults = result
+                    }
+                    allResults = Self.mergeAll(
+                        movies: movieResults, series: seriesResults, live: liveResults, q: q
+                    )
+                }
+            }
         case .movies:
             let source = contentStore.vodStreams
             let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod")
@@ -865,7 +1205,7 @@ private struct SearchResultsView: View {
             let result = await Task.detached(priority: .userInitiated) {
                 Self.searchMovies(source: source, hidden: hidden, blocked: blocked, q: q)
             }.value
-            guard !Task.isCancelled else { return }
+            guard runID == searchRunID, !Task.isCancelled else { return }
             movieResults = result
             liveResults = []
             seriesResults = []
@@ -877,7 +1217,7 @@ private struct SearchResultsView: View {
             let result = await Task.detached(priority: .userInitiated) {
                 Self.searchSeries(source: source, hidden: hidden, blocked: blocked, q: q)
             }.value
-            guard !Task.isCancelled else { return }
+            guard runID == searchRunID, !Task.isCancelled else { return }
             seriesResults = result
             liveResults = []
             movieResults = []
@@ -889,7 +1229,7 @@ private struct SearchResultsView: View {
             let result = await Task.detached(priority: .userInitiated) {
                 Self.searchLive(source: source, hidden: hidden, blocked: blocked, q: q)
             }.value
-            guard !Task.isCancelled else { return }
+            guard runID == searchRunID, !Task.isCancelled else { return }
             liveResults = result
             movieResults = []
             seriesResults = []

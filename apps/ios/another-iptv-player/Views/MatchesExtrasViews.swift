@@ -557,97 +557,39 @@ struct StandingsView: View {
     }
 }
 
-// MARK: - 10b Top scorers
-
-struct TopScorersView: View {
-    let leaguePath: String
-    let leagueName: String?
-    @State private var scorers: [ScorerEntry] = []
-    @State private var loaded = false
-
-    var body: some View {
-        List {
-            if loaded && scorers.isEmpty {
-                Text(L("matches.empty"))
-                    .font(AppTheme.fontMetadata)
-                    .foregroundStyle(.secondary)
-                    .listRowBackground(AppTheme.surface)
-            }
-            ForEach(Array(scorers.enumerated()), id: \.element.id) { index, scorer in
-                HStack(spacing: 12) {
-                    Text("\(index + 1)")
-                        .font(AppTheme.fontMetadata.weight(.bold))
-                        .monospacedDigit()
-                        .frame(width: 22, alignment: .trailing)
-                    PlayerPhotoDisc(
-                        url: scorer.headshotURL, name: scorer.name, size: 38,
-                        fallback: SoccerPhotoQuery(
-                            athleteId: scorer.athleteId, name: scorer.name,
-                            teamName: scorer.teamName, leaguePath: leaguePath,
-                            citizenship: nil, dateOfBirth: nil
-                        )
-                    )
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(scorer.name)
-                            .font(AppTheme.fontCardTitle)
-                            .lineLimit(1)
-                        if let team = scorer.teamName {
-                            Text(team)
-                                .font(AppTheme.fontMetadata)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    Spacer()
-                    Text("\(scorer.goals)")
-                        .font(.title3.weight(.black))
-                        .foregroundStyle(AppTheme.accent)
-                        .monospacedDigit()
-                }
-                .listRowBackground(AppTheme.surface)
-            }
-        }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .cinematicBackground()
-        .navigationTitle(leagueName ?? L("matches.scorers"))
-        .navigationBarTitleDisplayMode(.inline)
-        .overlay { if !loaded { BrandedLoader() } }
-        .task {
-            scorers = await MatchesScorersService.fetch(leaguePath: leaguePath)
-            loaded = true
-        }
-    }
-}
+// Build 90 (SP35): the old soccer-only TopScorersView was
+// deleted here — zero call sites since build 84; its job is
+// covered by LeadersView (per league) and
+// CrossLeagueScorersView (all leagues). Nothing replaces it.
 
 // MARK: - 10f Lineups
 
-struct LineupsView: View {
+/// Build 90 (SP24): the lineups CONTENT — the formation
+/// pitch + grouped list that used to sit behind a pushed
+/// page (LineupsView). The match detail's Lineups tab now
+/// renders this inline (the tab was a one-row link stub);
+/// the standalone page had no other caller and is removed.
+struct LineupsContentView: View {
     let sport: MatchSport
     let leaguePath: String
     let sides: [MatchLineupSide]
     @State private var selectedSide = 0
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                if sides.count > 1 {
-                    Picker("", selection: $selectedSide) {
-                        ForEach(Array(sides.enumerated()), id: \.offset) { index, side in
-                            Text(side.teamName ?? "").tag(index)
-                        }
+        VStack(spacing: 16) {
+            if sides.count > 1 {
+                Picker("", selection: $selectedSide) {
+                    ForEach(Array(sides.enumerated()), id: \.offset) { index, side in
+                        Text(side.teamName ?? "").tag(index)
                     }
-                    .pickerStyle(.segmented)
                 }
-                if sides.indices.contains(selectedSide) {
-                    sideView(sides[selectedSide])
-                }
+                .pickerStyle(.segmented)
             }
-            .padding(16)
+            if sides.indices.contains(selectedSide) {
+                sideView(sides[selectedSide])
+            }
         }
-        .cinematicBackground()
-        .navigationTitle(L("matches.lineups"))
-        .navigationBarTitleDisplayMode(.inline)
+        .padding(.vertical, 8)
     }
 
     @ViewBuilder
@@ -865,8 +807,11 @@ private struct PitchView: View {
             }
         }
         .onAppear {
-            if reduceMotion { appeared = true }
-            else { withAnimation(.easeOut(duration: 0.35)) { appeared = true } }
+            // Build 90 (SP34): through Motion.animate — nil
+            // (instant) under Reduce Motion / reduced
+            // intensity, the token path every other entrance
+            // takes; the raw easeOut bypassed the intensity.
+            withAnimation(Motion.animate(.easeOut(duration: 0.35))) { appeared = true }
         }
     }
 
@@ -907,7 +852,9 @@ private struct PitchView: View {
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared ? 0 : 8)
         .animation(
-            reduceMotion ? nil : .easeOut(duration: 0.3).delay(Double(flatIndex) * 0.04),
+            // Build 90 (SP34): Motion.animate subsumes the old
+            // Reduce-Motion-only check and adds the intensity.
+            Motion.animate(.easeOut(duration: 0.3).delay(Double(flatIndex) * 0.04)),
             value: appeared
         )
         // Build 84 (item 4): a pitch marker opens the player
@@ -962,6 +909,12 @@ struct TeamPageView: View {
     /// its wins/losses(/ties) stats. Nil when the standings
     /// carry no entry for this team.
     @State private var recordText: String?
+    /// Build 90 (SP12): the team's league position, computed
+    /// from the SAME standings groups the header record is
+    /// read from (StandingPositionService) — no extra
+    /// network. Nil when the standings carry no entry for
+    /// this team; the header row then renders nothing.
+    @State private var leaguePosition: Int?
     /// Build 86: TheSportsDB club details (stadium name +
     /// description) — soccer only, rendered only when the
     /// free source verifies an exact-name club record.
@@ -969,6 +922,10 @@ struct TeamPageView: View {
     /// sport whose clubs TheSportsDB carries (its own sport
     /// name gates the record, exactly as soccer's did).
     @State private var teamDetails: SportsDBService.TeamDetails?
+    /// Build 90 (SP10): the club description renders
+    /// truncated until the user expands it (see the About
+    /// section below).
+    @State private var aboutExpanded = false
     /// Build 87 (item 3): official MLBAM headshots for this
     /// club's squad, keyed by normalized player name — the
     /// MLB team page's photo upgrade (ESPN's stay fallback).
@@ -1049,6 +1006,24 @@ struct TeamPageView: View {
                         .font(AppTheme.fontCardTitle)
                 }
                 .buttonStyle(PressOpacityButtonStyle())
+                // Build 90 (SP12): the team's league position,
+                // from the standings groups fetched for the
+                // header record above. Renders only when the
+                // payload carries this team.
+                if let leaguePosition {
+                    HStack(spacing: 8) {
+                        Image(systemName: "list.number")
+                            .foregroundStyle(AppTheme.accent)
+                        Text(L("matches.player.position"))
+                            .font(AppTheme.fontCardTitle)
+                            .lineLimit(1)
+                        Spacer()
+                        Text("\(leaguePosition)")
+                            .font(AppTheme.fontMetadata.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
                 // Build 86: the club's home stadium, from
                 // TheSportsDB's verified club record.
                 if let stadium = teamDetails?.stadium {
@@ -1069,10 +1044,30 @@ struct TeamPageView: View {
 
             // Build 86: the club description, from the same
             // verified TheSportsDB record (soccer only).
+            // Build 90 (SP10): the descriptions run to
+            // thousands of characters (Arsenal's measured
+            // 2,092) — an untruncated text wall. Collapsed to
+            // four lines with an expand control when the text
+            // is long enough to need one.
             if let about = teamDetails?.descriptionText {
                 Section {
-                    Text(about)
-                        .font(.subheadline)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(about)
+                            .font(.subheadline)
+                            .lineLimit(aboutExpanded ? nil : 4)
+                        if about.count > 240 {
+                            Button {
+                                withAnimation(Motion.animate(Motion.contentIn)) {
+                                    aboutExpanded.toggle()
+                                }
+                            } label: {
+                                Text(L(aboutExpanded ? "detail.show_less" : "detail.show_more"))
+                                    .font(AppTheme.fontMetadata.weight(.semibold))
+                                    .foregroundStyle(AppTheme.accent)
+                            }
+                            .buttonStyle(PressOpacityButtonStyle())
+                        }
+                    }
                 } header: { extrasSectionHeader(L("matches.team.about")) }
                 .listRowBackground(AppTheme.surface)
             }
@@ -1201,6 +1196,12 @@ struct TeamPageView: View {
             let standings = await MatchesStandingsService.fetch(
                 sport: team.sport, leaguePath: team.leaguePath
             )
+            // Build 90 (SP12): the league position rides the
+            // same fetched groups — the team's rank inside
+            // its standings group, shown in the header.
+            leaguePosition = StandingPositionService.position(
+                ofTeamId: team.id, in: standings.groups
+            )
             if let entry = standings.groups.flatMap({ $0.entries })
                 .first(where: { $0.teamId == team.id }) {
                 if let overall = entry.stats["overall"], !overall.isEmpty {
@@ -1280,6 +1281,15 @@ struct TeamPageView: View {
                     citizenship: player.citizenship, dateOfBirth: player.dateOfBirth
                 )
             )
+            // Build 90 (SP12): the jersey number the roster
+            // payload always carried and the row never showed.
+            if let jersey = player.jersey, !jersey.isEmpty {
+                Text(jersey)
+                    .font(AppTheme.fontMetadata.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .frame(width: 22, alignment: .trailing)
+            }
             Text(player.name)
                 .font(AppTheme.fontCardTitle)
                 .lineLimit(1)
@@ -1423,7 +1433,16 @@ struct GoalAlertHostView: View {
                 .transition(.scale.combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: presenter.current?.id)
+        // Build 90 (SP34): the same spring, routed through
+        // Motion.animate — Reduce Motion / the Settings
+        // intensity now still the celebration card like every
+        // other effect (the raw spring previously animated
+        // even under Reduce Motion). The presenter's
+        // playback suppression is separate and untouched.
+        .animation(
+            Motion.animate(.spring(response: 0.35, dampingFraction: 0.8)),
+            value: presenter.current?.id
+        )
         .allowsHitTesting(presenter.current != nil)
     }
 }

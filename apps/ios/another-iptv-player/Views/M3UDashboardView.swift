@@ -60,11 +60,13 @@ struct M3UDashboardView: View {
             TabView(selection: tabBinding) {
                 Tab(value: 0) {
                     NavigationStack {
+                        // Build 90: the channels tab owns its
+                        // header now (in-view search field +
+                        // in-scroll title/actions pill, with the
+                        // navigation bar hidden on the tab root —
+                        // see M3UChannelsView), so the dashboard
+                        // no longer forces a bar or a title here.
                         M3UChannelsView(playlist: playlist)
-                            .navigationTitle(L("dashboard.channels"))
-                            .navigationBarTitleDisplayMode(.large)
-                            .toolbar(.visible, for: .navigationBar)
-                            .toolbarBackground(.visible, for: .navigationBar)
                     }
                 } label: { tabLabel(L("dashboard.channels"), symbol: "tv.fill", tab: 0) }
 

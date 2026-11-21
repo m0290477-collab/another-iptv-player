@@ -61,34 +61,42 @@ final class MatchesViewModel: ObservableObject {
         }
         states[sport] = working
 
-        let outcomes = await MatchesService.fetchSport(
-            sport,
-            dateParameter: MatchesService.todayParameter()
-        )
-
-        working = state(for: sport)
-        var anySuccess = false
+        // Build 90 (SP6): publish each league as its window
+        // lands instead of one publish after the whole pass —
+        // a single hung league (20 s timeout) no longer delays
+        // every other league's first paint. Same fetches, same
+        // per-league outcome semantics as the old fetchSport
+        // fan-out (which Home still uses unchanged).
         var anyFailureWithKeptData = false
-        for (index, outcome) in outcomes.enumerated() {
-            guard working.sections.indices.contains(index) else { continue }
-            switch outcome {
-            case .loaded(let result):
-                working.sections[index].result = result
-                working.sections[index].failed = false
-                anySuccess = true
-            case .failed:
-                if working.sections[index].result != nil {
-                    // Keep the old data; the sport is marked stale below.
-                    anyFailureWithKeptData = true
-                } else {
-                    working.sections[index].failed = true
+        let paths = sport.leaguePaths
+        await withTaskGroup(of: (Int, MatchLeagueOutcome).self) { group in
+            for (index, path) in paths.enumerated() {
+                group.addTask {
+                    (index, await MatchesService.fetchLeagueWindow(path: path))
                 }
             }
+            for await (index, outcome) in group {
+                var current = state(for: sport)
+                guard current.sections.indices.contains(index) else { continue }
+                switch outcome {
+                case .loaded(let result):
+                    current.sections[index].result = result
+                    current.sections[index].failed = false
+                    current.hasLoaded = true
+                    current.lastUpdated = Date()
+                case .failed:
+                    if current.sections[index].result != nil {
+                        // Keep the old data; the sport is marked stale below.
+                        anyFailureWithKeptData = true
+                    } else {
+                        current.sections[index].failed = true
+                    }
+                }
+                states[sport] = current
+            }
         }
-        if anySuccess {
-            working.hasLoaded = true
-            working.lastUpdated = Date()
-        }
+
+        working = state(for: sport)
         working.isStale = anyFailureWithKeptData
         // Build 84 (item 23): if any of this sport's scoreboards
         // was served from the sports disk cache during this
@@ -290,9 +298,14 @@ struct MatchesView: View {
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
-    /// The Home sports cards' symbol map (builds 82/85/87 —
-    /// canonical SF Symbols names only; an unknown name renders
-    /// zero-size, the build-82 collapsed-card defect).
+    /// THE sport-symbol map (build 90, SP33): the ONE shared
+    /// map for every surface — the Matches chips, the Home
+    /// sports cards (build 90 deleted Home's private copy) and
+    /// the hub pages all resolve through here, so the build-82
+    /// drift class (a bad SF Symbol name fixed in one copy
+    /// only) cannot recur. Canonical SF Symbols names only; an
+    /// unknown name renders zero-size, the build-82
+    /// collapsed-card defect.
     static func sportSymbolName(_ sport: MatchSport) -> String {
         switch sport {
         case .soccer: return "soccerball"
@@ -313,9 +326,12 @@ struct MatchesView: View {
 
     /// Build 87 (items 7/8/11/13/14): the hub row is ONE
     /// horizontally scrolling chip strip in a fixed order —
-    /// Live Now (+count), Live Wall, Calendar, Highlights,
-    /// Top Scorers — the same destinations from every sport
-    /// tab, no duplicated entries anywhere else on the tab.
+    /// Live Now (+count), Calendar, Highlights, Top Scorers
+    /// — the same destinations from every sport tab, no
+    /// duplicated entries anywhere else on the tab. (Build
+    /// 90 (SP32): the Live Wall chip is gone — its
+    /// sport-grouped today programme folded into Live Now
+    /// as the Live/Today switch.)
     /// Build 88 (F1): Top Scorers is a SOCCER page (cross-league
     /// goals leaders) — its chip renders only on the soccer
     /// tab; offering it inside the NFL/NBA/MLB/NHL tabs put a
@@ -345,9 +361,6 @@ struct MatchesView: View {
                     .overlay(Capsule().strokeBorder(AppTheme.cardBorderColor, lineWidth: 1))
                 }
                 .buttonStyle(PressOpacityButtonStyle())
-                hubChip(systemImage: "rectangle.grid.1x2", titleKey: "matches.live_wall") {
-                    LiveWallView()
-                }
                 hubChip(systemImage: "calendar", titleKey: "matches.calendar") {
                     SportsCalendarView()
                 }
@@ -727,10 +740,13 @@ struct MatchesView: View {
             .background(AppTheme.live, in: Capsule())
             HStack(alignment: .top, spacing: 8) {
                 featuredSide(match.home)
-                Text("\(match.home.score ?? "0") – \(match.away.score ?? "0")")
+                // Build 90 (SP34): the featured score rolls +
+                // flashes on a goal like every other score in
+                // the app (RollingScoreView) — the card's static
+                // text was the third, inconsistent presentation.
+                RollingScoreView(text: "\(match.home.score ?? "0") – \(match.away.score ?? "0")")
                     .font(.system(size: 40, weight: .black, design: .rounded))
                     .foregroundStyle(AppTheme.accent)
-                    .monospacedDigit()
                     .shadow(color: AppTheme.accent.opacity(0.55), radius: 14)
                     .fixedSize()
                     .padding(.top, 8)
@@ -824,10 +840,21 @@ struct MatchesView: View {
     ) -> some View {
         Section {
             if section.result != nil {
-                let matches = dayMatches(in: section)
-                if matches.isEmpty {
+                let dayList = dayMatches(in: section)
+                // Build 90 (SP31): the featured live card above
+                // IS this match's one presentation on the screen
+                // — its league section keeps every OTHER match
+                // (the same duplication the owner removed from
+                // Home in build 89).
+                let featured = featuredLiveMatch(sportState)
+                let matches = dayList.filter { match in
+                    guard let featured, featured.sectionIndex == section.index
+                    else { return true }
+                    return match.id != featured.match.id
+                }
+                if dayList.isEmpty {
                     emptyRow
-                } else {
+                } else if !matches.isEmpty {
                     ForEach(matches) { match in
                         // Build 63 (item 8b): rows open the match
                         // detail (timeline + stats + leaders).
@@ -853,6 +880,18 @@ struct MatchesView: View {
                 }
             } else if section.failed {
                 errorRow
+            } else if sportState.isLoading {
+                // Build 90 (SP6): this league's window is still
+                // in flight while its landed neighbours already
+                // render — a quiet progress row, never the
+                // "No matches" line for a league that simply
+                // hasn't answered yet.
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text(L("common.loading"))
+                        .font(AppTheme.fontMetadata)
+                        .foregroundStyle(.secondary)
+                }
             } else {
                 emptyRow
             }
@@ -1019,8 +1058,9 @@ struct MatchesView: View {
 /// Build 83 (item 3): internal (was private) — the league
 /// browser's league page renders its fixtures with this exact
 /// row, so a match looks and behaves identically wherever it
-/// is listed. Its helpers (LivePulseDot / FlashScoreText)
-/// stay file-private; they are only used inside this view.
+/// is listed. Its helpers (LivePulseDot / RollingScoreView)
+/// live at the bottom of this file; they are only used inside
+/// this view and the featured card above it.
 struct MatchRowView: View {
     let match: MatchEvent
     let isStale: Bool
@@ -1073,13 +1113,18 @@ struct MatchRowView: View {
                 .minimumScaleFactor(0.85)
             Spacer()
             if match.state != .upcoming, let score = side.score {
-                // Item 11(2): a live score change flashes once
-                // (goal moment) — see FlashScoreText.
+                // Build 90 (SP34): the score is the shared
+                // RollingScoreView — the same digit-roll + one
+                // accent flash the Home Match Results cards use,
+                // under the same Motion gating (the row's old
+                // FlashScoreText ran a second, differently-gated
+                // effect and is retired).
                 // Build 84 (item 3a audit): the score is pinned —
                 // fixed intrinsic size + top layout priority, so
                 // the flexible team name always yields first and
                 // the score can never be squeezed or clipped.
-                FlashScoreText(text: score, isLive: match.state == .live)
+                RollingScoreView(text: score)
+                    .font(AppTheme.fontCardTitle)
                     .fixedSize()
                     .layoutPriority(1)
             }
@@ -1166,18 +1211,27 @@ struct MatchRowView: View {
 
 /// The LIVE dot: a gentle 1.1 s opacity pulse while the row is
 /// on screen. SwiftUI tears the animation down with the view —
-/// nothing runs off-screen. Reduce Motion renders it static.
-private struct LivePulseDot: View {
+/// nothing runs off-screen. Build 90 (SP34): the pulse obeys
+/// the FULL motion regime — EffectsGate (Reduce Motion + the
+/// reduce-effects setting) AND the Settings motion intensity
+/// via Motion.animate — not Reduce Motion alone, so "motion
+/// off" in Settings stills it like every other effect.
+struct LivePulseDot: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulsing = false
+
+    private var pulses: Bool {
+        EffectsGate.allowsHeavyEffects(reduceMotion: reduceMotion)
+            && Motion.animate(.easeInOut(duration: 1.1)) != nil
+    }
 
     var body: some View {
         Circle()
             .fill(AppTheme.accent)
             .frame(width: 6, height: 6)
-            .opacity(reduceMotion ? 1 : (pulsing ? 0.35 : 1))
+            .opacity(pulses && pulsing ? 0.35 : 1)
             .onAppear {
-                guard !reduceMotion else { return }
+                guard pulses else { return }
                 withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
                     pulsing = true
                 }
@@ -1185,35 +1239,44 @@ private struct LivePulseDot: View {
     }
 }
 
-/// A score that flashes ONCE when it changes during a live
-/// match (the goal moment): a red-orange highlight that fades
-/// over ~1 s. Not fired by ordinary refreshes (the value must
-/// actually change), not fired for finished matches, and static
-/// under Reduce Motion.
-private struct FlashScoreText: View {
+/// Build 90 (SP34): THE live-score effect — digits roll on a
+/// change (numeric content transition) and the changed score
+/// gets ONE brief accent flash, then settles. Nothing loops;
+/// the flash is driven solely by an actual score change in
+/// the data, and Motion.animate gates it (system Reduce
+/// Motion + the Settings intensity), so a user who turned
+/// motion off gets a static score everywhere. This is the
+/// shared implementation the Home Match Results cards
+/// introduced in build 88/89, now serving the Matches rows,
+/// the featured card and Home's Match Results cards too
+/// (Home's file-private copy from build 89 was deleted in
+/// build 90 — this one is the single canonical home).
+/// It replaces the retired FlashScoreText, whose background
+/// flash ran under Reduce Motion only and ignored the
+/// Settings intensity — two goal effects, two rulebooks.
+struct RollingScoreView: View {
     let text: String
-    let isLive: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var flash = false
-    @State private var lastText: String?
 
     var body: some View {
         Text(text)
-            .font(AppTheme.fontCardTitle)
+            .fontWeight(.bold)
             .monospacedDigit()
+            .fixedSize()
+            .contentTransition(.numericText())
             .padding(.horizontal, 4)
-            .padding(.vertical, 1)
             .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(AppTheme.accent.opacity(flash ? 0.45 : 0))
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(AppTheme.accent.opacity(flash ? 0.35 : 0))
             )
-            .onAppear { lastText = text }
-            .onChange(of: text) { _, newValue in
-                defer { lastText = newValue }
-                guard isLive, !reduceMotion,
-                      let lastText, lastText != newValue else { return }
+            .animation(Motion.animate(.easeOut(duration: 0.65)), value: flash)
+            .onChange(of: text) { _, _ in
+                guard Motion.animate(.easeOut(duration: 0.3)) != nil else { return }
                 flash = true
-                withAnimation(.easeOut(duration: 1.0)) { flash = false }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(650))
+                    flash = false
+                }
             }
     }
 }

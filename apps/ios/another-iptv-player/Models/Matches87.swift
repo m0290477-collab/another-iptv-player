@@ -114,6 +114,18 @@ enum NHLService {
             let streakCode: String?
             let streakCount: Int?
             let winPctg: Double?
+            // Build 90 (SP18): the Full-set splits — verified
+            // live 2026-11-21 in standings/now (home/road/L10
+            // W-L-OT triples on every entry).
+            let homeWins: Int?
+            let homeLosses: Int?
+            let homeOtLosses: Int?
+            let roadWins: Int?
+            let roadLosses: Int?
+            let roadOtLosses: Int?
+            let l10Wins: Int?
+            let l10Losses: Int?
+            let l10OtLosses: Int?
         }
     }
 
@@ -377,6 +389,17 @@ enum NHLService {
                 if text.hasPrefix("0.") { text = String(text.dropFirst()) }
                 put("winPercent", "PCT", text)
             }
+            // Build 90 (SP18): Home / Road / Last-10 records,
+            // composed from the payload's own split triples
+            // under the standard abbreviations — the Full set
+            // now matches the other three US sports.
+            func record(_ wins: Int?, _ losses: Int?, _ otLosses: Int?) -> String? {
+                guard let wins, let losses, let otLosses else { return nil }
+                return "\(wins)-\(losses)-\(otLosses)"
+            }
+            put("homeRecord", "HOME", record(entry.homeWins, entry.homeLosses, entry.homeOtLosses))
+            put("roadRecord", "ROAD", record(entry.roadWins, entry.roadLosses, entry.roadOtLosses))
+            put("lastTen", "L10", record(entry.l10Wins, entry.l10Losses, entry.l10OtLosses))
             let standing = StandingEntry(
                 teamId: abbrev, teamName: name,
                 logoURL: nil,
@@ -534,6 +557,7 @@ enum NHLService {
         let wins: [Leader]?
         let savePctg: [Leader]?
         let shutouts: [Leader]?
+        let goalsAgainstAverage: [Leader]?
         struct Leader: Decodable {
             let id: Int?
             let firstName: NHLText?
@@ -555,7 +579,7 @@ enum NHLService {
             cacheKey: "nhl-leaders|skaters"
         )
         async let goalieData = fetchData(
-            "\(base)/goalie-stats-leaders/current?categories=wins,savePctg,shutouts&limit=15",
+            "\(base)/goalie-stats-leaders/current?categories=wins,savePctg,shutouts,goalsAgainstAverage&limit=15",
             cacheKey: "nhl-leaders|goalies"
         )
         var rows: [String: [LeaderRow84]] = [:]
@@ -587,7 +611,13 @@ enum NHLService {
         absorb(await goalieData, [
             ("wins", "Wins", \.wins),
             ("savePctg", "Save %", \.savePctg),
-            ("shutouts", "Shutouts", \.shutouts)
+            ("shutouts", "Shutouts", \.shutouts),
+            // Build 90 (SP17): goals-against average — the one
+            // further goalie category the endpoint verifies
+            // (checked live 2026-11-21: 200, real values;
+            // unverified skater categories answer 400 and
+            // none are requested).
+            ("goalsAgainstAverage", "GAA", \.goalsAgainstAverage)
         ])
         return (categories, rows)
     }
@@ -598,6 +628,9 @@ enum NHLService {
             var text = String(format: "%.3f", value)
             if text.hasPrefix("0.") { text = String(text.dropFirst()) }
             return text
+        }
+        if key == "goalsAgainstAverage" {
+            return String(format: "%.2f", value)
         }
         return value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
     }
@@ -635,14 +668,52 @@ enum NHLService {
         let headshotURL: URL?
     }
 
+    /// Build 90 (SP13): one goalie's line from the boxscore —
+    /// the payload fields verified live 2026-11-21 (game
+    /// 2026020359: 2 goalies per team with saves / shots
+    /// against / goals against / save percentage / decision /
+    /// TOI / starter). Build 87 decoded the goalies array
+    /// into the skater shape and never read it.
+    struct GoalieLine: Identifiable {
+        let id: String
+        let name: String
+        let saves: Int
+        let shotsAgainst: Int
+        let goalsAgainst: Int
+        let savePctgText: String?
+        let decision: String?
+        let toi: String?
+        let starter: Bool
+        let headshotURL: URL?
+    }
+
     struct GameDetail {
         let venue: String?
         let scoring: [(period: String, goals: [Goal])]
         let stars: [Star]
         let skaterLines: [(teamAbbrev: String, lines: [SkaterLine])]
+        let goalieLines: [(teamAbbrev: String, lines: [GoalieLine])]
+        /// Build 90 (SP19): the match rebuilt from the landing
+        /// payload itself (teams, scores, state, start time) —
+        /// the seedless page (a push tap) renders its header,
+        /// Watch and reminder sections from this.
+        let matchEvent: MatchEvent?
     }
 
     private struct LandingWire: Decodable {
+        // Build 90 (SP19): the landing payload carries the
+        // full game header (verified live 2026-11-21: id,
+        // startTimeUTC, gameState, period/clock, and both
+        // team sides in the schedule's TeamSide shape,
+        // scores included).
+        let id: Int?
+        let startTimeUTC: String?
+        let gameState: String?
+        let awayTeam: TeamSide?
+        let homeTeam: TeamSide?
+        let periodDescriptor: PeriodDescriptor?
+        let clock: Clock?
+        let gameOutcome: GameOutcome?
         let venue: NHLText?
         let summary: Summary?
         struct Summary: Decodable {
@@ -690,7 +761,7 @@ enum NHLService {
         struct Groups: Decodable {
             let forwards: [Skater]?
             let defense: [Skater]?
-            let goalies: [Skater]?
+            let goalies: [Goalie]?
         }
         struct Skater: Decodable {
             let playerId: Int?
@@ -700,6 +771,20 @@ enum NHLService {
             let goals: Int?
             let assists: Int?
             let points: Int?
+            let headshot: String?
+        }
+        /// Build 90 (SP13): the goalie shape — the fields the
+        /// boxscore actually publishes for goaltenders.
+        struct Goalie: Decodable {
+            let playerId: Int?
+            let name: NHLText?
+            let toi: String?
+            let saves: Int?
+            let shotsAgainst: Int?
+            let goalsAgainst: Int?
+            let savePctg: Double?
+            let decision: String?
+            let starter: Bool?
             let headshot: String?
         }
     }
@@ -728,8 +813,11 @@ enum NHLService {
                     strength: goal.strength,
                     assistsText: (goal.assists ?? []).compactMap { $0.name?.value }
                         .joined(separator: ", "),
+                    // Build 90 (SP14): HOME – AWAY, like the
+                    // page's own header and every other
+                    // surface (build 87 composed away – home).
                     scoreText: (goal.homeScore != nil && goal.awayScore != nil)
-                        ? "\(goal.awayScore ?? 0) – \(goal.homeScore ?? 0)" : nil
+                        ? "\(goal.homeScore ?? 0) – \(goal.awayScore ?? 0)" : nil
                 )
             }
             if !goals.isEmpty {
@@ -750,6 +838,7 @@ enum NHLService {
             )
         }
         var lines: [(teamAbbrev: String, lines: [SkaterLine])] = []
+        var goalies: [(teamAbbrev: String, lines: [GoalieLine])] = []
         if let box = await boxData,
            let boxWire = try? JSONDecoder().decode(BoxscoreWire.self, from: box),
            let teams = boxWire.playerByGameStats {
@@ -778,14 +867,212 @@ enum NHLService {
                 if !mapped.isEmpty {
                     lines.append((teamAbbrev: "", lines: mapped))
                 }
+                // Build 90 (SP13): the goalie lines the
+                // build-87 mapping discarded.
+                let mappedGoalies = (groups.goalies ?? []).compactMap { goalie -> GoalieLine? in
+                    guard let id = goalie.playerId else { return nil }
+                    let pctText = goalie.savePctg.map { value -> String in
+                        var text = String(format: "%.3f", value)
+                        if text.hasPrefix("0.") { text = String(text.dropFirst()) }
+                        return text
+                    }
+                    return GoalieLine(
+                        id: String(id),
+                        name: goalie.name?.value ?? "",
+                        saves: goalie.saves ?? 0,
+                        shotsAgainst: goalie.shotsAgainst ?? 0,
+                        goalsAgainst: goalie.goalsAgainst ?? 0,
+                        savePctgText: pctText,
+                        decision: goalie.decision,
+                        toi: goalie.toi,
+                        starter: goalie.starter ?? false,
+                        headshotURL: goalie.headshot.flatMap { URL(string: $0) }
+                    )
+                }
+                if !mappedGoalies.isEmpty {
+                    goalies.append((teamAbbrev: "", lines: mappedGoalies))
+                }
             }
+        }
+        // Build 90 (SP19): rebuild the match from the landing
+        // payload through the SAME mapper the scoreboard
+        // uses, so a seedless page shows the identical header.
+        var rebuilt: MatchEvent?
+        if let away = wire.awayTeam, let home = wire.homeTeam {
+            let game = Game(
+                id: wire.id, startTimeUTC: wire.startTimeUTC,
+                gameState: wire.gameState,
+                awayTeam: away, homeTeam: home,
+                periodDescriptor: wire.periodDescriptor,
+                clock: wire.clock, gameOutcome: wire.gameOutcome,
+                venue: wire.venue
+            )
+            rebuilt = await mapGame(game)
         }
         return GameDetail(
             venue: wire.venue?.value,
             scoring: scoring,
             stars: stars,
-            skaterLines: lines
+            skaterLines: lines,
+            goalieLines: goalies,
+            matchEvent: rebuilt
         )
+    }
+
+    // MARK: Play-by-play (build 90, SP18)
+    //
+    // Verified live 2026-11-21: gamecenter/{id}/play-by-play
+    // answers 200 (~141 KB, 339 plays for game 2026020359)
+    // with a typeDescKey taxonomy and per-play details. The
+    // feed the page shows is the EVENTFUL plays — goals,
+    // penalties, shots (on goal / missed / blocked) and hits;
+    // faceoffs, stoppages, giveaways/takeaways and the period
+    // markers are payload noise for a reader. Player names
+    // are NOT in this payload (ids only) — they resolve
+    // through the boxscore the page already fetched (a disk-
+    // cache hit), and goals take their scorer/assists text
+    // from the landing's scoring, matched by eventId. A play
+    // whose name cannot be resolved still renders with its
+    // type label — never an invented name. Goal plays carry
+    // only a Brightcove id + nhl.com URL (re-verified in the
+    // S3 audit) — no video is offered, by the standing rule.
+
+    struct PlayItem: Identifiable {
+        let id: String
+        let periodLabel: String
+        let timeText: String?
+        /// The payload's own typeDescKey ("goal", "penalty", …).
+        let typeKey: String
+        /// The composed line: scorer + assists for a goal, the
+        /// penalized player + the payload's infraction key for
+        /// a penalty, the shooter for a shot, the hitter for a
+        /// hit — nil when no name resolved.
+        let text: String?
+        /// Running score after a goal, HOME – AWAY.
+        let scoreText: String?
+        let isGoal: Bool
+    }
+
+    private struct PlayByPlayWire: Decodable {
+        let plays: [Play]?
+        struct Play: Decodable {
+            let eventId: Int?
+            let periodDescriptor: PeriodDescriptor?
+            let timeInPeriod: String?
+            let typeDescKey: String?
+            let details: Details?
+        }
+        struct Details: Decodable {
+            let scoringPlayerId: Int?
+            let committedByPlayerId: Int?
+            let shootingPlayerId: Int?
+            let hittingPlayerId: Int?
+            let descKey: String?
+            let duration: Int?
+            let homeScore: Int?
+            let awayScore: Int?
+        }
+    }
+
+    private static let playTypesShown: Set<String> = [
+        "goal", "penalty", "shot-on-goal", "missed-shot", "blocked-shot", "hit"
+    ]
+
+    static func playByPlay(eventId: String) async -> [PlayItem] {
+        async let pbpData = fetchData(
+            "\(base)/gamecenter/\(eventId)/play-by-play", cacheKey: "nhl-pbp|\(eventId)"
+        )
+        guard let data = await pbpData,
+              let wire = try? JSONDecoder().decode(PlayByPlayWire.self, from: data)
+        else { return [] }
+        // Names: the boxscore's skaters + goalies by id (the
+        // page's own fetch — served from the disk cache), and
+        // the landing's goal texts by eventId.
+        var names: [String: String] = [:]
+        if let box = await fetchData(
+            "\(base)/gamecenter/\(eventId)/boxscore", cacheKey: "nhl-boxscore|\(eventId)"
+        ), let boxWire = try? JSONDecoder().decode(BoxscoreWire.self, from: box),
+           let teams = boxWire.playerByGameStats {
+            for groups in [teams.awayTeam, teams.homeTeam] {
+                guard let groups else { continue }
+                for skater in (groups.forwards ?? []) + (groups.defense ?? []) {
+                    if let id = skater.playerId, let name = skater.name?.value {
+                        names[String(id)] = name
+                    }
+                }
+                for goalie in groups.goalies ?? [] {
+                    if let id = goalie.playerId, let name = goalie.name?.value {
+                        names[String(id)] = name
+                    }
+                }
+            }
+        }
+        var goalTexts: [String: String] = [:]
+        if let detail = await gameDetail(eventId: eventId) {
+            for period in detail.scoring {
+                for goal in period.goals {
+                    var text = goal.scorerName
+                    if let assists = goal.assistsText, !assists.isEmpty {
+                        text += " (\(assists))"
+                    }
+                    goalTexts[goal.id] = text
+                }
+            }
+        }
+        let plays = (wire.plays ?? []).filter { play in
+            guard let key = play.typeDescKey else { return false }
+            return playTypesShown.contains(key)
+        }
+        // Newest first, the play-by-play convention.
+        return plays.reversed().compactMap { play -> PlayItem? in
+            guard let key = play.typeDescKey, let eventIdValue = play.eventId
+            else { return nil }
+            let id = String(eventIdValue)
+            let number = play.periodDescriptor?.number ?? 0
+            let periodLabel: String
+            if play.periodDescriptor?.periodType == "SO" {
+                periodLabel = "SO"
+            } else if play.periodDescriptor?.periodType == "OT" {
+                periodLabel = "OT"
+            } else if number > 0 {
+                periodLabel = "P\(number)"
+            } else {
+                periodLabel = ""
+            }
+            let details = play.details
+            var text: String?
+            var scoreText: String?
+            switch key {
+            case "goal":
+                text = goalTexts[id]
+                    ?? details?.scoringPlayerId.flatMap { names[String($0)] }
+                if let home = details?.homeScore, let away = details?.awayScore {
+                    scoreText = "\(home) – \(away)"
+                }
+            case "penalty":
+                let who = details?.committedByPlayerId.flatMap { names[String($0)] }
+                var parts: [String] = []
+                if let who { parts.append(who) }
+                if let desc = details?.descKey, !desc.isEmpty { parts.append(desc) }
+                if let duration = details?.duration { parts.append("\(duration) min") }
+                text = parts.isEmpty ? nil : parts.joined(separator: " · ")
+            case "shot-on-goal", "missed-shot", "blocked-shot":
+                text = details?.shootingPlayerId.flatMap { names[String($0)] }
+            case "hit":
+                text = details?.hittingPlayerId.flatMap { names[String($0)] }
+            default:
+                text = nil
+            }
+            return PlayItem(
+                id: id,
+                periodLabel: periodLabel,
+                timeText: play.timeInPeriod,
+                typeKey: key,
+                text: text,
+                scoreText: scoreText,
+                isGoal: key == "goal"
+            )
+        }
     }
 }
 
@@ -949,6 +1236,16 @@ extension Optional where Wrapped == String {
 // driver/constructor rows are text rows (names, teams,
 // points), never decorated with invented imagery.
 
+/// One session of a race weekend (build 90, SP26): the
+/// schedule payload carries every session's date + time —
+/// build 87 decoded none of them, so a race weekend was one
+/// date instead of a weekend.
+struct F1Session: Identifiable {
+    let label: String
+    let date: Date?
+    var id: String { label }
+}
+
 struct F1Race: Identifiable {
     let round: Int
     let name: String
@@ -957,17 +1254,39 @@ struct F1Race: Identifiable {
     let country: String?
     let date: Date?
     let timeText: String?
+    let sessions: [F1Session]
     var id: Int { round }
 }
 
 struct F1ResultRow: Identifiable {
     let position: String
+    /// The payload's positionText ("R" retired, "W" withdrew)
+    /// — a retired driver is NOT classified at his numeric
+    /// position (build 90, SP26).
+    let positionText: String?
     let driverName: String
     let driverCode: String?
     let constructorName: String?
     let points: String?
     let status: String?
     let timeText: String?
+    let grid: String?
+    let laps: String?
+    let fastestLap: Bool
+    var id: String { position + "|" + driverName }
+}
+
+/// One qualifying row (build 90, SP26): Q1/Q2/Q3 times
+/// verbatim from the payload (a knocked-out driver simply
+/// has no Q2/Q3).
+struct F1QualifyingRow: Identifiable {
+    let position: String
+    let driverName: String
+    let driverCode: String?
+    let constructorName: String?
+    let q1: String?
+    let q2: String?
+    let q3: String?
     var id: String { position + "|" + driverName }
 }
 
@@ -1014,10 +1333,48 @@ enum F1Service {
             let date: String?
             let time: String?
             let results: [RaceResult]?
+            let qualifyingResults: [QualifyingResult]?
+            let sprintResults: [RaceResult]?
+            // Build 90 (SP26): the weekend's sessions, all
+            // present in current.json (verified 2026-11-21).
+            let firstPractice: Session?
+            let secondPractice: Session?
+            let thirdPractice: Session?
+            let qualifying: Session?
+            let sprint: Session?
+            let sprintQualifying: Session?
             enum CodingKeys: String, CodingKey {
                 case round, raceName, date, time
                 case circuit = "Circuit"
                 case results = "Results"
+                case qualifyingResults = "QualifyingResults"
+                case sprintResults = "SprintResults"
+                case firstPractice = "FirstPractice"
+                case secondPractice = "SecondPractice"
+                case thirdPractice = "ThirdPractice"
+                case qualifying = "Qualifying"
+                case sprint = "Sprint"
+                case sprintQualifying = "SprintQualifying"
+            }
+        }
+        struct Session: Decodable {
+            let date: String?
+            let time: String?
+        }
+        struct QualifyingResult: Decodable {
+            let position: String?
+            let driver: Driver?
+            let constructor: Constructor?
+            let q1: String?
+            let q2: String?
+            let q3: String?
+            enum CodingKeys: String, CodingKey {
+                case position
+                case driver = "Driver"
+                case constructor = "Constructor"
+                case q1 = "Q1"
+                case q2 = "Q2"
+                case q3 = "Q3"
             }
         }
         struct Circuit: Decodable {
@@ -1034,19 +1391,25 @@ enum F1Service {
         }
         struct RaceResult: Decodable {
             let position: String?
+            let positionText: String?
             let points: String?
             let driver: Driver?
             let constructor: Constructor?
             let status: String?
             let time: ResultTime?
+            let grid: String?
+            let laps: String?
+            let fastestLap: FastestLap?
             enum CodingKeys: String, CodingKey {
-                case position, points, status
+                case position, positionText, points, status, grid, laps
                 case driver = "Driver"
                 case constructor = "Constructor"
                 case time = "Time"
+                case fastestLap = "FastestLap"
             }
         }
         struct ResultTime: Decodable { let time: String? }
+        struct FastestLap: Decodable { let rank: String? }
         struct Driver: Decodable {
             let givenName: String?
             let familyName: String?
@@ -1090,16 +1453,30 @@ enum F1Service {
     }
 
     private static func fetchWire(_ path: String, cacheKey: String) async -> Wire? {
+        await fetchWireStamped(path, cacheKey: cacheKey)?.wire
+    }
+
+    /// Build 90 (SP30): the stamp-carrying form — the disk
+    /// cache's stamp is non-nil exactly when the payload was
+    /// served from disk, and the page shows it.
+    private static func fetchWireStamped(
+        _ path: String, cacheKey: String
+    ) async -> (wire: Wire, stamp: Date?)? {
         guard let url = URL(string: "\(base)/\(path)"),
               let result = await SportsDiskCache.espnData(url: url, cacheKey: cacheKey),
               let wire = try? JSONDecoder().decode(Wire.self, from: result.data)
         else { return nil }
-        return wire
+        return (wire, result.stamp)
     }
 
     static func schedule() async -> [F1Race] {
-        guard let wire = await fetchWire("current.json", cacheKey: "f1|schedule") else { return [] }
-        return (wire.mrData.raceTable?.races ?? []).compactMap { race -> F1Race? in
+        await scheduleStamped().races
+    }
+
+    static func scheduleStamped() async -> (races: [F1Race], stamp: Date?) {
+        guard let fetched = await fetchWireStamped("current.json", cacheKey: "f1|schedule")
+        else { return ([], nil) }
+        let races = (fetched.wire.mrData.raceTable?.races ?? []).compactMap { race -> F1Race? in
             guard let name = race.raceName else { return nil }
             return F1Race(
                 round: Int(race.round ?? "") ?? 0,
@@ -1108,39 +1485,101 @@ enum F1Service {
                 locality: race.circuit?.location?.locality,
                 country: race.circuit?.location?.country,
                 date: raceDate(race.date, race.time),
-                timeText: race.time
+                timeText: race.time,
+                sessions: sessions(of: race)
+            )
+        }
+        return (races, fetched.stamp)
+    }
+
+    /// The weekend's sessions in chronological order (race
+    /// itself excluded — the race row carries its own time).
+    private static func sessions(of race: Wire.Race) -> [F1Session] {
+        let labelled: [(label: String, session: Wire.Session?)] = [
+            ("FP1", race.firstPractice),
+            ("FP2", race.secondPractice),
+            ("FP3", race.thirdPractice),
+            ("Sprint Qualifying", race.sprintQualifying),
+            ("Sprint", race.sprint),
+            ("Qualifying", race.qualifying)
+        ]
+        return labelled.compactMap { entry -> F1Session? in
+            guard let session = entry.session else { return nil }
+            return F1Session(label: entry.label, date: raceDate(session.date, session.time))
+        }.sorted { ($0.date ?? .distantFuture) < ($1.date ?? .distantFuture) }
+    }
+
+    /// Build 90 (SP26): one round's full race classification
+    /// — the per-round endpoint replaces the build-87
+    /// "last race only" results (verified live 2026-11-21:
+    /// current/19/results.json, full 22-driver classification
+    /// with grid, laps, status, times, fastest laps).
+    static func raceResults(round: Int) async -> [F1ResultRow] {
+        guard let wire = await fetchWire(
+            "current/\(round)/results.json", cacheKey: "f1|results|\(round)"
+        ), let race = wire.mrData.raceTable?.races?.first else { return [] }
+        return mapResultRows(race.results)
+    }
+
+    /// One round's sprint classification — present on sprint
+    /// weekends only; other rounds answer without the array
+    /// and the section simply doesn't render.
+    static func raceSprint(round: Int) async -> [F1ResultRow] {
+        guard let wire = await fetchWire(
+            "current/\(round)/sprint.json", cacheKey: "f1|sprint|\(round)"
+        ), let race = wire.mrData.raceTable?.races?.first else { return [] }
+        return mapResultRows(race.sprintResults)
+    }
+
+    /// One round's qualifying table (Q1/Q2/Q3 verbatim).
+    static func raceQualifying(round: Int) async -> [F1QualifyingRow] {
+        guard let wire = await fetchWire(
+            "current/\(round)/qualifying.json", cacheKey: "f1|qualifying|\(round)"
+        ), let race = wire.mrData.raceTable?.races?.first else { return [] }
+        return (race.qualifyingResults ?? []).compactMap { result -> F1QualifyingRow? in
+            guard let position = result.position,
+                  let driver = result.driver,
+                  let name = driverName(driver) else { return nil }
+            return F1QualifyingRow(
+                position: position,
+                driverName: name,
+                driverCode: driver.code,
+                constructorName: result.constructor?.name,
+                q1: result.q1, q2: result.q2, q3: result.q3
             )
         }
     }
 
-    /// The most recent completed race and its full result —
-    /// the payload's own "last" pointer, never a guess.
-    static func lastResults() async -> (raceName: String?, rows: [F1ResultRow]) {
-        guard let wire = await fetchWire("current/last/results.json", cacheKey: "f1|last-results"),
-              let race = wire.mrData.raceTable?.races?.first
-        else { return (nil, []) }
-        let rows = (race.results ?? []).compactMap { result -> F1ResultRow? in
+    private static func mapResultRows(_ results: [Wire.RaceResult]?) -> [F1ResultRow] {
+        (results ?? []).compactMap { result -> F1ResultRow? in
             guard let position = result.position,
                   let driver = result.driver,
                   let name = driverName(driver) else { return nil }
             return F1ResultRow(
                 position: position,
+                positionText: result.positionText,
                 driverName: name,
                 driverCode: driver.code,
                 constructorName: result.constructor?.name,
                 points: result.points,
                 status: result.status,
-                timeText: result.time?.time
+                timeText: result.time?.time,
+                grid: result.grid,
+                laps: result.laps,
+                fastestLap: result.fastestLap?.rank == "1"
             )
         }
-        return (race.raceName, rows)
     }
 
     static func driverStandings() async -> [F1DriverStanding] {
-        guard let wire = await fetchWire("current/driverStandings.json", cacheKey: "f1|drivers"),
-              let list = wire.mrData.standingsTable?.standingsLists?.first
-        else { return [] }
-        return (list.driverStandings ?? []).compactMap { standing -> F1DriverStanding? in
+        await driverStandingsStamped().rows
+    }
+
+    static func driverStandingsStamped() async -> (rows: [F1DriverStanding], stamp: Date?) {
+        guard let fetched = await fetchWireStamped("current/driverStandings.json", cacheKey: "f1|drivers"),
+              let list = fetched.wire.mrData.standingsTable?.standingsLists?.first
+        else { return ([], nil) }
+        let rows = (list.driverStandings ?? []).compactMap { standing -> F1DriverStanding? in
             guard let position = standing.position,
                   let driver = standing.driver,
                   let name = driverName(driver) else { return nil }
@@ -1153,13 +1592,18 @@ enum F1Service {
                 wins: standing.wins
             )
         }
+        return (rows, fetched.stamp)
     }
 
     static func constructorStandings() async -> [F1ConstructorStanding] {
-        guard let wire = await fetchWire("current/constructorStandings.json", cacheKey: "f1|constructors"),
-              let list = wire.mrData.standingsTable?.standingsLists?.first
-        else { return [] }
-        return (list.constructorStandings ?? []).compactMap { standing -> F1ConstructorStanding? in
+        await constructorStandingsStamped().rows
+    }
+
+    static func constructorStandingsStamped() async -> (rows: [F1ConstructorStanding], stamp: Date?) {
+        guard let fetched = await fetchWireStamped("current/constructorStandings.json", cacheKey: "f1|constructors"),
+              let list = fetched.wire.mrData.standingsTable?.standingsLists?.first
+        else { return ([], nil) }
+        let rows = (list.constructorStandings ?? []).compactMap { standing -> F1ConstructorStanding? in
             guard let position = standing.position,
                   let name = standing.constructor?.name else { return nil }
             return F1ConstructorStanding(
@@ -1167,6 +1611,25 @@ enum F1Service {
                 points: standing.points, wins: standing.wins
             )
         }
+        return (rows, fetched.stamp)
+    }
+
+    /// Build 90 (SP30): the F1 page's whole load in one call,
+    /// carrying the OLDEST disk stamp among its fetches (the
+    /// honest "last updated" when any part was served stale).
+    static func overview() async -> (
+        races: [F1Race], drivers: [F1DriverStanding],
+        constructors: [F1ConstructorStanding], stamp: Date?
+    ) {
+        async let schedule = scheduleStamped()
+        async let drivers = driverStandingsStamped()
+        async let constructors = constructorStandingsStamped()
+        let scheduleResult = await schedule
+        let driversResult = await drivers
+        let constructorsResult = await constructors
+        let stamp = [scheduleResult.stamp, driversResult.stamp, constructorsResult.stamp]
+            .compactMap { $0 }.min()
+        return (scheduleResult.races, driversResult.rows, constructorsResult.rows, stamp)
     }
 
     private static func driverName(_ driver: Wire.Driver) -> String? {
@@ -1441,6 +1904,26 @@ struct TennisMatch: Identifiable {
     let sets1: [String]
     let sets2: [String]
     let winnerIndex: Int?
+    /// Build 90 (SP27): the payload's own curatedRank per
+    /// competitor (verified live 2026-11-21 in the scoreboard
+    /// payload). The same payload carries NO seed and NO flag
+    /// fields — those are not shown, not invented.
+    let rank1: Int?
+    let rank2: Int?
+}
+
+/// One rankings row (build 90, SP27): rank, previous rank,
+/// points and trend — the payload's own fields from the
+/// verified rankings endpoint (site/v2 tennis/{tour}/
+/// rankings, 200, 150 deep for both tours, 2026-11-21).
+struct TennisRankingRow: Identifiable {
+    let rank: Int
+    let previous: Int?
+    let pointsText: String?
+    let trend: String?
+    let name: String
+    let athleteId: String?
+    var id: String { "\(rank)|\(name)" }
 }
 
 struct TennisTournament: Identifiable {
@@ -1484,6 +1967,10 @@ enum TennisService {
             let athlete: Named?
             let team: Named?
             let linescores: [SetScore]?
+            let curatedRank: CuratedRank?
+        }
+        struct CuratedRank: Decodable {
+            let current: Int?
         }
         struct Named: Decodable { let displayName: String? }
         struct SetScore: Decodable {
@@ -1498,11 +1985,20 @@ enum TennisService {
     ]
 
     static func tournaments(tourPath: String) async -> [TennisTournament] {
+        await tournamentsStamped(tourPath: tourPath).tournaments
+    }
+
+    /// Build 90 (SP30): the stamp-carrying form (the page
+    /// shows "last updated" when the board was served from
+    /// the disk cache).
+    static func tournamentsStamped(
+        tourPath: String
+    ) async -> (tournaments: [TennisTournament], stamp: Date?) {
         guard let url = URL(string: "https://site.api.espn.com/apis/site/v2/sports/\(tourPath)/scoreboard"),
               let fetched = await SportsDiskCache.espnData(url: url, cacheKey: "tennis|\(tourPath)"),
               let wire = try? JSONDecoder().decode(ScoreboardWire.self, from: fetched.data)
-        else { return [] }
-        return (wire.events ?? []).compactMap { event -> TennisTournament? in
+        else { return ([], nil) }
+        let tournaments = (wire.events ?? []).compactMap { event -> TennisTournament? in
             guard let id = event.id, let name = event.name else { return nil }
             var groups: [(title: String?, matches: [TennisMatch])] = []
             for grouping in event.groupings ?? [] {
@@ -1516,6 +2012,67 @@ enum TennisService {
             guard !groups.isEmpty else { return nil }
             return TennisTournament(id: id, name: name, tour: tourPath, groups: groups)
         }
+        return (tournaments, fetched.stamp)
+    }
+
+    // MARK: Rankings (build 90, SP27)
+    //
+    // Verified live 2026-11-21: site/v2/sports/tennis/atp/
+    // rankings and …/wta/rankings answer 200 (~390 KB) with
+    // rankings[0].ranks 150 deep — current / previous /
+    // points / trend + the athlete's display name and id.
+    // The season-calendar idea does NOT ship: the scoreboard
+    // payload's league calendar is a bare list of date
+    // strings with no tournament names (verified in the same
+    // pass), so there is nothing truthful to render.
+
+    private struct RankingsWire: Decodable {
+        let rankings: [Group]?
+        struct Group: Decodable {
+            let ranks: [Rank]?
+        }
+        struct Rank: Decodable {
+            let current: Int?
+            let previous: Int?
+            let points: Double?
+            let trend: String?
+            let athlete: Athlete?
+        }
+        struct Athlete: Decodable {
+            let id: String?
+            let displayName: String?
+        }
+    }
+
+    /// The tour's rankings, top 100 (the payload runs 150
+    /// deep; the page stays light). Points render verbatim —
+    /// whole numbers without a fraction, the payload's own
+    /// precision otherwise.
+    static func rankings(
+        tourPath: String
+    ) async -> (rows: [TennisRankingRow], stamp: Date?) {
+        guard let url = URL(string: "https://site.api.espn.com/apis/site/v2/sports/\(tourPath)/rankings"),
+              let fetched = await SportsDiskCache.espnData(url: url, cacheKey: "tennis-rank|\(tourPath)"),
+              let wire = try? JSONDecoder().decode(RankingsWire.self, from: fetched.data),
+              let group = wire.rankings?.first
+        else { return ([], nil) }
+        let rows = (group.ranks ?? []).prefix(100).compactMap { rank -> TennisRankingRow? in
+            guard let current = rank.current,
+                  let name = rank.athlete?.displayName, !name.isEmpty
+            else { return nil }
+            let pointsText = rank.points.map { value -> String in
+                value == value.rounded() ? String(Int(value)) : String(value)
+            }
+            return TennisRankingRow(
+                rank: current,
+                previous: rank.previous,
+                pointsText: pointsText,
+                trend: rank.trend,
+                name: name,
+                athleteId: rank.athlete?.id
+            )
+        }
+        return (rows, fetched.stamp)
     }
 
     static func allMatches() async -> [TennisMatch] {
@@ -1559,7 +2116,9 @@ enum TennisService {
             name2: name2,
             sets1: setScores(first),
             sets2: setScores(second),
-            winnerIndex: winnerIndex
+            winnerIndex: winnerIndex,
+            rank1: first.curatedRank?.current,
+            rank2: second.curatedRank?.current
         )
     }
 
@@ -1585,11 +2144,37 @@ enum TennisService {
 // total score string and per-round linescores. golf/
 // champions answers HTTP 400 and is NOT offered.
 
+/// One hole of one round (build 90, SP29): the scoreboard
+/// payload nests 18 per-hole linescores inside each round
+/// linescore — verified live 2026-11-21 (PGA scoreboard:
+/// value + displayValue + period + scoreType per hole).
+struct GolfHole: Identifiable {
+    let number: Int
+    let scoreText: String?
+    let scoreTypeText: String?
+    var id: Int { number }
+}
+
+/// One round of a player's tournament (build 90, SP29).
+struct GolfRound: Identifiable {
+    let number: Int
+    let scoreText: String?
+    let holes: [GolfHole]
+    var id: Int { number }
+}
+
 struct GolfRow: Identifiable {
     let position: Int
+    /// Build 90 (SP29): the tie-aware position label —
+    /// players level on score share one position with a "T"
+    /// prefix (the payload's raw `order` numbered tied
+    /// players sequentially, which is not how golf tables
+    /// read).
+    let positionText: String
     let name: String
     let scoreText: String?
     let roundScores: [String]
+    let rounds: [GolfRound]
     var id: String { "\(position)|\(name)" }
 }
 
@@ -1598,6 +2183,10 @@ struct GolfLeaderboard {
     let leagueName: String?
     let eventName: String?
     let state: MatchState
+    /// Build 90 (SP29): the payload's own status line
+    /// ("Round 3 - Suspended") — the board's computed state,
+    /// previously derived in the service and never shown.
+    let stateText: String?
     let rows: [GolfRow]
 }
 
@@ -1625,6 +2214,16 @@ enum GolfService {
         struct RoundScore: Decodable {
             let displayValue: String?
             let period: Int?
+            // Build 90 (SP29): the nested per-hole linescores.
+            let linescores: [HoleScore]?
+        }
+        struct HoleScore: Decodable {
+            let displayValue: String?
+            let period: Int?
+            let scoreType: ScoreType?
+        }
+        struct ScoreType: Decodable {
+            let displayValue: String?
         }
     }
 
@@ -1635,37 +2234,94 @@ enum GolfService {
     ]
 
     static func leaderboard(tourPath: String) async -> GolfLeaderboard? {
+        await leaderboardStamped(tourPath: tourPath).board
+    }
+
+    /// Build 90 (SP30): the stamp-carrying form.
+    static func leaderboardStamped(
+        tourPath: String
+    ) async -> (board: GolfLeaderboard?, stamp: Date?) {
         guard let url = URL(string: "https://site.api.espn.com/apis/site/v2/sports/\(tourPath)/scoreboard"),
               let fetched = await SportsDiskCache.espnData(url: url, cacheKey: "golf|\(tourPath)"),
               let wire = try? JSONDecoder().decode(ScoreboardWire.self, from: fetched.data),
               let event = wire.events?.first,
               let competition = event.competitions?.first
-        else { return nil }
+        else { return (nil, nil) }
         let state: MatchState
         switch (competition.status?.type?.state ?? event.status?.type?.state) {
         case "in": state = .live
         case "post": state = .finished
         default: state = .upcoming
         }
-        let rows = (competition.competitors ?? []).enumerated().compactMap { index, competitor -> GolfRow? in
+        let stateText = competition.status?.type?.detail
+            ?? competition.status?.type?.shortDetail
+            ?? event.status?.type?.detail
+            ?? event.status?.type?.shortDetail
+        let rawRows = (competition.competitors ?? []).enumerated().compactMap {
+            index, competitor -> (position: Int, name: String, score: String?, rounds: [GolfRound], roundScores: [String])? in
             guard let name = competitor.athlete?.displayName, !name.isEmpty else { return nil }
-            let rounds = (competitor.linescores ?? [])
+            let roundWires = (competitor.linescores ?? [])
                 .sorted { ($0.period ?? 0) < ($1.period ?? 0) }
-                .compactMap { $0.displayValue }
-            return GolfRow(
+            let rounds = roundWires.map { round -> GolfRound in
+                let holes = (round.linescores ?? [])
+                    .sorted { ($0.period ?? 0) < ($1.period ?? 0) }
+                    .map { hole in
+                        GolfHole(
+                            number: hole.period ?? 0,
+                            scoreText: hole.displayValue,
+                            scoreTypeText: hole.scoreType?.displayValue
+                        )
+                    }
+                return GolfRound(
+                    number: round.period ?? 0,
+                    scoreText: round.displayValue,
+                    holes: holes
+                )
+            }
+            return (
                 position: competitor.order ?? index + 1,
                 name: name,
-                scoreText: competitor.score,
-                roundScores: rounds
+                score: competitor.score,
+                rounds: rounds,
+                roundScores: roundWires.compactMap { $0.displayValue }
             )
         }
-        return GolfLeaderboard(
+        // Build 90 (SP29): tie-aware positions from the
+        // payload's own scores — level players share a rank.
+        let parsedScores = rawRows.map { scoreValue($0.score) }
+        let rows = rawRows.enumerated().map { index, raw -> GolfRow in
+            var positionText = "\(raw.position)"
+            if let mine = parsedScores[index] {
+                let better = parsedScores.filter { ($0 ?? Int.max) < mine }.count
+                let tied = parsedScores.filter { $0 == mine }.count
+                positionText = tied > 1 ? "T\(better + 1)" : "\(better + 1)"
+            }
+            return GolfRow(
+                position: raw.position,
+                positionText: positionText,
+                name: raw.name,
+                scoreText: raw.score,
+                roundScores: raw.roundScores,
+                rounds: raw.rounds
+            )
+        }
+        let board = GolfLeaderboard(
             tourPath: tourPath,
             leagueName: wire.leagues?.first?.name,
             eventName: event.name,
             state: state,
+            stateText: stateText,
             rows: rows
         )
+        return (board, fetched.stamp)
+    }
+
+    /// "-12" → -12, "E" → 0, "+3" → 3; anything else nil.
+    private static func scoreValue(_ text: String?) -> Int? {
+        guard let text = text?.trimmingCharacters(in: .whitespaces), !text.isEmpty
+        else { return nil }
+        if text == "E" { return 0 }
+        return Int(text)
     }
 }
 
@@ -1686,6 +2342,29 @@ struct UFCFight: Identifiable {
     let state: MatchState
     let detailText: String?
     let startDate: Date?
+    /// Build 90 (SP28): the fight's weight class — the
+    /// payload's own competition type ("Lightweight"),
+    /// verified live 2026-11-21. Build 87 decoded it nowhere,
+    /// so fights rendered with no class context at all.
+    let weightClass: String?
+}
+
+/// One UFC ranking list offered by the core index (build 90,
+/// SP28): the slug from the payload's own $ref, the title
+/// derived mechanically from it.
+struct UFCRankingListRef: Identifiable {
+    let slug: String
+    let title: String
+    var id: String { slug }
+}
+
+/// One fighter in a ranking list: rank + trend from the
+/// list payload, the name from the athlete $ref deref.
+struct UFCRankRow: Identifiable {
+    let rank: Int
+    let trend: String?
+    let name: String
+    var id: String { "\(rank)|\(name)" }
 }
 
 struct UFCCard: Identifiable {
@@ -1698,6 +2377,18 @@ struct UFCCard: Identifiable {
 enum UFCService {
     private struct ScoreboardWire: Decodable {
         let events: [Event]?
+        // Build 90 (SP28): the undated scoreboard carries the
+        // league's season calendar (label + startDate per
+        // event) — the schedule source that replaces the
+        // 11-request day fan-out.
+        let leagues: [League]?
+        struct League: Decodable {
+            let calendar: [CalendarEntry]?
+        }
+        struct CalendarEntry: Decodable {
+            let label: String?
+            let startDate: String?
+        }
         struct Event: Decodable {
             let id: String?
             let name: String?
@@ -1709,6 +2400,10 @@ enum UFCService {
             let date: String?
             let status: ESPNStatus?
             let competitors: [Fighter]?
+            let type: FightType?
+        }
+        struct FightType: Decodable {
+            let abbreviation: String?
         }
         struct Fighter: Decodable {
             let homeAway: String?
@@ -1720,31 +2415,98 @@ enum UFCService {
         struct Record: Decodable { let summary: String? }
     }
 
-    /// Cards across the app's schedule window (the scoreboard
-    /// takes one day per call, like every ESPN feed here):
-    /// recent results, today's card, the next cards.
     static func cards() async -> [UFCCard] {
-        let days = MatchesService.dayParameters()
-        let perDay = await withTaskGroup(of: [UFCCard].self) { group in
-            for day in days {
-                group.addTask { await cards(dayParameter: day) }
-            }
-            var out: [UFCCard] = []
-            for await items in group { out += items }
-            return out
-        }
-        var seen = Set<String>()
-        return perDay
-            .filter { seen.insert($0.id).inserted }
-            .sorted { ($0.date ?? .distantFuture) < ($1.date ?? .distantFuture) }
+        await cardsStamped().cards
     }
 
-    private static func cards(dayParameter: String) async -> [UFCCard] {
+    /// Build 90 (SP28): the schedule now comes from ONE
+    /// undated scoreboard fetch — verified live 2026-11-21:
+    /// it returns today's card (when there is one) PLUS the
+    /// league's full season calendar (53 events with labels
+    /// and start dates). The calendar names the most recent
+    /// past card day and the next card day — even beyond the
+    /// old +7-day reach, which fixes the dark-week empty page
+    /// — and only those (at most two) days are fetched with
+    /// the dated form. Total: 1–3 requests instead of 11.
+    /// The old −3…+7 fan-out survives ONLY as the fallback
+    /// for a payload with no calendar at all.
+    static func cardsStamped() async -> (cards: [UFCCard], stamp: Date?) {
+        var stamps: [Date] = []
+        var collected: [UFCCard] = []
+        var calendarDays: [Date] = []
+        if let url = URL(string: "https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard"),
+           let fetched = await SportsDiskCache.espnData(url: url, cacheKey: "ufc|undated"),
+           let wire = try? JSONDecoder().decode(ScoreboardWire.self, from: fetched.data) {
+            collected += mapCards(wire)
+            if let stamp = fetched.stamp { stamps.append(stamp) }
+            calendarDays = (wire.leagues?.first?.calendar ?? []).compactMap {
+                $0.startDate.flatMap { MatchesService.parseEventDate($0) }
+            }
+        }
+        if calendarDays.isEmpty {
+            // Fallback: the build-87 day fan-out.
+            let days = MatchesService.dayParameters()
+            let perDay = await withTaskGroup(of: (cards: [UFCCard], stamp: Date?).self) { group in
+                for day in days {
+                    group.addTask { await cards(dayParameter: day) }
+                }
+                var out: [(cards: [UFCCard], stamp: Date?)] = []
+                for await items in group { out.append(items) }
+                return out
+            }
+            for result in perDay {
+                collected += result.cards
+                if let stamp = result.stamp { stamps.append(stamp) }
+            }
+        } else {
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date())
+            let coveredDays = Set(collected.compactMap { card -> String? in
+                card.date.map { dayParameter(for: $0) }
+            })
+            var targets = Set<String>()
+            if let last = calendarDays.filter({ calendar.startOfDay(for: $0) < today }).max() {
+                targets.insert(dayParameter(for: last))
+            }
+            if let next = calendarDays.filter({ calendar.startOfDay(for: $0) > today }).min() {
+                targets.insert(dayParameter(for: next))
+            }
+            // Today's own calendar entry needs no fetch — the
+            // undated payload already carried today's card.
+            targets.subtract(coveredDays)
+            for day in targets {
+                let result = await cards(dayParameter: day)
+                collected += result.cards
+                if let stamp = result.stamp { stamps.append(stamp) }
+            }
+        }
+        var seen = Set<String>()
+        let merged = collected
+            .filter { seen.insert($0.id).inserted }
+            .sorted { ($0.date ?? .distantFuture) < ($1.date ?? .distantFuture) }
+        return (merged, stamps.min())
+    }
+
+    private static func dayParameter(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyyMMdd"
+        return formatter.string(from: date)
+    }
+
+    private static func cards(
+        dayParameter: String
+    ) async -> (cards: [UFCCard], stamp: Date?) {
         guard let url = URL(string: "https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard?dates=\(dayParameter)"),
               let fetched = await SportsDiskCache.espnData(url: url, cacheKey: "ufc|\(dayParameter)"),
               let wire = try? JSONDecoder().decode(ScoreboardWire.self, from: fetched.data)
-        else { return [] }
-        return (wire.events ?? []).compactMap { event -> UFCCard? in
+        else { return ([], nil) }
+        return (mapCards(wire), fetched.stamp)
+    }
+
+    private static func mapCards(_ wire: ScoreboardWire) -> [UFCCard] {
+        (wire.events ?? []).compactMap { event -> UFCCard? in
             guard let id = event.id, let name = event.name else { return nil }
             let fights = (event.competitions ?? []).compactMap { fight -> UFCFight? in
                 let competitors = fight.competitors ?? []
@@ -1773,7 +2535,8 @@ enum UFCService {
                     winnerIndex: winnerIndex,
                     state: state,
                     detailText: fight.status?.type?.detail ?? fight.status?.type?.shortDetail,
-                    startDate: fight.date.flatMap { MatchesService.parseEventDate($0) }
+                    startDate: fight.date.flatMap { MatchesService.parseEventDate($0) },
+                    weightClass: fight.type?.abbreviation
                 )
             }
             guard !fights.isEmpty else { return nil }
@@ -1784,72 +2547,120 @@ enum UFCService {
             )
         }
     }
-}
 
-// MARK: - Cross-league top scorers (item 11)
-//
-// The goals leaders of ALL 17 catalog leagues on one page:
-// the existing per-league scorers service (the build-83
-// slug-fixed core leaders path) fanned out concurrently,
-// merged and ranked by the payload's own goal counts.
+    // MARK: Rankings (build 90, SP28)
+    //
+    // Verified live 2026-11-21: the ESPN core index
+    // (v2/sports/mma/leagues/ufc/rankings) lists 24 ranking
+    // lists by $ref (pound-for-pound, the divisional lists,
+    // the champions lists); each list payload is small
+    // (~2 KB) with ranks carrying current / trend and an
+    // athlete $ref. Names come from the athlete derefs —
+    // the app's existing core pattern — fanned out at most
+    // 8 at a time and session-cached per list, so a list is
+    // resolved once per app run. Lists load LAZILY (only the
+    // division the user opens), never all 24 up front.
 
-struct CrossScorerRow: Identifiable {
-    let entry: ScorerEntry
-    let leagueName: String
-    let leaguePath: String
-    var id: String { "\(leaguePath)|\(entry.athleteId)" }
-}
-
-/// Build 88 (F1): one league's cross-league scorers outcome.
-/// `ok` is false only when the league's fetch was cut off by
-/// the timeout or failed outright; a league that answers with
-/// no leaders is an honest empty (ok == true, rows == []).
-struct CrossLeagueFetchOutcome {
-    let rows: [CrossScorerRow]
-    let ok: Bool
-}
-
-enum CrossLeagueScorersService {
-    /// Build 88 (F1): the build-87 fan-out waited for ALL 17
-    /// leagues before the page rendered anything, and a single
-    /// slow league (its leaders call plus up to 30 name
-    /// dereferences) stalled the whole page on "Loading…"
-    /// indefinitely. Now each league is fetched on its own with
-    /// a hard 15-second ceiling — the fetch races a timer and
-    /// the loser is cancelled (URLSession honours task
-    /// cancellation) — and the view consumes leagues as they
-    /// land, so the page fills in incrementally and always
-    /// terminates: rows, an honest empty, or a failure state.
-    static func fetchLeague(_ league: SoccerLeague) async -> CrossLeagueFetchOutcome {
-        let raced = await raceTimeout(seconds: 15) {
-            await MatchesScorersService.fetch(leaguePath: league.leaguePath, limit: 8)
+    private struct RankingsIndexWire: Decodable {
+        let items: [RefItem]?
+        struct RefItem: Decodable {
+            let ref: String?
+            enum CodingKeys: String, CodingKey { case ref = "$ref" }
         }
-        guard let entries = raced else {
-            return CrossLeagueFetchOutcome(rows: [], ok: false)
-        }
-        return CrossLeagueFetchOutcome(
-            rows: entries.map {
-                CrossScorerRow(entry: $0, leagueName: league.name, leaguePath: league.leaguePath)
-            },
-            ok: true
-        )
     }
 
-    /// First finisher wins: the operation's value, or nil when
-    /// the timer fired first (the operation is then cancelled).
-    private static func raceTimeout<T: Sendable>(
-        seconds: Double, operation: @escaping @Sendable () async -> T
-    ) async -> T? {
-        await withTaskGroup(of: T?.self) { group in
-            group.addTask { await operation() }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+    private struct RankingListWire: Decodable {
+        let ranks: [Rank]?
+        struct Rank: Decodable {
+            let current: Int?
+            let trend: String?
+            let athlete: RefItem?
         }
+        struct RefItem: Decodable {
+            let ref: String?
+            enum CodingKeys: String, CodingKey { case ref = "$ref" }
+        }
+    }
+
+    private struct AthleteWire: Decodable {
+        let displayName: String?
+        let fullName: String?
+        let shortName: String?
+    }
+
+    private final class RankingsCache: @unchecked Sendable {
+        static let shared = RankingsCache()
+        private let lock = NSLock()
+        private var lists: [String: [UFCRankRow]] = [:]
+        func get(_ key: String) -> [UFCRankRow]? {
+            lock.lock(); defer { lock.unlock() }
+            return lists[key]
+        }
+        func put(_ key: String, _ value: [UFCRankRow]) {
+            lock.lock(); defer { lock.unlock() }
+            lists[key] = value
+        }
+    }
+
+    static func rankingLists() async -> [UFCRankingListRef] {
+        guard let url = URL(string: "https://sports.core.api.espn.com/v2/sports/mma/leagues/ufc/rankings"),
+              let fetched = await SportsDiskCache.espnData(url: url, cacheKey: "ufc-rank|index"),
+              let wire = try? JSONDecoder().decode(RankingsIndexWire.self, from: fetched.data)
+        else { return [] }
+        return (wire.items ?? []).compactMap { item -> UFCRankingListRef? in
+            guard let ref = item.ref,
+                  let slug = ref.split(separator: "/").last?
+                      .split(separator: "?").first.map(String.init),
+                  !slug.isEmpty
+            else { return nil }
+            let title = slug
+                .split(separator: "-")
+                .map { $0.capitalized }
+                .joined(separator: " ")
+            return UFCRankingListRef(slug: slug, title: title)
+        }
+    }
+
+    static func rankingList(slug: String) async -> [UFCRankRow] {
+        if let cached = RankingsCache.shared.get(slug) { return cached }
+        guard let url = URL(string: "https://sports.core.api.espn.com/v2/sports/mma/leagues/ufc/rankings/\(slug)"),
+              let fetched = await SportsDiskCache.espnData(url: url, cacheKey: "ufc-rank|\(slug)"),
+              let wire = try? JSONDecoder().decode(RankingListWire.self, from: fetched.data)
+        else { return [] }
+        let ranks = (wire.ranks ?? []).filter { $0.current != nil }
+        // Athlete names by $ref deref, at most 8 in flight.
+        var names: [Int: String] = [:]
+        var cursor = 0
+        while cursor < ranks.count {
+            let batch = Array(ranks[cursor..<min(cursor + 8, ranks.count)])
+            let resolved = await withTaskGroup(of: (Int, String?).self) { group in
+                for (offset, rank) in batch.enumerated() {
+                    group.addTask {
+                        (cursor + offset, await athleteName(ref: rank.athlete?.ref))
+                    }
+                }
+                var out: [(Int, String?)] = []
+                for await item in group { out.append(item) }
+                return out
+            }
+            for (index, name) in resolved { names[index] = name }
+            cursor += batch.count
+        }
+        let rows = ranks.enumerated().compactMap { index, rank -> UFCRankRow? in
+            guard let current = rank.current, let name = names[index], !name.isEmpty
+            else { return nil }
+            return UFCRankRow(rank: current, trend: rank.trend, name: name)
+        }.sorted { $0.rank < $1.rank }
+        RankingsCache.shared.put(slug, rows)
+        return rows
+    }
+
+    private static func athleteName(ref: String?) async -> String? {
+        guard let ref, let url = URL(string: ref),
+              let fetched = await SportsDiskCache.espnData(url: url, cacheKey: "ufc-athlete|\(ref)"),
+              let wire = try? JSONDecoder().decode(AthleteWire.self, from: fetched.data)
+        else { return nil }
+        return wire.displayName ?? wire.fullName ?? wire.shortName
     }
 }
 

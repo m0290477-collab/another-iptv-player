@@ -16,6 +16,10 @@ struct M3UFavoritesView: View {
     @State private var debounceTask: Task<Void, Never>?
     @State private var favoriteChannels: [DBM3UChannel] = []
     @State private var filtered: [DBM3UChannel] = []
+    /// Build 90: unsanitizable-URL tap alert (build 80, F3) —
+    /// the channels surfaces show it; this view used to fail
+    /// silently on the same tap.
+    @State private var showPlayFailure = false
 
     /// The recomputation trigger when the favorite set or the catalog changes.
     private var recomputeKey: String {
@@ -89,6 +93,9 @@ struct M3UFavoritesView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .cinematicBackground()
+        .alert(L("playback.error.failed_to_start"), isPresented: $showPlayFailure) {
+            Button(L("common.ok")) { showPlayFailure = false }
+        }
     }
 
     private func recompute() async {
@@ -109,7 +116,7 @@ struct M3UFavoritesView: View {
     }
 
     private func present(_ channel: DBM3UChannel) {
-        guard M3UParser.sanitizedURL(from: channel.url) != nil else { return }
+        guard M3UParser.sanitizedURL(from: channel.url) != nil else { showPlayFailure = true; return }
         // When playing from favorites, the queue = the favorites list (prev/next moves between favorites).
         playerOverlay.present {
             M3UPlayerShell(

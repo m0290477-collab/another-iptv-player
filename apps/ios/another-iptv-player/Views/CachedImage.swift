@@ -105,7 +105,8 @@ enum IPTVRemoteImagePipeline {
 enum ImageLoadProfile: Equatable, Sendable {
     /// Single / header: light animation, request cancels on disappear.
     case standard
-    /// Horizontal shelf: small decode, no cancel on disappear (see body).
+    /// Horizontal shelf: small decode, priority lowers — never
+    /// cancels — on disappear (see body).
     case shelf
     /// Long grid / list: retina decode, cancels on disappear (C10).
     case grid
@@ -134,9 +135,36 @@ struct CachedImage: View {
     /// swap invisibly when this load fails.
     var onLoadFailed: (() -> Void)? = nil
 
+    /// Build 90 (F4, D1 RC1): visible-cell retry state. A failed
+    /// load used to be terminal for as long as its cell stayed on
+    /// screen: LazyImage sat in its error state, the failure memo
+    /// blocked fresh appearances, and nothing ever re-issued the
+    /// request — the poster came back only after an unrelated
+    /// re-render or a scroll off-and-back, the exact "title cards
+    /// first, real posters seconds later (or never)" signature in
+    /// the owner's recordings. The state below drives a BOUNDED
+    /// in-place retry while the cell remains visible: it is
+    /// scheduled through the `.task(id:)` in `body`, which cancels
+    /// the pending retry automatically when the cell disappears —
+    /// a per-cell task tied to appear/disappear, no global
+    /// polling, no timers.
+    /// In-place retries already consumed this appearance (max 2).
+    @State private var visibleRetriesUsed = 0
+    /// Fire time of the pending retry; nil when none is armed.
+    @State private var retryDeadline: Date? = nil
+    /// Bumped when a retry fires; the LazyImage's `.id` rebuilds
+    /// it so it issues a fresh load instead of sitting in error.
+    @State private var loadGeneration = 0
+    /// An in-place retry bypasses the failure memo: the memo
+    /// governs fresh appearances (scroll re-appears must not
+    /// hammer a dead host), while a cell the user is staring at
+    /// retries on the short F4 schedule instead of waiting out
+    /// the memo's 30/90/300 s ladder.
+    @State private var bypassMemo = false
+
     var body: some View {
         Group {
-            if let url, ArtworkFailureMemo.shared.isFailed(url) {
+            if let url, !bypassMemo, ArtworkFailureMemo.shared.isFailed(url) {
                 // Build 81 (item 5b): this URL already failed in
                 // this session — render the designed placeholder
                 // immediately instead of re-issuing a doomed
@@ -154,7 +182,17 @@ struct CachedImage: View {
                 // on the placeholder even though their fallback
                 // art is sitting unused.
                 placeholder
-                    .onAppear { onLoadFailed?() }
+                    .onAppear {
+                        onLoadFailed?()
+                        // Build 90 (F4): a memo-blocked cell still
+                        // recovers while it stays visible — arm one
+                        // wake-up for the moment the memo's block
+                        // lifts, then retry in place. The memo keeps
+                        // governing scroll re-appears exactly as
+                        // before; this only ends the "blocked for
+                        // the whole viewing session" trap.
+                        scheduleRetry(after: ArtworkFailureMemo.shared.remainingBlockDuration(for: url))
+                    }
             } else if let url {
                 // A custom `transaction` can trigger multiple LazyImageContext updates in the same frame; animation is handled by the parent `Group` instead.
                 LazyImage(request: makeRequest(url: url)) { state in
@@ -184,10 +222,20 @@ struct CachedImage: View {
                         // arrive.
                         placeholder
                             .onAppear {
-                                if !Self.isCancellation(loadError) {
+                                let cancelled = Self.isCancellation(loadError)
+                                if !cancelled {
                                     ArtworkFailureMemo.shared.recordFailure(url)
                                 }
                                 onLoadFailed?()
+                                // Build 90 (F4): arm the bounded
+                                // visible retry (2 s, then 8 s —
+                                // see scheduleVisibleRetry). A
+                                // cancellation is never retried:
+                                // the cell is gone or going, and a
+                                // fresh appearance starts fresh.
+                                if !cancelled {
+                                    scheduleVisibleRetry()
+                                }
                             }
                     } else {
                         placeholder
@@ -200,7 +248,28 @@ struct CachedImage: View {
                 // profile deliberately keeps the old no-cancel behavior:
                 // the documented round-5-era bug was shelf cells whose
                 // lowered-priority requests stuck and never loaded.
-                .onDisappear((loadProfile == .standard || loadProfile == .grid) ? .cancel : nil)
+                //
+                // Build 90 (F5c, D1 RC3): no-cancel had its own cost —
+                // in a fast fling every shelf cell flashed past kept
+                // its load running at full RENDER priority, filling
+                // the pipeline's data/decode queues with off-screen
+                // work while the settled cells queued behind it. The
+                // shelf profile now DEMOTES on disappear instead:
+                // `.lowerPriority` keeps the request alive (never a
+                // cancel, so the round-5 stuck-request failure mode
+                // is not reintroduced — that bug was requests ISSUED
+                // at low priority, not requests demoted after running
+                // at full priority while visible) but drops it out of
+                // the render fast lane; NukeUI restores the priority
+                // when the cell reappears. .standard/.grid keep
+                // .cancel; .high (heroes/backdrops, not scroll cells)
+                // keeps nil.
+                .onDisappear(disappearAction)
+                // Build 90 (F4): an in-place retry bumps
+                // `loadGeneration`; the new identity rebuilds the
+                // LazyImage so it issues a fresh load instead of
+                // sitting in its error state.
+                .id(loadGeneration)
                 .frame(width: width, height: height)
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
             } else {
@@ -221,6 +290,77 @@ struct CachedImage: View {
                 t.animation = nil
             }
         }
+        // Build 90 (F4): the visible-retry driver. `.task(id:)`
+        // restarts when a retry is armed and is cancelled
+        // automatically when the cell disappears, so a pending
+        // retry can never fire into a recycled cell. When the
+        // deadline passes, the retry bypasses the failure memo
+        // and rebuilds the LazyImage (see `loadGeneration`).
+        .task(id: retryDeadline) {
+            guard let deadline = retryDeadline else { return }
+            let wait = deadline.timeIntervalSinceNow
+            if wait > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            }
+            guard !Task.isCancelled else { return }
+            retryDeadline = nil
+            bypassMemo = true
+            loadGeneration &+= 1
+        }
+        .onDisappear {
+            // A fresh appearance starts a fresh bounded retry
+            // budget; the memo alone governs what a re-appearing
+            // cell may load, exactly as before build 90.
+            retryDeadline = nil
+            visibleRetriesUsed = 0
+            bypassMemo = false
+        }
+        .onChange(of: url) { _, _ in
+            // Cell reuse with a different item: the old item's
+            // retry state must not leak into the new one.
+            retryDeadline = nil
+            visibleRetriesUsed = 0
+            bypassMemo = false
+        }
+    }
+
+    /// Build 90 (F5c): the LazyImage disappear action per profile
+    /// (see the `.onDisappear` call site for the full reasoning).
+    private var disappearAction: LazyImage.DisappearAction? {
+        switch loadProfile {
+        case .standard, .grid:
+            return .cancel
+        case .shelf:
+            return .lowerPriority
+        case .high:
+            return nil
+        }
+    }
+
+    /// Build 90 (F4): arms the next in-place retry for a load
+    /// that just failed while its cell is on screen. Bounded at
+    /// two retries per appearance — after ~2 s, then ~8 s —
+    /// deliberately SHORTER than the failure memo's 30/90/300 s
+    /// ladder: the memo exists to stop scroll re-appears from
+    /// hammering a dead host, while a cell the user is actively
+    /// looking at should recover from a transient request storm
+    /// within seconds (D1 RC1). The retry itself runs in the
+    /// body's `.task(id:)`; this only records the deadline.
+    private func scheduleVisibleRetry() {
+        guard visibleRetriesUsed < 2 else { return }
+        guard retryDeadline == nil else { return }
+        let delay: TimeInterval = visibleRetriesUsed == 0 ? 2 : 8
+        visibleRetriesUsed += 1
+        retryDeadline = Date().addingTimeInterval(delay)
+    }
+
+    /// Build 90 (F4): arms the memo branch's one wake-up, fired
+    /// when the failure memo's block for this URL lifts. Does not
+    /// consume the visible-retry budget: if that load then fails,
+    /// the error branch's own bounded retries apply.
+    private func scheduleRetry(after delay: TimeInterval) {
+        guard retryDeadline == nil else { return }
+        retryDeadline = Date().addingTimeInterval(max(delay, 0))
     }
 
     private func makeRequest(url: URL) -> ImageRequest {

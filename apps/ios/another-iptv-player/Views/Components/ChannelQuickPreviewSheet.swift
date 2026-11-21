@@ -21,7 +21,7 @@ struct ChannelQuickPreviewSheet: View {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 12) {
                     CachedImage(
-                        url: stream.streamIcon.flatMap { URL(string: $0) },
+                        url: ArtworkURL.url(from: stream.streamIcon),
                         width: 56, height: 56,
                         cornerRadius: AppTheme.smallCornerRadius,
                         iconName: "tv"

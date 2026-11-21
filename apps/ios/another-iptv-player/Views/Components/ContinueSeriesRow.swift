@@ -87,7 +87,7 @@ struct ContinueSeriesRow: View {
               let record = contentStore.seriesItems.first(where: { "\($0.series.seriesId)" == seriesId })?.series,
               let raw = record.backdropPath?.trimmingCharacters(in: .whitespaces), !raw.isEmpty
         else { return nil }
-        return URL(string: raw)
+        return ArtworkURL.url(from: raw)
     }
 
     /// For each series whose latest episode is finished, resolve the

@@ -210,6 +210,9 @@ struct PlayerPageView: View {
     /// rendered only when the free source verifies the
     /// record as this player (name + team).
     @State private var playerBio: String?
+    /// Build 90 (SP10, bio half): the biography renders
+    /// truncated until the user expands it (see bioSection).
+    @State private var bioExpanded = false
 
     var body: some View {
         List {
@@ -275,10 +278,31 @@ struct PlayerPageView: View {
         }
     }
 
+    /// Build 90 (SP10, bio half): TheSportsDB biographies run
+    /// long — the section used to render the full text as an
+    /// untruncated wall. Now the team About treatment
+    /// (SP-D's TeamPageView pattern): collapsed to four
+    /// lines with an expand control when the text is long
+    /// enough to need one.
     private func bioSection(_ bio: String) -> some View {
         Section {
-            Text(bio)
-                .font(.subheadline)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(bio)
+                    .font(.subheadline)
+                    .lineLimit(bioExpanded ? nil : 4)
+                if bio.count > 240 {
+                    Button {
+                        withAnimation(Motion.animate(Motion.contentIn)) {
+                            bioExpanded.toggle()
+                        }
+                    } label: {
+                        Text(L(bioExpanded ? "detail.show_less" : "detail.show_more"))
+                            .font(AppTheme.fontMetadata.weight(.semibold))
+                            .foregroundStyle(AppTheme.accent)
+                    }
+                    .buttonStyle(PressOpacityButtonStyle())
+                }
+            }
         } header: {
             Text(L("matches.player.bio"))
         }
@@ -390,12 +414,48 @@ struct PlayerPageView: View {
 
     private func statsSection(_ profile: PlayerProfile) -> some View {
         Section {
-            ForEach(Array(profile.statLines.enumerated()), id: \.offset) { _, line in
-                infoRow(line.label, line.value)
+            // Build 90 (SP7): grouped rendering — the
+            // headline group first (no subheader; it sits
+            // directly under the section's own "Season stats"
+            // header), then each payload category under its
+            // own name. Profiles without groups (NHL, the
+            // MLB-enriched path) fall back to the flat list,
+            // exactly as before.
+            if profile.statGroups.isEmpty {
+                ForEach(Array(profile.statLines.enumerated()), id: \.offset) { _, line in
+                    infoRow(line.label, line.value)
+                }
+            } else {
+                ForEach(Array(profile.statGroups.enumerated()), id: \.offset) { _, group in
+                    if let category = group.category {
+                        Text(Self.categoryTitle(category))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 6)
+                    }
+                    ForEach(Array(group.lines.enumerated()), id: \.offset) { _, line in
+                        infoRow(line.label, line.value)
+                    }
+                }
             }
         } header: {
             Text(L("matches.player.stats"))
         }
+    }
+
+    /// The payload's category names are camelCase identifiers
+    /// ("goalKeeping", "offensive") — shown spaced and
+    /// capitalised, otherwise verbatim: the payload's own
+    /// grouping words, never invented labels.
+    private static func categoryTitle(_ raw: String) -> String {
+        var spaced = ""
+        for character in raw {
+            if character.isUppercase {
+                spaced.append(" ")
+            }
+            spaced.append(character)
+        }
+        return spaced.prefix(1).uppercased() + spaced.dropFirst()
     }
 
     private func recentSection(_ profile: PlayerProfile) -> some View {
@@ -658,12 +718,30 @@ struct LeagueNewsView: View {
 
 // MARK: - Live Now (item 13)
 
-/// Every live match across all 20 competitions right now,
+/// Every live match across all 21 competitions right now,
 /// grouped by competition. Refreshes on the Matches cadence
 /// (the shared 60-second loop pattern — no new timer system),
 /// and each row carries the Watch action where item 3b matches.
+///
+/// Build 90 (SP32): the page gains a Live / Today switch and
+/// the separate Live Wall page is REMOVED — two build-90
+/// audits (S5 B1, S6 B2) independently found the Wall
+/// duplicated this page plus the Calendar's today section.
+/// Today mode is the Wall's one unique cut — the day's FULL
+/// programme grouped by sport — carried on the existing
+/// `SportsHubService.todaySchedule()` path, whose entries
+/// keep each match paired with its REAL competition group
+/// (the build-88 rule: no synthetic league paths). One page,
+/// one refresh loop, both jobs.
 struct LiveNowView: View {
+    private enum Mode {
+        case live
+        case today
+    }
+
+    @State private var mode: Mode = .live
     @State private var groups: [LiveNowGroup] = []
+    @State private var todaySections: [TodaySportSchedule] = []
     @State private var didLoad = false
     /// Build 88 (F11): whether today has fixtures at all —
     /// drives the empty copy below.
@@ -682,50 +760,12 @@ struct LiveNowView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18) {
-                if groups.isEmpty {
-                    Text(didLoad ? emptyText : L("common.loading"))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.top, 40)
-                } else {
-                    ForEach(groups) { group in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(group.leagueName ?? group.leaguePath)
-                                .font(AppTheme.fontSectionTitle)
-                                .padding(.horizontal, 16)
-                            VStack(spacing: 0) {
-                                ForEach(Array(group.matches.enumerated()), id: \.element.id) { index, match in
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        NavigationLink {
-                                            MatchDetailView(
-                                                sport: group.sport, leaguePath: group.leaguePath,
-                                                match: match, leagueName: group.leagueName
-                                            )
-                                        } label: {
-                                            MatchRowView(match: match, isStale: false, sport: group.sport)
-                                        }
-                                        .buttonStyle(PressOpacityButtonStyle())
-                                        WatchPlayButton(
-                                            sport: group.sport, leaguePath: group.leaguePath,
-                                            match: match
-                                        )
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    if index < group.matches.count - 1 {
-                                        Divider().padding(.leading, 12)
-                                    }
-                                }
-                            }
-                            .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 14))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .strokeBorder(AppTheme.cardBorderColor, lineWidth: 1)
-                            )
-                            .padding(.horizontal, 16)
-                        }
-                        .sectionAppear()
-                    }
+                modePicker
+                switch mode {
+                case .live:
+                    liveContent
+                case .today:
+                    todayContent
                 }
             }
             .padding(.vertical, 12)
@@ -743,10 +783,113 @@ struct LiveNowView: View {
         }
     }
 
+    private var modePicker: some View {
+        Picker(L("matches.live_now"), selection: modeSelection) {
+            Text(L("matches.live_now")).tag(Mode.live)
+            Text(L("matches.today")).tag(Mode.today)
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 16)
+    }
+
+    private var modeSelection: Binding<Mode> {
+        Binding(
+            get: { mode },
+            set: { newValue in
+                withAnimation(Motion.animate(Motion.chipSwap)) { mode = newValue }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var liveContent: some View {
+        if groups.isEmpty {
+            Text(didLoad ? emptyText : L("common.loading"))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 40)
+        } else {
+            ForEach(groups) { group in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(group.leagueName ?? group.leaguePath)
+                        .font(AppTheme.fontSectionTitle)
+                        .padding(.horizontal, 16)
+                    matchCardList(
+                        entries: group.matches.map { (group: group, match: $0) }
+                    )
+                }
+                .sectionAppear()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var todayContent: some View {
+        if todaySections.isEmpty {
+            Text(didLoad ? L("matches.empty") : L("common.loading"))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 40)
+        } else {
+            ForEach(todaySections) { section in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 7) {
+                        Image(systemName: MatchesView.sportSymbolName(section.sport))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(AppTheme.accent)
+                        Text(L(section.sport.titleKey))
+                            .font(AppTheme.fontSectionTitle)
+                    }
+                    .padding(.horizontal, 16)
+                    matchCardList(entries: section.entries)
+                }
+                .sectionAppear()
+            }
+        }
+    }
+
+    /// One card of match rows — the shared row rendering for
+    /// both modes (the Live Wall's rows, carried over): each
+    /// row routes detail + Watch through its entry's REAL
+    /// competition group.
+    private func matchCardList(entries: [(group: LiveNowGroup, match: MatchEvent)]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
+                VStack(alignment: .leading, spacing: 6) {
+                    NavigationLink {
+                        MatchDetailView(
+                            sport: entry.group.sport, leaguePath: entry.group.leaguePath,
+                            match: entry.match, leagueName: entry.group.leagueName
+                        )
+                    } label: {
+                        MatchRowView(match: entry.match, isStale: false, sport: entry.group.sport)
+                    }
+                    .buttonStyle(PressOpacityButtonStyle())
+                    WatchPlayButton(
+                        sport: entry.group.sport, leaguePath: entry.group.leaguePath,
+                        match: entry.match
+                    )
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                if index < entries.count - 1 {
+                    Divider().padding(.leading, 12)
+                }
+            }
+        }
+        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(AppTheme.cardBorderColor, lineWidth: 1)
+        )
+        .padding(.horizontal, 16)
+    }
+
     private func refresh() async {
         let snapshot = await SportsHubService.liveNowSnapshot()
         groups = snapshot.groups
         todayHasFixtures = snapshot.todayHasFixtures
+        todaySections = await SportsHubService.todaySchedule()
         didLoad = true
     }
 }
@@ -1154,6 +1297,10 @@ struct CompareTeamsView: View {
     @State private var groups: [StandingGroup] = []
     @State private var form: [String: [String]] = [:]
     @State private var opponent: StandingEntry?
+    /// Build 90 (SP20): the load completed at least once —
+    /// distinguishes "still loading" from "loaded, and this
+    /// team simply isn't in the standings payload".
+    @State private var didLoad = false
 
     private var allEntries: [StandingEntry] {
         groups.flatMap { $0.entries }
@@ -1189,6 +1336,17 @@ struct CompareTeamsView: View {
                         Text(L("matches.compare.pick"))
                     }
                 }
+            } else if didLoad {
+                // Build 90 (SP20): loaded, and the team is NOT
+                // in the standings payload (a cup competition
+                // with no table, a team the payload omits) —
+                // the honest empty state. This branch used to
+                // be unreachable: without didLoad the page sat
+                // on "Loading…" forever (S5 A2).
+                Section {
+                    Text(L("matches.empty"))
+                        .foregroundStyle(.secondary)
+                }
             } else {
                 Section {
                     Text(L("common.loading"))
@@ -1200,9 +1358,29 @@ struct CompareTeamsView: View {
         .navigationTitle(L("matches.compare"))
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            let result = await MatchesStandingsService.fetch(sport: team.sport, leaguePath: team.leaguePath)
-            groups = result.groups
-            form = await TeamFormService.form(sport: team.sport, leaguePath: team.leaguePath)
+            // Build 90 (integration): NHL teams compare from
+            // the NHL official standings — the ESPN standings
+            // service has no hockey path and returned empty,
+            // which would have landed the new NHL Compare
+            // entry on the SP20 empty state forever.
+            if team.sport == .nhl {
+                let result = await NHLService.standings()
+                groups = result.groups
+            } else {
+                let result = await MatchesStandingsService.fetch(sport: team.sport, leaguePath: team.leaguePath)
+                groups = result.groups
+            }
+            didLoad = true
+            // Build 90 (fixer, SP-C prescription): TeamFormService
+            // scans ESPN scoreboard days — it has no hockey
+            // source, so for NHL the fetch could only ever come
+            // back empty. NHL form stays [:] and the form row
+            // simply never renders.
+            if team.sport == .nhl {
+                form = [:]
+            } else {
+                form = await TeamFormService.form(sport: team.sport, leaguePath: team.leaguePath)
+            }
         }
     }
 
@@ -1306,11 +1484,14 @@ struct CompareTeamsView: View {
                           "pointsFor", "pointsAgainst", "pointDifferential",
                           "Last Ten Games", "streak"]
         case .nhl:
-            // Build 87 (item 1): for exhaustiveness — NHL
-            // teams never reach CompareTeamsView (their page
-            // is NHLTeamPageView, which offers no compare
-            // entry), but the NHL entries' keys mirror the
-            // ESPN names if one ever did.
+            // Build 87 (item 1) wrote this case for
+            // exhaustiveness, when NHL teams could not reach
+            // this view. Build 90 (SP18) added the compare
+            // entry on NHLTeamPageView, so NHL teams DO reach
+            // CompareTeamsView now — their entries come from
+            // NHLService.standings() (see the .task branch
+            // above) and these keys mirror the ESPN names the
+            // NHL wire stats are mapped onto.
             candidates = ["gamesPlayed", "wins", "losses", "otLosses",
                           "pointsFor", "pointsAgainst", "pointDifferential", "points"]
         }

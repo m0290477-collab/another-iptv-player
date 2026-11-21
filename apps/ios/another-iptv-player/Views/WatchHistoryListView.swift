@@ -165,11 +165,13 @@ struct WatchHistoryListView: View {
     }
 }
 
-/// The grid equivalent of the `HistoryCard` in ContinueWatchingRow — a slightly larger card,
-/// progress at the bottom left; title + subtitle below.
+/// The grid equivalent of the `HistoryCard` in ContinueWatchingRow — the
+/// same 160×90 art card (one shared decode variant across both history
+/// surfaces), progress at the bottom left; title + subtitle below.
 private struct HistoryCardGridItem: View {
     let item: DBWatchHistory
     let onTap: () -> Void
+    @State private var fillFraction: CGFloat = 0
 
     var body: some View {
         Button(action: onTap) {
@@ -183,17 +185,18 @@ private struct HistoryCardGridItem: View {
                         LiveLogoArt(
                             url: item.imageURL.flatMap { ArtworkURL.url(from: $0) },
                             width: 160,
-                            height: 95,
+                            height: 90,
                             cornerRadius: AppTheme.smallCornerRadius
                         )
                     } else {
                         CachedImage(
                             url: item.imageURL.flatMap { ArtworkURL.url(from: $0) },
                             width: 160,
-                            height: 95,
+                            height: 90,
                             cornerRadius: 10,
                             contentMode: .fill,
-                            iconName: "film"
+                            iconName: "film",
+                            title: item.title
                         )
                     }
 
@@ -205,11 +208,14 @@ private struct HistoryCardGridItem: View {
                                 .frame(height: 3)
                             Rectangle()
                                 .fill(AppTheme.accent)
-                                .frame(width: 160 * min(max(progress, 0), 1), height: 3)
+                                .frame(width: 160 * min(max(progress, 0), 1) * fillFraction, height: 3)
+                        }
+                        .onAppear {
+                            withAnimation(Motion.animate(.easeOut(duration: 0.7))) { fillFraction = 1 }
                         }
                     }
                 }
-                .frame(width: 160, height: 95)
+                .frame(width: 160, height: 90)
                 .clipShape(RoundedRectangle(cornerRadius: AppTheme.smallCornerRadius))
 
                 Text(item.title)

@@ -36,11 +36,10 @@ struct MatchDetailView: View {
     /// the active playlist, shown ahead of the name-search hits.
     @State private var broadcastHits: [WatchChannelHit] = []
     /// Build 84 (item 15): the any-match kickoff PUSH toggle
-    /// state (the local 15-minute reminder above is separate
-    /// and unchanged).
+    /// state. Build 90 (SP22): it is now the page's ONLY
+    /// reminder toggle — the local 15-minute reminder section
+    /// is removed (two bell sections for one intent, S5 A5).
     @State private var kickoffPushOn = false
-    /// Item 10e state.
-    @State private var reminderOn = false
     /// Build 65 (Match detail style 1 'Scoreboard Pro') introduced
     /// the tabbed sections; build 80 (item 16) re-arranges them
     /// the FotMob way at the owner's order: Facts / Lineup / Stats
@@ -83,7 +82,18 @@ struct MatchDetailView: View {
         }
     }
 
-    private var hasTimeline: Bool { !(detail?.timeline.isEmpty ?? true) }
+    /// Build 90 (SP23): the Facts timeline exists only for
+    /// soccer + MLB. For NBA/NFL the summary's scoring plays
+    /// ARE the Play-by-Play tab's data — Facts rendering them
+    /// again put every basket/touchdown on two tabs of the
+    /// same page (S5 A8/B3). Soccer's timeline is its own
+    /// event feed (goals/cards/subs) and MLB's is its scoring
+    /// summary; neither duplicates a tab.
+    private var factsTimeline: [MatchTimelineEvent] {
+        guard sport == .soccer || sport == .mlb else { return [] }
+        return detail?.timeline ?? []
+    }
+    private var hasTimeline: Bool { !factsTimeline.isEmpty }
     private var hasLineups: Bool { !(detail?.lineups.isEmpty ?? true) }
     private var hasStats: Bool { !(detail?.stats.isEmpty ?? true) }
     private var hasBoxScore: Bool { !(detail?.boxScore.isEmpty ?? true) }
@@ -91,10 +101,11 @@ struct MatchDetailView: View {
     /// Facts exists when any of its groups has real data:
     /// the timeline, the payload's match info, its videos,
     /// or (build 85) its recap/preview article.
+    /// Build 90 (SP3): the last-five form block counts too.
     private var hasFacts: Bool {
         guard let detail else { return false }
         return hasTimeline || detail.info != nil || !detail.videos.isEmpty
-            || detail.article != nil
+            || detail.article != nil || !detail.form.isEmpty
     }
     private var hasH2H: Bool { !(detail?.h2h?.meetings.isEmpty ?? true) }
     private var hasCommentary: Bool { !(detail?.commentary.isEmpty ?? true) }
@@ -135,9 +146,15 @@ struct MatchDetailView: View {
         self.leagueName = nil
     }
 
-    private var home: MatchTeamSide? { seedMatch?.home ?? detail?.header?.home }
-    private var away: MatchTeamSide? { seedMatch?.away ?? detail?.header?.away }
-    private var state: MatchState? { seedMatch?.state ?? detail?.header?.state }
+    // Build 90 (SP21): once the summary lands, ITS header is
+    // the freshest word on the teams, the score and the state
+    // — the seed is only the pre-load stand-in. The old
+    // seed-first order pinned the page to the score as it was
+    // when the row was tapped, however long the page stayed
+    // open (S1 A2 / S5 A14).
+    private var home: MatchTeamSide? { detail?.header?.home ?? seedMatch?.home }
+    private var away: MatchTeamSide? { detail?.header?.away ?? seedMatch?.away }
+    private var state: MatchState? { detail?.header?.state ?? seedMatch?.state }
 
     var body: some View {
         // Build 87 (item 1): hockey's detail is the NHL API's
@@ -176,7 +193,22 @@ struct MatchDetailView: View {
         .cinematicBackground()
         .navigationTitle(L("matches.title"))
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: eventId) { await load() }
+        .task(id: eventId) {
+            await load()
+            // Build 90 (SP21): a live match page STAYS live —
+            // the existing load re-runs on the same 60-second
+            // cadence the Matches tab and Live Now already use
+            // (view-scoped, cancelled on disappear — no new
+            // polling system). The loop also covers an upcoming
+            // page left open across kickoff; a finished match
+            // is final and ends it.
+            while !Task.isCancelled {
+                if state == .finished { break }
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                if Task.isCancelled { break }
+                await load()
+            }
+        }
         // Build 81 (item 8): the FotMob tab swap eases instead of
         // snapping.
         .animation(Motion.animate(Motion.contentIn), value: detailTab)
@@ -205,7 +237,12 @@ struct MatchDetailView: View {
     }
 
     private func load() async {
-        reminderOn = MatchReminderService.shared.isScheduled(eventId: eventId)
+        // Build 90 (SP22): both reminder stores prune their
+        // past matches on the way in — armed fixtures whose
+        // kickoff has passed stop re-uploading to the watcher
+        // and stop reporting as scheduled, forever (S5 A6).
+        MatchKickoffPushStore.shared.prunePast()
+        await MatchReminderService.shared.prunePast()
         kickoffPushOn = MatchKickoffPushStore.shared.contains(eventId: eventId)
         do {
             detail = try await MatchesService.fetchDetail(
@@ -257,8 +294,6 @@ struct MatchDetailView: View {
 
             followSection
 
-            reminderSection
-
             kickoffPushSection
 
             watchSection
@@ -299,14 +334,40 @@ struct MatchDetailView: View {
                     if let info = detail.info {
                         Section {
                             infoRows(info)
+                            // Build 90 (SP23): the payload's own
+                            // broadcaster list — fetched on every
+                            // load, previously rendered NOWHERE
+                            // (it only fed Watch matching needles).
+                            if !detail.broadcastNames.isEmpty {
+                                infoRow(
+                                    label: L("matches.info.broadcast"),
+                                    value: detail.broadcastNames.joined(separator: ", ")
+                                )
+                            }
                         } header: {
                             sectionHeader(L("matches.detail.match_info"))
                         }
                         .listRowBackground(AppTheme.surface)
                     }
-                    if !detail.timeline.isEmpty {
+                    // Build 90 (SP23): the league table, one tap
+                    // from the match — the existing StandingsView
+                    // on this match's own league.
+                    Section {
+                        NavigationLink {
+                            StandingsView(
+                                sport: sport, leaguePath: leaguePath,
+                                leagueName: leagueName
+                            )
+                        } label: {
+                            Label(L("matches.standings"), systemImage: "chart.bar.fill")
+                                .font(AppTheme.fontCardTitle)
+                        }
+                        .buttonStyle(PressOpacityButtonStyle())
+                    }
+                    .listRowBackground(AppTheme.surface)
+                    if !factsTimeline.isEmpty {
                         Section {
-                            ForEach(detail.timeline) { event in
+                            ForEach(factsTimeline) { event in
                                 // Build 84 (item 4): a timeline
                                 // event with a known athlete
                                 // opens the player page.
@@ -326,6 +387,21 @@ struct MatchDetailView: View {
                             }
                         } header: {
                             sectionHeader(L("matches.detail.timeline"))
+                        }
+                        .listRowBackground(AppTheme.surface)
+                    }
+                    if !detail.form.isEmpty {
+                        // Build 90 (SP3): both teams' last-five
+                        // form, from the summary's own
+                        // `lastFiveGames` — the FotMob match-page
+                        // element the app lacked (its form chips
+                        // lived only inside the standings table).
+                        Section {
+                            ForEach(detail.form) { block in
+                                formBlock(block)
+                            }
+                        } header: {
+                            sectionHeader(L("matches.table_form"))
                         }
                         .listRowBackground(AppTheme.surface)
                     }
@@ -374,13 +450,16 @@ struct MatchDetailView: View {
                         .listRowBackground(AppTheme.surface)
                     }
                 } else if selectedTab == .lineups {
+                    // Build 90 (SP24): the lineups render INLINE
+                    // in the tab — the tab used to be a single
+                    // NavigationLink row pushing the real page,
+                    // which read as an empty/broken tab (S5 A7).
+                    // The content is LineupsView's own body,
+                    // shared via LineupsContentView.
                     Section {
-                        NavigationLink {
-                            LineupsView(sport: sport, leaguePath: leaguePath, sides: detail.lineups)
-                        } label: {
-                            Label(L("matches.lineups"), systemImage: "sportscourt")
-                                .font(AppTheme.fontCardTitle)
-                        }
+                        LineupsContentView(
+                            sport: sport, leaguePath: leaguePath, sides: detail.lineups
+                        )
                     }
                     .listRowBackground(AppTheme.surface)
                 } else if selectedTab == .stats {
@@ -557,7 +636,7 @@ struct MatchDetailView: View {
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
-            } else if let start = seedMatch?.startDate ?? detail?.header?.startDate {
+            } else if let start = detail?.header?.startDate ?? seedMatch?.startDate {
                 Text(MatchesView.kickoffText(start))
                     .font(.title3.weight(.bold))
                     .multilineTextAlignment(.center)
@@ -576,7 +655,7 @@ struct MatchDetailView: View {
     /// the inning, so neither shipped label applies.
     private var baseballStatusText: String? {
         guard sport == .mlb else { return nil }
-        let raw = seedMatch?.statusDetail ?? detail?.header?.statusDetail
+        let raw = detail?.header?.statusDetail ?? seedMatch?.statusDetail
         let trimmed = raw?.trimmingCharacters(in: .whitespaces)
         return (trimmed?.isEmpty == false) ? trimmed : nil
     }
@@ -593,7 +672,7 @@ struct MatchDetailView: View {
                     Text(baseballStatusText)
                         .font(AppTheme.fontBadge)
                         .monospacedDigit()
-                } else if let clock = seedMatch?.displayClock ?? detail?.header?.displayClock {
+                } else if let clock = detail?.header?.displayClock ?? seedMatch?.displayClock {
                     Text(clock)
                         .font(AppTheme.fontBadge)
                         .monospacedDigit()
@@ -652,54 +731,30 @@ struct MatchDetailView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: Reminder (item 10e)
+    // MARK: Kickoff push (build 84, item 15; build 90, SP22)
 
-    @ViewBuilder
-    private var reminderSection: some View {
-        if let seedMatch, seedMatch.state == .upcoming,
-           let start = seedMatch.startDate, start.addingTimeInterval(-15 * 60) > Date() {
-            Section {
-                Toggle(isOn: Binding(
-                    get: { reminderOn },
-                    set: { newValue in
-                        // Build 66 (item 18): NO optimistic ON —
-                        // reminderOn is set only from the CONFIRMED
-                        // state re-read after the async
-                        // authorization/scheduling completes; on
-                        // denial or a past fire date it stays false.
-                        Task {
-                            _ = await MatchReminderService.shared.setReminder(
-                                match: seedMatch, leaguePath: leaguePath,
-                                sport: sport, enabled: newValue
-                            )
-                            reminderOn = MatchReminderService.shared.isScheduled(eventId: eventId)
-                        }
-                    }
-                )) {
-                    Label(L("matches.reminder.title"), systemImage: "bell")
-                        .font(AppTheme.fontCardTitle)
-                }
-                .tint(AppTheme.accent)
-            }
-            .listRowBackground(AppTheme.surface)
-        }
-    }
-
-    // MARK: Kickoff push (build 84, item 15)
-
-    /// Any-match kickoff push: ON stores the fixture in
+    /// THE match reminder (build 90, SP22): the local
+    /// 15-minute reminder section that used to sit above this
+    /// one is removed — two bell sections for one intent
+    /// confused more than they offered (S5 A5), and the
+    /// watcher push is the mechanism that survives app
+    /// closure. ON stores the fixture in
     /// MatchKickoffPushStore and re-uploads the watcher
     /// registration (the `matches` array rides additively);
     /// the watcher fires ONE push at kickoff and drops it.
-    /// Separate from the local 15-minute reminder above.
+    /// The section renders only while the match is genuinely
+    /// upcoming with a future kickoff — judged on the
+    /// summary-refreshed state, not the possibly stale seed
+    /// (S5 A14: a started match could previously be armed
+    /// with a kickoff time in the past).
     @ViewBuilder
     private var kickoffPushSection: some View {
-        if let seedMatch, seedMatch.state == .upcoming {
+        if let seedMatch, state == .upcoming,
+           let start = seedMatch.startDate, start > Date() {
             Section {
                 Toggle(isOn: Binding(
                     get: { kickoffPushOn },
                     set: { newValue in
-                        kickoffPushOn = newValue
                         MatchKickoffPushStore.shared.set(
                             match: seedMatch, leaguePath: leaguePath,
                             sport: sport, enabled: newValue
@@ -715,6 +770,12 @@ struct MatchDetailView: View {
                             PushNotificationService.shared.ensureAuthorizationAndRegister()
                         }
                         PushNotificationService.shared.uploadRegistration()
+                        // Build 90 (SP22): CONFIRMED state only
+                        // — the toggle re-reads the store after
+                        // the write (the build-66 rule), never
+                        // the optimistic value it was handed.
+                        kickoffPushOn = MatchKickoffPushStore.shared
+                            .contains(eventId: eventId)
                     }
                 )) {
                     Label(L("matches.kickoff_push"), systemImage: "bell.badge")
@@ -1172,7 +1233,7 @@ struct MatchDetailView: View {
                 .monospacedDigit()
                 .foregroundStyle(event.kind == .goal || event.kind == .scoring ? AppTheme.accent : .secondary)
                 .frame(width: 44, alignment: .trailing)
-            kindIcon(event.kind)
+            kindIcon(event)
                 .frame(width: 18)
             PlayerPhotoView(url: event.headshotURL, name: event.playerName, size: 30)
             VStack(alignment: .leading, spacing: 1) {
@@ -1180,15 +1241,44 @@ struct MatchDetailView: View {
                     .font(AppTheme.fontCardTitle)
                     .lineLimit(2)
                 if let detail = event.detail {
+                    // Build 90 (SP1): a keyEvents row's detail
+                    // carries type + team + the second
+                    // participant (a substitution's other
+                    // player, a goal's assist) — two lines so
+                    // it never truncates mid-name.
                     Text(detail)
                         .font(AppTheme.fontMetadata)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
             }
             Spacer(minLength: 0)
         }
         .padding(.vertical, 2)
+    }
+
+    /// Build 90 (SP1): rows built from the summary's
+    /// `keyEvents` carry their payload type id — substitutions
+    /// and penalty events get their own glyphs instead of the
+    /// generic dot every non-goal event used to share. All
+    /// other rows fall through to the kind switch below.
+    @ViewBuilder
+    private func kindIcon(_ event: MatchTimelineEvent) -> some View {
+        if let typeId = event.keyEventTypeId, event.kind == .other {
+            if typeId == "substitution" {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            } else if typeId.hasPrefix("penalty") {
+                Image(systemName: "target")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+            } else {
+                kindIcon(event.kind)
+            }
+        } else {
+            kindIcon(event.kind)
+        }
     }
 
     @ViewBuilder
@@ -1210,6 +1300,69 @@ struct MatchDetailView: View {
             Image(systemName: "circle.fill")
                 .font(.system(size: 6))
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Form (build 90, SP3)
+
+    /// One team's last-five block: crest + name + the W/D/L
+    /// chips (the shared FormChipsRow), then one row per
+    /// result — outcome letter, opponent, competition, and
+    /// the score as played. Payload order and payload values
+    /// throughout; nothing is composed or invented.
+    private func formBlock(_ block: MatchTeamForm) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                CachedImage(
+                    url: block.logoURL,
+                    width: 22, height: 22, cornerRadius: 11, iconName: "shield"
+                )
+                Text(block.teamName ?? "")
+                    .font(AppTheme.fontCardTitle)
+                    .lineLimit(1)
+                Spacer()
+                FormChipsRow(results: block.results.compactMap { $0.result })
+            }
+            ForEach(block.results) { result in
+                HStack(spacing: 8) {
+                    Text(result.result ?? "")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(formResultColor(result.result))
+                        .frame(width: 14, alignment: .center)
+                    CachedImage(
+                        url: result.opponentLogoURL,
+                        width: 18, height: 18, cornerRadius: 9, iconName: "shield"
+                    )
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("\(result.atVs ?? "") \(result.opponentName ?? "")")
+                            .font(AppTheme.fontMetadata)
+                            .lineLimit(1)
+                        if let competition = result.competitionName {
+                            Text(competition)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                    if let score = result.scoreText {
+                        Text(score)
+                            .font(AppTheme.fontMetadata.weight(.semibold))
+                            .monospacedDigit()
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// The form letter's color — the standings chips' own
+    /// palette (W green / L red / D grey).
+    private func formResultColor(_ result: String?) -> Color {
+        switch result {
+        case "W": return Color(red: 0.13, green: 0.62, blue: 0.28)
+        case "L": return Color(red: 0.85, green: 0.22, blue: 0.24)
+        default: return Color(red: 0.45, green: 0.47, blue: 0.50)
         }
     }
 

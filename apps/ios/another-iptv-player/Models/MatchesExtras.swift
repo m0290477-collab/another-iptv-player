@@ -145,109 +145,6 @@ enum MatchesStandingsService {
     }
 }
 
-// MARK: - 10b Top scorers (soccer, core API leaders)
-
-struct ScorerEntry: Identifiable {
-    var id: String { athleteId }
-    let athleteId: String
-    let name: String
-    let teamName: String?
-    let goals: Int
-    let headshotURL: URL?
-}
-
-enum MatchesScorersService {
-    private struct LeadersWire: Decodable {
-        let categories: [Category]?
-        struct Category: Decodable {
-            let name: String?
-            let leaders: [Leader]?
-        }
-        struct Leader: Decodable {
-            let value: Double?
-            let athlete: Ref?
-            let team: Ref?
-        }
-        struct Ref: Decodable { let ref: String?; enum CodingKeys: String, CodingKey { case ref = "$ref" } }
-    }
-    private struct NameWire: Decodable { let displayName: String?; let name: String? }
-
-    /// Season leaders live on the CORE api as $ref graphs:
-    /// categories → goalsLeaders → leaders(value = goals,
-    /// athlete/team = reference URLs whose last path component
-    /// is the id — the headshot comes from the item-8c CDN
-    /// pattern; names need one small dereference each, fetched
-    /// concurrently). Season year = the European season's start
-    /// year (Jul–Jun). Leagues that publish no leaders return an
-    /// empty list — honest empty upstream.
-    /// Build 88 (F1): `limit` bounds the per-league deref fan-out
-    /// (each leader costs up to two small core-API dereferences).
-    /// The per-league page keeps the full 15; the cross-league
-    /// page passes a smaller cap — it only ever shows the merged
-    /// top 40, so a league's 9th-best scorer can never appear.
-    static func fetch(leaguePath: String, limit: Int = 15) async -> [ScorerEntry] {
-        let now = Date()
-        let comps = Calendar.current.dateComponents([.year, .month], from: now)
-        let season = (comps.month ?? 1) >= 7 ? (comps.year ?? 2026) : (comps.year ?? 2026) - 1
-        // Build 83 (item 3): callers pass the full site path
-        // ("soccer/eng.1") — the form every other Matches
-        // service takes — but the core API's leagues segment
-        // takes the bare slug ("eng.1"). Interpolating the
-        // full path produced …/leagues/soccer/eng.1/…, which
-        // the core API answers HTTP 400, so Top Scorers had
-        // been silently empty for every league. Verified live
-        // 2026-11-20: the slug form returns goalsLeaders for
-        // all 17 catalog leagues.
-        let slug = leaguePath.split(separator: "/").last.map(String.init) ?? leaguePath
-        let urlString = "https://sports.core.api.espn.com/v2/sports/soccer/leagues/\(slug)/seasons/\(season)/types/1/leaders"
-        guard let url = URL(string: urlString) else { return [] }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 20
-        guard let (data, _) = try? await URLSession.shared.data(for: request),
-              let wire = try? JSONDecoder().decode(LeadersWire.self, from: data),
-              let category = (wire.categories ?? []).first(where: { $0.name == "goalsLeaders" })
-                ?? wire.categories?.first else { return [] }
-        let leaders = Array((category.leaders ?? []).prefix(limit))
-        return await withTaskGroup(of: ScorerEntry?.self) { group in
-            for leader in leaders {
-                group.addTask {
-                    guard let ref = leader.athlete?.ref,
-                          let athleteId = ref.split(separator: "/").last.map(String.init) else { return nil }
-                    let name = await derefName(ref)
-                    guard let name else { return nil }
-                    let teamName = await leader.team?.ref.asyncFlatMap { await derefName($0) }
-                    return ScorerEntry(
-                        athleteId: athleteId,
-                        name: name,
-                        teamName: teamName,
-                        goals: Int(leader.value ?? 0),
-                        headshotURL: URL(string: "https://a.espncdn.com/i/headshots/soccer/players/full/\(athleteId).png")
-                    )
-                }
-            }
-            var out: [ScorerEntry] = []
-            for await entry in group { if let entry { out.append(entry) } }
-            return out.sorted { $0.goals > $1.goals }
-        }
-    }
-
-    private static func derefName(_ ref: String) async -> String? {
-        guard let url = URL(string: ref) else { return nil }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 15
-        guard let (data, _) = try? await URLSession.shared.data(for: request),
-              let wire = try? JSONDecoder().decode(NameWire.self, from: data) else { return nil }
-        return wire.displayName ?? wire.name
-    }
-}
-
-private extension Optional where Wrapped == String {
-    func asyncFlatMap(_ transform: (String) async -> String?) async -> String? {
-        guard let self else { return nil }
-        return await transform(self)
-    }
-}
-
 // MARK: - 10c Watch on your channels (local data only)
 
 struct WatchChannelHit: Identifiable {
@@ -355,6 +252,34 @@ final class MatchReminderService {
         set { UserDefaults.standard.set(Array(newValue), forKey: defaultsKey) }
     }
 
+    /// Build 90 (SP22): prune reminders whose fire date has
+    /// passed. The id set previously grew one-way — a fired
+    /// reminder's id reported "scheduled" forever and could
+    /// never be cleaned from any UI (S5 A6). The pending
+    /// requests are the truth: an id survives only while its
+    /// request is still pending with a future trigger date,
+    /// and elapsed requests are removed outright.
+    func prunePast() async {
+        let center = UNUserNotificationCenter.current()
+        let pending = await center.pendingNotificationRequests()
+        let prefix = "match-reminder-"
+        var liveIds = Set<String>()
+        var deadRequestIds: [String] = []
+        for request in pending where request.identifier.hasPrefix(prefix) {
+            let eventId = String(request.identifier.dropFirst(prefix.count))
+            let trigger = request.trigger as? UNCalendarNotificationTrigger
+            if let next = trigger?.nextTriggerDate(), next > Date() {
+                liveIds.insert(eventId)
+            } else {
+                deadRequestIds.append(request.identifier)
+            }
+        }
+        if !deadRequestIds.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: deadRequestIds)
+        }
+        scheduledIds = scheduledIds.intersection(liveIds)
+    }
+
     /// Build 66 (item 18): reports its CONFIRMED outcome — the
     /// returned Bool is the post-operation `isScheduled(eventId:)`
     /// state, never an optimistic claim. Enabling returns false
@@ -429,6 +354,9 @@ struct SquadPlayer: Identifiable {
     /// photo fallback's identity gates (never rendered).
     var citizenship: String? = nil
     var dateOfBirth: String? = nil
+    /// Build 90 (SP12): the roster payload's jersey number,
+    /// rendered on the team page's squad rows.
+    var jersey: String? = nil
 }
 
 enum TeamService {
@@ -462,6 +390,11 @@ enum TeamService {
             /// carries both; other sports may not).
             let citizenship: String?
             let dateOfBirth: String?
+            /// Build 90 (SP12): the roster payload's jersey
+            /// number (verified live 2026-11-21: present for
+            /// 31/31 Arsenal athletes) — decoded but never
+            /// rendered until now.
+            let jersey: String?
             /// Build 85: baseball's roster payload GROUPS its
             /// athletes by position — each top-level entry is a
             /// group ({position: "Pitchers", items: [...]})
@@ -473,7 +406,35 @@ enum TeamService {
         struct Pos: Decodable { let displayName: String?; let name: String? }
     }
 
+    /// Build 90 (SP4): the per-sport session cache for
+    /// `allTeams` — team search is the sole caller and it
+    /// opens on demand, so the first open pays the fetches
+    /// and every repeat open this session is free. Only
+    /// non-empty results are cached, so a failed open can
+    /// retry on the next open.
+    private final class AllTeamsCache: @unchecked Sendable {
+        static let shared = AllTeamsCache()
+        private let lock = NSLock()
+        private var entries: [String: [TeamRef]] = [:]
+        func get(_ sport: MatchSport) -> [TeamRef]? {
+            lock.lock(); defer { lock.unlock() }
+            return entries[sport.rawValue]
+        }
+        func put(_ sport: MatchSport, _ teams: [TeamRef]) {
+            lock.lock(); defer { lock.unlock() }
+            entries[sport.rawValue] = teams
+        }
+    }
+
     /// 12c: every team in a sport's leagues (for search).
+    /// Build 90 (SP4): for soccer this iterates the full
+    /// 17-league browser catalog, not just the featured six
+    /// in `leaguePaths` — Ajax, Celtic, Porto, Club América,
+    /// Palmeiras, every MLS side and the Europa/Conference
+    /// clubs could not be searched (and therefore not
+    /// followed) before. The site/v2 teams endpoint serves
+    /// every catalog league in the identical wire shape
+    /// (ned.1 verified live 2026-11-21: 18 teams).
     static func allTeams(sport: MatchSport) async -> [TeamRef] {
         // Build 87 (item 1): NHL teams come from the NHL API's
         // standings payload (abbrev-keyed TeamRefs), never the
@@ -481,8 +442,14 @@ enum TeamService {
         if sport == .nhl {
             return await NHLService.allTeams()
         }
+        if let cached = AllTeamsCache.shared.get(sport) {
+            return cached
+        }
+        let paths = sport == .soccer
+            ? MatchSport.soccerLeagueCatalog.map { $0.leaguePath }
+            : sport.leaguePaths
         var out: [TeamRef] = []
-        for leaguePath in sport.leaguePaths {
+        for leaguePath in paths {
             let path = leaguePath
             guard let url = URL(string: "https://site.api.espn.com/apis/site/v2/sports/\(path)/teams"),
                   let (data, _) = try? await URLSession.shared.data(from: url),
@@ -495,6 +462,9 @@ enum TeamService {
                     logoURL: team.logos?.first?.href.flatMap { URL(string: $0) }
                 ))
             }
+        }
+        if !out.isEmpty {
+            AllTeamsCache.shared.put(sport, out)
         }
         return out
     }
@@ -558,7 +528,8 @@ enum TeamService {
                 headshotURL: headshot,
                 athleteId: athlete.id,
                 citizenship: athlete.citizenship,
-                dateOfBirth: athlete.dateOfBirth
+                dateOfBirth: athlete.dateOfBirth,
+                jersey: athlete.jersey
             )
         }
     }

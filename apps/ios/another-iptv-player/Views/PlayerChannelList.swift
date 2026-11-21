@@ -139,7 +139,7 @@ struct PlayerChannelList: View {
                     .foregroundStyle(isCurrent ? AppTheme.accent : .white.opacity(0.55))
                     .frame(width: 30, alignment: .trailing)
                 CachedImage(
-                    url: channel.streamIcon.flatMap { URL(string: $0) },
+                    url: ArtworkURL.url(from: channel.streamIcon),
                     width: 62,
                     height: 38,
                     cornerRadius: AppTheme.smallCornerRadius,

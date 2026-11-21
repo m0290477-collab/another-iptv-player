@@ -311,6 +311,7 @@ struct FavoritesView: View {
             }
             .padding(.horizontal, 16)
         }
+        .sectionAppear()
     }
 
     /// Favorite Movies shelf: a poster rail (same cards, menus
@@ -326,8 +327,8 @@ struct FavoritesView: View {
                                 playlistId: playlist.id,
                                 stream: item.stream,
                                 categoryName: item.categoryName,
-                                posterWidth: posterMetrics.searchCardWidth,
-                                posterHeight: posterMetrics.searchCardHeight,
+                                posterWidth: posterMetrics.shelfPosterWidth,
+                                posterHeight: posterMetrics.shelfPosterHeight,
                                 imageLoadProfile: ImageLoadProfile.shelf,
                                 watchProgress: vodProgressMap[String(item.stream.streamId)]
                             )
@@ -349,6 +350,7 @@ struct FavoritesView: View {
             .scrollClipDisabled()
             .shelfEdgeFade()
         }
+        .sectionAppear()
     }
 
     /// Favorite Series shelf: a poster rail, same treatment.
@@ -363,8 +365,8 @@ struct FavoritesView: View {
                                 playlistId: playlist.id,
                                 stream: item.series,
                                 categoryName: item.categoryName,
-                                posterWidth: posterMetrics.searchCardWidth,
-                                posterHeight: posterMetrics.searchCardHeight,
+                                posterWidth: posterMetrics.shelfPosterWidth,
+                                posterHeight: posterMetrics.shelfPosterHeight,
                                 imageLoadProfile: ImageLoadProfile.shelf,
                                 watchProgress: seriesProgressMap[String(item.series.seriesId)]
                             )
@@ -386,6 +388,7 @@ struct FavoritesView: View {
             .scrollClipDisabled()
             .shelfEdgeFade()
         }
+        .sectionAppear()
     }
 
     /// Round 10: the designed empty state — the type's glyph in an

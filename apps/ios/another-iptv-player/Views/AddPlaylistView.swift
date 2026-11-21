@@ -224,6 +224,12 @@ struct AddPlaylistView: View {
         }
         // The sheet must not be dismissible by scrolling while verification/sync is running (see AddM3UPlaylistView).
         .interactiveDismissDisabled(isLoading)
+        // Build 90: a sheet is a NEW presentation hierarchy —
+        // the hub root's one GlowingToggleStyle application does
+        // not cross into it, so this form's Filter Adult switch
+        // rendered the STOCK iOS switch. Same one application,
+        // here at the sheet's own root.
+        .toggleStyle(GlowingToggleStyle())
     }
 
     private func savePlaylist() async {

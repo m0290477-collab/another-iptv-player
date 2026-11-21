@@ -313,13 +313,25 @@ struct LiveStreamsView: View {
         // away only when the user scrolls. Pushed screens (group
         // pages, All Channels, Favorites) declare their own
         // titles and get the bar back.
+        // Build 90 (F2): the hiding is owned by the dashboard
+        // chrome now (`hidesNavigationBar: true` at the
+        // DashboardView call site). Build 89's inner
+        // `.toolbar(.hidden)` here was DEAD — the outer modifier
+        // forced the bar `.visible` and rendered its own large
+        // title + Favorites star above the pill, which is the
+        // duplicated "Live TV" title/star in the owner's build-89
+        // recording (detection D2, P2). The inner modifier is
+        // removed; with the bar genuinely hidden, the grid
+        // content's toolbar sort/filter also has no bar to render
+        // in on this tab (the pill's instance is the single
+        // entry), while on All Channels the same toolbar item
+        // still renders in that page's own bar, as before.
         // === B5 (build 61) Item 11: Multiview entry — wave-2 (B8):
         // the entry moved into the header pill (same action, same
         // disabled state, same accessibility label) — see
         // `liveTabHeaderRow`. ===
         // Round 8 (D-2): still NO second AllLiveView entry — the
         // Trending shelf's "See all" stays the ONE path.
-        .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showingCategoryPicker) {
             CategoryPickerSheet(
                 title: L("category_picker.title"),
@@ -950,6 +962,34 @@ struct LiveStreamsView: View {
         gridItems = result.grid
         gridSections = result.gridSections
         liveChannelSections = result.sections
+        // Build 90 (F5b): shelves mode gets its up-front warm-up
+        // HERE, at model publish. The grid has always warmed its
+        // first logos when its model is built (`LiveCategoryContent
+        // .recompute` ends in a prefetch), but the shelves issued
+        // NO prefetch from this pass at all — a shelf started
+        // warming only when its own row appeared on screen, so a
+        // cold open painted whole shelves as placeholder tiles
+        // and a fast fling outran the per-row warm-ups (detection
+        // D2, P1 mechanism 1). Warm the first two shelves' head
+        // batches with the tiles' exact render requests; the
+        // rows' own on-appear prefetch stays as the deeper-scroll
+        // mechanism. Grid mode skips this — its model-build
+        // prefetch already covers the same moment.
+        if liveViewMode == "list" {
+            for category in result.categories.prefix(2) {
+                let head = (result.itemsByCategory[category.id] ?? [])
+                    .prefix(CategoryShelf.prefetchHeadCount)
+                let urls = head
+                    .compactMap { $0.stream.streamIcon }
+                    .compactMap { ArtworkURL.url(from: $0) }
+                ListImagePrefetch.start(
+                    urls: urls,
+                    width: LiveChannelTileMetrics.logoWidth,
+                    height: LiveChannelTileMetrics.logoHeight,
+                    loadProfile: .shelf
+                )
+            }
+        }
     }
 
     private func liveStream(for item: DBWatchHistory) -> DBLiveStream? {
@@ -984,10 +1024,24 @@ struct LiveCategoryShelfRow: View, Equatable {
     var isStreamsLoading: Bool = false
 
     static func == (lhs: LiveCategoryShelfRow, rhs: LiveCategoryShelfRow) -> Bool {
-        lhs.playlist.id == rhs.playlist.id &&
-        lhs.category == rhs.category &&
-        lhs.items == rhs.items &&
-        lhs.isStreamsLoading == rhs.isStreamsLoading
+        // Build 90 (F8): the cheap boundary signature, staged
+        // into separate statements (the build-89 fix-round-1
+        // lesson — one chained expression in this file timed out
+        // the type-checker). The full-array equality this
+        // replaces walked EVERY item of EVERY shelf row on every
+        // parent re-render (~6.8k items across ~100 rows —
+        // detection D2, S5), where the grid's content view has
+        // used count + boundary ids since build 89. A mid-list
+        // change with identical boundaries is invisible until
+        // another input moves — the same accepted trade-off as
+        // `LiveCategoryContent.==`.
+        let samePlaylist = lhs.playlist.id == rhs.playlist.id
+        let sameCategory = lhs.category == rhs.category
+        let sameCount = lhs.items.count == rhs.items.count
+        let sameFirst = lhs.items.first?.stream.streamId == rhs.items.first?.stream.streamId
+        let sameLast = lhs.items.last?.stream.streamId == rhs.items.last?.stream.streamId
+        let sameLoading = lhs.isStreamsLoading == rhs.isStreamsLoading
+        return samePlaylist && sameCategory && sameCount && sameFirst && sameLast && sameLoading
     }
 
     var body: some View {
@@ -1057,6 +1111,13 @@ struct LiveCategoryShelfRow: View, Equatable {
                     // fling doesn't leave the shared prefetch queue
                     // full of shelves the user already passed.
                     stopPrefetchIcons(from: items)
+                    // Build 90 (F5a): retract the per-cell WINDOW
+                    // batches too — the head retraction alone left
+                    // every window batch (8 logos per appeared
+                    // cell) queued forever, draining through the
+                    // shared 6-wide prefetcher long after the
+                    // shelf was gone (detection D2, P1 mechanism 3).
+                    stopPrefetchWindows(from: items)
                 }
             }
         }
@@ -1077,6 +1138,12 @@ struct LiveCategoryShelfRow: View, Equatable {
 
     /// Round 20 (R20-5): the scroll window ahead of the cell at
     /// `index` (see ListImagePrefetch.scrollWindow).
+    /// Build 90 (F5a): the batch starts under this row's keyed
+    /// prefetch key for the cell, so the row's `onDisappear`
+    /// can retract it by key (see `stopPrefetchWindows`) — the
+    /// plain start/stop pair would force the row to rebuild
+    /// the exact URL list at disappear time, which live
+    /// catalog state no longer guarantees.
     private func prefetchWindow(from list: [LiveStreamWithCategory], after index: Int) {
         let start = index + 1
         guard start < list.count else { return }
@@ -1084,11 +1151,19 @@ struct LiveCategoryShelfRow: View, Equatable {
             .compactMap { $0.stream.streamIcon }
             .compactMap { ArtworkURL.url(from: $0) }
         ListImagePrefetch.start(
+            keyed: windowPrefetchKey(after: index),
             urls: urls,
             width: LiveChannelTileMetrics.logoWidth,
             height: LiveChannelTileMetrics.logoHeight,
             loadProfile: .shelf
         )
+    }
+
+    /// Build 90 (F5a): the keyed-prefetch key for the window
+    /// batch started by the cell at `index` — stable per row
+    /// (playlist + category) and per cell position.
+    private func windowPrefetchKey(after index: Int) -> String {
+        "live-shelf-window|\(playlist.id.uuidString)|\(category.id)|\(index)"
     }
 
     private func stopPrefetchIcons(from list: [LiveStreamWithCategory]) {
@@ -1102,88 +1177,18 @@ struct LiveCategoryShelfRow: View, Equatable {
             loadProfile: .shelf
         )
     }
-}
 
-struct LiveStreamCard: View {
-    let playlistId: UUID
-    let stream: DBLiveStream
-    var width: CGFloat = 120
-    var iconSize: CGFloat = 120
-    var imageLoadProfile: ImageLoadProfile = .standard
-    var onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil
-
-    // Build 61 (B8): R2 NEW badge + C10 pin indicator, read from the
-    // stores at render (cards are cheap; the stores bump `version`).
-    @ObservedObject private var firstSeenStore = FirstSeenStore.shared
-    @ObservedObject private var pinnedStore = PinnedChannelStore.shared
-    // Build 61 (FA, H1): audio-only active indicator, read from the
-    // same store the long-press toggle writes and the player reads.
-    @ObservedObject private var audioOnlyStore = AudioOnlyStore.shared
-
-    var body: some View {
-        Button(action: {
-            onStreamSelected?(stream, nil)
-        }) {
-            VStack(alignment: .center, spacing: 10) {
-                CachedImage(
-                    url: stream.streamIcon.flatMap { ArtworkURL.url(from: $0) },
-                    width: iconSize,
-                    height: iconSize,
-                    cornerRadius: AppTheme.cornerRadius,
-                    iconName: "tv",
-                    loadProfile: imageLoadProfile
-                )
-                .overlay(alignment: .topLeading) {
-                    if firstSeenStore.isNewLive(playlistId: playlistId, streamId: stream.streamId) {
-                        NewContentBadge()
-                            .padding(6)
-                    }
-                }
-                .overlay(alignment: .topTrailing) {
-                    if pinnedStore.isPinned(playlistId: playlistId, streamId: stream.streamId) {
-                        Image(systemName: "pin.fill")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(AppTheme.accent)
-                            .padding(6)
-                    }
-                }
-                // Build 61 (FA, H1): audio-only indicator — shown
-                // only while the store says this channel plays
-                // audio-only (explicit choice or Settings default).
-                .overlay(alignment: .bottomTrailing) {
-                    if audioOnlyStore.isEnabled(playlistId: playlistId, streamId: stream.streamId) {
-                        Image(systemName: "speaker.wave.2.fill")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.white)
-                            .padding(4)
-                            .background(AppTheme.accent, in: Circle())
-                            .padding(6)
-                            .accessibilityLabel(L("audioonly.badge"))
-                    }
-                }
-
-                Text(stream.name)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .frame(width: width)
-                    .foregroundColor(.primary)
-
-                // Build 61 (B8, H5): the provider's channel number,
-                // only when the provider supplied one.
-                if let number = stream.channelNumber {
-                    Text(L("channels.number_format", String(number)))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-            }
+    /// Build 90 (F5a): retract every window batch this row
+    /// started, by key — the keyed API remembers the exact
+    /// batch, so no URL list is rebuilt here. Unknown keys
+    /// are a no-op in that API, so positions whose cells
+    /// never appeared cost one dictionary lookup each;
+    /// batches already in flight finish into the memory
+    /// cache, exactly as with the head retraction.
+    private func stopPrefetchWindows(from list: [LiveStreamWithCategory]) {
+        for index in list.indices {
+            ListImagePrefetch.stop(keyed: windowPrefetchKey(after: index))
         }
-        // Build 81 (item 8): press feedback on the channel tile
-        // (was .plain — a tap gave no visible response).
-        .buttonStyle(PressScaleButtonStyle())
     }
 }
 
@@ -1204,11 +1209,22 @@ enum LiveTabBarClearance {
 /// shrinks modestly (216×122 → 192×108, the same 16:9 family);
 /// the grid surfaces use the tile's flexible-width form, whose
 /// card follows its grid cell at the same 16:9 ratio.
+/// Build 90 (F3): the logo box grows 132×74 → 168×92 (12 pt
+/// side / 8 pt vertical margins inside the 192×108 card).
+/// Aspect-fit in the old box shrank wide wordmark logos
+/// (~3.5–4:1, e.g. beIN SPORTS) to ≈132×33–38 pt strips —
+/// a third of the card's height, faint on the dark card
+/// gradient (detection D2, P3). A 3.5:1 wordmark now renders
+/// 168×48 and squarer logos gain the full 92 pt. The request
+/// (504×276 px at 3x) stays under both CachedImage profile
+/// caps (shelf 640 / grid 768), so the decode is still exact
+/// device pixels and every surface + prefetch follows from
+/// this one enum, unchanged.
 enum LiveChannelTileMetrics {
     static let width: CGFloat = 192
     static let height: CGFloat = 108
-    static let logoWidth: CGFloat = 132
-    static let logoHeight: CGFloat = 74
+    static let logoWidth: CGFloat = 168
+    static let logoHeight: CGFloat = 92
 }
 
 /// Build 88: the approved mockup's press treatment for the wide
@@ -1256,8 +1272,11 @@ private struct LiveTileButtonStyle: ButtonStyle {
 /// card gradient, aspect-fit — never stretched, never cropped —
 /// and the FULL channel name stands under the tile. One tile
 /// system for the Live TV category shelves and the grouped "All"
-/// browse; the small square `LiveStreamCard` remains only where
-/// it was already the surface (the trending strip).
+/// browse — and, since build 89, the flat grids and the
+/// trending strip too. Build 90 (F9): the small square
+/// `LiveStreamCard` is DELETED together with its only caller
+/// (the unreferenced `RecentChannelsRow`); this tile is the
+/// one channel card on every Live TV surface.
 struct LiveChannelTile: View {
     let playlistId: UUID
     let stream: DBLiveStream
@@ -1417,6 +1436,13 @@ struct TrendingChannelsShelf: View {
             .onAppear {
                 prefetchIcons(from: items)
             }
+            .onDisappear {
+                // Build 90 (F5a): the same head-batch retraction
+                // the category rows run — this shelf never had
+                // one, so its batch stayed queued after the home
+                // header scrolled away.
+                stopPrefetchIcons(from: items)
+            }
         }
         .padding(.bottom, 6)
     }
@@ -1437,6 +1463,20 @@ struct TrendingChannelsShelf: View {
             .compactMap { $0.streamIcon }
             .compactMap { ArtworkURL.url(from: $0) }
         ListImagePrefetch.start(
+            urls: urls,
+            width: LiveChannelTileMetrics.logoWidth,
+            height: LiveChannelTileMetrics.logoHeight,
+            loadProfile: .shelf
+        )
+    }
+
+    /// Build 90 (F5a): the head batch's retraction counterpart
+    /// (same slice, same request parameters as `prefetchIcons`).
+    private func stopPrefetchIcons(from list: [DBLiveStream]) {
+        let urls = list.prefix(CategoryShelf.prefetchHeadCount)
+            .compactMap { $0.streamIcon }
+            .compactMap { ArtworkURL.url(from: $0) }
+        ListImagePrefetch.stop(
             urls: urls,
             width: LiveChannelTileMetrics.logoWidth,
             height: LiveChannelTileMetrics.logoHeight,

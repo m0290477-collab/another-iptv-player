@@ -34,7 +34,7 @@ struct ReorderChannelsView: View {
                         ForEach(channels) { channel in
                             HStack(spacing: 12) {
                                 CachedImage(
-                                    url: channel.streamIcon.flatMap { URL(string: $0) },
+                                    url: ArtworkURL.url(from: channel.streamIcon),
                                     width: 40, height: 40,
                                     iconName: "tv",
                                     loadProfile: .grid

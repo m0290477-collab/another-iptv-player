@@ -145,6 +145,36 @@ enum CoreCoordinates {
         }
     }
 
+    /// Build 90 (SP5): soccer leagues whose season is the
+    /// CALENDAR year — MLS, the Brazilian Série A and the
+    /// Argentine Liga Profesional run roughly Feb–Dec. The
+    /// Jul–Jun rule above requested the PREVIOUS, completed
+    /// season for them from January to June and presented
+    /// its leaders/profiles as the current race. Verified
+    /// live 2026-11-21: usa.1 / bra.1 / arg.1 all publish
+    /// their full leaders sets at seasons/<calendar year>.
+    /// The February threshold mirrors MLB's rule (before
+    /// the season opens, the just-completed season is the
+    /// latest real one). mex.1 is deliberately NOT in this
+    /// set: ESPN keys Liga MX as a Jun–Jun year — its
+    /// scoreboard season displayName is "2026-27 Liga BBVA
+    /// MX" (verified live 2026-11-21) — so the Jul–Jun rule
+    /// is already correct for it.
+    static let calendarYearSoccerLeagues: Set<String> = ["usa.1", "bra.1", "arg.1"]
+
+    /// The league-aware season: calendar-year soccer
+    /// leagues key by the calendar year; every other sport
+    /// and league keeps the rule above.
+    static func season(for sport: MatchSport, leaguePath: String, now: Date = Date()) -> Int {
+        guard sport == .soccer,
+              calendarYearSoccerLeagues.contains(slug(from: leaguePath))
+        else { return season(for: sport, now: now) }
+        let comps = Calendar.current.dateComponents([.year, .month], from: now)
+        let year = comps.year ?? 2026
+        let month = comps.month ?? 1
+        return month >= 2 ? year : year - 1
+    }
+
     static func seasonType(for sport: MatchSport) -> Int {
         sport == .soccer ? 1 : 2
     }
@@ -204,6 +234,90 @@ enum CoreDeref {
     }
 }
 
+// MARK: - Leaders name cache (build 90, SP17)
+
+/// Disk cache for the leaders services' $ref name derefs.
+/// A cold leaders open used to fire one small core-API GET
+/// per athlete (and per team) — up to ~540 for MLB's eighteen
+/// categories — and the session cache only helped until the
+/// app relaunched. Resolved names now persist per league per
+/// day through the existing SportsDiskCache (key:
+/// leadernames|<leaguePath>|<yyyyMMdd> — the refs themselves
+/// are league-scoped URLs, so one map serves every category
+/// of that league), seeded lazily on first use and flushed
+/// once per fetch, never per name. Names are stable identity
+/// data; the day scope bounds staleness and the disk cache's
+/// own 7-day sweep bounds growth.
+enum LeaderNameCache {
+    private final class Store: @unchecked Sendable {
+        static let shared = Store()
+        private let lock = NSLock()
+        /// leaguePath → (athlete/team $ref → display name)
+        private var maps: [String: [String: String]] = [:]
+        private var seeded: Set<String> = []
+        private var dirty: Set<String> = []
+
+        func name(_ ref: String, leaguePath: String) -> String? {
+            lock.lock(); defer { lock.unlock() }
+            seedLocked(leaguePath)
+            return maps[leaguePath]?[ref]
+        }
+
+        func store(_ name: String, for ref: String, leaguePath: String) {
+            lock.lock(); defer { lock.unlock() }
+            seedLocked(leaguePath)
+            maps[leaguePath, default: [:]][ref] = name
+            dirty.insert(leaguePath)
+        }
+
+        func flush(leaguePath: String) {
+            lock.lock()
+            guard dirty.contains(leaguePath), let map = maps[leaguePath] else {
+                lock.unlock()
+                return
+            }
+            dirty.remove(leaguePath)
+            lock.unlock()
+            if let encoded = try? JSONEncoder().encode(map) {
+                SportsDiskCache.save(key: diskKey(leaguePath), data: encoded)
+            }
+        }
+
+        private func seedLocked(_ leaguePath: String) {
+            guard !seeded.contains(leaguePath) else { return }
+            seeded.insert(leaguePath)
+            if maps[leaguePath] == nil { maps[leaguePath] = [:] }
+            if let cached = SportsDiskCache.load(key: diskKey(leaguePath)),
+               let decoded = try? JSONDecoder().decode([String: String].self, from: cached.data) {
+                maps[leaguePath] = decoded
+            }
+        }
+
+        private func diskKey(_ leaguePath: String) -> String {
+            "leadernames|\(leaguePath)|\(MatchesService.todayParameter())"
+        }
+    }
+
+    /// The cached name when this league's map already holds
+    /// the ref; otherwise one live deref (the previous
+    /// behaviour), stored for every later caller — including
+    /// the next cold launch.
+    static func name(_ ref: String, leaguePath: String) async -> String? {
+        if let cached = Store.shared.name(ref, leaguePath: leaguePath) {
+            return cached
+        }
+        guard let resolved = await CoreDeref.name(ref) else { return nil }
+        Store.shared.store(resolved, for: ref, leaguePath: leaguePath)
+        return resolved
+    }
+
+    /// Persist a league's map once its fetch has resolved any
+    /// new names (a no-op when nothing was fetched).
+    static func flush(leaguePath: String) {
+        Store.shared.flush(leaguePath: leaguePath)
+    }
+}
+
 // MARK: - League leaders (item 7)
 
 struct LeaderRow84: Identifiable {
@@ -212,6 +326,16 @@ struct LeaderRow84: Identifiable {
     let teamName: String?
     let valueText: String
     let headshotURL: URL?
+    /// Build 90 (SP35): the payload's numeric value behind
+    /// `valueText`, surfaced so cross-league ranking can
+    /// merge rows from several leagues' fetchAll results
+    /// without re-parsing display text. Stamped by
+    /// MatchesLeadersService from the same `values` map its
+    /// sort already computes. Defaulted so the NHL-side
+    /// constructions in Matches87.swift (a separate service
+    /// whose rows are never merged cross-league) compile
+    /// unchanged.
+    var value: Double = 0
     var id: String { athleteId }
 }
 
@@ -222,11 +346,9 @@ struct LeaderCategory84: Identifiable {
 }
 
 /// Season leaders from the CORE api, all categories in ONE
-/// payload per league (verified live 2026-11-21: soccer carries
-/// goalsLeaders AND assistsLeaders; the NBA payload carries
-/// pointsPerGame / assistsPerGame / reboundsPerGame; the NFL
-/// payload carries passingYards / rushingYards /
-/// receivingYards). The view offers exactly the categories the
+/// payload per league (verified live 2026-11-21: soccer
+/// carries twelve categories; the NBA and NFL payloads carry
+/// sixteen each). The view offers exactly the categories the
 /// payload returned — a category ESPN doesn't publish for a
 /// league simply never appears.
 enum MatchesLeadersService {
@@ -234,9 +356,65 @@ enum MatchesLeadersService {
     /// one of them confirmed present in the live payload.
     static func surfacedCategories(sport: MatchSport) -> [String] {
         switch sport {
-        case .soccer: return ["goalsLeaders", "assistsLeaders"]
-        case .nba: return ["pointsPerGame", "assistsPerGame", "reboundsPerGame"]
-        case .nfl: return ["passingYards", "rushingYards", "receivingYards"]
+        // Build 90 (SP2): the soccer core leaders payload
+        // returns TWELVE categories (verified live
+        // 2026-11-21, 25 leaders each, in eng.1, usa.1,
+        // bra.1, arg.1, mex.1 and uefa.champions) — the app
+        // used to whitelist two. Now surfaced: the two races
+        // plus shots on target, accurate passes, SAVES (the
+        // goalkeeper race — keepers were invisible in every
+        // leaders surface) and the two card counts. The
+        // payload's `goals` / `assists` categories stay
+        // excluded: verified byte-identical duplicates of
+        // goalsLeaders / assistsLeaders (same ids, values
+        // and order). foulsCommitted / foulsSuffered /
+        // totalShots ride the same payload but stay
+        // unsurfaced (trivia-grade, per the S2 audit). A
+        // category a league doesn't publish simply never
+        // appears — fetchAll intersects with the payload.
+        case .soccer: return [
+            "goalsLeaders", "assistsLeaders",
+            "shotsOnTarget", "accuratePasses", "saves",
+            "yellowCards", "redCards"
+        ]
+        // Build 90 (SP17): the NBA core leaders payload
+        // returns SIXTEEN categories (verified live
+        // 2026-11-21, 25 leaders each) — the app used to
+        // whitelist three. Now surfaced: the three races
+        // plus steals, blocks, the three shooting
+        // percentages, made threes, double-doubles and
+        // minutes. Four payload categories stay excluded:
+        // `NBARating` and `PER` (ratings — this app never
+        // shows player ratings, the same rule as MLB's
+        // MLBRating), and `avgTurnovers` / `foulsPerGame`
+        // (negative trivia-grade counts, per the S3 audit).
+        // A category a league doesn't publish simply never
+        // appears — fetchAll intersects with the payload.
+        case .nba: return [
+            "pointsPerGame", "assistsPerGame", "reboundsPerGame",
+            "stealsPerGame", "blocksPerGame",
+            "fieldGoalPercentage", "3PointPct", "FreeThrowPct",
+            "3PointsMadePerGame", "doubleDouble", "minutesPerGame"
+        ]
+        // Build 90 (SP17): the NFL core leaders payload
+        // returns SIXTEEN categories (verified live
+        // 2026-11-21, 25 leaders each) — the app used to
+        // whitelist three. Now surfaced: the three yardage
+        // races plus the touchdown races (passing, rushing,
+        // receiving and total), receptions, and the
+        // defensive races — sacks, interceptions, total
+        // tackles and passes defended. `quarterbackRating`
+        // stays excluded: a rating, and this app never
+        // shows player ratings (the same rule as MLB's
+        // MLBRating and the NBA ratings above). A category
+        // a league doesn't publish simply never appears —
+        // fetchAll intersects with the payload.
+        case .nfl: return [
+            "passingYards", "rushingYards", "receivingYards",
+            "passingTouchdowns", "rushingTouchdowns", "receivingTouchdowns",
+            "receptions", "sacks", "interceptions",
+            "totalTackles", "passesDefended", "totalTouchdowns"
+        ]
         // Build 85: EVERY category the MLB core leaders
         // payload verified live 2026-11-21 (25 leaders each,
         // seasons/2026/types/2) — batting first, then
@@ -304,7 +482,9 @@ enum MatchesLeadersService {
             return (categories, cached.rows, nil)
         }
         let slug = CoreCoordinates.slug(from: leaguePath)
-        let season = CoreCoordinates.season(for: sport)
+        // Build 90 (SP5): the league-aware season (calendar-
+        // year soccer leagues key by calendar year).
+        let season = CoreCoordinates.season(for: sport, leaguePath: leaguePath)
         let type = CoreCoordinates.seasonType(for: sport)
         let urlString = "https://sports.core.api.espn.com/v2/sports/\(CoreCoordinates.segment(for: sport))/leagues/\(slug)/seasons/\(season)/types/\(type)/leaders"
         guard let url = URL(string: urlString),
@@ -318,14 +498,20 @@ enum MatchesLeadersService {
         for category in wire.categories ?? [] {
             guard let name = category.name, wanted.contains(name) else { continue }
             displayNames[name] = category.displayName ?? name
-            let leaders = Array((category.leaders ?? []).prefix(15))
+            // Build 90 (SP2 / S2 A3): the payload publishes
+            // 25 leaders per category (verified live across
+            // the sampled leagues) — the old cap threw ranks
+            // 16–25 away after fetching them.
+            let leaders = Array((category.leaders ?? []).prefix(25))
             let mapped = await withTaskGroup(of: LeaderRow84?.self) { group in
                 for leader in leaders {
                     group.addTask {
                         guard let ref = leader.athlete?.ref,
                               let athleteId = ref.split(separator: "/").last?.split(separator: "?").first.map(String.init),
-                              let athleteName = await CoreDeref.name(ref) else { return nil }
-                        let teamName = await leader.team?.ref.asyncFlatMap84 { await CoreDeref.name($0) }
+                              let athleteName = await LeaderNameCache.name(ref, leaguePath: leaguePath) else { return nil }
+                        let teamName = await leader.team?.ref.asyncFlatMap84 {
+                            await LeaderNameCache.name($0, leaguePath: leaguePath)
+                        }
                         return LeaderRow84(
                             athleteId: athleteId,
                             name: athleteName,
@@ -341,16 +527,41 @@ enum MatchesLeadersService {
             }
             // The payload orders leaders by value already; the
             // task group doesn't preserve order, so re-sort by
-            // the numeric value the payload carried.
+            // the numeric value the payload carried. Build 90
+            // (S2 A7): ties fall back to the payload's own
+            // ranking order — sorting by value alone stabilised
+            // the task-group's completion order, so tied rows
+            // shuffled between visits.
             var values: [String: Double] = [:]
-            for leader in leaders {
+            var payloadOrder: [String: Int] = [:]
+            for (index, leader) in leaders.enumerated() {
                 guard let ref = leader.athlete?.ref,
                       let id = ref.split(separator: "/").last?.split(separator: "?").first.map(String.init)
                 else { continue }
                 values[id] = leader.value ?? 0
+                payloadOrder[id] = index
             }
-            rows[name] = mapped.sorted { (values[$0.athleteId] ?? 0) > (values[$1.athleteId] ?? 0) }
+            let sorted = mapped.sorted { a, b in
+                let valueA = values[a.athleteId] ?? 0
+                let valueB = values[b.athleteId] ?? 0
+                if valueA != valueB { return valueA > valueB }
+                let orderA = payloadOrder[a.athleteId] ?? Int.max
+                let orderB = payloadOrder[b.athleteId] ?? Int.max
+                return orderA < orderB
+            }
+            // Build 90 (SP35): stamp each row with the
+            // numeric value the sort just used, so
+            // cross-league consumers (the scorers adapter in
+            // MatchesExtras.swift, the cross-league page) can
+            // merge and re-rank rows without re-parsing
+            // display text.
+            rows[name] = sorted.map { row in
+                var stamped = row
+                stamped.value = values[row.athleteId] ?? 0
+                return stamped
+            }
         }
+        LeaderNameCache.flush(leaguePath: leaguePath)
         SessionCache.shared.put(cacheKey, (rows, displayNames))
         var categories: [LeaderCategory84] = []
         for name in wanted where rows[name] != nil {
@@ -378,7 +589,8 @@ enum MatchesLeadersService {
         sport: MatchSport, leaguePath: String, teamId: String
     ) async -> [(category: String, rows: [LeaderRow84])] {
         let slug = CoreCoordinates.slug(from: leaguePath)
-        let season = CoreCoordinates.season(for: sport)
+        // Build 90 (SP5): the league-aware season, as in fetchAll.
+        let season = CoreCoordinates.season(for: sport, leaguePath: leaguePath)
         let type = CoreCoordinates.seasonType(for: sport)
         let urlString = "https://sports.core.api.espn.com/v2/sports/\(CoreCoordinates.segment(for: sport))/leagues/\(slug)/seasons/\(season)/types/\(type)/teams/\(teamId)/leaders"
         guard let url = URL(string: urlString),
@@ -396,7 +608,7 @@ enum MatchesLeadersService {
                     group.addTask {
                         guard let ref = leader.athlete?.ref,
                               let athleteId = ref.split(separator: "/").last?.split(separator: "?").first.map(String.init),
-                              let athleteName = await CoreDeref.name(ref) else { return nil }
+                              let athleteName = await LeaderNameCache.name(ref, leaguePath: leaguePath) else { return nil }
                         return LeaderRow84(
                             athleteId: athleteId,
                             name: athleteName,
@@ -410,11 +622,42 @@ enum MatchesLeadersService {
                 for await row in group { if let row { out.append(row) } }
                 return out
             }
-            if !rows.isEmpty {
-                output.append((category: category.displayName ?? category.name ?? "", rows: rows))
+            // Build 90 (SP8 / S2 A2): the task group appends in
+            // COMPLETION order and this path never re-sorted —
+            // a team's top scorer could render 2nd or 3rd in
+            // his own category. Mirror fetchAll: numeric value
+            // descending, ties in the payload's own order.
+            var values: [String: Double] = [:]
+            var payloadOrder: [String: Int] = [:]
+            for (index, leader) in leaders.enumerated() {
+                guard let ref = leader.athlete?.ref,
+                      let id = ref.split(separator: "/").last?.split(separator: "?").first.map(String.init)
+                else { continue }
+                values[id] = leader.value ?? 0
+                payloadOrder[id] = index
+            }
+            let sortedRows = rows.sorted { a, b in
+                let valueA = values[a.athleteId] ?? 0
+                let valueB = values[b.athleteId] ?? 0
+                if valueA != valueB { return valueA > valueB }
+                let orderA = payloadOrder[a.athleteId] ?? Int.max
+                let orderB = payloadOrder[b.athleteId] ?? Int.max
+                return orderA < orderB
+            }
+            // Build 90 (SP35): the same value stamping as
+            // fetchAll, so team rows carry their numeric
+            // value too.
+            let stampedRows = sortedRows.map { row in
+                var stamped = row
+                stamped.value = values[row.athleteId] ?? 0
+                return stamped
+            }
+            if !stampedRows.isEmpty {
+                output.append((category: category.displayName ?? category.name ?? "", rows: stampedRows))
             }
             if output.count >= 4 { break }
         }
+        LeaderNameCache.flush(leaguePath: leaguePath)
         return output
     }
 }
@@ -500,6 +743,13 @@ struct PlayerProfile {
     let teamName: String?
     let teamLogoURL: URL?
     let statLines: [(label: String, value: String)]
+    /// Build 90 (SP7): the same season stats GROUPED under
+    /// the payload's own category names, headline lines first
+    /// (see PlayerProfileService.fetchStats). Defaulted so
+    /// the NHL / MLB-enrichment constructors keep building
+    /// their profiles exactly as before — they leave this
+    /// empty and their pages render the flat `statLines`.
+    let statGroups: [(category: String?, lines: [(label: String, value: String)])] = []
     let recentEvents: [(name: String, date: Date)]
 }
 
@@ -623,7 +873,12 @@ enum PlayerProfileService {
     }
 
     private static func fetchScoped(sport: MatchSport, slug: String, athleteId: String) async -> PlayerProfile? {
-        let season = CoreCoordinates.season(for: sport)
+        // Build 90 (SP5): profiles scope by the same
+        // league-aware season as the leaders services — the
+        // slug this function receives keys the calendar-year
+        // rule identically (slug(from:) passes a bare slug
+        // through unchanged).
+        let season = CoreCoordinates.season(for: sport, leaguePath: slug)
         let urlString = "https://sports.core.api.espn.com/v2/sports/\(CoreCoordinates.segment(for: sport))/leagues/\(slug)/seasons/\(season)/athletes/\(athleteId)"
         guard let url = URL(string: urlString) else { return nil }
         var request = URLRequest(url: url)
@@ -638,6 +893,7 @@ enum PlayerProfileService {
         async let stats = fetchStats(ref: athlete.statistics?.ref)
         async let events = fetchRecentEvents(ref: athlete.events?.ref)
         let team = await teamInfo
+        let statsResult = await stats
         let teamId = athlete.team?.ref
             .flatMap { $0.split(separator: "/").last?.split(separator: "?").first }
             .map(String.init)
@@ -654,7 +910,8 @@ enum PlayerProfileService {
             teamId: teamId,
             teamName: team.name,
             teamLogoURL: team.logoURL,
-            statLines: await stats,
+            statLines: statsResult.lines,
+            statGroups: statsResult.groups,
             recentEvents: await events
         )
     }
@@ -668,24 +925,101 @@ enum PlayerProfileService {
     /// $ref — the exact season/type scope ESPN chose for this
     /// athlete. Ratings-named stats are filtered out (see the
     /// type note); empty values never render.
-    private static func fetchStats(ref: String?) async -> [(label: String, value: String)] {
-        guard let ref, let url = URL(string: ref) else { return [] }
+    ///
+    /// Build 90 (SP7 / S2 A1+C7): the old walk flattened the
+    /// categories in PAYLOAD ORDER and stopped at 16 lines.
+    /// The payload orders defensive → general → goalKeeping →
+    /// offensive (106 lines for a top striker), so the cap cut
+    /// long before his Goals/Assists ever rendered — a
+    /// forward's page showed tackles. The lines are now
+    /// grouped under the payload's own category names with a
+    /// headline group pulled to the top, and the full lists
+    /// are kept (bounded at 140 lines — the largest verified
+    /// payload carries ~106).
+    private static func fetchStats(
+        ref: String?
+    ) async -> (lines: [(label: String, value: String)],
+                groups: [(category: String?, lines: [(label: String, value: String)])]) {
+        guard let ref, let url = URL(string: ref) else { return ([], []) }
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
         guard let (data, _) = try? await URLSession.shared.data(for: request),
               let wire = try? JSONDecoder().decode(StatsWire.self, from: data)
-        else { return [] }
-        var lines: [(label: String, value: String)] = []
+        else { return ([], []) }
+
+        // Per-category lines, in payload order, ratings and
+        // empty values dropped — the payload's own labels.
+        var byCategory: [(name: String, lines: [(label: String, value: String, key: String)])] = []
         for category in wire.splits?.categories ?? [] {
+            var lines: [(label: String, value: String, key: String)] = []
             for stat in category.stats ?? [] {
                 guard let value = stat.displayValue, !value.isEmpty else { continue }
-                let statName = (stat.name ?? "").lowercased()
-                if statName.contains("rating") { continue }
-                lines.append((label: stat.displayName ?? stat.name ?? "", value: value))
-                if lines.count >= 16 { return lines }
+                let key = (stat.name ?? "").lowercased()
+                if key.contains("rating") { continue }
+                lines.append((label: stat.displayName ?? stat.name ?? "", value: value, key: key))
+            }
+            if !lines.isEmpty {
+                byCategory.append((name: category.name ?? "", lines: lines))
             }
         }
-        return lines
+        guard !byCategory.isEmpty else { return ([], []) }
+
+        // The headline group: the lines a player's page exists
+        // to show, pulled from whichever category carries them
+        // (outfield and goalkeeper sets in one priority list —
+        // a player only ever matches his own role's lines).
+        // Matching is by the payload's stat names; each line
+        // is used at most once.
+        let headlineRules: [(String) -> Bool] = [
+            { $0.contains("appearance") },
+            { $0 == "goals" },
+            { $0 == "assists" },
+            { $0.contains("shotsontarget") },
+            { $0 == "shots" || $0 == "totalshots" },
+            { $0 == "saves" },
+            { $0.contains("cleansheet") },
+            { $0.contains("goalsagainst") }
+        ]
+        // Identity per line: category index + line index.
+        var usedIds = Set<String>()
+        var headline: [(label: String, value: String)] = []
+        for rule in headlineRules {
+            for (categoryIndex, category) in byCategory.enumerated() {
+                for (lineIndex, line) in category.lines.enumerated() {
+                    let identity = "\(categoryIndex)|\(lineIndex)"
+                    if usedIds.contains(identity) { continue }
+                    if rule(line.key) {
+                        usedIds.insert(identity)
+                        headline.append((label: line.label, value: line.value))
+                    }
+                }
+            }
+        }
+
+        // Category groups in reading order — offensive first,
+        // then general, goalkeeping, defensive; any other
+        // payload category keeps its relative order after
+        // those. Headline lines stay in their groups too (the
+        // group is the complete list; the headline is a
+        // summary, not a move).
+        let categoryPriority = ["offensive", "general", "goalkeeping", "defensive"]
+        let orderedCategories = byCategory.enumerated().sorted { a, b in
+            let rankA = categoryPriority.firstIndex(of: a.element.name.lowercased()) ?? categoryPriority.count
+            let rankB = categoryPriority.firstIndex(of: b.element.name.lowercased()) ?? categoryPriority.count
+            if rankA != rankB { return rankA < rankB }
+            return a.offset < b.offset
+        }
+
+        var groups: [(category: String?, lines: [(label: String, value: String)])] = []
+        if !headline.isEmpty {
+            groups.append((category: nil, lines: headline))
+        }
+        for entry in orderedCategories {
+            let lines = entry.element.lines.map { (label: $0.label, value: $0.value) }
+            groups.append((category: entry.element.name, lines: lines))
+        }
+        let flat = groups.flatMap { $0.lines }
+        return (Array(flat.prefix(140)), groups)
     }
 
     /// Recent matches from the athlete's own event log: the
@@ -996,7 +1330,12 @@ enum LiveTableAdjuster {
             let wins = int(stats["wins"]), losses = int(stats["losses"]), ties = int(stats["ties"])
             let total = wins + losses + ties
             if total > 0 {
-                let pct = Double(wins) / Double(total)
+                // Build 90 (SP15): a tie counts as HALF a win —
+                // ESPN's own published PCT for a 5-3-1 team is
+                // .611 = (5 + 0.5) / 9; the old W/(W+L+T)
+                // printed .556 for the same record. (Sports
+                // without ties are unaffected: their ties are 0.)
+                let pct = (Double(wins) + 0.5 * Double(ties)) / Double(total)
                 var text = String(format: "%.3f", pct)
                 if text.hasPrefix("0.") { text = String(text.dropFirst()) }
                 stats["winPercent"] = text
@@ -1035,6 +1374,25 @@ enum LiveTableAdjuster {
     private static func double(_ value: String?) -> Double {
         guard let value else { return 0 }
         return Double(value) ?? 0
+    }
+}
+
+// MARK: - Team league position (build 90, SP12)
+
+/// A team's 1-based position within its standings group —
+/// the payload's own ordering, exactly as the table renders
+/// it. The team page already fetches the standings for its
+/// header record line; this turns that SAME fetch into the
+/// position with zero extra network (the view half renders
+/// it beside the record — see the build-90 SP-B report).
+enum StandingPositionService {
+    static func position(ofTeamId teamId: String, in groups: [StandingGroup]) -> Int? {
+        for group in groups {
+            if let index = group.entries.firstIndex(where: { $0.teamId == teamId }) {
+                return index + 1
+            }
+        }
+        return nil
     }
 }
 
@@ -1232,7 +1590,32 @@ final class MatchKickoffPushStore {
         reminders.contains { $0.eventId == eventId }
     }
 
+    /// Build 90 (SP22): drop every reminder whose kickoff is
+    /// in the past. The store previously only ever shrank on
+    /// a manual toggle-off — and past matches render no
+    /// toggle — so every match ever armed stayed in
+    /// UserDefaults and rode EVERY watcher registration
+    /// payload forever (S5 A6). Called from the detail
+    /// page's load and before every payload build.
+    func prunePast() {
+        let formatter = ISO8601DateFormatter()
+        let now = Date()
+        let kept = reminders.filter { reminder in
+            guard let kickoff = formatter.date(from: reminder.kickoffISO) else {
+                // An unparseable stamp can't be proven past —
+                // keep it rather than silently disarming a
+                // reminder the user set.
+                return true
+            }
+            return kickoff > now
+        }
+        if kept.count != reminders.count {
+            reminders = kept
+        }
+    }
+
     func set(match: MatchEvent, leaguePath: String, sport: MatchSport, enabled: Bool) {
+        prunePast()
         var current = reminders
         current.removeAll { $0.eventId == match.id }
         if enabled, let start = match.startDate {
@@ -1250,9 +1633,12 @@ final class MatchKickoffPushStore {
     }
 
     /// The watcher's payload shape (additive field — see the
-    /// type note).
+    /// type note). Build 90 (SP22): pruned first, so a stale
+    /// entry can never ride an upload again even if no detail
+    /// page has opened since its kickoff passed.
     var payload: [[String: Any]] {
-        reminders.map {
+        prunePast()
+        return reminders.map {
             [
                 "eventId": $0.eventId,
                 "leaguePath": $0.leaguePath,
@@ -1276,10 +1662,10 @@ struct LiveNowGroup: Identifiable {
 }
 
 /// Build 88 (F11): one sport's slice of today's full
-/// schedule, as the Live Wall renders it — the sport (the
-/// section header) plus its matches in kickoff order, each
-/// match still PAIRED with the competition group it came
-/// from. The pairing is load-bearing: `MatchEvent` carries
+/// schedule, as Live Now's Today mode renders it (build 90:
+/// formerly the Live Wall) — the sport (the section header)
+/// plus its matches in kickoff order, each match still
+/// PAIRED with the competition group it came from. The pairing is load-bearing: `MatchEvent` carries
 /// no leaguePath of its own, and detail routing + Watch
 /// matching need the REAL competition path. Merging a
 /// sport's matches into a single group stamped a synthetic
@@ -1392,17 +1778,19 @@ enum SportsHubService {
         return (sorted, hasFixtures)
     }
 
-    /// Build 88 (F11): the Live Wall's data — TODAY'S FULL
-    /// schedule (live, upcoming and finished), bucketed by SPORT
-    /// in the app's sport order with each sport's matches sorted
-    /// by kickoff. Deliberately a different shape from Live Now
-    /// (live-only, grouped by competition): the two pages sat
-    /// side by side as near-twins; now the wall is the day's
-    /// programme and Live Now is the live filter. The bucketing
-    /// is DISPLAY-ONLY: every match stays paired with its
-    /// competition group (`TodaySportSchedule`), so the wall's
-    /// rows route detail and Watch matching through the real
-    /// leaguePath — never a synthetic sport path.
+    /// Build 88 (F11): TODAY'S FULL schedule (live, upcoming
+    /// and finished), bucketed by SPORT in the app's sport
+    /// order with each sport's matches sorted by kickoff.
+    /// Build 90 (SP32): this is now the data behind Live Now's
+    /// Today mode — the separate Live Wall page is removed
+    /// (two audits found it duplicated Live Now + the
+    /// Calendar's today section). Deliberately a different
+    /// shape from the live snapshot (live-only, grouped by
+    /// competition). The bucketing is DISPLAY-ONLY: every
+    /// match stays paired with its competition group
+    /// (`TodaySportSchedule`), so the rows route detail and
+    /// Watch matching through the real leaguePath — never a
+    /// synthetic sport path.
     static func todaySchedule() async -> [TodaySportSchedule] {
         let today = MatchesService.todayParameter()
         let perCompetition = await withTaskGroup(of: LiveNowGroup?.self) { group in
@@ -1448,12 +1836,47 @@ enum SportsHubService {
         await highlights(competitions: highlightCompetitions)
     }
 
+    /// Build 90 (S5 C5, hub half): a short in-memory cache
+    /// over the aggregation below. A hub or section open used
+    /// to re-download up to 36 full summary payloads EVERY
+    /// time (fetchDetail itself has no cache); finished
+    /// matches' summaries are immutable in practice, so a
+    /// 120-second memory of the finished feed turns repeat
+    /// opens into memory reads. The fetchDetail-level cache
+    /// S5 proposed lives in MatchesService.swift — see the
+    /// build-90 SP-B report.
+    private final class HighlightsCache: @unchecked Sendable {
+        static let shared = HighlightsCache()
+        private let lock = NSLock()
+        private var entries: [String: (highlights: [HubHighlight], at: Date)] = [:]
+        func get(_ key: String) -> [HubHighlight]? {
+            lock.lock(); defer { lock.unlock() }
+            guard let entry = entries[key],
+                  Date().timeIntervalSince(entry.at) < 120 else { return nil }
+            return entry.highlights
+        }
+        func put(_ key: String, _ highlights: [HubHighlight]) {
+            lock.lock(); defer { lock.unlock() }
+            entries[key] = (highlights, Date())
+        }
+    }
+
     /// Build 87 (item 13): ONE section's own highlights — the
     /// same aggregation scoped to a caller-chosen competition
     /// set (one league for a league page, one sport's leagues
     /// for a sport page). The hub above passes every
     /// highlight-capable competition.
     static func highlights(
+        competitions: [(sport: MatchSport, leaguePath: String)]
+    ) async -> [HubHighlight] {
+        let cacheKey = competitions.map { $0.leaguePath }.joined(separator: ",")
+        if let cached = HighlightsCache.shared.get(cacheKey) { return cached }
+        let result = await computeHighlights(competitions: competitions)
+        HighlightsCache.shared.put(cacheKey, result)
+        return result
+    }
+
+    private static func computeHighlights(
         competitions: [(sport: MatchSport, leaguePath: String)]
     ) async -> [HubHighlight] {
         let calendar = Calendar.current

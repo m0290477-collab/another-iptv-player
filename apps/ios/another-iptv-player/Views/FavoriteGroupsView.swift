@@ -17,7 +17,6 @@ struct FavoriteGroupsView: View {
     @ObservedObject private var groupStore = FavoriteGroupStore.shared
     @ObservedObject private var contentStore = PlaylistContentStore.shared
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
-    @Environment(\.posterMetrics) private var posterMetrics
 
     @State private var showCreateGroup = false
     @State private var newGroupName = ""
@@ -33,11 +32,14 @@ struct FavoriteGroupsView: View {
     var body: some View {
         Group {
             if groups.isEmpty {
-                VStack(spacing: 12) {
+                VStack(spacing: 14) {
                     Image(systemName: "folder.badge.plus")
-                        .font(.largeTitle)
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                        .frame(width: 76, height: 76)
+                        .background(Circle().fill(AppTheme.elevated))
                     Text(L("groups.empty"))
+                        .font(.callout)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 32)

@@ -101,6 +101,22 @@ final class ArtworkFailureMemo {
         return true
     }
 
+    /// Build 90 (F4): seconds until the block for `url` lifts
+    /// (0 when the URL is not currently blocked). CachedImage's
+    /// visible-cell retry sleeps for exactly this long and then
+    /// retries in place, instead of the cell sitting on its
+    /// placeholder until an unrelated re-render. Read-only: an
+    /// expired entry is left for `isFailed` to reap.
+    func remainingBlockDuration(for url: URL) -> TimeInterval {
+        let key = url.absoluteString
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = entries[key] else { return 0 }
+        let elapsed = Date().timeIntervalSince(entry.lastFailureAt)
+        let remaining = blockDuration(consecutiveFailures: entry.consecutiveFailures) - elapsed
+        return remaining > 0 ? remaining : 0
+    }
+
     func recordFailure(_ url: URL) {
         let key = url.absoluteString
         let now = Date()

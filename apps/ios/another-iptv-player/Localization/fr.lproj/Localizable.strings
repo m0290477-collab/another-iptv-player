@@ -1229,3 +1229,28 @@
 "player.channel_list.title" = "Chaînes";
 "settings.hub.refresh" = "Actualiser";
 "matches.live_none_now" = "Aucun match en direct pour le moment";
+
+// Build 90
+"matches.today" = "Aujourd'hui";
+"playlists.actions" = "Actions de la playlist";
+"search.sports" = "Équipes et joueurs";
+"search.sports.row" = "Rechercher équipes et joueurs";
+"matches.info.broadcast" = "Diffusion";
+"matches.detail.goalies" = "Gardiens";
+"matches.detail.starter" = "Titulaire";
+"matches.pbp.goal" = "But";
+"matches.pbp.penalty" = "Penalty";
+"matches.pbp.shot" = "Tir cadré";
+"matches.pbp.missed_shot" = "Tir manqué";
+"matches.pbp.blocked_shot" = "Tir bloqué";
+"matches.pbp.hit" = "Mise en échec";
+"matches.f1.wins" = "Victoires";
+"matches.f1.next_race" = "Prochaine course";
+"matches.f1.sessions" = "Séances";
+"matches.f1.qualifying" = "Qualifications";
+"matches.f1.sprint" = "Sprint";
+"matches.f1.grid" = "Grille";
+"matches.f1.laps" = "tours";
+"matches.rankings" = "Classements";
+"matches.golf.round" = "Manche";
+"matches.golf.scorecard" = "Carte de score";

@@ -317,6 +317,10 @@ struct MyPlaylistsView: View {
                     .frame(width: 36, height: 36)
                     .background(Circle().fill(AppTheme.elevated))
             }
+            // Build 90: the one icon-only control on this surface
+            // without a VoiceOver label (the toolbar buttons all
+            // carry one) — VoiceOver read the bare glyph name.
+            .accessibilityLabel(L("playlists.actions"))
         }
         .padding(14)
         .background(AppTheme.surface)

@@ -278,6 +278,7 @@ struct SettingsHubView: View {
                         .font(.title2.weight(.bold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                     statusLine
                 }
                 Spacer(minLength: 8)
@@ -367,6 +368,7 @@ struct SettingsHubView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .accessibilityElement(children: .combine)
     }
@@ -451,11 +453,17 @@ struct SettingsHubView: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
+            // Build 90: the FULL count at every Dynamic Type
+            // size — the number scales down rather than ever
+            // truncating (lineLimit(1) alone clipped "22,342"
+            // to "22,3…" at accessibility sizes).
             Text(value.formatted())
                 .font(.headline)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.5)
         }
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .ignore)
@@ -475,11 +483,13 @@ struct SettingsHubView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.red)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             } else {
                 Text(L("settings.hub.active_until_format", formattedExpiry(expiry)))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AppTheme.accent)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
         }
     }

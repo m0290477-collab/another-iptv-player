@@ -58,14 +58,14 @@ enum RecentlyAddedResolver {
                 else { continue }
                 result.append(RecentlyAddedEntry(
                     kind: .live, key: key, title: stream.name,
-                    imageURL: stream.streamIcon.flatMap { URL(string: $0) }, firstSeen: date))
+                    imageURL: ArtworkURL.url(from: stream.streamIcon), firstSeen: date))
             case "vod":
                 guard parts.count > 1, let streamId = Int(parts[1]),
                       let movie = contentStore.vodStreamById[streamId]
                 else { continue }
                 result.append(RecentlyAddedEntry(
                     kind: .vod, key: key, title: movie.name,
-                    imageURL: movie.streamIcon.flatMap { URL(string: $0) }, firstSeen: date))
+                    imageURL: ArtworkURL.url(from: movie.streamIcon), firstSeen: date))
             case "series", "episode":
                 // "episode:<seriesId>:<episodeId>" rolls up to the series (R5).
                 guard parts.count > 1, let seriesId = Int(parts[1]),
@@ -74,7 +74,7 @@ enum RecentlyAddedResolver {
                 else { continue }
                 result.append(RecentlyAddedEntry(
                     kind: .series, key: "series:\(seriesId)", title: series.name,
-                    imageURL: series.cover.flatMap { URL(string: $0) }, firstSeen: date))
+                    imageURL: ArtworkURL.url(from: series.cover), firstSeen: date))
             default:
                 continue
             }

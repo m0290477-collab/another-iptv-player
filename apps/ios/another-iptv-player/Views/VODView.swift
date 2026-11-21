@@ -90,7 +90,10 @@ struct VODView: View {
     @State private var shelfCategories: [DBCategory] = []
     @State private var shelfItemsByCategory: [String: [VODWithCategory]] = [:]
     @State private var recentlyAddedVODs: [DBVODStream] = []
-    @State private var newestVODs: [DBVODStream] = []
+    // Build 90: the old `newestVODs` state was removed — it was
+    // computed every recompute pass and read NOWHERE (the Newest
+    // grid paginates `newestAll`; the shelves use
+    // recentlyAddedVODs). Dead state, dead per-pass work.
     @State private var topRatedVODs: [DBVODStream] = []
     /// Build 88: the NEW-chip membership — the newest-added slice
     /// of the catalog (the first 60 of the full `added`-desc
@@ -415,6 +418,25 @@ struct VODView: View {
         tabSearchResults = result
     }
 
+    /// Build 90: when one of the tab's own grids (Newest,
+    /// category, in-tab search) pages in its next slice, warm
+    /// that slice's posters with the grid's exact render request
+    /// (moviePosterCard's chain at grid size, .fill, .grid) —
+    /// VODCategoryContent's grids always did this via loadMore;
+    /// the tab's own grids paged in cold.
+    private func prefetchGridPosters(_ movies: [DBVODStream], startingAt start: Int) {
+        guard start < movies.count else { return }
+        let urls = movies.dropFirst(start).prefix(ListImagePrefetch.maxBatch)
+            .compactMap { ArtworkURL.url(from: $0.streamIcon) ?? ArtworkURL.url(from: $0.backdropPath) }
+        ListImagePrefetch.start(
+            urls: urls,
+            width: posterMetrics.categoryGridPosterWidth,
+            height: posterMetrics.categoryGridPosterHeight,
+            contentMode: .fill,
+            loadProfile: .grid
+        )
+    }
+
     /// Build 80 (item 4): the in-tab search results — the tab's own
     /// poster grid idiom (same cards, same detail destination,
     /// 90-per-page BrandedLoader pagination as the other grids).
@@ -440,7 +462,11 @@ struct VODView: View {
                         .buttonStyle(PressScaleButtonStyle())
                         .onAppear {
                             if index >= tabSearchVisibleCount - 15 {
+                                let oldCount = tabSearchVisibleCount
                                 tabSearchVisibleCount = min(tabSearchVisibleCount + 90, tabSearchResults.count)
+                                if tabSearchVisibleCount > oldCount {
+                                    prefetchGridPosters(tabSearchResults.map(\.stream), startingAt: oldCount)
+                                }
                             }
                         }
                     }
@@ -538,7 +564,11 @@ struct VODView: View {
                         // as the end approaches, no silent cap.
                         .onAppear {
                             if index >= newestVisibleCount - 15 {
+                                let oldCount = newestVisibleCount
                                 newestVisibleCount = min(newestVisibleCount + Self.newestPageSize, newestAll.count)
+                                if newestVisibleCount > oldCount {
+                                    prefetchGridPosters(newestAll, startingAt: oldCount)
+                                }
                             }
                         }
                     }
@@ -588,7 +618,11 @@ struct VODView: View {
                         .buttonStyle(PressScaleButtonStyle())
                         .onAppear {
                             if index >= categoryVisibleCount - 15 {
+                                let oldCount = categoryVisibleCount
                                 categoryVisibleCount = min(categoryVisibleCount + 90, items.count)
+                                if categoryVisibleCount > oldCount {
+                                    prefetchGridPosters(items.map(\.stream), startingAt: oldCount)
+                                }
                             }
                         }
                     }
@@ -647,7 +681,7 @@ struct VODView: View {
     /// (the same simplification Live got in round 3).
     private func recomputeFilter() async {
         guard playlist.id == contentStore.activePlaylistId else {
-            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedVODs = []; newestVODs = []; topRatedVODs = []; newestAll = []; newMovieIds = []; franchiseGroups = []; shelfCategories = []; shelfItemsByCategory = [:]; return
+            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedVODs = []; topRatedVODs = []; newestAll = []; newMovieIds = []; franchiseGroups = []; shelfCategories = []; shelfItemsByCategory = [:]; return
         }
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod")
         let allCats = orderStore.applyOrder(
@@ -673,7 +707,6 @@ struct VODView: View {
         let sharedNewest = contentStore.sharedNewestMovies
         topRatedVODs = Array(sharedTop.filter { visibleCatIds.contains($0.categoryId ?? "") }.prefix(15))
         recentlyAddedVODs = Array(sharedNewest.filter { visibleCatIds.contains($0.categoryId ?? "") }.prefix(20))
-        newestVODs = Array(sharedNewest.filter { visibleCatIds.contains($0.categoryId ?? "") }.prefix(60))
 
         let byAddedDesc = await Task.detached(priority: .userInitiated) {
             allVODs
@@ -956,6 +989,40 @@ struct TopMoviesShelf: View, Equatable {
             .shelfEdgeFade()
         }
         .padding(.vertical, 6)
+        .onAppear { prefetchPosters() }
+        .onDisappear { stopPrefetchPosters() }
+    }
+
+    /// Build 90: this shelf never prefetched — its ranked cards
+    /// cold-loaded on every tab open while the category shelves
+    /// below arrived warm. Warm exactly what the cards render:
+    /// the same artwork chain the cells pass RankedPosterCard
+    /// (icon, then the stored backdrop), at shelf size, .fill,
+    /// .shelf — and retract the batch when the shelf leaves.
+    private func prefetchPosters() {
+        let urls = items.compactMap {
+            ArtworkURL.url(from: $0.streamIcon) ?? ArtworkURL.url(from: $0.backdropPath)
+        }
+        ListImagePrefetch.start(
+            urls: urls,
+            width: posterMetrics.shelfPosterWidth,
+            height: posterMetrics.shelfPosterHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
+    }
+
+    private func stopPrefetchPosters() {
+        let urls = items.compactMap {
+            ArtworkURL.url(from: $0.streamIcon) ?? ArtworkURL.url(from: $0.backdropPath)
+        }
+        ListImagePrefetch.stop(
+            urls: urls,
+            width: posterMetrics.shelfPosterWidth,
+            height: posterMetrics.shelfPosterHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
     }
 }
 
@@ -1095,6 +1162,12 @@ struct VODCategoryShelfRow: View, Equatable {
     /// Build 88: NEW-chip membership (the tab's newest-added
     /// slice), passed down from VODView's recompute pass.
     var newMovieIds: Set<Int> = []
+    /// Build 90 (RC2a): every window batch this shelf handed to
+    /// the shared prefetcher, so `onDisappear` can retract them
+    /// too — build 89 and earlier retracted only the head batch,
+    /// leaving a fast fling's worth of stale window requests
+    /// queued ahead of the shelves actually on screen.
+    @State private var windowPrefetchURLs: [URL] = []
 
     static func == (lhs: VODCategoryShelfRow, rhs: VODCategoryShelfRow) -> Bool {
         lhs.playlist.id == rhs.playlist.id &&
@@ -1166,6 +1239,8 @@ struct VODCategoryShelfRow: View, Equatable {
                     // not-yet-started head batch so a fast vertical
                     // fling doesn't leave the shared prefetch queue
                     // full of shelves the user already passed.
+                    // Build 90 (RC2a): the per-cell window batches
+                    // are retracted with it (see windowPrefetchURLs).
                     stopPrefetchIcons(from: items)
                 }
             }
@@ -1173,10 +1248,20 @@ struct VODCategoryShelfRow: View, Equatable {
         .padding(.vertical, 6)
     }
 
+    /// Build 90 (RC5): the ONE artwork resolution the shelf's
+    /// cards render — the record's icon, then its stored
+    /// backdrop (CatalogComponents' `moviePosterCard` chain).
+    /// The prefetchers below resolve through this same chain:
+    /// they used to warm the icon field only, so a movie living
+    /// on its backdrop was never warmed and cold-loaded on
+    /// first appearance even inside a "prefetched" shelf.
+    private func artworkURL(for stream: DBVODStream) -> URL? {
+        ArtworkURL.url(from: stream.streamIcon) ?? ArtworkURL.url(from: stream.backdropPath)
+    }
+
     private func prefetchIcons(from list: [VODWithCategory]) {
         let urls = list.prefix(VODCategoryShelf.prefetchHeadCount)
-            .compactMap { $0.stream.streamIcon }
-            .compactMap { ArtworkURL.url(from: $0) }
+            .compactMap { artworkURL(for: $0.stream) }
         ListImagePrefetch.start(
             urls: urls,
             width: posterMetrics.shelfPosterWidth,
@@ -1188,12 +1273,14 @@ struct VODCategoryShelfRow: View, Equatable {
 
     /// Round 20 (R20-5): the scroll window ahead of the cell at
     /// `index` (see ListImagePrefetch.scrollWindow).
+    /// Build 90 (RC2a): the started URLs are remembered so the
+    /// shelf's disappearance can retract them (see
+    /// stopPrefetchIcons) instead of leaving them queued.
     private func prefetchWindow(from list: [VODWithCategory], after index: Int) {
         let start = index + 1
         guard start < list.count else { return }
         let urls = list[start..<min(start + ListImagePrefetch.scrollWindow, list.count)]
-            .compactMap { $0.stream.streamIcon }
-            .compactMap { ArtworkURL.url(from: $0) }
+            .compactMap { artworkURL(for: $0.stream) }
         ListImagePrefetch.start(
             urls: urls,
             width: posterMetrics.shelfPosterWidth,
@@ -1201,12 +1288,14 @@ struct VODCategoryShelfRow: View, Equatable {
             contentMode: .fill,
             loadProfile: .shelf
         )
+        for url in urls where !windowPrefetchURLs.contains(url) {
+            windowPrefetchURLs.append(url)
+        }
     }
 
     private func stopPrefetchIcons(from list: [VODWithCategory]) {
         let urls = list.prefix(VODCategoryShelf.prefetchHeadCount)
-            .compactMap { $0.stream.streamIcon }
-            .compactMap { ArtworkURL.url(from: $0) }
+            .compactMap { artworkURL(for: $0.stream) }
         ListImagePrefetch.stop(
             urls: urls,
             width: posterMetrics.shelfPosterWidth,
@@ -1214,6 +1303,20 @@ struct VODCategoryShelfRow: View, Equatable {
             contentMode: .fill,
             loadProfile: .shelf
         )
+        // Build 90 (RC2a): retract the window batches too,
+        // chunked to the prefetcher's own batch cap (its stop
+        // slices to maxBatch per call).
+        let windows = windowPrefetchURLs
+        windowPrefetchURLs = []
+        for chunkStart in stride(from: 0, to: windows.count, by: ListImagePrefetch.maxBatch) {
+            ListImagePrefetch.stop(
+                urls: Array(windows[chunkStart..<min(chunkStart + ListImagePrefetch.maxBatch, windows.count)]),
+                width: posterMetrics.shelfPosterWidth,
+                height: posterMetrics.shelfPosterHeight,
+                contentMode: .fill,
+                loadProfile: .shelf
+            )
+        }
     }
 }
 
@@ -1654,9 +1757,12 @@ struct VODCategoryContent: View, Equatable {
     private func prefetch(_ list: [VODWithCategory], startingAt: Int = 0) {
         // Only a bounded slice is ever prefetched (start() caps to maxBatch); building URLs
         // for the whole 10k list first would be wasted O(n) work on the main thread.
+        // Build 90 (RC5): resolve the same chain the grid cards
+        // render (icon, then the stored backdrop — moviePosterCard)
+        // instead of the icon field alone, so backdrop-only movies
+        // are warmed too.
         let urls = list.dropFirst(startingAt).prefix(ListImagePrefetch.maxBatch)
-            .compactMap { $0.stream.streamIcon }
-            .compactMap { ArtworkURL.url(from: $0) }
+            .compactMap { ArtworkURL.url(from: $0.stream.streamIcon) ?? ArtworkURL.url(from: $0.stream.backdropPath) }
         ListImagePrefetch.start(
             urls: urls,
             width: posterMetrics.categoryGridPosterWidth,
@@ -1912,6 +2018,9 @@ struct WatchlistShelf: View, Equatable {
     let items: [DBVODStream]
     /// Build 88: NEW-chip membership (the tab's newest-added slice).
     var newMovieIds: Set<Int> = []
+    /// Build 90 (RC2a): window batches started by this shelf,
+    /// retracted on disappear (see VODCategoryShelfRow).
+    @State private var windowPrefetchURLs: [URL] = []
 
     static func == (lhs: WatchlistShelf, rhs: WatchlistShelf) -> Bool {
         lhs.playlist.id == rhs.playlist.id && lhs.items == rhs.items
@@ -1928,7 +2037,7 @@ struct WatchlistShelf: View, Equatable {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(items) { movie in
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, movie in
                         NavigationLink {
                             MovieDetailView(playlist: playlist, movie: movie, queue: items)
                         } label: {
@@ -1941,14 +2050,82 @@ struct WatchlistShelf: View, Equatable {
                             )
                         }
                         .buttonStyle(.plain)
+                        // Build 90: warm the posters just ahead
+                        // of the visible cell, as the category
+                        // shelves do (this shelf never prefetched
+                        // at all — every card cold-loaded).
+                        .onAppear {
+                            prefetchWindow(after: index)
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
             }
             .frame(height: posterMetrics.shelfRowTotalHeight)
             .shelfEdgeFade()
+            .onAppear {
+                prefetchIcons()
+            }
+            .onDisappear {
+                stopPrefetchIcons()
+            }
         }
         .padding(.vertical, 6)
+    }
+
+    /// Build 90: head + window prefetch for this shelf, resolving
+    /// the same artwork chain its cards render (moviePosterCard:
+    /// icon, then the stored backdrop) at the shelf's own size.
+    private func prefetchIcons() {
+        let urls = items.prefix(VODCategoryShelf.prefetchHeadCount)
+            .compactMap { ArtworkURL.url(from: $0.streamIcon) ?? ArtworkURL.url(from: $0.backdropPath) }
+        ListImagePrefetch.start(
+            urls: urls,
+            width: posterMetrics.shelfPosterWidth,
+            height: posterMetrics.shelfPosterHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
+    }
+
+    private func prefetchWindow(after index: Int) {
+        let start = index + 1
+        guard start < items.count else { return }
+        let urls = items[start..<min(start + ListImagePrefetch.scrollWindow, items.count)]
+            .compactMap { ArtworkURL.url(from: $0.streamIcon) ?? ArtworkURL.url(from: $0.backdropPath) }
+        ListImagePrefetch.start(
+            urls: urls,
+            width: posterMetrics.shelfPosterWidth,
+            height: posterMetrics.shelfPosterHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
+        for url in urls where !windowPrefetchURLs.contains(url) {
+            windowPrefetchURLs.append(url)
+        }
+    }
+
+    private func stopPrefetchIcons() {
+        let urls = items.prefix(VODCategoryShelf.prefetchHeadCount)
+            .compactMap { ArtworkURL.url(from: $0.streamIcon) ?? ArtworkURL.url(from: $0.backdropPath) }
+        ListImagePrefetch.stop(
+            urls: urls,
+            width: posterMetrics.shelfPosterWidth,
+            height: posterMetrics.shelfPosterHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
+        let windows = windowPrefetchURLs
+        windowPrefetchURLs = []
+        for chunkStart in stride(from: 0, to: windows.count, by: ListImagePrefetch.maxBatch) {
+            ListImagePrefetch.stop(
+                urls: Array(windows[chunkStart..<min(chunkStart + ListImagePrefetch.maxBatch, windows.count)]),
+                width: posterMetrics.shelfPosterWidth,
+                height: posterMetrics.shelfPosterHeight,
+                contentMode: .fill,
+                loadProfile: .shelf
+            )
+        }
     }
 }
 
@@ -1989,6 +2166,13 @@ struct WatchlistView: View {
         [GridItem(.adaptive(minimum: posterMetrics.categoryGridPosterWidth), spacing: posterMetrics.gridSpacing)]
     }
 
+    /// Build 90 (RC6): the NEW-chip membership set, built ONCE
+    /// per body pass — the grid cells used to rebuild this Set
+    /// from the store's array inside every cell's label closure.
+    private var newestMovieIdSet: Set<Int> {
+        Set(contentStore.sharedNewestMovies.map(\.streamId))
+    }
+
     var body: some View {
         Group {
             if movies.isEmpty && unavailableEntries.isEmpty {
@@ -2012,7 +2196,7 @@ struct WatchlistView: View {
                                     posterWidth: posterMetrics.categoryGridPosterWidth,
                                     posterHeight: posterMetrics.categoryGridPosterHeight,
                                     imageLoadProfile: .grid,
-                                    isNew: Set(contentStore.sharedNewestMovies.map(\.streamId)).contains(movie.streamId)
+                                    isNew: newestMovieIdSet.contains(movie.streamId)
                                 )
                             }
                             .buttonStyle(.plain)
@@ -2174,8 +2358,36 @@ struct MovieCollectionsShelf: View, Equatable {
                 .padding(.horizontal, 16)
             }
             .shelfEdgeFade()
+            .onAppear { prefetchArtwork() }
+            .onDisappear { stopPrefetchArtwork() }
         }
         .padding(.vertical, 6)
+    }
+
+    /// Build 90: the collection cards render through
+    /// `collectionArtworkURL` at shelf size — warm those exact
+    /// requests (the shelf never prefetched; ≤10 groups, so one
+    /// bounded batch covers the whole shelf).
+    private func prefetchArtwork() {
+        let urls = groups.compactMap { collectionArtworkURL($0) }
+        ListImagePrefetch.start(
+            urls: urls,
+            width: posterMetrics.shelfPosterWidth,
+            height: posterMetrics.shelfPosterHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
+    }
+
+    private func stopPrefetchArtwork() {
+        let urls = groups.compactMap { collectionArtworkURL($0) }
+        ListImagePrefetch.stop(
+            urls: urls,
+            width: posterMetrics.shelfPosterWidth,
+            height: posterMetrics.shelfPosterHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
     }
 }
 
@@ -2194,6 +2406,11 @@ struct MovieCollectionView: View {
         [GridItem(.adaptive(minimum: posterMetrics.categoryGridPosterWidth), spacing: posterMetrics.gridSpacing)]
     }
 
+    /// Build 90 (RC6): built once per body pass, not per cell.
+    private var newestMovieIdSet: Set<Int> {
+        Set(contentStore.sharedNewestMovies.map(\.streamId))
+    }
+
     var body: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: posterMetrics.gridRowSpacing) {
@@ -2206,7 +2423,7 @@ struct MovieCollectionView: View {
                             posterWidth: posterMetrics.categoryGridPosterWidth,
                             posterHeight: posterMetrics.categoryGridPosterHeight,
                             imageLoadProfile: .grid,
-                            isNew: Set(contentStore.sharedNewestMovies.map(\.streamId)).contains(movie.streamId)
+                            isNew: newestMovieIdSet.contains(movie.streamId)
                         )
                     }
                     .buttonStyle(.plain)
@@ -2260,6 +2477,11 @@ struct MovieGenreGridView: View {
 
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: posterMetrics.categoryGridPosterWidth), spacing: posterMetrics.gridSpacing)]
+    }
+
+    /// Build 90 (RC6): built once per body pass, not per cell.
+    private var newestMovieIdSet: Set<Int> {
+        Set(contentStore.sharedNewestMovies.map(\.streamId))
     }
 
     var body: some View {
@@ -2372,7 +2594,7 @@ struct MovieGenreGridView: View {
                                     posterWidth: posterMetrics.categoryGridPosterWidth,
                                     posterHeight: posterMetrics.categoryGridPosterHeight,
                                     imageLoadProfile: .grid,
-                                    isNew: Set(contentStore.sharedNewestMovies.map(\.streamId)).contains(movie.streamId)
+                                    isNew: newestMovieIdSet.contains(movie.streamId)
                                 )
                             }
                             .buttonStyle(.plain)
@@ -2498,6 +2720,11 @@ struct PersonTitlesView: View {
         [GridItem(.adaptive(minimum: posterMetrics.categoryGridPosterWidth), spacing: posterMetrics.gridSpacing)]
     }
 
+    /// Build 90 (RC6): built once per body pass, not per cell.
+    private var newestMovieIdSet: Set<Int> {
+        Set(contentStore.sharedNewestMovies.map(\.streamId))
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -2515,7 +2742,7 @@ struct PersonTitlesView: View {
                                         posterWidth: posterMetrics.categoryGridPosterWidth,
                                         posterHeight: posterMetrics.categoryGridPosterHeight,
                                         imageLoadProfile: .grid,
-                                        isNew: Set(contentStore.sharedNewestMovies.map(\.streamId)).contains(movie.streamId)
+                                        isNew: newestMovieIdSet.contains(movie.streamId)
                                     )
                                 }
                                 .buttonStyle(.plain)

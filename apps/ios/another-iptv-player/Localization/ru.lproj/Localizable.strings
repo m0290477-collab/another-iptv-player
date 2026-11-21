@@ -1229,3 +1229,28 @@
 "player.channel_list.title" = "Каналы";
 "settings.hub.refresh" = "Обновить";
 "matches.live_none_now" = "Сейчас нет матчей в прямом эфире";
+
+// Build 90
+"matches.today" = "Сегодня";
+"playlists.actions" = "Действия плейлиста";
+"search.sports" = "Команды и игроки";
+"search.sports.row" = "Поиск команд и игроков";
+"matches.info.broadcast" = "Трансляция";
+"matches.detail.goalies" = "Вратари";
+"matches.detail.starter" = "Стартовый";
+"matches.pbp.goal" = "Гол";
+"matches.pbp.penalty" = "Пенальти";
+"matches.pbp.shot" = "Удар в створ";
+"matches.pbp.missed_shot" = "Удар мимо";
+"matches.pbp.blocked_shot" = "Заблокированный удар";
+"matches.pbp.hit" = "Силовой приём";
+"matches.f1.wins" = "Победы";
+"matches.f1.next_race" = "Следующая гонка";
+"matches.f1.sessions" = "Сессии";
+"matches.f1.qualifying" = "Квалификация";
+"matches.f1.sprint" = "Спринт";
+"matches.f1.grid" = "Стартовая решётка";
+"matches.f1.laps" = "кругов";
+"matches.rankings" = "Рейтинги";
+"matches.golf.round" = "Раунд";
+"matches.golf.scorecard" = "Карточка результатов";
