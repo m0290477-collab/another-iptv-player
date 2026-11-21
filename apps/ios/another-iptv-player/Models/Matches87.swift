@@ -1965,7 +1965,7 @@ enum DeepH2HService {
 
     private static func scoreText(_ ref: String?) async -> String? {
         guard let ref, let url = URL(string: ref),
-              let (data, _) = try? await URLSession.shared.data(for: url),
+              let (data, _) = try? await URLSession.shared.data(from: url),
               let wire = try? JSONDecoder().decode(ScoreWire.self, from: data)
         else { return nil }
         if let display = wire.displayValue, !display.isEmpty { return display }

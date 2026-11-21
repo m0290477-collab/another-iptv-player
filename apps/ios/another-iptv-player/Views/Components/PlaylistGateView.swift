@@ -577,12 +577,12 @@ struct PlaylistGateView: View {
                                  ? AppTheme.accent : Color.white.opacity(0.12)))
                         .frame(width: 2.5)
                 }
-                .frame(width: 2.5, maxHeight: .infinity)
+                .frame(minWidth: 2.5, maxWidth: 2.5, maxHeight: .infinity)
 
                 timelineNode(step)
                     .padding(.top, isActive ? 14 : 0)
             }
-            .frame(width: 44, maxHeight: .infinity)
+            .frame(minWidth: 44, maxWidth: 44, maxHeight: .infinity)
             .animation(Motion.animate(.easeInOut(duration: 0.4)), value: step.state)
 
             if isActive {
