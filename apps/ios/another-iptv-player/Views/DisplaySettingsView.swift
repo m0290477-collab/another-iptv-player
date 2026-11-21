@@ -106,6 +106,14 @@ struct DisplaySettingsView: View {
                                         .stroke(accentStore.preset == preset ? Color.primary : Color.clear, lineWidth: 2)
                                         .padding(-4)
                                 }
+                                // Build 88: the picked dot carries
+                                // the mockup's glow — a soft halo
+                                // in the preset's own color around
+                                // the selection ring.
+                                .shadow(
+                                    color: accentStore.preset == preset ? preset.color.opacity(0.65) : .clear,
+                                    radius: accentStore.preset == preset ? 9 : 0
+                                )
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(L(preset.nameKey))
@@ -115,6 +123,7 @@ struct DisplaySettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .animation(Motion.animate(Motion.chipSwap), value: accentStore.preset)
                 .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
             } header: {
                 SettingsSectionHeader(title: L("display.accent"))

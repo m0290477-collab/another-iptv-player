@@ -1224,3 +1224,8 @@
 "matches.tab.nhl" = "NHL";
 "matches.tennis" = "टेनिस";
 "matches.ufc" = "UFC";
+"catalog.count_of_total" = "%d / %d";
+"live.group.count_format" = "%d / %d";
+"player.channel_list.title" = "चैनल";
+"settings.hub.refresh" = "रीफ़्रेश";
+"matches.live_none_now" = "अभी कोई मैच लाइव नहीं है";

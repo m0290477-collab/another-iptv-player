@@ -56,18 +56,46 @@ struct SplashView: View {
             )
             .ignoresSafeArea()
 
+            // Build 88 (gate max): very subtle floating embers
+            // over the collage — a dozen tiny dots drifting
+            // slowly upward, as in the approved mockup. Pure
+            // decoration: rendered ONLY while the effects gate
+            // allows heavy effects (stilled entirely by Reduce
+            // Motion / Q21), and never hit-tested, so the
+            // tap-to-skip gesture below is untouched.
+            if EffectsGate.allowsHeavyEffects(reduceMotion: reduceMotion) {
+                GateEmberParticles()
+                    .ignoresSafeArea()
+            }
+
             VStack(spacing: 12) {
                 // The Design-4 flame mark in the fixed brand
                 // gradient (same treatment as the gate header).
                 // X1: ignition — spark → full flame with a glow
                 // flash; tap anywhere skips to the rest state.
-                Image(systemName: "flame.fill")
-                    .font(.system(size: 64, weight: .bold))
-                    .foregroundStyle(AppTheme.brandGradient)
-                    .shadow(color: AppTheme.accentStart.opacity(ignited ? (glowPulse ? 0.62 : 0.45) : 0.95),
-                            radius: ignited ? 16 : 30, x: 0, y: 8)
-                    .scaleEffect(ignitionAllowed && !ignited ? 0.55 : 1)
-                    .opacity(ignitionAllowed && !ignited ? 0.6 : 1)
+                // Build 88 (gate max): the mockup's glowing ring
+                // now encircles the flame — a thin brand-gradient
+                // circle whose glow breathes on the SAME pulse
+                // driver as the flame's shadow, so the lockup
+                // breathes as one. The ring itself is a static
+                // design element; only the pulse is gated (via
+                // glowPulse, which never starts when the gate
+                // is closed). Ignition scale/opacity moved to
+                // the ZStack so ring and flame ignite together.
+                ZStack {
+                    Circle()
+                        .stroke(AppTheme.brandGradient, lineWidth: 2.5)
+                        .frame(width: 128, height: 128)
+                        .shadow(color: AppTheme.accentStart.opacity(ignited ? (glowPulse ? 0.55 : 0.35) : 0.8),
+                                radius: ignited ? 14 : 24)
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 64, weight: .bold))
+                        .foregroundStyle(AppTheme.brandGradient)
+                        .shadow(color: AppTheme.accentStart.opacity(ignited ? (glowPulse ? 0.62 : 0.45) : 0.95),
+                                radius: ignited ? 16 : 30, x: 0, y: 8)
+                }
+                .scaleEffect(ignitionAllowed && !ignited ? 0.55 : 1)
+                .opacity(ignitionAllowed && !ignited ? 0.6 : 1)
 
                 // Wordmark: "Super" white, the X in the brand
                 // gradient — the mockup's flame-treated X.
@@ -139,4 +167,80 @@ struct SplashView: View {
 #Preview {
     SplashView()
         .preferredColorScheme(.dark)
+}
+
+// MARK: - Build 88 gate embers
+
+/// One ember: a tiny dot that drifts slowly upward and
+/// fades, on its own duration/delay, looping forever.
+/// Transform + opacity only, animated by the compositor —
+/// no timers, no per-frame state.
+private struct GateEmberDot: View {
+    let xFraction: CGFloat
+    let yFraction: CGFloat
+    let size: CGFloat
+    let drift: CGFloat
+    let duration: Double
+    let delay: Double
+
+    @State private var floated = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            Circle()
+                .fill(AppTheme.accentStart.opacity(floated ? 0.08 : 0.5))
+                .frame(width: size, height: size)
+                .position(
+                    x: xFraction * proxy.size.width,
+                    y: yFraction * proxy.size.height - (floated ? drift : 0)
+                )
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: duration).delay(delay).repeatForever(autoreverses: true)) {
+                floated = true
+            }
+        }
+    }
+}
+
+/// The ember field: a fixed, seeded scatter of dots over
+/// the gate collage (deterministic layout — the same sky
+/// on every launch, no random churn). Rendered only while
+/// the effects gate allows heavy effects (see SplashView).
+private struct GateEmberParticles: View {
+    private struct EmberSpec {
+        let x: CGFloat
+        let y: CGFloat
+        let size: CGFloat
+        let drift: CGFloat
+        let duration: Double
+        let delay: Double
+    }
+
+    private static let embers: [EmberSpec] = [
+        EmberSpec(x: 0.08, y: 0.78, size: 3.0, drift: 80, duration: 7.5, delay: 0.0),
+        EmberSpec(x: 0.16, y: 0.62, size: 2.2, drift: 60, duration: 6.0, delay: 1.2),
+        EmberSpec(x: 0.24, y: 0.85, size: 4.0, drift: 90, duration: 8.5, delay: 0.6),
+        EmberSpec(x: 0.33, y: 0.70, size: 2.6, drift: 65, duration: 6.8, delay: 2.0),
+        EmberSpec(x: 0.42, y: 0.90, size: 3.4, drift: 75, duration: 7.8, delay: 0.3),
+        EmberSpec(x: 0.50, y: 0.66, size: 2.0, drift: 55, duration: 5.6, delay: 1.6),
+        EmberSpec(x: 0.58, y: 0.82, size: 3.8, drift: 85, duration: 8.2, delay: 0.9),
+        EmberSpec(x: 0.66, y: 0.74, size: 2.4, drift: 60, duration: 6.4, delay: 2.4),
+        EmberSpec(x: 0.74, y: 0.88, size: 3.2, drift: 70, duration: 7.2, delay: 0.5),
+        EmberSpec(x: 0.82, y: 0.64, size: 2.2, drift: 58, duration: 6.1, delay: 1.9),
+        EmberSpec(x: 0.90, y: 0.80, size: 3.6, drift: 88, duration: 8.8, delay: 1.1),
+        EmberSpec(x: 0.95, y: 0.70, size: 2.6, drift: 66, duration: 6.9, delay: 2.8),
+    ]
+
+    var body: some View {
+        ZStack {
+            ForEach(Array(Self.embers.enumerated()), id: \.offset) { _, ember in
+                GateEmberDot(
+                    xFraction: ember.x, yFraction: ember.y, size: ember.size,
+                    drift: ember.drift, duration: ember.duration, delay: ember.delay
+                )
+            }
+        }
+        .allowsHitTesting(false)
+    }
 }

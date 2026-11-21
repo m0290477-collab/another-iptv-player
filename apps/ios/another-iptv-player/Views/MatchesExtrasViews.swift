@@ -1185,6 +1185,11 @@ struct TeamPageView: View {
             async let roster = TeamService.squad(sport: team.sport, leaguePath: team.leaguePath, teamId: team.id)
             fixtures = await schedule
             squad = await roster
+            // Build 88 (F13): warm every squad photo NOW, in
+            // parallel, instead of letting each disc resolve
+            // lazily as its row scrolls in (build 87: the
+            // squad's photos landed seconds after the names).
+            prefetchSquadPhotos()
             loaded = true
             teamLeaders = await MatchesLeadersService.fetchTeam(
                 sport: team.sport, leaguePath: team.leaguePath, teamId: team.id
@@ -1220,6 +1225,44 @@ struct TeamPageView: View {
             // Build 87 (item 3): the MLBAM squad headshots.
             if team.sport == .mlb {
                 mlbHeadshots = await MLBStatsService.squadHeadshots(teamName: team.name)
+            }
+        }
+    }
+
+    /// Build 88 (F13): the page-open photo warm-up. Primary
+    /// headshots go through the shared Nuke prefetcher with
+    /// the discs' exact render parameters (32×32, fill,
+    /// standard profile) so the prefetch keys match the
+    /// render keys and every warmed image is a cache hit on
+    /// display. For soccer, the verified fallback chain ALSO
+    /// resolves for the whole squad at once through the
+    /// resolver (bounded and cached by athlete id inside it),
+    /// so a player whose ESPN photo is missing shows the
+    /// fallback photo immediately — and a player with no
+    /// verified photo anywhere keeps the monogram, never a
+    /// placeholder glyph.
+    private func prefetchSquadPhotos() {
+        ListImagePrefetch.start(
+            urls: squad.compactMap { player -> URL? in player.headshotURL },
+            width: 32, height: 32, contentMode: .fill, loadProfile: .standard
+        )
+        guard team.sport == .soccer else { return }
+        let queries = squad.compactMap { player -> SoccerPhotoQuery? in
+            soccerFallback(
+                athleteId: player.athleteId, name: player.name,
+                citizenship: player.citizenship, dateOfBirth: player.dateOfBirth
+            )
+        }
+        guard !queries.isEmpty else { return }
+        Task {
+            await withTaskGroup(of: Bool.self) { group in
+                for query in queries {
+                    group.addTask {
+                        _ = await SoccerPhotoResolver.shared.photo(for: query)
+                        return true
+                    }
+                }
+                for await _ in group {}
             }
         }
     }

@@ -123,12 +123,15 @@ struct MovieDetailView: View {
                         Button {
                             pendingMovieDetail = item
                         } label: {
-                            VODStreamCard(
-                                playlistId: playlist.id,
-                                stream: item,
+                            // Build 88: the shared poster card
+                            // (CatalogComponents) — one card
+                            // language across the Movies surfaces.
+                            moviePosterCard(
+                                item,
                                 posterWidth: posterMetrics.searchCardWidth,
                                 posterHeight: posterMetrics.searchCardHeight,
-                                imageLoadProfile: .shelf
+                                imageLoadProfile: .shelf,
+                                isNew: false
                             )
                         }
                         // Build 81 (item 8): poster-card press feedback.
@@ -155,12 +158,14 @@ struct MovieDetailView: View {
                         Button {
                             pendingMovieDetail = item
                         } label: {
-                            VODStreamCard(
-                                playlistId: playlist.id,
-                                stream: item,
+                            // Build 88: the shared poster card
+                            // (CatalogComponents).
+                            moviePosterCard(
+                                item,
                                 posterWidth: posterMetrics.searchCardWidth,
                                 posterHeight: posterMetrics.searchCardHeight,
-                                imageLoadProfile: .shelf
+                                imageLoadProfile: .shelf,
+                                isNew: false
                             )
                         }
                         // Build 81 (item 8): poster-card press feedback.
@@ -360,6 +365,10 @@ struct MovieDetailView: View {
                         EmptyView()
                     }
                 }
+                // Build 88 (mockup elevation): a soft accent glow
+                // under the glass action trio — accent ONLY from
+                // the existing token.
+                .shadow(color: AppTheme.accent.opacity(0.22), radius: 16, x: 0, y: 4)
                 // The same tight spacing as the trailer row; neutralizing the VStack spacing 20 with -10
                 // DetailActionBar içindeki 10pt ritme hizalar.
                 .padding(.top, -10)
@@ -476,7 +485,9 @@ struct MovieDetailView: View {
                         .sectionAppear()
                 }
             }
-            .padding(.bottom, 48)
+            // Build 88 (F3): raised from 48 so the last section
+            // always clears the floating tab bar.
+            .padding(.bottom, 88)
         }
         .scrollIndicators(.hidden)
         .onScrollGeometryChange(for: Bool.self) { geo in

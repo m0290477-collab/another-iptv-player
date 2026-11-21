@@ -1224,3 +1224,8 @@
 "matches.tab.nhl" = "NHL";
 "matches.tennis" = "网球";
 "matches.ufc" = "UFC";
+"catalog.count_of_total" = "%d / %d";
+"live.group.count_format" = "%d / %d";
+"player.channel_list.title" = "频道";
+"settings.hub.refresh" = "刷新";
+"matches.live_none_now" = "目前没有直播比赛";

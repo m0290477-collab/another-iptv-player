@@ -19,6 +19,10 @@ struct SettingsIconTile: View {
     /// passes `.primary` so the glyph pairs with the tint in both
     /// schemes instead of white-on-white in light mode.
     var glyphColor: Color = .white
+    /// Build 88: an optional soft halo under the tile — the hub's
+    /// glowing accent squares from the approved mockup. Nil (every
+    /// pre-88 call site) renders exactly as before.
+    var glowColor: Color? = nil
 
     var body: some View {
         Image(systemName: systemImage)
@@ -26,6 +30,110 @@ struct SettingsIconTile: View {
             .foregroundColor(glyphColor)
             .frame(width: size, height: size)
             .background(tint, in: RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+            .shadow(color: glowColor ?? .clear, radius: glowColor == nil ? 0 : 7)
+    }
+}
+
+/// Build 88: press feedback for the Settings hub rows — instead of
+/// the plain dim, a soft accent sheen sweeps in behind the row
+/// content while pressed (the section card's clip bounds it).
+/// Routed through `Motion.animate`, so Reduce Motion and the
+/// motion-intensity setting still it like every other effect.
+struct SettingsSweepPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background {
+                LinearGradient(
+                    colors: [
+                        AppTheme.accent.opacity(0),
+                        AppTheme.accent.opacity(0.13),
+                        AppTheme.accent.opacity(0)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .opacity(configuration.isPressed ? 1 : 0)
+            }
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(Motion.animate(Motion.pressSpring), value: configuration.isPressed)
+    }
+}
+
+/// Build 88: the Settings switch — a plump capsule in the user's
+/// accent with a soft glow while on, a neutral track while off,
+/// replacing the stock iOS switch on every toggle the hub reaches.
+/// Applied ONCE at the hub root (`.toggleStyle` on the hub's
+/// ScrollView); the environment carries it into every pushed
+/// destination, so each real toggle renders this way exactly once
+/// and no call site changes. The whole row is the tap target, like
+/// the native switch row; the flip routes through `Motion.animate`
+/// (Reduce Motion / intensity still it). Labels are untouched —
+/// every settings toggle's label is a passive icon + text stack.
+struct GlowingToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 12) {
+            configuration.label
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Capsule()
+                .fill(configuration.isOn ? AppTheme.accent : AppTheme.overlayFill(0.16))
+                .frame(width: 50, height: 30)
+                .overlay {
+                    Circle()
+                        .fill(Color.white)
+                        .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                        .padding(3)
+                        .frame(maxWidth: .infinity, alignment: configuration.isOn ? .trailing : .leading)
+                }
+                .shadow(
+                    color: configuration.isOn ? AppTheme.accent.opacity(0.45) : .clear,
+                    radius: configuration.isOn ? 8 : 0
+                )
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(Motion.animate(Motion.chipSwap)) {
+                configuration.isOn.toggle()
+            }
+        }
+    }
+}
+
+/// Build 88: the Settings glass card — the card-gradient fill, the
+/// warm brand glow low in the card, a faint top sheen (the glass
+/// edge of the approved mockup), and the hairline border. Shared
+/// by the hub's header and playlist cards so they read as one
+/// glass system.
+struct SettingsGlassCardModifier: ViewModifier {
+    var cornerRadius: CGFloat = AppTheme.heroCornerRadius
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(AppTheme.cardGradient)
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.clear, AppTheme.accentStart.opacity(0.16)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [AppTheme.overlayFill(0.10), Color.clear],
+                                startPoint: .top,
+                                endPoint: .center
+                            )
+                        )
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+            }
     }
 }
 
@@ -278,6 +386,12 @@ extension View {
     func settingsCardRows() -> some View {
         listRowBackground(AppTheme.elevated)
             .listRowSeparator(.hidden)
+    }
+
+    /// Build 88: the glass-card treatment (see
+    /// `SettingsGlassCardModifier`).
+    func settingsGlassCard(cornerRadius: CGFloat = AppTheme.heroCornerRadius) -> some View {
+        modifier(SettingsGlassCardModifier(cornerRadius: cornerRadius))
     }
 }
 

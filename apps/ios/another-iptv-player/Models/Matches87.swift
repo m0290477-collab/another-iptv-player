@@ -1800,23 +1800,56 @@ struct CrossScorerRow: Identifiable {
     var id: String { "\(leaguePath)|\(entry.athleteId)" }
 }
 
+/// Build 88 (F1): one league's cross-league scorers outcome.
+/// `ok` is false only when the league's fetch was cut off by
+/// the timeout or failed outright; a league that answers with
+/// no leaders is an honest empty (ok == true, rows == []).
+struct CrossLeagueFetchOutcome {
+    let rows: [CrossScorerRow]
+    let ok: Bool
+}
+
 enum CrossLeagueScorersService {
-    static func fetch() async -> [CrossScorerRow] {
-        let leagues = MatchSport.soccerLeagueCatalog
-        let perLeague = await withTaskGroup(of: [CrossScorerRow].self) { group in
-            for league in leagues {
-                group.addTask {
-                    await MatchesScorersService.fetch(leaguePath: league.leaguePath)
-                        .map {
-                            CrossScorerRow(entry: $0, leagueName: league.name, leaguePath: league.leaguePath)
-                        }
-                }
-            }
-            var out: [CrossScorerRow] = []
-            for await items in group { out += items }
-            return out
+    /// Build 88 (F1): the build-87 fan-out waited for ALL 17
+    /// leagues before the page rendered anything, and a single
+    /// slow league (its leaders call plus up to 30 name
+    /// dereferences) stalled the whole page on "Loading…"
+    /// indefinitely. Now each league is fetched on its own with
+    /// a hard 15-second ceiling — the fetch races a timer and
+    /// the loser is cancelled (URLSession honours task
+    /// cancellation) — and the view consumes leagues as they
+    /// land, so the page fills in incrementally and always
+    /// terminates: rows, an honest empty, or a failure state.
+    static func fetchLeague(_ league: SoccerLeague) async -> CrossLeagueFetchOutcome {
+        let raced = await raceTimeout(seconds: 15) {
+            await MatchesScorersService.fetch(leaguePath: league.leaguePath, limit: 8)
         }
-        return Array(perLeague.sorted { $0.entry.goals > $1.entry.goals }.prefix(40))
+        guard let entries = raced else {
+            return CrossLeagueFetchOutcome(rows: [], ok: false)
+        }
+        return CrossLeagueFetchOutcome(
+            rows: entries.map {
+                CrossScorerRow(entry: $0, leagueName: league.name, leaguePath: league.leaguePath)
+            },
+            ok: true
+        )
+    }
+
+    /// First finisher wins: the operation's value, or nil when
+    /// the timer fired first (the operation is then cancelled).
+    private static func raceTimeout<T: Sendable>(
+        seconds: Double, operation: @escaping @Sendable () async -> T
+    ) async -> T? {
+        await withTaskGroup(of: T?.self) { group in
+            group.addTask { await operation() }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
     }
 }
 

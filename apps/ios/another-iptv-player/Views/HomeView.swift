@@ -327,7 +327,25 @@ struct HomeView: View {
             if catalogIsEmpty {
                 emptyState
             } else {
-                ScrollView(showsIndicators: false) {
+                // Build 88 (F2 — the owner's main complaint): the
+                // top bar is no longer a row INSIDE the scroll
+                // view. As a scroll row it rode up with the
+                // content, rendered into the status-bar row over
+                // the clock/battery, and the hero card sliced
+                // against the top edge the same way (recording
+                // frames f038/f046/f102). The bar is now a FIXED
+                // opaque header above the scroll view: this
+                // stack's frame starts below the status bar, the
+                // header band is solid at every scroll position,
+                // and the scroll view's frame begins at the
+                // header's bottom edge — Home content can never
+                // draw into the status-bar row again, and the
+                // hero stays clipped inside the scroll frame
+                // below the header.
+                VStack(spacing: 0) {
+                    homeHeaderBar
+
+                    ScrollView(showsIndicators: false) {
                     // Build 65: the row spacing is the Display
                     // screen's Home-density preference (default
                     // comfortable = the long-standing 26).
@@ -338,15 +356,6 @@ struct HomeView: View {
                     // sat; rows now instantiate as they approach
                     // the viewport. Same order, spacing and content.
                     LazyVStack(alignment: .leading, spacing: HomeDensityPreference.current.shelfSpacing) {
-                        // Round 10 (owner, build 46): the STRONG-style
-                        // top bar — wordmark on one side, tidy square
-                        // icon buttons on the other (Favorites star,
-                        // Refresh with confirm, Search, Downloads,
-                        // Notifications). It replaces the round-7
-                        // search bar on this tab only; the other tabs
-                        // keep theirs.
-                        homeTopBar
-                            .padding(.horizontal, 16)
 
                         // Build 61 (S4): subscription-expiry banner —
                         // real ProviderExpiryStore data for the ACTIVE
@@ -478,9 +487,15 @@ struct HomeView: View {
                         }
                     }
                     .padding(.top, 8)
-                    .padding(.bottom, 24)
-                }
-                .refreshable {
+                    // Build 88 (F3): the bottom inset clears the
+                    // floating tab bar (the iOS 26 glass pill
+                    // overlays scroll content instead of reserving
+                    // its area) with margin to spare, so the last
+                    // rows — the Support entry included — are
+                    // never covered by the bar again.
+                    .padding(.bottom, 96)
+                    }
+                    .refreshable {
                     // G5 (B13): playlist refresh is network-only —
                     // offline it answers with the plain offline
                     // message instead of a spinner.
@@ -505,6 +520,7 @@ struct HomeView: View {
                         }
                     }
                 }
+                } // Build 88 (F2): the fixed-header VStack.
             }
         }
         .cinematicBackground()
@@ -726,6 +742,32 @@ struct HomeView: View {
     /// (the ONE unified search sheet), Downloads (the existing
     /// Downloads screen) and Notifications (real account-derived
     /// items only — see NotificationsView).
+    ///
+    /// Build 88 (F2): the FIXED header — the round-10 top bar
+    /// carried on a SOLID `AppTheme.background` band, opaque at
+    /// every scroll position. The band's fill reaches into the
+    /// status-bar region (the way a navigation bar's background
+    /// does), so the band reads as one opaque bar whose CONTENT
+    /// sits below the status bar; a hairline separates it from
+    /// the scrolling content beneath. The bar itself never
+    /// scrolls — it is the top of the fixed-header VStack in
+    /// `body`, outside the ScrollView entirely.
+    private var homeHeaderBar: some View {
+        homeTopBar
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 10)
+            .background {
+                AppTheme.background
+                    .ignoresSafeArea(edges: .top)
+            }
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(AppTheme.cardBorderColor)
+                    .frame(height: 0.5)
+            }
+    }
+
     private var homeTopBar: some View {
         HStack(spacing: 8) {
             // B6: playlist name under the wordmark. B3: when the
@@ -834,15 +876,21 @@ struct HomeView: View {
         }
     }
 
+    /// Build 88 (owner-approved Home mockup): the top-bar
+    /// actions are ROUND GLASS buttons — a circular elevated
+    /// fill, a hairline glass stroke and a soft card shadow,
+    /// the mockup's header language. (The helper keeps its
+    /// round-10 name; the shape is the new part.) Same buttons,
+    /// same actions, same order — no control added or removed;
+    /// Search keeps its build-61 brand-gradient circle.
     private func topBarSquare(systemName: String, tint: Color = .primary) -> some View {
         Image(systemName: systemName)
             .font(.system(size: 16, weight: .semibold))
             .foregroundStyle(tint)
             .frame(width: 38, height: 38)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(AppTheme.elevated)
-            )
+            .background(Circle().fill(AppTheme.elevated))
+            .overlay(Circle().stroke(Color.white.opacity(0.14), lineWidth: 1))
+            .shadow(color: AppTheme.cardShadowColor, radius: 6, y: 2)
     }
 
     // MARK: - S4 expiry banner (build 61)
@@ -1217,9 +1265,16 @@ struct HomeView: View {
     /// now that the row scrolls.
     private func sportCard(symbol: String, title: String) -> some View {
         VStack(spacing: 8) {
+            // Build 88 (owner-approved Home mockup): the sport
+            // glyph GLOWS — the brand gradient with the tab-glow
+            // shadow (the same restrained glow family as the
+            // selected tab's icon), over the card-gradient fill
+            // and an accent-tinted hairline. The fixed 80pt
+            // height (build 82, owner-confirmed) is unchanged.
             Image(systemName: symbol)
                 .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(AppTheme.accent)
+                .foregroundStyle(AppTheme.brandGradient)
+                .shadow(color: AppTheme.tabGlow, radius: 7, y: 3)
             Text(title)
                 .font(AppTheme.fontCardTitle)
                 .foregroundStyle(.primary)
@@ -1229,12 +1284,13 @@ struct HomeView: View {
         .frame(width: 104, height: 80)
         .background(
             RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                .fill(AppTheme.surface)
+                .fill(AppTheme.cardGradient)
                 .overlay(
                     RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                        .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+                        .stroke(AppTheme.accent.opacity(0.22), lineWidth: 1)
                 )
         )
+        .shadow(color: AppTheme.cardShadowColor, radius: AppTheme.cardShadowRadius, y: AppTheme.cardShadowY)
         .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
     }
 
@@ -1264,9 +1320,9 @@ struct HomeView: View {
 
     /// Design 18's slim strip: ONE rounded bar under the hero,
     /// its cells divided by vertical hairlines — each cell a
-    /// state line (LIVE chip + clock, or FT), the score line
-    /// (both logos + names + the score between them) and the
-    /// sport label. Fed by `matchResults` itself — the same
+    /// state line (LIVE chip + clock, or FT, sport at the end)
+    /// over two team rows (logo + full name + own score —
+    /// build 88, F4). Fed by `matchResults` itself — the same
     /// entries, in the same order, as the Match Results cards
     /// below; a tap opens the same match detail. Renders
     /// nothing when today has no live or finished match.
@@ -1316,9 +1372,21 @@ struct HomeView: View {
             .sectionAppear()
     }
 
+    /// Build 88 (F4): the strip cell is now a two-row match
+    /// card — the SAME structure as the Match Results cards
+    /// below (build 80, item 8): a slim state line (LIVE chip
+    /// + clock, or FT, with the sport at the line's end), then
+    /// one row per team — logo + FULL name + that team's own
+    /// score at the row's end. The build-87 single line (both
+    /// names and the score on one row) truncated BOTH names at
+    /// strip width ("Denve… / Housto…" — the owner's
+    /// recording, confirmed at full resolution). The name is
+    /// the only flexible element in its row; the score keeps
+    /// its reserved slot and the build-87 roll/flash on a
+    /// change (StripScoreView, per team now).
     private func stripCell(_ entry: HomeMatchEntry) -> some View {
         let match = entry.match
-        return VStack(alignment: .leading, spacing: 3) {
+        return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 5) {
                 if match.state == .live {
                     Text(L("matches.live"))
@@ -1339,29 +1407,39 @@ struct HomeView: View {
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-            }
-            HStack(spacing: 5) {
-                CachedImage(url: match.home.logoURL, width: 15, height: 15, cornerRadius: 7.5, iconName: "shield")
-                Text(match.home.name ?? "")
+                Spacer(minLength: 4)
+                Text(L(entry.sport.titleKey))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                StripScoreView(text: "\(match.home.score ?? "0") – \(match.away.score ?? "0")")
-                Text(match.away.name ?? "")
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                CachedImage(url: match.away.logoURL, width: 15, height: 15, cornerRadius: 7.5, iconName: "shield")
             }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.primary)
-            Text(L(entry.sport.titleKey))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            stripTeamRow(match.home)
+            stripTeamRow(match.away)
         }
-        .frame(width: 208, alignment: .leading)
+        .frame(width: 232, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .contentShape(Rectangle())
+    }
+
+    /// Build 88 (F4): one strip team row — logo, FULL name
+    /// (the row's whole width at the shared team-name font;
+    /// the scale factor remains only as a safety net, the
+    /// build-80 rule), and that team's own score at the end.
+    private func stripTeamRow(_ side: MatchTeamSide) -> some View {
+        HStack(spacing: 6) {
+            CachedImage(url: side.logoURL, width: 18, height: 18, cornerRadius: 9, iconName: "shield")
+            Text(side.name ?? "")
+                .font(AppTheme.fontTeamName)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            StripScoreView(text: side.score ?? "0")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.primary)
+                .layoutPriority(1)
+        }
     }
 
     /// The strip's state text from payload fields only — the

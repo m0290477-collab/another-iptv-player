@@ -127,6 +127,15 @@ struct PlaylistGateView: View {
     @State private var importExpiry: Date?
     /// The active timeline card's subtle pulse driver.
     @State private var importPulse = false
+    /// Build 88 (F6): the stage snapshot the LATEST returned
+    /// count read can vouch for — snapshotted BEFORE that
+    /// read started (see the counter loop in
+    /// importLoadingView), so every stage it marks .done had
+    /// fully written its rows before the read began. Steps
+    /// render Done only on this confirmed plane: a green
+    /// check can never sit over a count read that predates
+    /// the stage's own data (the "Done — 0" flash).
+    @State private var confirmedStages: [PlaylistValidationService.Stage: PlaylistValidationService.StageState] = [:]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // Shared save state: one loading overlay + one error alert, exactly
@@ -353,6 +362,19 @@ struct PlaylistGateView: View {
         addStages[stage] ?? .pending
     }
 
+    /// Build 88 (F6): a stage's state on the CONFIRMED plane —
+    /// a pipeline .done that no count read begun after the
+    /// stage completed has vouched for yet still reads
+    /// .active, so the step keeps its in-progress rendering
+    /// (spinner + "so far" counter) until its real count
+    /// lands. Failure and pending pass through untouched:
+    /// only the Done claim waits for its count.
+    private func confirmedStageState(_ stage: PlaylistValidationService.Stage) -> PlaylistValidationService.StageState {
+        let raw = stageState(stage)
+        if raw == .done && confirmedStages[stage] != .done { return .active }
+        return raw
+    }
+
     private var currentImportStage: PlaylistValidationService.Stage {
         let all = PlaylistValidationService.Stage.allCases.sorted { $0.rawValue < $1.rawValue }
         return all.first { stageState($0) == .active }
@@ -363,14 +385,20 @@ struct PlaylistGateView: View {
 
     /// Movies finish inside the shared movies/series stage:
     /// once series rows start landing, Movies reads Done.
+    /// Build 88 (F6): derived on the CONFIRMED plane — the
+    /// shared stage state comes from confirmedStageState and
+    /// the series count from the same vouched read that
+    /// published it (the counter loop assigns liveCounts and
+    /// confirmedStages from one read), never from the raw
+    /// pipeline state alone.
     private var moviesStepState: PlaylistValidationService.StageState {
-        let s = stageState(.loadingMoviesSeries)
+        let s = confirmedStageState(.loadingMoviesSeries)
         if s == .active && liveCounts.series > 0 { return .done }
         return s
     }
 
     private var seriesStepState: PlaylistValidationService.StageState {
-        let s = stageState(.loadingMoviesSeries)
+        let s = confirmedStageState(.loadingMoviesSeries)
         if s == .active && liveCounts.series == 0 { return .pending }
         return s
     }
@@ -419,11 +447,15 @@ struct PlaylistGateView: View {
     /// after both content stages complete (the probe the old
     /// summary reported), so it reads active exactly while
     /// every content stage is done and the import still runs.
+    /// Build 88 (F6): activation reads the CONFIRMED plane —
+    /// the check lights up once both content steps read Done
+    /// (counts vouched), never during their confirmation
+    /// lag; failure still surfaces from the raw plane at once.
     private var checkingStepState: TimelineState {
         if stageState(.loadingChannels) == .failed || stageState(.loadingMoviesSeries) == .failed {
             return .failed
         }
-        if stageState(.loadingChannels) == .done && stageState(.loadingMoviesSeries) == .done {
+        if confirmedStageState(.loadingChannels) == .done && confirmedStageState(.loadingMoviesSeries) == .done {
             return .active
         }
         return .waiting
@@ -431,7 +463,7 @@ struct PlaylistGateView: View {
 
     private var timelineSteps: [TimelineStep] {
         [
-            TimelineStep(title: L("dashboard.live"), state: timelineState(of: stageState(.loadingChannels)),
+            TimelineStep(title: L("dashboard.live"), state: timelineState(of: confirmedStageState(.loadingChannels)),
                          count: liveCounts.live, countText: L("addplaylist.summary.live", liveCounts.live), isChecking: false),
             TimelineStep(title: L("dashboard.movies"), state: timelineState(of: moviesStepState),
                          count: liveCounts.movies, countText: L("addplaylist.summary.movies", liveCounts.movies), isChecking: false),
@@ -715,11 +747,22 @@ struct PlaylistGateView: View {
             // ~0.8 s while this state is on screen — never a
             // per-row update, so the import can't jank the UI.
             // The expiry chip refreshes on the same cadence.
+            // Build 88 (F6): each read also publishes the
+            // stage snapshot taken BEFORE it started
+            // (confirmedStages). A stage inside that snapshot
+            // marked .done had completed before the read
+            // began, so the read's counts provably include
+            // its rows — the only plane a step may read Done
+            // from. A stage that completes DURING a read is
+            // confirmed by the next one (~0.8 s later).
+            confirmedStages = [:]
             while !Task.isCancelled {
                 if let id = importTargetId {
+                    let stagesAtReadStart = addStages
                     liveCounts = await PlaylistValidationService.importedCounts(
                         playlistId: id, kind: importTargetKind
                     )
+                    confirmedStages = stagesAtReadStart
                     importExpiry = ProviderExpiryStore.expiryDate(playlistId: id)
                 }
                 try? await Task.sleep(for: .milliseconds(800))
@@ -868,6 +911,7 @@ struct PlaylistGateView: View {
         isLoading = false
         progressMessage = nil
         addStages = [:]
+        confirmedStages = [:]
         liveCounts = (0, 0, 0)
         importTargetId = nil
         importExpiry = nil
@@ -889,6 +933,14 @@ struct PlaylistGateView: View {
                     .padding(.top, 14)
                     .padding(.bottom, 12)
                 gateHairline
+                // Build 88 (F12): the two forms NEVER coexist.
+                // The symmetric .opacity crossfade kept BOTH
+                // forms in the hierarchy for a beat while the
+                // card's height animated between them, ghosting
+                // one form's rows over the other's. Removal is
+                // now immediate (.identity) and only the
+                // incoming form fades in — one state at a time,
+                // each under its own identity.
                 Group {
                     if formKind == .xtream {
                         xtreamForm
@@ -897,7 +949,7 @@ struct PlaylistGateView: View {
                     }
                 }
                 .id(formKind)
-                .transition(.opacity)
+                .transition(.asymmetric(insertion: .opacity, removal: .identity))
             }
             .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(
@@ -1039,6 +1091,10 @@ struct PlaylistGateView: View {
     private func segmentButton(kind: FormKind, title: String) -> some View {
         let selected = formKind == kind
         return Button {
+            // Build 88 (F12): the outgoing form leaves with
+            // the switch — its field must not keep focus (and
+            // hold the keyboard) inside the other form's state.
+            focusedField = nil
             formKind = kind
         } label: {
             Text(title)
@@ -1404,6 +1460,10 @@ struct PlaylistGateView: View {
         Button(action: action) {
             // Design-4 primary button: big solid accent fill, BLACK
             // bold text (the mockup's Load Playlist / Connect).
+            // Build 88 (gate max): the approved gate mockup's
+            // shine sweep across the entry pill — a soft light
+            // band crossing every few seconds (GateShineBand,
+            // effects-gated, clipped to the pill's corners).
             Text(title)
                 .font(.headline.weight(.bold))
                 .foregroundColor(AppTheme.onAccent)
@@ -1411,6 +1471,8 @@ struct PlaylistGateView: View {
                 .padding(.vertical, 14)
                 .background(AppTheme.accent)
                 .cornerRadius(AppTheme.cornerRadius)
+                .overlay { GateShineBand() }
+                .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
         }
         .buttonStyle(PressScaleButtonStyle())
         .disabled(!enabled)
@@ -2199,6 +2261,42 @@ private struct CheckDrawView: View {
                 withAnimation(.easeOut(duration: 0.35)) { trim = 1 }
             } else {
                 trim = 1
+            }
+        }
+    }
+}
+
+/// Build 88 (gate max): the entry pill's shine sweep — a
+/// soft diagonal light band that crosses the gate's
+/// primary pill (Sign In / Load Playlist) every few
+/// seconds, as on the approved gate mockup's Enter pill.
+/// The band travels from fully off one edge to fully off
+/// the other, so the loop point is never visible, and it
+/// spends most of each cycle off the pill (a pause
+/// between sweeps). Renders NOTHING when the effects
+/// gate is closed (Reduce Motion / Q21 / motion off) —
+/// the pill is then a plain pill. Never hit-tested.
+private struct GateShineBand: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var sweep = false
+
+    var body: some View {
+        if EffectsGate.allowsHeavyEffects(reduceMotion: reduceMotion) {
+            GeometryReader { proxy in
+                LinearGradient(
+                    colors: [.clear, Color.white.opacity(0.30), .clear],
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: proxy.size.width * 0.45, height: proxy.size.height * 2.4)
+                .rotationEffect(.degrees(16))
+                .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+                .offset(x: sweep ? proxy.size.width * 0.95 : -proxy.size.width * 0.95)
+            }
+            .allowsHitTesting(false)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 4.4).repeatForever(autoreverses: false)) {
+                    sweep = true
+                }
             }
         }
     }

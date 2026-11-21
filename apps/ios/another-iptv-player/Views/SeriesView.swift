@@ -114,10 +114,9 @@ struct SeriesView: View {
     @State private var newestAll: [DBSeries] = []
     @State private var newestVisibleCount = 90
     private static let newestPageSize = 90
-    /// Round 15 (C12): bumped on every tab appearance so the identity
-    /// shelf replays the LIGHT entrance on tab return (the shared
-    /// ShelfEntranceModifier's replay token).
-    @State private var shelfReplayToken = 0
+    // Build 88 (Part 2-B): the round-15 shelf replay token is
+    // gone with the shelves it fed — the shared CatalogShelfRow
+    // owns its entrance animation now.
 
     init(playlist: Playlist) {
         self.playlist = playlist
@@ -244,31 +243,138 @@ struct SeriesView: View {
                                 }
                             )
 
+                            // Build 88 (Part 2-B): the tab's shelves
+                            // are the SHARED catalog components
+                            // (Views/CatalogComponents.swift) — the
+                            // same PosterCardView / CatalogShelfRow
+                            // the Movies tab renders. Data inputs
+                            // (rankings, dedupe, progress) are the
+                            // unchanged build-87 state above; only
+                            // the rendering moved.
                             if topRatedSeries.count >= 3 {
-                                PopularSeriesShelf(playlist: playlist, items: topRatedSeries, progressBySeriesId: progressBySeriesId, watchedPercentBySeriesId: watchedPercentBySeriesId, replayToken: shelfReplayToken)
+                                CatalogShelfRow(
+                                    title: L("home.popular_series"),
+                                    items: topRatedSeries,
+                                    rowHeight: posterMetrics.shelfRowTotalHeight + 18,
+                                    destination: { AllSeriesView(playlist: playlist) },
+                                    cell: { series in
+                                        NavigationLink {
+                                            SeriesDetailView(playlist: playlist, series: series)
+                                        } label: {
+                                            // Ranked shelf: the ranked
+                                            // card (the mockup's big
+                                            // numerals), as before —
+                                            // rank, real season/episode
+                                            // counts, normalized rating.
+                                            RankedPosterCard(
+                                                rank: (topRatedSeries.firstIndex(of: series) ?? 0) + 1,
+                                                imageURL: series.cover.flatMap { ArtworkURL.url(from: $0) },
+                                                title: series.name,
+                                                ratingText: ContentRating.normalizedDisplayText(
+                                                    rating: series.rating,
+                                                    rating5Based: series.rating5Based
+                                                ),
+                                                metaText: contentStore.seriesSeasonEpisodeCounts[series.seriesId].map {
+                                                    "\(L("series.seasons_count_format", $0.seasons)) • \(L("series.episode_count_format", $0.episodes))"
+                                                },
+                                                posterWidth: posterMetrics.shelfPosterWidth,
+                                                posterHeight: posterMetrics.shelfPosterHeight,
+                                                iconName: "play.tv"
+                                            )
+                                            .tint(SectionTheme.series)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                )
                             }
 
                             if !recentlyAddedSeries.isEmpty {
-                                RecentlyAddedSeriesShelf(playlist: playlist, items: recentlyAddedSeries, progressBySeriesId: progressBySeriesId, watchedPercentBySeriesId: watchedPercentBySeriesId)
+                                CatalogShelfRow(
+                                    title: L("recently_added.title"),
+                                    items: recentlyAddedSeries,
+                                    rowHeight: posterMetrics.shelfRowTotalHeight + 18,
+                                    destination: { RecentlyAddedSeriesDetailView(playlist: playlist, items: recentlyAddedSeries) },
+                                    cell: { series in
+                                        NavigationLink {
+                                            SeriesDetailView(playlist: playlist, series: series)
+                                        } label: {
+                                            seriesPosterCard(
+                                                series,
+                                                posterWidth: posterMetrics.shelfPosterWidth,
+                                                posterHeight: posterMetrics.shelfPosterHeight,
+                                                imageLoadProfile: .shelf,
+                                                isNew: true,
+                                                captionText: seriesShelfCaption(series),
+                                                watchProgress: progressBySeriesId[String(series.seriesId)]?.progress
+                                            )
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                )
                             }
 
                             // Build 61 (B8, C2): series Watch Later shelf.
                             if !watchlistSeries.isEmpty {
-                                WatchlistSeriesShelf(playlist: playlist, items: watchlistSeries)
+                                CatalogShelfRow(
+                                    title: L("watchlist.title"),
+                                    items: watchlistSeries,
+                                    rowHeight: posterMetrics.shelfRowTotalHeight,
+                                    destination: { WatchlistSeriesView(playlist: playlist) },
+                                    cell: { series in
+                                        NavigationLink {
+                                            SeriesDetailView(playlist: playlist, series: series)
+                                        } label: {
+                                            seriesPosterCard(
+                                                series,
+                                                posterWidth: posterMetrics.shelfPosterWidth,
+                                                posterHeight: posterMetrics.shelfPosterHeight,
+                                                imageLoadProfile: .shelf,
+                                                isNew: newestSliceIds.contains(series.seriesId)
+                                            )
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                )
                             }
 
                             LazyVStack(spacing: 0) {
                                 ForEach(shelfCategories) { category in
-                                    SeriesCategoryShelfRow(
-                                        playlist: playlist,
-                                        category: category,
-                                        items: shelfItemsByCategory[category.id] ?? [],
-                                        isStreamsLoading: !contentStore.streamsLoaded,
-                                        progressBySeriesId: progressBySeriesId,
-                                        watchedPercentBySeriesId: watchedPercentBySeriesId
+                                    let categoryItems = shelfItemsByCategory[category.id] ?? []
+                                    let seriesItems = categoryItems.map(\.series)
+                                    CatalogShelfRow(
+                                        title: category.name,
+                                        count: seriesItems.isEmpty ? nil : seriesItems.count,
+                                        items: seriesItems,
+                                        rowHeight: posterMetrics.shelfRowTotalHeight + 18,
+                                        destination: { SeriesCategoryDetailView(playlist: playlist, category: category) },
+                                        cell: { series in
+                                            NavigationLink {
+                                                SeriesDetailView(playlist: playlist, series: series)
+                                            } label: {
+                                                seriesPosterCard(
+                                                    series,
+                                                    posterWidth: posterMetrics.shelfPosterWidth,
+                                                    posterHeight: posterMetrics.shelfPosterHeight,
+                                                    imageLoadProfile: .shelf,
+                                                    isNew: newestSliceIds.contains(series.seriesId),
+                                                    captionText: seriesShelfCaption(series),
+                                                    watchProgress: progressBySeriesId[String(series.seriesId)]?.progress
+                                                )
+                                            }
+                                            .buttonStyle(.plain)
+                                            // Round 20 (R20-5): warm the
+                                            // covers just ahead of the
+                                            // visible cell.
+                                            .onAppear {
+                                                if let index = seriesItems.firstIndex(of: series) {
+                                                    prefetchSeriesWindow(seriesItems, after: index)
+                                                }
+                                            }
+                                        }
                                     )
-                                    .equatable()
                                     .id(category.id)
+                                    .onAppear { prefetchSeriesCovers(seriesItems) }
+                                    .onDisappear { stopSeriesPrefetch(seriesItems) }
                                 }
                             }
                             } // Build 65: end of the All (shelves) branch of the category-chip swap.
@@ -276,6 +382,14 @@ struct SeriesView: View {
                             newestGrid
                         }
                         }
+
+                        // Build 88 (F3): bottom clearance — the
+                        // floating tab bar must never cover the
+                        // last rows of any content branch above
+                        // (shelves, Newest grid, category grid,
+                        // in-tab search results).
+                        Color.clear
+                            .frame(height: 84)
                     }
                     .refreshable {
                         // Independent Task: so the refreshable cancellation doesn't propagate to the requests (see LiveStreamsView).
@@ -349,7 +463,6 @@ struct SeriesView: View {
             rankingsStamp: "\(contentStore.sharedTopRatedSeries.count)-\(contentStore.sharedNewestSeries.count)-\(contentStore.sharedTopRatedSeries.first?.seriesId ?? -1)-\(contentStore.sharedNewestSeries.first?.seriesId ?? -1)",
             order: orderStore.orderedIds(playlistId: playlist.id, type: "series")
         )) { await recomputeFilter() }
-        .onAppear { shelfReplayToken += 1 }
         // Build 80 (item 4): 280 ms debounce, then the detached
         // filter pass over the tab's display set.
         .task(id: tabSearchText) {
@@ -476,6 +589,71 @@ struct SeriesView: View {
             ContentChipsRow(chips: [.all, .newest], selection: $selectedChip)
         }
         .padding(.bottom, 6)
+    }
+
+    /// Build 88 (Part 2-B, decision D2): the NEW-chip slice —
+    /// the series on the Recently Added shelf (the catalog's
+    /// newest-added ordering, after the build-80 dedupe) carry
+    /// the chip wherever they render.
+    private var newestSliceIds: Set<Int> {
+        Set(recentlyAddedSeries.map(\.seriesId))
+    }
+
+    /// The shared poster card's caption override for one
+    /// series on the tab's shelves: the in-progress position
+    /// when there is one (the live signal SeriesCard always
+    /// prioritised); nil lets the card show the record's own
+    /// "year • first genre" line.
+    private func seriesShelfCaption(_ series: DBSeries) -> String? {
+        progressBySeriesId[String(series.seriesId)]?.positionText
+    }
+
+    // Build 88 (Part 2-B): cover prefetch for the category
+    // shelves, carried over from the deleted
+    // SeriesCategoryShelfRow (rounds 7/9/20 behaviour) — the
+    // shared shelf owns no prefetch, so the tab keeps warming
+    // exactly what its cells render: the cover at shelf size,
+    // head batch + the window ahead of the visible cell, with
+    // the head batch retracted when the shelf leaves.
+    private func prefetchSeriesCovers(_ list: [DBSeries]) {
+        let urls = list.prefix(16)
+            .compactMap { $0.cover }
+            .compactMap { ArtworkURL.url(from: $0) }
+        ListImagePrefetch.start(
+            urls: urls,
+            width: posterMetrics.shelfPosterWidth,
+            height: posterMetrics.shelfPosterHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
+    }
+
+    private func prefetchSeriesWindow(_ list: [DBSeries], after index: Int) {
+        let start = index + 1
+        guard start < list.count else { return }
+        let urls = list[start..<min(start + ListImagePrefetch.scrollWindow, list.count)]
+            .compactMap { $0.cover }
+            .compactMap { ArtworkURL.url(from: $0) }
+        ListImagePrefetch.start(
+            urls: urls,
+            width: posterMetrics.shelfPosterWidth,
+            height: posterMetrics.shelfPosterHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
+    }
+
+    private func stopSeriesPrefetch(_ list: [DBSeries]) {
+        let urls = list.prefix(16)
+            .compactMap { $0.cover }
+            .compactMap { ArtworkURL.url(from: $0) }
+        ListImagePrefetch.stop(
+            urls: urls,
+            width: posterMetrics.shelfPosterWidth,
+            height: posterMetrics.shelfPosterHeight,
+            contentMode: .fill,
+            loadProfile: .shelf
+        )
     }
 
     @Environment(\.posterMetrics) private var posterMetrics
@@ -842,16 +1020,49 @@ struct SeriesView: View {
     }
 }
 
-// MARK: - Popular Series shelf
+// MARK: - Build 88: shared catalog poster card (series)
 
-/// "Popular Series" row: the catalog's highest-rated series (real panel
-/// ratings only, computed in `recomputeFilter`). Round 9: portrait
-/// poster cards (`SeriesCard`, the series cover) — the wide 16:9
-/// `SeriesWideCard` showed backdrop art where it existed and low-res
-/// covers upscaled into a 264pt-wide frame where it did not, visibly
-/// blurrier than the Movies shelves' crisp portrait posters (owner
-/// recording, build 45). Same card, size and image profile the Movies
-/// shelves use. "See all" opens the existing All Series grid.
+/// The Series tab's poster card for one record — the shared
+/// PosterCardView fed exactly as `moviePosterCard` feeds the
+/// Movies tab: the artwork chain resolved to ONE url (cover,
+/// then the stored backdrop — build 82 item 6), the normalized
+/// rating, and the caller's NEW-slice flag. The caption is the
+/// caller's line when it passes one (the in-progress position
+/// on the tab's shelves); otherwise the record's own
+/// "year • first genre" line, as SeriesCard always showed.
+func seriesPosterCard(
+    _ series: DBSeries,
+    posterWidth: CGFloat,
+    posterHeight: CGFloat,
+    imageLoadProfile: ImageLoadProfile,
+    isNew: Bool,
+    captionText: String? = nil,
+    watchProgress: Double? = nil
+) -> PosterCardView {
+    var captionParts: [String] = []
+    if let year = DetailFormatting.year(from: series.releaseDate) {
+        captionParts.append(year)
+    }
+    if let genre = series.genre?.split(separator: ",").first {
+        let trimmed = genre.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty { captionParts.append(trimmed) }
+    }
+    return PosterCardView(
+        imageURL: ArtworkURL.url(from: series.cover) ?? ArtworkURL.url(from: series.backdropPath),
+        title: series.name,
+        yearText: captionText ?? (captionParts.isEmpty ? nil : captionParts.joined(separator: " • ")),
+        ratingText: ContentRating.normalizedDisplayText(rating: series.rating, rating5Based: series.rating5Based),
+        isNew: isNew,
+        iconName: "play.tv",
+        posterWidth: posterWidth,
+        posterHeight: posterHeight,
+        imageLoadProfile: imageLoadProfile,
+        watchProgress: watchProgress
+    )
+}
+
+// MARK: - Series featured hero
+
 /// Build 65: the Series tab's featured hero — the exact visual
 /// language of the Movies tab's `MovieFeaturedHero` (backdrop,
 /// gradient, badge, big title, real rating/year/genre line, Play
@@ -903,312 +1114,54 @@ struct SeriesFeaturedHero: View {
     }
 }
 
-struct PopularSeriesShelf: View, Equatable {
-    let playlist: Playlist
-    let items: [DBSeries]
-    var progressBySeriesId: [String: SeriesProgressInfo] = [:]
-    var watchedPercentBySeriesId: [String: Int] = [:]
-    var replayToken: Int = 0
-
-    static func == (lhs: PopularSeriesShelf, rhs: PopularSeriesShelf) -> Bool {
-        lhs.playlist.id == rhs.playlist.id && lhs.items == rhs.items
-            && lhs.progressBySeriesId == rhs.progressBySeriesId
-            && lhs.replayToken == rhs.replayToken
-    }
-
-    @Environment(\.posterMetrics) private var posterMetrics
-    @ObservedObject private var contentStore = PlaylistContentStore.shared
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            CinematicSectionHeader(title: L("home.popular_series")) {
-                AllSeriesView(playlist: playlist)
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(items.indices, id: \.self) { index in
-                        NavigationLink {
-                            SeriesDetailView(playlist: playlist, series: items[index])
-                        } label: {
-                            // Round 14 (B8): Popular Series is a
-                            // RANKED shelf — outlined numerals, the
-                            // series identity mirroring Top Movies.
-                            RankedPosterCard(
-                                rank: index + 1,
-                                imageURL: items[index].cover.flatMap { ArtworkURL.url(from: $0) },
-                                title: items[index].name,
-                                ratingText: ContentRating.normalizedDisplayText(
-                                    rating: items[index].rating,
-                                    rating5Based: items[index].rating5Based
-                                ),
-                                // B8: real season/episode counts
-                                // ride the card's meta line when the
-                                // store has computed them.
-                                metaText: contentStore.seriesSeasonEpisodeCounts[items[index].seriesId].map {
-                                    "\(L("series.seasons_count_format", $0.seasons)) • \(L("series.episode_count_format", $0.episodes))"
-                                },
-                                posterWidth: posterMetrics.shelfPosterWidth,
-                                posterHeight: posterMetrics.shelfPosterHeight,
-                                iconName: "play.tv"
-                            )
-                            .tint(SectionTheme.series)
-                        }
-                        .buttonStyle(.plain)
-                        .shelfEntrance(index: index, replayToken: replayToken)
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-            .shelfEdgeFade()
-        }
-        .padding(.vertical, 6)
-    }
-}
+// Build 88 (Part 2-B): PopularSeriesShelf was replaced by the shared
+// CatalogShelfRow (ranked) in SeriesView — see Views/CatalogComponents.swift.
 
 // MARK: - Recently Added shelf
 
-struct RecentlyAddedSeriesShelf: View, Equatable {
-    let playlist: Playlist
-    let items: [DBSeries]
-    var progressBySeriesId: [String: SeriesProgressInfo] = [:]
-    var watchedPercentBySeriesId: [String: Int] = [:]
-
-    static func == (lhs: RecentlyAddedSeriesShelf, rhs: RecentlyAddedSeriesShelf) -> Bool {
-        lhs.playlist.id == rhs.playlist.id && lhs.items == rhs.items
-            && lhs.progressBySeriesId == rhs.progressBySeriesId
-    }
-
-    @Environment(\.posterMetrics) private var posterMetrics
-    @ObservedObject private var contentStore = PlaylistContentStore.shared
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Round 8: the ONE shelf-header style (was headline +
-            // chevron); destination unchanged.
-            CinematicSectionHeader(title: L("recently_added.title")) {
-                RecentlyAddedSeriesDetailView(playlist: playlist, items: items)
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(items) { series in
-                        NavigationLink {
-                            SeriesDetailView(playlist: playlist, series: series)
-                        } label: {
-                            // Round 9: portrait poster card (cover),
-                            // same as the Movies shelves — see
-                            // `PopularSeriesShelf`. Round 14 (B8):
-                            // in-progress series carry their progress
-                            // bar + position line here too.
-                            SeriesCard(
-                                playlistId: playlist.id,
-                                stream: series,
-                                posterWidth: posterMetrics.shelfPosterWidth,
-                                posterHeight: posterMetrics.shelfPosterHeight,
-                                imageLoadProfile: .shelf,
-                                watchProgress: progressBySeriesId[String(series.seriesId)]?.progress,
-                                seasonEpisodeCounts: contentStore.seriesSeasonEpisodeCounts[series.seriesId],
-                                positionText: progressBySeriesId[String(series.seriesId)]?.positionText,
-                                watchedPercent: watchedPercentBySeriesId[String(series.seriesId)]
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-            .frame(height: posterMetrics.shelfRowTotalHeight + 18)
-            .shelfEdgeFade()
-        }
-        .padding(.vertical, 6)
-    }
-}
+// Build 88 (Part 2-B): RecentlyAddedSeriesShelf was replaced by the shared
+// CatalogShelfRow in SeriesView — see Views/CatalogComponents.swift.
 
 // MARK: - Recently Added Detail View
+/// Build 88 (Part 2-B): the "See all" page is the shared
+/// CatalogGridView — poster grid, in-section search and the
+/// "N of N" count line; the grid owns the header, the search,
+/// the navigation chrome and the bottom clearance.
 struct RecentlyAddedSeriesDetailView: View {
     let playlist: Playlist
     let items: [DBSeries]
 
-    @State private var searchText = ""
-    @State private var debouncedQuery = ""
-    @State private var debounceTask: Task<Void, Never>?
-
-    private var wrapped: [SeriesWithCategory] {
-        items.map { SeriesWithCategory(series: $0, categoryName: "") }
-    }
-
-    private var displayItems: [SeriesWithCategory] {
-        let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
-        if q.isEmpty { return wrapped }
-        return wrapped.filter { CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.series.name) }
-    }
+    @Environment(\.posterMetrics) private var posterMetrics
 
     var body: some View {
-        SeriesCategoryContent(playlist: playlist, items: displayItems)
-            .equatable()
-            .navigationTitle(L("recently_added.title"))
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar(.hidden, for: .tabBar)
-            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: L("series.search_placeholder"))
-            .onChange(of: searchText) { _, new in
-                debounceTask?.cancel()
-                debounceTask = Task {
-                    try? await Task.sleep(nanoseconds: 280_000_000)
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run { debouncedQuery = new }
+        CatalogGridView(
+            title: L("recently_added.title"),
+            items: items,
+            searchPlaceholder: L("series.search_placeholder"),
+            itemTitle: { $0.name },
+            emptySystemImage: "tv",
+            cell: { series in
+                NavigationLink {
+                    SeriesDetailView(playlist: playlist, series: series)
+                } label: {
+                    seriesPosterCard(
+                        series,
+                        posterWidth: posterMetrics.categoryGridPosterWidth,
+                        posterHeight: posterMetrics.categoryGridPosterHeight,
+                        imageLoadProfile: .grid,
+                        isNew: true
+                    )
                 }
+                .buttonStyle(.plain)
             }
-            .onDisappear { debounceTask?.cancel(); debounceTask = nil }
+        )
     }
 }
 
 // MARK: - Category shelf
-private enum SeriesCategoryShelf {
-    static let prefetchHeadCount = 16 // Round 7: 32 → 16 (see ListImagePrefetch — bounds speculative decode work per shelf)
-}
-
-struct SeriesCategoryShelfRow: View, Equatable {
-    let playlist: Playlist
-    let category: DBCategory
-    let items: [SeriesWithCategory]
-    var isStreamsLoading: Bool = false
-    var progressBySeriesId: [String: SeriesProgressInfo] = [:]
-    var watchedPercentBySeriesId: [String: Int] = [:]
-
-    static func == (lhs: SeriesCategoryShelfRow, rhs: SeriesCategoryShelfRow) -> Bool {
-        lhs.playlist.id == rhs.playlist.id &&
-        lhs.category == rhs.category &&
-        lhs.items == rhs.items &&
-        lhs.isStreamsLoading == rhs.isStreamsLoading &&
-        lhs.progressBySeriesId == rhs.progressBySeriesId
-    }
-
-    @Environment(\.posterMetrics) private var posterMetrics
-    @ObservedObject private var contentStore = PlaylistContentStore.shared
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Round 8: the ONE shelf-header style — destination and the
-            // real per-category count badge (round 5, elite pattern)
-            // are unchanged; both now ride on CinematicSectionHeader.
-            CinematicSectionHeader(title: category.name, count: items.isEmpty ? nil : items.count) {
-                SeriesCategoryDetailView(playlist: playlist, category: category)
-            }
-
-            if items.isEmpty {
-                if isStreamsLoading {
-                    // Round 9: matches the portrait-card row height.
-                    Color.clear.frame(height: posterMetrics.shelfRowTotalHeight)
-                } else {
-                    Text(L("series.empty.no_in_category"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 16)
-                }
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: 14) {
-                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                            NavigationLink {
-                                SeriesDetailView(playlist: playlist, series: item.series)
-                            } label: {
-                                // Round 9: portrait poster card
-                                // (cover), same as the Movies shelves.
-                                // Round 14 (B8): counts + in-progress
-                                // state ride the card.
-                                SeriesCard(
-                                    playlistId: playlist.id,
-                                    stream: item.series,
-                                    posterWidth: posterMetrics.shelfPosterWidth,
-                                    posterHeight: posterMetrics.shelfPosterHeight,
-                                    imageLoadProfile: .shelf,
-                                    watchProgress: progressBySeriesId[String(item.series.seriesId)]?.progress,
-                                    seasonEpisodeCounts: contentStore.seriesSeasonEpisodeCounts[item.series.seriesId],
-                                    positionText: progressBySeriesId[String(item.series.seriesId)]?.positionText,
-                                    watchedPercent: watchedPercentBySeriesId[String(item.series.seriesId)]
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            // Round 20 (R20-5): as each cell appears,
-                            // warm the covers just ahead of it — the
-                            // old head-only prefetch left every cover
-                            // past the first 16 a cold request during
-                            // fast horizontal scrolls (the placeholder
-                            // fields in the owner's build-54 recording
-                            // were this shelf's Ramadan rows).
-                            .onAppear {
-                                prefetchWindow(from: items, after: index)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-                .frame(height: posterMetrics.shelfRowTotalHeight + 18)
-                .shelfEdgeFade()
-                .onAppear {
-                    prefetchCovers(from: items)
-                }
-                .onDisappear {
-                    // Round 20 (R20-5): retract this shelf's
-                    // not-yet-started head batch so a fast vertical
-                    // fling doesn't leave the shared prefetch queue
-                    // full of shelves the user already passed.
-                    stopPrefetchCovers(from: items)
-                }
-            }
-        }
-        .padding(.vertical, 6)
-    }
-
-    private func prefetchCovers(from list: [SeriesWithCategory]) {
-        // Round 9: prefetch exactly what the portrait cards render —
-        // the cover at shelf poster size (mirrors
-        // `VODCategoryShelfRow.prefetchPosters`). The old request
-        // prefetched backdrop art at the deleted wide-card size, a
-        // cache key no card ever asked for.
-        let urls = list.prefix(SeriesCategoryShelf.prefetchHeadCount)
-            .compactMap { $0.series.cover }
-            .compactMap { ArtworkURL.url(from: $0) }
-        ListImagePrefetch.start(
-            urls: urls,
-            width: posterMetrics.shelfPosterWidth,
-            height: posterMetrics.shelfPosterHeight,
-            contentMode: .fill,
-            loadProfile: .shelf
-        )
-    }
-
-    /// Round 20 (R20-5): the scroll window ahead of the cell at
-    /// `index` (see ListImagePrefetch.scrollWindow).
-    private func prefetchWindow(from list: [SeriesWithCategory], after index: Int) {
-        let start = index + 1
-        guard start < list.count else { return }
-        let urls = list[start..<min(start + ListImagePrefetch.scrollWindow, list.count)]
-            .compactMap { $0.series.cover }
-            .compactMap { ArtworkURL.url(from: $0) }
-        ListImagePrefetch.start(
-            urls: urls,
-            width: posterMetrics.shelfPosterWidth,
-            height: posterMetrics.shelfPosterHeight,
-            contentMode: .fill,
-            loadProfile: .shelf
-        )
-    }
-
-    private func stopPrefetchCovers(from list: [SeriesWithCategory]) {
-        let urls = list.prefix(SeriesCategoryShelf.prefetchHeadCount)
-            .compactMap { $0.series.cover }
-            .compactMap { ArtworkURL.url(from: $0) }
-        ListImagePrefetch.stop(
-            urls: urls,
-            width: posterMetrics.shelfPosterWidth,
-            height: posterMetrics.shelfPosterHeight,
-            contentMode: .fill,
-            loadProfile: .shelf
-        )
-    }
-}
+// Build 88 (Part 2-B): SeriesCategoryShelfRow (+ its prefetch helpers) was
+// replaced by the shared CatalogShelfRow in SeriesView — the shared shelf
+// owns poster prefetch at shelf size. See Views/CatalogComponents.swift.
 
 struct SeriesCard: View {
     let playlistId: UUID
@@ -1636,53 +1589,62 @@ struct SeriesCategoryContent: View, Equatable {
     }
 }
 
-// MARK: - All Series (flat, sortable/filterable browse)
+// MARK: - All Series (flat browse)
 
-/// Flat grid of every series across categories. Reuses `SeriesCategoryContent`, so
-/// it inherits the sort menu and genre filter for free.
+/// Flat grid of every series across categories — the Top Rated
+/// shelf's "See all". Build 88 (Part 2-B): renders through the
+/// shared CatalogGridView (poster grid, in-section search,
+/// "N of N"); this view keeps only the data rule it always had
+/// (hidden categories excluded). The grid's own search replaces
+/// the page's old searchable + relevance-sort plumbing.
 struct AllSeriesView: View {
     let playlist: Playlist
 
     @ObservedObject private var contentStore = PlaylistContentStore.shared
     @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
-    @State private var searchText = ""
-    @State private var debouncedQuery = ""
-    @State private var debounceTask: Task<Void, Never>?
-    @State private var displayItems: [SeriesWithCategory] = []
+    @State private var displayItems: [DBSeries] = []
+    @Environment(\.posterMetrics) private var posterMetrics
+
+    /// The NEW-chip slice, from the store's shared newest
+    /// ordering (the tab derives its slice from its own deduped
+    /// shelf state; the ids agree on the newest head).
+    private var newSliceIds: Set<Int> {
+        Set(contentStore.sharedNewestSeries.prefix(20).map(\.seriesId))
+    }
 
     var body: some View {
-        SeriesCategoryContent(playlist: playlist, items: displayItems)
-            .equatable()
-            .navigationTitle(L("browse.all_series"))
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar(.hidden, for: .tabBar)
-            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: L("series.search_placeholder"))
-            .onChange(of: searchText) { _, new in
-                debounceTask?.cancel()
-                debounceTask = Task {
-                    try? await Task.sleep(nanoseconds: 280_000_000)
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run { debouncedQuery = new }
+        CatalogGridView(
+            title: L("browse.all_series"),
+            items: displayItems,
+            searchPlaceholder: L("series.search_placeholder"),
+            itemTitle: { $0.name },
+            emptySystemImage: "tv",
+            cell: { series in
+                NavigationLink {
+                    SeriesDetailView(playlist: playlist, series: series)
+                } label: {
+                    seriesPosterCard(
+                        series,
+                        posterWidth: posterMetrics.categoryGridPosterWidth,
+                        posterHeight: posterMetrics.categoryGridPosterHeight,
+                        imageLoadProfile: .grid,
+                        isNew: newSliceIds.contains(series.seriesId)
+                    )
                 }
+                .buttonStyle(.plain)
             }
-            .onDisappear { debounceTask?.cancel(); debounceTask = nil }
-            .task(id: debouncedQuery) { await recompute() }
-            .task(id: contentStore.streamsLoaded) { await recompute() }
-            .task(id: hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")) { await recompute() }
-            .cinematicBackground()
+        )
+        .task(id: contentStore.streamsLoaded) { await recompute() }
+        .task(id: hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")) { await recompute() }
     }
 
     private func recompute() async {
         guard playlist.id == contentStore.activePlaylistId else { displayItems = []; return }
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "series")
         let source = contentStore.seriesItems
-        let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
         // All work off the main thread; the catalog can be very large.
         let result = await Task.detached(priority: .userInitiated) {
-            let base = source.filter { !hidden.contains($0.series.categoryId ?? "") }
-            if q.isEmpty { return base }
-            let filtered = base.filter { CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.series.name) }
-            return CatalogTextSearch.sortSeriesByRelevance(filtered, search: q)
+            source.filter { !hidden.contains($0.series.categoryId ?? "") }.map(\.series)
         }.value
         guard !Task.isCancelled else { return }
         displayItems = result
@@ -2218,6 +2180,11 @@ struct SeriesDetailView: View {
                 DetailHero(config: heroConfig, heroHeight: 380) { url in
                     enlargedImage = IdentifiableURL(url: url)
                 }
+                // Build 88 (Part 2-B): the approved mockup's
+                // ambient accent under-glow beneath the hero —
+                // a soft shadow only; the hero's own art chain
+                // (DetailHero) is untouched.
+                .shadow(color: AppTheme.accent.opacity(0.16), radius: 28, y: 14)
 
                 // Round 14 (B1): genre chips navigate to the Series
                 // tab's genre-filtered grid.
@@ -2390,7 +2357,10 @@ struct SeriesDetailView: View {
                         .sectionAppear()
                 }
             }
-            .padding(.bottom, 48)
+            // Build 88 (F3): 48 → 96 — this page does not hide
+            // the floating tab bar, so the last episode / More
+            // Like This rows need full clearance under it.
+            .padding(.bottom, 96)
         }
         .scrollIndicators(.hidden)
         .onScrollGeometryChange(for: Bool.self) { geo in
@@ -3157,8 +3127,17 @@ private struct EpisodeDetailRow: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                .strokeBorder(AppTheme.cardBorderColor, lineWidth: 0.5)
+                .strokeBorder(
+                    watchProgress != nil ? AppTheme.accent.opacity(0.45) : AppTheme.cardBorderColor,
+                    lineWidth: watchProgress != nil ? 1 : 0.5
+                )
         )
+        // Build 88 (Part 2-B): the approved mockup's lifted
+        // card — a soft drop shadow under every episode card;
+        // an in-progress episode additionally carries the
+        // accent edge above (its progress bar rides the text
+        // column, as before).
+        .shadow(color: .black.opacity(0.30), radius: 10, y: 4)
         // Build 61 (B8, C5): manual watched toggle on the episode card.
         .contextMenu {
             Button {
@@ -3254,10 +3233,21 @@ private struct EpisodeDetailRow: View {
             }
             .font(.caption.weight(.semibold))
 
-            Text(rawEpisodeTitle)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
+            // Build 88 (Part 2-B): the mockup's numbered title
+            // ("1. Pilot") — the episode number leads, in the
+            // accent; skipped when the record's own title already
+            // starts with that number (some panels bake it in).
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if let num = episode.episodeNum, !rawEpisodeTitle.hasPrefix("\(num).") {
+                    Text("\(num).")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+                Text(rawEpisodeTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+            }
 
             // In-progress: the mockup's progress bar under the
             // title (it rode the thumbnail's bottom edge before).
@@ -3347,43 +3337,8 @@ struct SeriesGenreGridView: View {
 
 /// The Series tab's Watch Later shelf — the mirror of the Movies
 /// tab's `WatchlistShelf`, fed by the SAME `WatchlistStore`.
-struct WatchlistSeriesShelf: View {
-    let playlist: Playlist
-    let items: [DBSeries]
-
-    @Environment(\.posterMetrics) private var posterMetrics
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            CinematicSectionHeader(title: L("watchlist.title")) {
-                WatchlistSeriesView(playlist: playlist)
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(items) { series in
-                        NavigationLink {
-                            SeriesDetailView(playlist: playlist, series: series)
-                        } label: {
-                            SeriesCard(
-                                playlistId: playlist.id,
-                                stream: series,
-                                posterWidth: posterMetrics.shelfPosterWidth,
-                                posterHeight: posterMetrics.shelfPosterHeight,
-                                imageLoadProfile: .shelf
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-            .frame(height: posterMetrics.shelfRowTotalHeight)
-            .shelfEdgeFade()
-        }
-        .padding(.vertical, 6)
-    }
-}
+// Build 88 (Part 2-B): WatchlistSeriesShelf was replaced by the shared
+// CatalogShelfRow in SeriesView — see Views/CatalogComponents.swift.
 
 /// Every watch-later series for this playlist, resolved against the
 /// loaded catalog — plus the R6 unavailable entries (vanished from

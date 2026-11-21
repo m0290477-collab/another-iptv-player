@@ -665,12 +665,25 @@ struct LeagueNewsView: View {
 struct LiveNowView: View {
     @State private var groups: [LiveNowGroup] = []
     @State private var didLoad = false
+    /// Build 88 (F11): whether today has fixtures at all —
+    /// drives the empty copy below.
+    @State private var todayHasFixtures = false
+
+    /// Build 88 (F11): the honest empty line. When today HAS
+    /// fixtures but none are live, the page says so ("No
+    /// matches live right now"); "No matches today" is reserved
+    /// for a day with no fixtures. Build 87 showed the second
+    /// line for both states — at 1 AM it read as if the day
+    /// were empty when it was full of fixtures.
+    private var emptyText: String {
+        todayHasFixtures ? L("matches.live_none_now") : L("matches.empty")
+    }
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18) {
                 if groups.isEmpty {
-                    Text(didLoad ? L("matches.empty") : L("common.loading"))
+                    Text(didLoad ? emptyText : L("common.loading"))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 40)
@@ -731,8 +744,54 @@ struct LiveNowView: View {
     }
 
     private func refresh() async {
-        groups = await SportsHubService.liveNow()
+        let snapshot = await SportsHubService.liveNowSnapshot()
+        groups = snapshot.groups
+        todayHasFixtures = snapshot.todayHasFixtures
         didLoad = true
+    }
+}
+
+// MARK: - Highlight thumbnail (build 88, F14)
+
+/// A highlight's thumbnail cell. Build 87's cells flashed
+/// BLACK for a beat before the image landed: the cell was a
+/// bare CachedImage whose placeholder only exists inside its
+/// own loading branch, so any frame before that branch (or a
+/// row recycled mid-load) showed the page through an empty
+/// 104×60 hole. The cell now ALWAYS renders its designed
+/// placeholder first — an accent-tinted block with the play
+/// badge — and the image fades in over it; there is no frame
+/// in which the cell is black or empty.
+struct HighlightThumb: View {
+    let url: URL?
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(
+                    LinearGradient(
+                        colors: [AppTheme.surface, AppTheme.accent.opacity(0.22)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                )
+            CachedImage(
+                url: url,
+                width: 104, height: 60,
+                cornerRadius: 8,
+                contentMode: .fill,
+                iconName: "play.rectangle"
+            )
+            Image(systemName: "play.circle.fill")
+                .font(.title3)
+                .foregroundStyle(.white)
+                .shadow(radius: 3)
+        }
+        .frame(width: 104, height: 60)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(AppTheme.cardBorderColor, lineWidth: 1)
+        )
     }
 }
 
@@ -765,6 +824,7 @@ struct HighlightsHubView: View {
                     Text(didLoad ? L("matches.empty") : L("common.loading"))
                         .foregroundStyle(.secondary)
                 }
+                .listRowBackground(AppTheme.surface)
             } else {
                 ForEach(Array(sportGroups.enumerated()), id: \.offset) { _, group in
                     Section {
@@ -781,10 +841,17 @@ struct HighlightsHubView: View {
                             .font(AppTheme.fontBadge)
                             .foregroundStyle(AppTheme.accent)
                     }
+                    .listRowBackground(AppTheme.surface)
                 }
             }
         }
         .listStyle(.insetGrouped)
+        // Build 88 (F14): the hub was the one Matches page
+        // without the shared chrome — its rows rendered on the
+        // system list background, which is part of why its
+        // thumbnails read as black flashes against the page.
+        .scrollContentBackground(.hidden)
+        .cinematicBackground()
         .navigationTitle(L("matches.highlights_hub"))
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $selected) { video in
@@ -798,19 +865,7 @@ struct HighlightsHubView: View {
 
     private func highlightRow(_ item: HubHighlight) -> some View {
         HStack(spacing: 12) {
-            ZStack {
-                CachedImage(
-                    url: item.video.thumbnailURL,
-                    width: 104, height: 60,
-                    cornerRadius: 8,
-                    contentMode: .fill,
-                    iconName: "play.rectangle"
-                )
-                Image(systemName: "play.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(.white)
-                    .shadow(radius: 3)
-            }
+            HighlightThumb(url: item.video.thumbnailURL)
             VStack(alignment: .leading, spacing: 3) {
                 if let home = item.homeName, let away = item.awayName {
                     Text("\(home) – \(away)")

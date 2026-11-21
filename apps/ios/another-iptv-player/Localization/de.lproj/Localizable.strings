@@ -1224,3 +1224,8 @@
 "matches.tab.nhl" = "NHL";
 "matches.tennis" = "Tennis";
 "matches.ufc" = "UFC";
+"catalog.count_of_total" = "%d von %d";
+"live.group.count_format" = "%d von %d";
+"player.channel_list.title" = "Kanäle";
+"settings.hub.refresh" = "Aktualisieren";
+"matches.live_none_now" = "Gerade keine Live-Spiele";

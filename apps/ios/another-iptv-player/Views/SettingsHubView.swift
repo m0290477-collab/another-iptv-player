@@ -33,6 +33,23 @@ import SwiftUI
 /// red-orange regardless of the user's saved accent preset.
 /// Destinations and sub-screens are byte-for-byte the build-70
 /// ones; only this home surface changed.
+///
+/// Build 88 (owner-approved "max" Settings mockup): the header
+/// becomes a GLASS card whose avatar is the flame brand mark in
+/// a glowing brand-gradient ring; a NEW playlist glass card sits
+/// under it with the playlist's REAL imported counts (the record-
+/// layer `importedCounts` the gate summary reads), its real
+/// recorded expiry line, and a glowing Refresh pill wired to the
+/// SAME refresh the rest of the app runs (Xtream catalog refresh
+/// / M3U remote re-import — the pill is hidden for a local-file
+/// M3U, which has no remote source to refresh). The hub rows'
+/// chips become glowing accent squares and their press is an
+/// accent sheen sweep; every toggle the hub reaches renders the
+/// shared glowing switch (one `.toggleStyle` at this root). The
+/// header's brand elements (avatar ring, validity bar) stay on
+/// the FIXED brand tokens; the interactive chrome (chips, pill,
+/// switches) reads the existing accent token, so the accent
+/// picker keeps governing this surface like every other.
 struct SettingsHubView: View {
     let playlist: Playlist
     let onDismiss: () -> Void
@@ -40,6 +57,12 @@ struct SettingsHubView: View {
 
     @Query<PlaylistRequest> private var allPlaylists: [Playlist]?
     @State private var pinUnlocked = false
+    /// Build 88 playlist card: the active playlist's real
+    /// imported counts, read from the record layer on appear and
+    /// after every card refresh (nil until the first read lands —
+    /// the counts line simply isn't there yet, never a fake 0).
+    @State private var playlistCounts: (live: Int, movies: Int, series: Int)?
+    @State private var isRefreshingPlaylist = false
 
     init(playlist: Playlist, onDismiss: @escaping () -> Void, onSwitchPlaylist: @escaping (Playlist) -> Void) {
         self.playlist = playlist
@@ -71,6 +94,8 @@ struct SettingsHubView: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 22) {
                 headerCard
+
+                playlistCard
 
                 hubSection(title: L("settings.hub.section_general")) {
                     hubRow(
@@ -179,20 +204,35 @@ struct SettingsHubView: View {
                         aboutDestination
                     }
                 }
+
+                // Build 88 (F3): clearance so the last section
+                // can always scroll fully clear of the floating
+                // tab bar (the iOS 26 glass pill floats over
+                // content; the destination Lists are system lists
+                // whose bottom safe area the bar already reserves,
+                // so only this ScrollView needs the extra room).
+                Color.clear
+                    .frame(height: 48)
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
             .padding(.bottom, 24)
         }
         .cinematicBackground()
+        // Build 88: the ONE application of the glowing switch —
+        // the environment carries it into every destination the
+        // hub pushes, so all real toggles in Settings render it.
+        .toggleStyle(GlowingToggleStyle())
     }
 
     // MARK: - Header card
 
-    /// Build 71 profile header (Style 3): a circular monogram
-    /// avatar derived from the ACTIVE playlist's real name (the
-    /// flame brand mark when the name yields no letter — never a
-    /// fake person), the playlist's name as the title, and a
+    /// Build 71 profile header (Style 3), build 88 glass pass:
+    /// the avatar is the flame brand mark on a dark disc inside a
+    /// glowing brand-gradient ring (the approved mockup's header;
+    /// it replaced the build-71 monogram — the playlist's name
+    /// still sits right beside it as the title, so no identity is
+    /// lost), the playlist's name as the title, and a
     /// subtitle composed ONLY of real state: the real playlist
     /// count and the provider expiry recorded in
     /// `ProviderExpiryStore` (the same source as the account
@@ -208,18 +248,17 @@ struct SettingsHubView: View {
             HStack(spacing: 14) {
                 ZStack {
                     Circle()
-                        .fill(AppTheme.brandGradient)
-                        .frame(width: 64, height: 64)
-                    if headerInitial.isEmpty {
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 26, weight: .bold))
-                            .foregroundStyle(.white)
-                    } else {
-                        Text(headerInitial)
-                            .font(.title.weight(.bold))
-                            .foregroundStyle(.white)
-                    }
+                        .fill(AppTheme.surface)
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(AppTheme.brandGradient)
                 }
+                .frame(width: 64, height: 64)
+                .overlay {
+                    Circle()
+                        .stroke(AppTheme.brandGradient, lineWidth: 2.5)
+                }
+                .shadow(color: AppTheme.accentStart.opacity(0.45), radius: 12, y: 4)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(headerTitle)
                         .font(.title2.weight(.bold))
@@ -245,26 +284,10 @@ struct SettingsHubView: View {
             .frame(height: 4)
         }
         .padding(18)
-        .background {
-            ZStack {
-                RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
-                    .fill(AppTheme.cardGradient)
-                // The mockup's subtle warm glow, low in the card —
-                // the FIXED Design-4 orange, never the user accent.
-                RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.clear, AppTheme.accentStart.opacity(0.16)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            }
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
-                .stroke(AppTheme.cardBorderColor, lineWidth: 1)
-        }
+        // Build 88: the shared glass card (card gradient + the
+        // warm brand glow low in the card — the FIXED Design-4
+        // orange, never the user accent — + the top sheen).
+        .settingsGlassCard()
     }
 
     /// The header's display name: the active playlist's real
@@ -274,15 +297,6 @@ struct SettingsHubView: View {
         let name = playlist.name.trimmingCharacters(in: .whitespacesAndNewlines)
         if !name.isEmpty { return name }
         return playlist.username.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Monogram initial from the header title: its first letter,
-    /// uppercased (the mockup's single-letter avatar). Empty when
-    /// the title has no letters (the header then shows the flame
-    /// mark instead).
-    private var headerInitial: String {
-        guard let first = headerTitle.first(where: { $0.isLetter }) else { return "" }
-        return String(first).uppercased()
     }
 
     private var headerSubtitle: String {
@@ -327,6 +341,171 @@ struct SettingsHubView: View {
         return formatter.string(from: date)
     }
 
+    // MARK: - Playlist card (build 88)
+
+    /// The freshest record of the hub's playlist (the sections in
+    /// SettingsComponents resolve theirs the same way).
+    private var currentPlaylist: Playlist {
+        allPlaylists?.first(where: { $0.id == playlist.id }) ?? playlist
+    }
+
+    /// The mockup's playlist card, built ONLY from real state:
+    /// the playlist's display name, its real imported counts
+    /// (record-layer `importedCounts` — the same read the gate's
+    /// completion card uses; the movies/series segments exist
+    /// only for Xtream, whose catalog has them), its real
+    /// recorded expiry line (omitted when none is recorded, and
+    /// for M3U, which carries no provider account), and the
+    /// glowing Refresh pill. Refresh runs the app's own refresh
+    /// for this playlist — Xtream: `PlaylistContentStore`'s
+    /// catalog refresh (the Home pull-to-refresh call); M3U with
+    /// a remote URL: the Content & Data section's re-import,
+    /// step for step — then re-reads the counts. A local-file
+    /// M3U has no remote source, so it gets no pill (its refresh
+    /// lives in Playlists → Content & Data, from file).
+    private var playlistCard: some View {
+        HStack(spacing: 14) {
+            SettingsIconTile(
+                systemImage: isM3U ? "list.bullet" : "tv",
+                tint: AppTheme.accent,
+                size: 44,
+                glowColor: AppTheme.accent.opacity(0.45)
+            )
+            VStack(alignment: .leading, spacing: 4) {
+                Text(headerTitle)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                countsLine
+                playlistCardExpiry
+            }
+            Spacer(minLength: 8)
+            if !isM3U || !currentPlaylist.serverURL.isEmpty {
+                refreshPill
+            }
+        }
+        .padding(16)
+        .settingsGlassCard(cornerRadius: AppTheme.cornerRadius)
+        .sectionAppear()
+        .task { await loadPlaylistCounts() }
+    }
+
+    /// The counts line: one icon + count segment per catalog
+    /// kind this playlist actually carries, formatted with the
+    /// app's canonical count strings. Nothing renders until the
+    /// first real read lands — never a placeholder 0.
+    @ViewBuilder
+    private var countsLine: some View {
+        if let counts = playlistCounts {
+            HStack(spacing: 10) {
+                countSegment(icon: "tv", text: L("addplaylist.summary.live", counts.live))
+                if !isM3U {
+                    countSegment(icon: "film", text: L("addplaylist.summary.movies", counts.movies))
+                    countSegment(icon: "rectangle.stack", text: L("addplaylist.summary.series", counts.series))
+                }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+        }
+    }
+
+    private func countSegment(icon: String, text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AppTheme.accent)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// The card's expiry line: the recorded provider expiry,
+    /// from the same store the header reads. Omitted entirely
+    /// when nothing real is recorded.
+    @ViewBuilder
+    private var playlistCardExpiry: some View {
+        if !isM3U, let expiry = ProviderExpiryStore.expiryDate(playlistId: playlist.id) {
+            if ProviderExpiryStore.isExpired(expiryDate: expiry) {
+                Text(L("subscription.expired_format", formattedExpiry(expiry)))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.red)
+                    .lineLimit(1)
+            } else {
+                Text(L("settings.hub.active_until_format", formattedExpiry(expiry)))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var refreshPill: some View {
+        Button {
+            Task { await refreshPlaylistCard() }
+        } label: {
+            HStack(spacing: 6) {
+                if isRefreshingPlaylist {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption.weight(.bold))
+                }
+                Text(L("settings.hub.refresh"))
+                    .font(.subheadline.weight(.bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Capsule().fill(AppTheme.accent))
+            .shadow(color: AppTheme.accent.opacity(0.45), radius: 9, y: 3)
+        }
+        .buttonStyle(PressOpacityButtonStyle())
+        .disabled(isRefreshingPlaylist)
+    }
+
+    private func loadPlaylistCounts() async {
+        playlistCounts = await PlaylistValidationService.importedCounts(
+            playlistId: playlist.id,
+            kind: playlist.kind
+        )
+    }
+
+    /// The card's refresh: the app's own per-playlist refresh
+    /// (see the card's comment), then the counts re-read so the
+    /// line shows the post-refresh truth.
+    private func refreshPlaylistCard() async {
+        guard !isRefreshingPlaylist else { return }
+        isRefreshingPlaylist = true
+        defer { isRefreshingPlaylist = false }
+        if isM3U {
+            let target = currentPlaylist
+            if !target.serverURL.isEmpty {
+                do {
+                    let content = try await M3UService().fetchRemote(
+                        urlString: target.serverURL,
+                        playlist: target
+                    )
+                    let parsed = try await M3UParser.parseAsync(content)
+                    try await M3UImporter.replace(
+                        playlist: target,
+                        channels: parsed.channels,
+                        epgURL: parsed.epgURL
+                    )
+                    PlaylistHealthStore.record(.responds, for: target.id)
+                    await M3UContentStore.shared.reloadIfActive(playlist: target)
+                } catch {
+                    PlaylistHealthStore.record(.refused, for: target.id)
+                }
+            }
+        } else {
+            await PlaylistContentStore.shared.refreshFromNetwork(playlist: currentPlaylist)
+        }
+        await loadPlaylistCounts()
+    }
+
     // MARK: - Section & row
 
     /// One Style-3 hub section: the small caps gray title above
@@ -345,26 +524,24 @@ struct SettingsHubView: View {
             VStack(spacing: 0) {
                 content()
             }
-            .background {
-                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                    .fill(AppTheme.cardGradient)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                    .stroke(AppTheme.cardBorderColor, lineWidth: 1)
-            }
+            // Build 88: the shared glass card (the build-71 card
+            // gradient, plus the glass sheen).
+            .settingsGlassCard(cornerRadius: AppTheme.cornerRadius)
             // Build 81 (item 8): hub sections fade/rise in once.
             .sectionAppear()
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
         }
     }
 
-    /// One Style-3 hub row: a small muted icon chip (neutral
-    /// scheme-paired chip — the mockup's chips, NOT the user
-    /// accent, so this surface keeps the Design-4 look for every
-    /// preset; build 76 pairs the tint and glyph with the scheme),
-    /// the title, and a chevron. NO value: the identity/state
-    /// lives only in the header card.
+    /// One Style-3 hub row: the title and a chevron beside the
+    /// icon chip. Build 88: the chip is the mockup's glowing
+    /// accent square — a translucent accent tile, the glyph in
+    /// the accent itself, a soft halo under it — reading the
+    /// existing accent token, so the row chrome follows the
+    /// user's picked accent like the rest of the app (builds
+    /// 71–87 kept these chips neutral; the approved build-88
+    /// mockup supersedes that for this surface). NO value: the
+    /// identity/state lives only in the header card.
     @ViewBuilder
     private func hubRow<Destination: View>(
         icon: String,
@@ -373,7 +550,13 @@ struct SettingsHubView: View {
     ) -> some View {
         NavigationLink(destination: destination) {
             HStack(spacing: 12) {
-                SettingsIconTile(systemImage: icon, tint: AppTheme.overlayFill(0.09), size: 30, glyphColor: .primary)
+                SettingsIconTile(
+                    systemImage: icon,
+                    tint: AppTheme.accent.opacity(0.18),
+                    size: 36,
+                    glyphColor: AppTheme.accent,
+                    glowColor: AppTheme.accent.opacity(0.45)
+                )
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
@@ -384,19 +567,20 @@ struct SettingsHubView: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 11)
+            .padding(.vertical, 13)
             .contentShape(Rectangle())
         }
-        // Build 81 (item 8): hub rows dim on press (was .plain —
-        // no feedback at all).
-        .buttonStyle(PressOpacityButtonStyle())
+        // Build 88: the press is an accent sheen sweep (build 81
+        // gave these rows the plain dim; the sweep supersedes it
+        // on this surface).
+        .buttonStyle(SettingsSweepPressStyle())
     }
 
     /// Hairline between grouped rows, inset to the title edge
-    /// (14 row padding + 30 icon tile + 12 spacing).
+    /// (14 row padding + 36 icon tile + 12 spacing).
     private var rowDivider: some View {
         Divider()
-            .padding(.leading, 56)
+            .padding(.leading, 62)
     }
 
     // MARK: - Destinations (build 70, unchanged)

@@ -180,7 +180,12 @@ enum MatchesScorersService {
     /// concurrently). Season year = the European season's start
     /// year (Jul–Jun). Leagues that publish no leaders return an
     /// empty list — honest empty upstream.
-    static func fetch(leaguePath: String) async -> [ScorerEntry] {
+    /// Build 88 (F1): `limit` bounds the per-league deref fan-out
+    /// (each leader costs up to two small core-API dereferences).
+    /// The per-league page keeps the full 15; the cross-league
+    /// page passes a smaller cap — it only ever shows the merged
+    /// top 40, so a league's 9th-best scorer can never appear.
+    static func fetch(leaguePath: String, limit: Int = 15) async -> [ScorerEntry] {
         let now = Date()
         let comps = Calendar.current.dateComponents([.year, .month], from: now)
         let season = (comps.month ?? 1) >= 7 ? (comps.year ?? 2026) : (comps.year ?? 2026) - 1
@@ -202,7 +207,7 @@ enum MatchesScorersService {
               let wire = try? JSONDecoder().decode(LeadersWire.self, from: data),
               let category = (wire.categories ?? []).first(where: { $0.name == "goalsLeaders" })
                 ?? wire.categories?.first else { return [] }
-        let leaders = Array((category.leaders ?? []).prefix(15))
+        let leaders = Array((category.leaders ?? []).prefix(limit))
         return await withTaskGroup(of: ScorerEntry?.self) { group in
             for leader in leaders {
                 group.addTask {

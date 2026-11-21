@@ -1098,25 +1098,69 @@ struct MatchDetailView: View {
         }
     }
 
+    /// Build 88 (F5): the Top Performers card, rebuilt. The
+    /// build-87 card squeezed everything into an 84 pt column:
+    /// the name truncated to one line ("Erling Haala…"), the
+    /// photo was the ESPN-only disc (a monogram whenever ESPN
+    /// had no headshot), and the value/category lines clipped
+    /// into each other. Now: the photo runs the FULL photo
+    /// chain (PlayerPhotoDisc with the soccer fallback), the
+    /// name gets its own two lines at card width — never
+    /// truncated — and the stat value and its category each
+    /// sit on their own line inside a fixed-width card, so
+    /// nothing can overflow or collide.
     private func leaderCard(_ entry: MatchLeaderEntry) -> some View {
-        VStack(spacing: 5) {
-            PlayerPhotoView(url: entry.headshotURL, name: entry.athleteName, size: 46)
+        VStack(spacing: 6) {
+            PlayerPhotoDisc(
+                url: entry.headshotURL, name: entry.athleteName, size: 52,
+                fallback: leaderFallback(entry)
+            )
             Text(entry.athleteName)
-                .font(AppTheme.fontBadge)
-                .lineLimit(1)
-                .frame(width: 84)
+                .font(AppTheme.fontCardTitle)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 118, height: 38, alignment: .top)
             if let value = entry.valueText {
                 Text(value)
-                    .font(AppTheme.fontCardTitle)
+                    .font(.headline.weight(.bold))
                     .foregroundStyle(AppTheme.accent)
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize()
             }
             Text(entry.category)
                 .font(AppTheme.fontMetadata)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(width: 84)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 118)
         }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 10)
+        .frame(width: 138)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(AppTheme.elevated)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(AppTheme.cardBorderColor, lineWidth: 1)
+        )
+    }
+
+    /// Build 88 (F5): the soccer fallback query for a leader
+    /// card — the same verified chain the squad/leaders
+    /// surfaces use; nil for every other sport (their ESPN
+    /// photos are complete) and without an athlete id.
+    private func leaderFallback(_ entry: MatchLeaderEntry) -> SoccerPhotoQuery? {
+        guard sport == .soccer, let athleteId = entry.athleteId else { return nil }
+        return SoccerPhotoQuery(
+            athleteId: athleteId, name: entry.athleteName,
+            teamName: entry.teamName, leaguePath: leaguePath,
+            citizenship: nil, dateOfBirth: nil
+        )
     }
 
     // MARK: Timeline (item 8b/8c)

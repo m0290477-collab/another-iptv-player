@@ -1275,6 +1275,23 @@ struct LiveNowGroup: Identifiable {
     var id: String { leaguePath }
 }
 
+/// Build 88 (F11): one sport's slice of today's full
+/// schedule, as the Live Wall renders it — the sport (the
+/// section header) plus its matches in kickoff order, each
+/// match still PAIRED with the competition group it came
+/// from. The pairing is load-bearing: `MatchEvent` carries
+/// no leaguePath of its own, and detail routing + Watch
+/// matching need the REAL competition path. Merging a
+/// sport's matches into a single group stamped a synthetic
+/// "sport|…" path that fetched nothing (critic catch,
+/// build 88) — the F10 calendar keeps the same
+/// (group, match) pairing for the same reason.
+struct TodaySportSchedule: Identifiable {
+    let sport: MatchSport
+    let entries: [(group: LiveNowGroup, match: MatchEvent)]
+    var id: MatchSport { sport }
+}
+
 struct HubHighlight: Identifiable {
     let video: MatchVideo
     let homeName: String?
@@ -1320,6 +1337,17 @@ enum SportsHubService {
     }
 
     static func liveNow() async -> [LiveNowGroup] {
+        await liveNowSnapshot().groups
+    }
+
+    /// Build 88 (F11): ONE pass over today's scoreboards that
+    /// answers both of Live Now's questions — which matches are
+    /// live (grouped by competition, as before) and whether
+    /// today has any fixtures at all. The second answer drives
+    /// the page's empty copy: "No matches live right now" is
+    /// only honest when fixtures exist; the two states used to
+    /// render the same "No matches today" line.
+    static func liveNowSnapshot() async -> (groups: [LiveNowGroup], todayHasFixtures: Bool) {
         let today = MatchesService.todayParameter()
         let groups = await withTaskGroup(of: LiveNowGroup?.self) { group in
             for competition in allCompetitions {
@@ -1342,7 +1370,69 @@ enum SportsHubService {
             return out
         }
         let order = Dictionary(uniqueKeysWithValues: allCompetitions.enumerated().map { ($0.element.leaguePath, $0.offset) })
-        return groups.sorted { (order[$0.leaguePath] ?? 0) < (order[$1.leaguePath] ?? 0) }
+        let sorted = groups.sorted { (order[$0.leaguePath] ?? 0) < (order[$1.leaguePath] ?? 0) }
+        // Fixtures check: today's scoreboards again — every one
+        // of these reads is served by the shared disk cache the
+        // pass above just warmed, so this costs no new network.
+        var hasFixtures = !sorted.isEmpty
+        if !hasFixtures {
+            hasFixtures = await withTaskGroup(of: Bool.self) { group in
+                for competition in allCompetitions {
+                    group.addTask {
+                        guard let result = try? await MatchesService.fetchLeague(
+                            path: competition.leaguePath, dateParameter: today
+                        ) else { return false }
+                        return !result.matches.isEmpty
+                    }
+                }
+                for await hit in group { if hit { group.cancelAll(); return true } }
+                return false
+            }
+        }
+        return (sorted, hasFixtures)
+    }
+
+    /// Build 88 (F11): the Live Wall's data — TODAY'S FULL
+    /// schedule (live, upcoming and finished), bucketed by SPORT
+    /// in the app's sport order with each sport's matches sorted
+    /// by kickoff. Deliberately a different shape from Live Now
+    /// (live-only, grouped by competition): the two pages sat
+    /// side by side as near-twins; now the wall is the day's
+    /// programme and Live Now is the live filter. The bucketing
+    /// is DISPLAY-ONLY: every match stays paired with its
+    /// competition group (`TodaySportSchedule`), so the wall's
+    /// rows route detail and Watch matching through the real
+    /// leaguePath — never a synthetic sport path.
+    static func todaySchedule() async -> [TodaySportSchedule] {
+        let today = MatchesService.todayParameter()
+        let perCompetition = await withTaskGroup(of: LiveNowGroup?.self) { group in
+            for competition in allCompetitions {
+                group.addTask {
+                    guard let result = try? await MatchesService.fetchLeague(
+                        path: competition.leaguePath, dateParameter: today
+                    ), !result.matches.isEmpty else { return nil }
+                    return LiveNowGroup(
+                        leagueName: result.leagueName,
+                        leaguePath: competition.leaguePath,
+                        sport: competition.sport,
+                        matches: result.matches
+                    )
+                }
+            }
+            var out: [LiveNowGroup] = []
+            for await item in group { if let item { out.append(item) } }
+            return out
+        }
+        return MatchSport.allCases.compactMap { sport in
+            let entries: [(group: LiveNowGroup, match: MatchEvent)] = perCompetition
+                .filter { $0.sport == sport }
+                .flatMap { competition in
+                    competition.matches.map { (group: competition, match: $0) }
+                }
+                .sorted { ($0.match.startDate ?? .distantFuture) < ($1.match.startDate ?? .distantFuture) }
+            guard !entries.isEmpty else { return nil }
+            return TodaySportSchedule(sport: sport, entries: entries)
+        }
     }
 
     static func liveCount() async -> Int {

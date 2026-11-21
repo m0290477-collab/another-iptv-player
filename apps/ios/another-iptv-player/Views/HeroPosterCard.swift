@@ -7,14 +7,19 @@ import SwiftUI
 // card with big rounded corners; the previous/next cards peek
 // at the edges scaled down and darker (the carousel applies
 // that treatment — this card renders itself at full strength);
-// the title sits CENTERED over a bottom gradient with the
-// star row and meta line under it, and the Play (solid accent)
-// + Details (glass) actions as rounded rectangles beneath.
-// Portrait posters are this design's native art; a wide
-// backdrop fills the same card. The art chain is the
+// the title sits CENTERED in a glass info panel over the
+// poster's lower third, with the rating (one star + number,
+// build 88 F7) and meta line under it, and the Play (solid
+// accent) + Details (glass) actions as rounded rectangles
+// beneath. The centered card carries the accent border +
+// glow (build 88, owner-approved "max" mockup); peeks stay
+// quiet. Portrait posters are this design's native art; a
+// wide backdrop fills the same card. The art chain is the
 // build-81/82 one: backdrop first, a load failure swaps to
 // the poster, and an item with no working art renders
-// CachedImage's designed title card — never a blank slab.
+// CachedImage's designed placeholder (gradient + icon — the
+// overlay title is the ONE title in that state, build 88
+// F8) — never a blank slab.
 
 struct HeroPosterCard: View {
     let title: String
@@ -49,22 +54,43 @@ struct HeroPosterCard: View {
         return posterURL
     }
 
-    /// Filled stars out of five, derived from the DISPLAYED
-    /// rating value (10-scale → 5-scale, rounded) — the
-    /// mockup's 4.8/5 title shows five; nothing is invented:
-    /// no rating text, no star row.
-    private var filledStars: Int? {
-        guard let ratingText,
-              let value = Double(ratingText.filter { $0.isNumber || $0 == "." })
-        else { return nil }
-        return min(5, max(0, Int((value / 2).rounded())))
-    }
-
-    private var metaText: String? {
-        var parts: [String] = []
-        if let ratingText { parts.append(ratingText) }
-        if let metaLine { parts.append(metaLine) }
-        return parts.isEmpty ? nil : parts.joined(separator: " • ")
+    /// Build 88 (F7): the rating renders ONCE — one gold star
+    /// + the number — leading the meta line (the approved
+    /// mockup's "4.8 • 2025 • Action/Sci-Fi • 2h 14m"). Build
+    /// 87 printed BOTH a five-star row derived from the value
+    /// AND the raw number inside the meta line; the owner's
+    /// recording showed the duplication on every slide. The
+    /// value is the item's real displayed rating text —
+    /// nothing is derived or invented: no rating text, no
+    /// star, no number.
+    @ViewBuilder
+    private var ratingMetaRow: some View {
+        if ratingText != nil || metaLine != nil {
+            HStack(spacing: 5) {
+                if let ratingText {
+                    HStack(spacing: 3) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(AppTheme.ratingGold)
+                        Text(ratingText)
+                            .font(AppTheme.fontMetadata.weight(.bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                if ratingText != nil && metaLine != nil {
+                    Text("•")
+                        .font(AppTheme.fontMetadata)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                if let metaLine {
+                    Text(metaLine)
+                        .font(AppTheme.fontMetadata.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
+                }
+            }
+            .shadow(color: .black.opacity(0.7), radius: 5, y: 1)
+        }
     }
 
     var body: some View {
@@ -85,7 +111,16 @@ struct HeroPosterCard: View {
                     contentMode: .fill,
                     iconName: iconName,
                     loadProfile: .high,
-                    title: title,
+                    // Build 88 (F8): NO title is passed. The
+                    // placeholder's own title text under this
+                    // card's overlay title printed the title
+                    // TWICE in the no-art state (small gray +
+                    // big white — the owner's recording, frame
+                    // f030). The overlay below is now the ONE
+                    // title in every state (loading, failed, no
+                    // art); the placeholder keeps its gradient
+                    // + section icon.
+                    title: nil,
                     onLoadFailed: {
                         if artURL == backdropURL { backdropLoadFailed = true }
                     }
@@ -96,10 +131,17 @@ struct HeroPosterCard: View {
                 .offset(x: parallax)
                 .onChange(of: backdropURL) { _, _ in backdropLoadFailed = false }
 
+                // Build 88 (F9): a stronger scrim — the fade
+                // starts higher and lands near-opaque, so the
+                // overlay text survives posters whose own
+                // baked-in title art sits at the bottom (the
+                // owner's "Tiny Fugitives" frame: the poster's
+                // printed FUGITIVES collided with the overlay).
                 LinearGradient(
                     stops: [
-                        .init(color: .clear, location: 0.45),
-                        .init(color: Color.black.opacity(0.88), location: 1)
+                        .init(color: .clear, location: 0.30),
+                        .init(color: Color.black.opacity(0.55), location: 0.62),
+                        .init(color: Color.black.opacity(0.97), location: 1)
                     ],
                     startPoint: .top, endPoint: .bottom
                 )
@@ -109,29 +151,24 @@ struct HeroPosterCard: View {
             .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .onTapGesture { if showsControls { onDetails() } }
 
+            // Build 88 (owner-approved Home mockup): the title,
+            // rating/meta and actions sit in a GLASS info panel
+            // floating over the poster's lower third — a dark
+            // material slab with a hairline glass stroke. The
+            // panel doubles as the F9 scrim: overlay text over
+            // it stays readable even when the poster's own
+            // baked-in title sits behind it. The panel carries
+            // the same details tap the art carries (it covers
+            // the art's tap area now); the buttons above it
+            // keep their own actions.
             VStack(spacing: 7) {
                 Text(title)
                     .font(.title3.weight(.black))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
-                    .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
-                if let filledStars {
-                    HStack(spacing: 3) {
-                        ForEach(0..<5, id: \.self) { index in
-                            Image(systemName: index < filledStars ? "star.fill" : "star")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(AppTheme.ratingGold)
-                        }
-                    }
-                }
-                if let metaText {
-                    Text(metaText)
-                        .font(AppTheme.fontMetadata.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .multilineTextAlignment(.center)
-                        .lineLimit(1)
-                }
+                    .shadow(color: .black.opacity(0.85), radius: 8, y: 2)
+                ratingMetaRow
                 if showsControls {
                     HStack(spacing: 12) {
                         Button(action: onPlay) {
@@ -168,14 +205,39 @@ struct HeroPosterCard: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 18)
+            .padding(.vertical, 14)
+            .background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Color.black.opacity(0.45))
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color.white.opacity(0.22), lineWidth: 1)
+                )
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
+            .onTapGesture { if showsControls { onDetails() } }
         }
         .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+                .strokeBorder(
+                    showsControls ? AppTheme.accent.opacity(0.55) : Color.white.opacity(0.14),
+                    lineWidth: showsControls ? 1.2 : 1
+                )
         )
+        // Build 88 (owner-approved Home mockup): the CENTERED
+        // card glows in the accent — the tab-glow token, the
+        // same restrained glow family as the selected tab's
+        // icon. Peek neighbours stay quiet (plain hairline,
+        // no glow), so exactly one card on screen glows.
+        .shadow(color: showsControls ? AppTheme.tabGlow : .clear,
+                radius: showsControls ? 18 : 0, y: showsControls ? 8 : 0)
         // The parallax reader: an invisible background that
         // reports the card's global position as it travels.
         // Updates are a few points of offset on visible cards

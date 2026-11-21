@@ -27,9 +27,18 @@ struct ContentView: View {
     @State private var playlistToRenew: Playlist?
     /// Build 61 (D2, B6): the branded splash covers the cold start
     /// until the playlists query has answered — the moment the gate
-    /// or the auto-loaded dashboard underneath is ready. No timer,
-    /// no artificial delay.
+    /// or the auto-loaded dashboard underneath is ready.
+    /// Build 88 (A4): dismissal still waits for that answer, but
+    /// never lands before the owner's 2.5 s minimum dwell.
     @State private var showSplash = true
+    /// Build 88 (A4): the minimum-dwell clock. A static so a
+    /// hierarchy rebuild (e.g. a language change re-creating
+    /// this view) does not restart it — it measures from the
+    /// process's first ContentView, i.e. from launch, once.
+    private static let splashLaunchDate = Date()
+    /// Build 88 (A4): the pending minimum-dwell dismissal, so
+    /// repeated readiness callbacks schedule it at most once.
+    @State private var splashDismissTask: Task<Void, Never>?
     /// Build 61 (F4, B13): first-run onboarding completion flag.
     /// First launch only; the T6 erase wipes the whole
     /// UserDefaults domain, which resets it (verified in B13's
@@ -325,10 +334,28 @@ struct ContentView: View {
 
     /// Build 61 (D2): cross-fade the splash out as soon as content
     /// is ready (Motion-safe: duration collapses when reduced/off).
+    /// Build 88 (A4, owner): the cinematic entry stays a MINIMUM
+    /// of 2.5 s — a warm store answers in well under a second,
+    /// which flashed the gate past before it could be seen.
+    /// Content readiness still drives dismissal; it simply
+    /// cannot land before the minimum dwell has elapsed. (The
+    /// dwell is a duration, not a motion effect, so it holds
+    /// under Reduce Motion too — only the fade collapses there.)
     private func dismissSplash() {
-        guard showSplash else { return }
-        withAnimation(Motion.animate(.easeInOut(duration: 0.3))) {
-            showSplash = false
+        guard showSplash, splashDismissTask == nil else { return }
+        let remaining = 2.5 - Date().timeIntervalSince(Self.splashLaunchDate)
+        guard remaining > 0 else {
+            withAnimation(Motion.animate(.easeInOut(duration: 0.3))) {
+                showSplash = false
+            }
+            return
+        }
+        splashDismissTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(remaining))
+            guard !Task.isCancelled else { return }
+            withAnimation(Motion.animate(.easeInOut(duration: 0.3))) {
+                showSplash = false
+            }
         }
     }
 

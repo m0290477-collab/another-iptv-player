@@ -92,6 +92,11 @@ struct VODView: View {
     @State private var recentlyAddedVODs: [DBVODStream] = []
     @State private var newestVODs: [DBVODStream] = []
     @State private var topRatedVODs: [DBVODStream] = []
+    /// Build 88: the NEW-chip membership — the newest-added slice
+    /// of the catalog (the first 60 of the full `added`-desc
+    /// ordering computed in recomputeFilter; plan D2: newest-added
+    /// to the catalog, not release year).
+    @State private var newMovieIds: Set<Int> = []
 
     init(playlist: Playlist) {
         self.playlist = playlist
@@ -217,16 +222,20 @@ struct VODView: View {
                                 }
                             )
 
+                            // Build 88 (plan Part 2-C): the catalog
+                            // shelves lead with Recently Added, then
+                            // Top Rated, then the per-category
+                            // shelves below.
+                            if !recentlyAddedVODs.isEmpty {
+                                RecentlyAddedVODShelf(playlist: playlist, items: recentlyAddedVODs, newMovieIds: newMovieIds)
+                            }
+
                             if topRatedVODs.count >= 3 {
                                 TopMoviesShelf(playlist: playlist, items: topRatedVODs, replayToken: shelfReplayToken)
                             }
 
-                            if !recentlyAddedVODs.isEmpty {
-                                RecentlyAddedVODShelf(playlist: playlist, items: recentlyAddedVODs)
-                            }
-
                             if !watchlistMovies.isEmpty {
-                                WatchlistShelf(playlist: playlist, items: watchlistMovies)
+                                WatchlistShelf(playlist: playlist, items: watchlistMovies, newMovieIds: newMovieIds)
                             }
 
                             if !franchiseGroups.isEmpty {
@@ -239,7 +248,8 @@ struct VODView: View {
                                         playlist: playlist,
                                         category: category,
                                         items: shelfItemsByCategory[category.id] ?? [],
-                                        isStreamsLoading: !contentStore.streamsLoaded
+                                        isStreamsLoading: !contentStore.streamsLoaded,
+                                        newMovieIds: newMovieIds
                                     )
                                     .equatable()
                                     .id(category.id)
@@ -256,6 +266,10 @@ struct VODView: View {
                         let work = Task { await contentStore.refreshFromNetwork(playlist: playlist, only: .vod) }
                         await work.value
                     }
+                    // Build 88 (F3): bottom scroll clearance so the
+                    // floating tab bar never covers the last shelf /
+                    // grid row of this tab.
+                    .contentMargins(.bottom, 40, for: .scrollContent)
                     .onChange(of: pendingScrollTarget) { _, target in
                         guard let target else { return }
                         withAnimation(.easeOut(duration: 0.25)) {
@@ -391,12 +405,12 @@ struct VODView: View {
                         NavigationLink {
                             MovieDetailView(playlist: playlist, movie: item.stream)
                         } label: {
-                            VODStreamCard(
-                                playlistId: playlist.id,
-                                stream: item.stream,
+                            moviePosterCard(
+                                item.stream,
                                 posterWidth: posterMetrics.categoryGridPosterWidth,
                                 posterHeight: posterMetrics.categoryGridPosterHeight,
-                                imageLoadProfile: .grid
+                                imageLoadProfile: .grid,
+                                isNew: newMovieIds.contains(item.stream.streamId)
                             )
                         }
                         .buttonStyle(PressScaleButtonStyle())
@@ -481,12 +495,12 @@ struct VODView: View {
                         NavigationLink {
                             MovieDetailView(playlist: playlist, movie: movie, queue: newestAll)
                         } label: {
-                            VODStreamCard(
-                                playlistId: playlist.id,
-                                stream: movie,
+                            moviePosterCard(
+                                movie,
                                 posterWidth: posterMetrics.categoryGridPosterWidth,
                                 posterHeight: posterMetrics.categoryGridPosterHeight,
-                                imageLoadProfile: .grid
+                                imageLoadProfile: .grid,
+                                isNew: newMovieIds.contains(movie.streamId)
                             )
                         }
                         .buttonStyle(PressScaleButtonStyle())
@@ -534,12 +548,12 @@ struct VODView: View {
                         NavigationLink {
                             MovieDetailView(playlist: playlist, movie: item.stream, queue: queue)
                         } label: {
-                            VODStreamCard(
-                                playlistId: playlist.id,
-                                stream: item.stream,
+                            moviePosterCard(
+                                item.stream,
                                 posterWidth: posterMetrics.categoryGridPosterWidth,
                                 posterHeight: posterMetrics.categoryGridPosterHeight,
-                                imageLoadProfile: .grid
+                                imageLoadProfile: .grid,
+                                isNew: newMovieIds.contains(item.stream.streamId)
                             )
                         }
                         .buttonStyle(PressScaleButtonStyle())
@@ -604,7 +618,7 @@ struct VODView: View {
     /// (the same simplification Live got in round 3).
     private func recomputeFilter() async {
         guard playlist.id == contentStore.activePlaylistId else {
-            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedVODs = []; newestVODs = []; topRatedVODs = []; newestAll = []; franchiseGroups = []; shelfCategories = []; shelfItemsByCategory = [:]; return
+            displayCategories = []; displayItemsByCategory = [:]; recentlyAddedVODs = []; newestVODs = []; topRatedVODs = []; newestAll = []; newMovieIds = []; franchiseGroups = []; shelfCategories = []; shelfItemsByCategory = [:]; return
         }
         let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod")
         let allCats = orderStore.applyOrder(
@@ -646,6 +660,9 @@ struct VODView: View {
         guard !Task.isCancelled else { return }
         newestAll = byAddedDesc
         newestVisibleCount = min(Self.newestPageSize, byAddedDesc.count)
+        // Build 88: the NEW slice is the head of THIS ordering —
+        // the same full added-desc pass the Newest grid paginates.
+        newMovieIds = Set(byAddedDesc.prefix(60).map(\.streamId))
 
         // Round 15 (C7): franchise groups. Two cheap passes — first
         // the bases that a marked title (number/roman/"part"/colon)
@@ -896,44 +913,42 @@ struct TopMoviesShelf: View, Equatable {
 struct RecentlyAddedVODShelf: View, Equatable {
     let playlist: Playlist
     let items: [DBVODStream]
+    /// Build 88: NEW-chip membership (the tab's newest-added
+    /// slice), passed down from VODView's recompute pass.
+    var newMovieIds: Set<Int> = []
 
     static func == (lhs: RecentlyAddedVODShelf, rhs: RecentlyAddedVODShelf) -> Bool {
         lhs.playlist.id == rhs.playlist.id && lhs.items == rhs.items
+            && lhs.newMovieIds == rhs.newMovieIds
     }
 
     @Environment(\.posterMetrics) private var posterMetrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Round 8: the ONE shelf-header style (was headline +
-            // chevron); destination unchanged.
-            CinematicSectionHeader(title: L("recently_added.title")) {
-                RecentlyAddedVODDetailView(playlist: playlist, items: items)
+        // Build 88: the shared catalog shelf (CatalogComponents) —
+        // same header style and destination as the hand-rolled
+        // shelf it replaces; the cards are the shared PosterCard
+        // with the NEW chip on the newest-added slice.
+        CatalogShelfRow(
+            title: L("recently_added.title"),
+            items: items,
+            rowHeight: posterMetrics.shelfRowTotalHeight
+        ) {
+            RecentlyAddedVODDetailView(playlist: playlist, items: items)
+        } cell: { stream in
+            NavigationLink {
+                MovieDetailView(playlist: playlist, movie: stream, queue: items)
+            } label: {
+                moviePosterCard(
+                    stream,
+                    posterWidth: posterMetrics.shelfPosterWidth,
+                    posterHeight: posterMetrics.shelfPosterHeight,
+                    imageLoadProfile: .shelf,
+                    isNew: newMovieIds.contains(stream.streamId)
+                )
             }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(items) { stream in
-                        NavigationLink {
-                            MovieDetailView(playlist: playlist, movie: stream, queue: items)
-                        } label: {
-                            VODStreamCard(
-                                playlistId: playlist.id,
-                                stream: stream,
-                                posterWidth: posterMetrics.shelfPosterWidth,
-                                posterHeight: posterMetrics.shelfPosterHeight,
-                                imageLoadProfile: .shelf
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-            .frame(height: posterMetrics.shelfRowTotalHeight)
-            .shelfEdgeFade()
+            .buttonStyle(.plain)
         }
-        .padding(.vertical, 6)
     }
 }
 
@@ -947,39 +962,50 @@ struct RecentlyAddedVODDetailView: View {
 
     @ObservedObject private var contentStore = PlaylistContentStore.shared
     @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
-    @State private var searchText = ""
-    @State private var debouncedQuery = ""
-    @State private var debounceTask: Task<Void, Never>?
+    @Environment(\.posterMetrics) private var posterMetrics
     @State private var recomputed: [VODWithCategory]?
 
-    private var wrapped: [VODWithCategory] {
-        recomputed ?? items.map { VODWithCategory(stream: $0, categoryName: "") }
+    /// The full visible `added`-desc ordering as plain records
+    /// (the recompute below fills it; the shelf's snapshot covers
+    /// the window before it lands).
+    private var fullStreams: [DBVODStream] {
+        (recomputed ?? items.map { VODWithCategory(stream: $0, categoryName: "") }).map(\.stream)
     }
 
-    private var displayItems: [VODWithCategory] {
-        let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
-        if q.isEmpty { return wrapped }
-        return wrapped.filter { CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.stream.name) }
+    /// Build 88: on an `added`-desc list, the newest-added slice
+    /// is by construction its head — the NEW chip's membership
+    /// on this page.
+    private var pageNewIds: Set<Int> {
+        Set(fullStreams.prefix(60).map(\.streamId))
     }
 
     var body: some View {
-        VODCategoryContent(playlist: playlist, items: displayItems)
-            .equatable()
-            .navigationTitle(L("recently_added.title"))
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar(.hidden, for: .tabBar)
-            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: L("vod.search_placeholder"))
-            .onChange(of: searchText) { _, new in
-                debounceTask?.cancel()
-                debounceTask = Task {
-                    try? await Task.sleep(nanoseconds: 280_000_000)
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run { debouncedQuery = new }
-                }
+        // Build 88: the shared see-all grid (CatalogComponents) —
+        // in-section search field, "N of N" count, the shared
+        // PosterCard. It replaces this page's old `.searchable`
+        // drawer + VODCategoryContent pairing; the full-ordering
+        // recompute below is unchanged.
+        CatalogGridView(
+            title: L("recently_added.title"),
+            items: fullStreams,
+            searchPlaceholder: L("vod.search_placeholder"),
+            itemTitle: { $0.name }
+        ) { stream in
+            NavigationLink {
+                MovieDetailView(playlist: playlist, movie: stream, queue: fullStreams)
+            } label: {
+                moviePosterCard(
+                    stream,
+                    posterWidth: posterMetrics.categoryGridPosterWidth,
+                    posterHeight: posterMetrics.categoryGridPosterHeight,
+                    imageLoadProfile: .grid,
+                    isNew: pageNewIds.contains(stream.streamId)
+                )
             }
-            .onDisappear { debounceTask?.cancel(); debounceTask = nil }
-            .task(id: contentStore.streamsLoaded) { await recompute() }
-            .task(id: hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod")) { await recompute() }
+            .buttonStyle(PressScaleButtonStyle())
+        }
+        .task(id: contentStore.streamsLoaded) { await recompute() }
+        .task(id: hiddenStore.hiddenIds(playlistId: playlist.id, type: "vod")) { await recompute() }
     }
 
     /// The full visible `added`-desc ordering from the store (the
@@ -1015,12 +1041,16 @@ struct VODCategoryShelfRow: View, Equatable {
     let category: DBCategory
     let items: [VODWithCategory]
     var isStreamsLoading: Bool = false
+    /// Build 88: NEW-chip membership (the tab's newest-added
+    /// slice), passed down from VODView's recompute pass.
+    var newMovieIds: Set<Int> = []
 
     static func == (lhs: VODCategoryShelfRow, rhs: VODCategoryShelfRow) -> Bool {
         lhs.playlist.id == rhs.playlist.id &&
         lhs.category == rhs.category &&
         lhs.items == rhs.items &&
-        lhs.isStreamsLoading == rhs.isStreamsLoading
+        lhs.isStreamsLoading == rhs.isStreamsLoading &&
+        lhs.newMovieIds == rhs.newMovieIds
     }
 
     @Environment(\.posterMetrics) private var posterMetrics
@@ -1054,12 +1084,12 @@ struct VODCategoryShelfRow: View, Equatable {
                             NavigationLink {
                                 MovieDetailView(playlist: playlist, movie: item.stream, queue: queue)
                             } label: {
-                                VODStreamCard(
-                                    playlistId: playlist.id,
-                                    stream: item.stream,
+                                moviePosterCard(
+                                    item.stream,
                                     posterWidth: posterMetrics.shelfPosterWidth,
                                     posterHeight: posterMetrics.shelfPosterHeight,
-                                    imageLoadProfile: .shelf
+                                    imageLoadProfile: .shelf,
+                                    isNew: newMovieIds.contains(item.stream.streamId)
                                 )
                             }
                             .buttonStyle(.plain)
@@ -1246,7 +1276,7 @@ struct VODCategoryDetailView: View {
     @State private var displayItems: [VODWithCategory] = []
 
     var body: some View {
-        VODCategoryContent(playlist: playlist, items: displayItems)
+        VODCategoryContent(playlist: playlist, items: displayItems, newMovieIds: Set(contentStore.sharedNewestMovies.map(\.streamId)))
             .equatable()
             .navigationTitle(category.name)
             .navigationBarTitleDisplayMode(.large)
@@ -1288,6 +1318,10 @@ struct VODCategoryDetailView: View {
 struct VODCategoryContent: View, Equatable {
     let playlist: Playlist
     let items: [VODWithCategory]
+    /// Build 88: NEW-chip membership — the store's newest-added
+    /// slice (sharedNewestMovies), passed by the hosting detail
+    /// views; empty = no chips (the default for other hosts).
+    var newMovieIds: Set<Int> = []
 
     /// Cheap signature compare so a parent re-render (e.g. `applyVODMetadata`'s
     /// @Published storm) doesn't force SwiftUI to re-process a 10k-item view — that
@@ -1298,6 +1332,7 @@ struct VODCategoryContent: View, Equatable {
             && lhs.items.count == rhs.items.count
             && lhs.items.first?.stream.id == rhs.items.first?.stream.id
             && lhs.items.last?.stream.id == rhs.items.last?.stream.id
+            && lhs.newMovieIds == rhs.newMovieIds
     }
 
     @Environment(\.posterMetrics) private var posterMetrics
@@ -1411,12 +1446,12 @@ struct VODCategoryContent: View, Equatable {
                                 NavigationLink {
                                     MovieDetailView(playlist: playlist, movie: item.stream, queue: streamQueue)
                                 } label: {
-                                    VODStreamCard(
-                                        playlistId: playlist.id,
-                                        stream: item.stream,
+                                    moviePosterCard(
+                                        item.stream,
                                         posterWidth: posterMetrics.categoryGridPosterWidth,
                                         posterHeight: posterMetrics.categoryGridPosterHeight,
                                         imageLoadProfile: .grid,
+                                        isNew: newMovieIds.contains(item.stream.streamId),
                                         watchProgress: progressMap[String(item.stream.streamId)]
                                     )
                                 }
@@ -1590,7 +1625,7 @@ struct AllVODView: View {
     @State private var displayItems: [VODWithCategory] = []
 
     var body: some View {
-        VODCategoryContent(playlist: playlist, items: displayItems)
+        VODCategoryContent(playlist: playlist, items: displayItems, newMovieIds: Set(contentStore.sharedNewestMovies.map(\.streamId)))
             .equatable()
             .navigationTitle(L("browse.all_movies"))
             .navigationBarTitleDisplayMode(.large)
@@ -1818,9 +1853,12 @@ struct MovieFeaturedHero: View {
 struct WatchlistShelf: View, Equatable {
     let playlist: Playlist
     let items: [DBVODStream]
+    /// Build 88: NEW-chip membership (the tab's newest-added slice).
+    var newMovieIds: Set<Int> = []
 
     static func == (lhs: WatchlistShelf, rhs: WatchlistShelf) -> Bool {
         lhs.playlist.id == rhs.playlist.id && lhs.items == rhs.items
+            && lhs.newMovieIds == rhs.newMovieIds
     }
 
     @Environment(\.posterMetrics) private var posterMetrics
@@ -1837,12 +1875,12 @@ struct WatchlistShelf: View, Equatable {
                         NavigationLink {
                             MovieDetailView(playlist: playlist, movie: movie, queue: items)
                         } label: {
-                            VODStreamCard(
-                                playlistId: playlist.id,
-                                stream: movie,
+                            moviePosterCard(
+                                movie,
                                 posterWidth: posterMetrics.shelfPosterWidth,
                                 posterHeight: posterMetrics.shelfPosterHeight,
-                                imageLoadProfile: .shelf
+                                imageLoadProfile: .shelf,
+                                isNew: newMovieIds.contains(movie.streamId)
                             )
                         }
                         .buttonStyle(.plain)
@@ -1912,12 +1950,12 @@ struct WatchlistView: View {
                             NavigationLink {
                                 MovieDetailView(playlist: playlist, movie: movie, queue: movies)
                             } label: {
-                                VODStreamCard(
-                                    playlistId: playlist.id,
-                                    stream: movie,
+                                moviePosterCard(
+                                    movie,
                                     posterWidth: posterMetrics.categoryGridPosterWidth,
                                     posterHeight: posterMetrics.categoryGridPosterHeight,
-                                    imageLoadProfile: .grid
+                                    imageLoadProfile: .grid,
+                                    isNew: Set(contentStore.sharedNewestMovies.map(\.streamId)).contains(movie.streamId)
                                 )
                             }
                             .buttonStyle(.plain)
@@ -2082,6 +2120,9 @@ struct MovieCollectionView: View {
     let title: String
     let movies: [DBVODStream]
 
+    /// Build 88: observed only for the NEW-chip membership (the
+    /// store's newest-added slice) on the shared poster cards.
+    @ObservedObject private var contentStore = PlaylistContentStore.shared
     @Environment(\.posterMetrics) private var posterMetrics
 
     private var columns: [GridItem] {
@@ -2095,12 +2136,12 @@ struct MovieCollectionView: View {
                     NavigationLink {
                         MovieDetailView(playlist: playlist, movie: movie, queue: movies)
                     } label: {
-                        VODStreamCard(
-                            playlistId: playlist.id,
-                            stream: movie,
+                        moviePosterCard(
+                            movie,
                             posterWidth: posterMetrics.categoryGridPosterWidth,
                             posterHeight: posterMetrics.categoryGridPosterHeight,
-                            imageLoadProfile: .grid
+                            imageLoadProfile: .grid,
+                            isNew: Set(contentStore.sharedNewestMovies.map(\.streamId)).contains(movie.streamId)
                         )
                     }
                     .buttonStyle(.plain)
@@ -2261,12 +2302,12 @@ struct MovieGenreGridView: View {
                             NavigationLink {
                                 MovieDetailView(playlist: playlist, movie: movie, queue: displayItems)
                             } label: {
-                                VODStreamCard(
-                                    playlistId: playlist.id,
-                                    stream: movie,
+                                moviePosterCard(
+                                    movie,
                                     posterWidth: posterMetrics.categoryGridPosterWidth,
                                     posterHeight: posterMetrics.categoryGridPosterHeight,
-                                    imageLoadProfile: .grid
+                                    imageLoadProfile: .grid,
+                                    isNew: Set(contentStore.sharedNewestMovies.map(\.streamId)).contains(movie.streamId)
                                 )
                             }
                             .buttonStyle(.plain)
@@ -2404,12 +2445,12 @@ struct PersonTitlesView: View {
                                 NavigationLink {
                                     MovieDetailView(playlist: playlist, movie: movie, queue: movies)
                                 } label: {
-                                    VODStreamCard(
-                                        playlistId: playlist.id,
-                                        stream: movie,
+                                    moviePosterCard(
+                                        movie,
                                         posterWidth: posterMetrics.categoryGridPosterWidth,
                                         posterHeight: posterMetrics.categoryGridPosterHeight,
-                                        imageLoadProfile: .grid
+                                        imageLoadProfile: .grid,
+                                        isNew: Set(contentStore.sharedNewestMovies.map(\.streamId)).contains(movie.streamId)
                                     )
                                 }
                                 .buttonStyle(.plain)

@@ -440,6 +440,15 @@ struct NHLTeamPageView: View {
             async let roster = NHLService.roster(abbrev: abbrev)
             fixtures = await schedule
             squad = await roster
+            // Build 88 (F13): the same page-open photo warm-up
+            // as the ESPN team pages — the roster's official
+            // headshots prefetch through the shared prefetcher
+            // at the discs' exact render parameters, so they
+            // are cache hits when the rows render.
+            ListImagePrefetch.start(
+                urls: squad.compactMap { player -> URL? in player.headshotURL },
+                width: 32, height: 32, contentMode: .fill, loadProfile: .standard
+            )
             loaded = true
             clubLeaders = await NHLService.clubLeaders(abbrev: abbrev)
             let standings = await NHLService.standings()
@@ -1262,117 +1271,163 @@ struct UFCView: View {
 
 // MARK: - Sports calendar (item 7)
 
-/// One page, today's events across EVERY sport in the app:
-/// the league sports from the same per-day scoreboard cache
-/// the Matches tabs read, plus today's tennis matches, UFC
-/// fights, a live golf leaderboard and today's F1 race when
-/// the payloads carry them. Sections in the app's fixed
-/// sport order; nothing here starts a fetch the other
-/// screens don't already make.
+/// Build 88 (F10): a REAL calendar, not a second copy of the
+/// fixtures list. The build-87 version showed only today,
+/// grouped by league — indistinguishable from Today's Matches.
+/// Now the page is grouped BY DAY: one sticky-headed section
+/// per day (yesterday → +7 days), every sport's events for
+/// that day inside it, and each row carries a sport tag, so
+/// the page reads as a calendar of the week ahead. League
+/// events come from the same per-day scoreboard service the
+/// Matches tabs read; tennis / UFC / F1 events are bucketed
+/// by the dates their own payloads carry; the live golf
+/// leaderboard belongs to today only. Days fill in
+/// chronologically as their fetches land.
 struct SportsCalendarView: View {
-    @State private var leagueGroups: [LiveNowGroup] = []
-    @State private var tennisMatches: [TennisMatch] = []
-    @State private var ufcCards: [UFCCard] = []
-    @State private var golfBoard: GolfLeaderboard?
-    @State private var f1RacesToday: [F1Race] = []
+    /// One day's events: league matches (with their
+    /// competition, for the tag + detail routing) and the
+    /// payload-dated events of the other sports.
+    private struct CalendarDay: Identifiable {
+        let date: Date
+        var leagueMatches: [(group: LiveNowGroup, match: MatchEvent)] = []
+        var tennis: [TennisMatch] = []
+        var ufc: [UFCCard] = []
+        var f1: [F1Race] = []
+        var golf: GolfLeaderboard?
+        var id: Date { date }
+        var isEmpty: Bool {
+            leagueMatches.isEmpty && tennis.isEmpty && ufc.isEmpty
+                && f1.isEmpty && golf == nil
+        }
+    }
+
+    @State private var days: [CalendarDay] = []
     @State private var didLoad = false
 
-    private var isEmpty: Bool {
-        leagueGroups.isEmpty && tennisMatches.isEmpty && ufcCards.isEmpty
-            && golfBoard == nil && f1RacesToday.isEmpty
-    }
+    private var visibleDays: [CalendarDay] { days.filter { !$0.isEmpty } }
 
     var body: some View {
         List {
-            if didLoad && isEmpty {
+            if didLoad && visibleDays.isEmpty {
                 Section {
                     Text(L("matches.empty"))
                         .foregroundStyle(.secondary)
                 }
                 .listRowBackground(AppTheme.surface)
             }
-            ForEach(leagueGroups) { group in
+            ForEach(visibleDays) { day in
                 Section {
-                    ForEach(group.matches) { match in
+                    ForEach(Array(day.leagueMatches.enumerated()), id: \.offset) { _, entry in
                         NavigationLink {
                             MatchDetailView(
-                                sport: group.sport, leaguePath: group.leaguePath,
-                                match: match, leagueName: group.leagueName
+                                sport: entry.group.sport, leaguePath: entry.group.leaguePath,
+                                match: entry.match, leagueName: entry.group.leagueName
                             )
                         } label: {
-                            MatchRowView(match: match, isStale: false, sport: group.sport)
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack(spacing: 6) {
+                                    sportTag(entry.group.sport)
+                                    if let name = entry.group.leagueName {
+                                        Text(name)
+                                            .font(AppTheme.fontMetadata)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                MatchRowView(match: entry.match, isStale: false, sport: entry.group.sport)
+                            }
                         }
                         .buttonStyle(PressOpacityButtonStyle())
                     }
-                } header: { b87SectionHeader(group.leagueName ?? group.leaguePath) }
-                .listRowBackground(AppTheme.surface)
-            }
-            if !tennisMatches.isEmpty {
-                Section {
-                    ForEach(tennisMatches) { match in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(match.name1) – \(match.name2)")
-                                .font(AppTheme.fontTeamName)
-                                .lineLimit(2)
-                            Text(match.tournamentName)
-                                .font(AppTheme.fontMetadata)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                } header: { b87SectionHeader(L("matches.tennis")) }
-                .listRowBackground(AppTheme.surface)
-            }
-            ForEach(ufcCards) { card in
-                Section {
-                    ForEach(card.fights) { fight in
-                        Text("\(fight.name1) – \(fight.name2)")
-                            .font(AppTheme.fontTeamName)
-                            .lineLimit(2)
-                    }
-                } header: { b87SectionHeader("\(L("matches.ufc")) · \(card.name)") }
-                .listRowBackground(AppTheme.surface)
-            }
-            if let golfBoard, golfBoard.state == .live {
-                Section {
-                    ForEach(golfBoard.rows.prefix(10)) { row in
-                        HStack(spacing: 10) {
-                            Text("\(row.position)")
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                                .frame(width: 30, alignment: .trailing)
-                            Text(row.name)
-                                .font(.subheadline.weight(.semibold))
-                                .lineLimit(1)
-                            Spacer()
-                            if let score = row.scoreText {
-                                Text(score)
-                                    .font(.headline.weight(.bold))
-                                    .foregroundStyle(AppTheme.accent)
-                                    .monospacedDigit()
-                            }
-                        }
-                    }
-                } header: { b87SectionHeader("\(L("matches.golf")) · \(golfBoard.eventName ?? "")") }
-                .listRowBackground(AppTheme.surface)
-            }
-            if !f1RacesToday.isEmpty {
-                Section {
-                    ForEach(f1RacesToday) { race in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(race.name)
-                                .font(AppTheme.fontTeamName)
-                                .lineLimit(2)
-                            if let circuit = race.circuit {
-                                Text(circuit)
+                    ForEach(day.tennis) { match in
+                        VStack(alignment: .leading, spacing: 5) {
+                            sportTag(nil, titleKey: "matches.tennis")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(match.name1) – \(match.name2)")
+                                    .font(AppTheme.fontTeamName)
+                                    .lineLimit(2)
+                                Text(match.tournamentName)
                                     .font(AppTheme.fontMetadata)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
                             }
                         }
                     }
-                } header: { b87SectionHeader(L("matches.f1")) }
+                    ForEach(day.ufc) { card in
+                        VStack(alignment: .leading, spacing: 5) {
+                            sportTag(nil, titleKey: "matches.ufc")
+                            Text(card.name)
+                                .font(AppTheme.fontMetadata.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            ForEach(card.fights) { fight in
+                                Text("\(fight.name1) – \(fight.name2)")
+                                    .font(AppTheme.fontTeamName)
+                                    .lineLimit(2)
+                            }
+                        }
+                    }
+                    ForEach(day.f1) { race in
+                        VStack(alignment: .leading, spacing: 5) {
+                            sportTag(nil, titleKey: "matches.f1")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(race.name)
+                                    .font(AppTheme.fontTeamName)
+                                    .lineLimit(2)
+                                if let circuit = race.circuit {
+                                    Text(circuit)
+                                        .font(AppTheme.fontMetadata)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                        }
+                    }
+                    if let golf = day.golf, golf.state == .live {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 6) {
+                                sportTag(nil, titleKey: "matches.golf")
+                                Text(golf.eventName ?? "")
+                                    .font(AppTheme.fontMetadata)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            ForEach(golf.rows.prefix(10)) { row in
+                                HStack(spacing: 10) {
+                                    Text("\(row.position)")
+                                        .font(.subheadline.weight(.bold))
+                                        .foregroundStyle(.secondary)
+                                        .monospacedDigit()
+                                        .frame(width: 30, alignment: .trailing)
+                                    Text(row.name)
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    if let score = row.scoreText {
+                                        Text(score)
+                                            .font(.headline.weight(.bold))
+                                            .foregroundStyle(AppTheme.accent)
+                                            .monospacedDigit()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(AppTheme.accent)
+                        Text(Self.dayHeaderText(day.date))
+                            .font(AppTheme.fontCardTitle)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Text(Self.dayCountText(day))
+                            .font(AppTheme.fontMetadata.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
                 .listRowBackground(AppTheme.surface)
             }
         }
@@ -1384,44 +1439,128 @@ struct SportsCalendarView: View {
         .task { await load() }
     }
 
-    private func load() async {
-        let today = MatchesService.todayParameter()
-        let groups = await withTaskGroup(of: LiveNowGroup?.self) { group in
-            for competition in SportsHubService.allCompetitions {
-                group.addTask {
-                    guard let result = try? await MatchesService.fetchLeague(
-                        path: competition.leaguePath, dateParameter: today
-                    ), !result.matches.isEmpty else { return nil }
-                    return LiveNowGroup(
-                        leagueName: result.leagueName,
-                        leaguePath: competition.leaguePath,
-                        sport: competition.sport,
-                        matches: result.matches
-                    )
-                }
+    /// The row's sport tag: a small accent capsule naming the
+    /// sport (symbol + title for the league sports; title only
+    /// for the payload sports, which have no MatchSport case).
+    private func sportTag(_ sport: MatchSport?, titleKey: String? = nil) -> some View {
+        HStack(spacing: 4) {
+            if let sport {
+                Image(systemName: MatchesView.sportSymbolName(sport))
+                    .font(.system(size: 9, weight: .bold))
             }
-            var out: [LiveNowGroup] = []
-            for await item in group { if let item { out.append(item) } }
-            return out
+            Text(L(titleKey ?? sport?.titleKey ?? ""))
+                .font(.caption2.weight(.bold))
         }
-        let order = Dictionary(uniqueKeysWithValues: SportsHubService.allCompetitions.enumerated().map { ($0.element.leaguePath, $0.offset) })
-        leagueGroups = groups.sorted { (order[$0.leaguePath] ?? 0) < (order[$1.leaguePath] ?? 0) }
+        .foregroundStyle(AppTheme.accent)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2)
+        .background(AppTheme.accent.opacity(0.14), in: Capsule())
+    }
 
+    /// "Today" / "Tomorrow" / "Yesterday" where the locale's
+    /// relative formatting knows them, else the full date —
+    /// formatter output only, in the app locale.
+    static func dayHeaderText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = AppTheme.appLocale
+        formatter.timeZone = TimeZone.current
+        formatter.dateStyle = .full
+        formatter.timeStyle = .none
+        formatter.doesRelativeDateFormatting = true
+        return formatter.string(from: date)
+    }
+
+    private static func dayCountText(_ day: CalendarDay) -> String {
+        let count = day.leagueMatches.count + day.tennis.count
+            + day.ufc.reduce(0) { $0 + $1.fights.count } + day.f1.count
+        return count > 0 ? "\(count)" : ""
+    }
+
+    private static func dayParameter(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyyMMdd"
+        return formatter.string(from: date)
+    }
+
+    private func load() async {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let window = (-1...7).compactMap {
+            calendar.date(byAdding: .day, value: $0, to: today)
+        }
+        // The payload-dated sports are fetched ONCE and then
+        // bucketed by their own dates; golf is a live board and
+        // belongs to today only.
         let allTennis = await TennisService.allMatches()
-        tennisMatches = allTennis.filter { match in
-            guard let start = match.startDate else { return false }
-            return Calendar.current.isDateInToday(start)
-        }
         let allCards = await UFCService.cards()
-        ufcCards = allCards.filter { card in
-            guard let date = card.date else { return false }
-            return Calendar.current.isDateInToday(date)
-        }
-        golfBoard = await GolfService.leaderboard(tourPath: GolfService.tours[0].path)
-        let races = await F1Service.schedule()
-        f1RacesToday = races.filter { race in
-            guard let date = race.date else { return false }
-            return Calendar.current.isDateInToday(date)
+        let allRaces = await F1Service.schedule()
+        let golfBoard = await GolfService.leaderboard(tourPath: GolfService.tours[0].path)
+
+        days = []
+        // A league's day response can span neighbouring days;
+        // the date filter pins each dated event to its own day,
+        // and this set keeps an undated event (or any repeat)
+        // from surfacing in two day sections.
+        var seenMatches = Set<String>()
+        for day in window {
+            let parameter = Self.dayParameter(for: day)
+            let groups = await withTaskGroup(of: LiveNowGroup?.self) { group in
+                for competition in SportsHubService.allCompetitions {
+                    group.addTask {
+                        guard let result = try? await MatchesService.fetchLeague(
+                            path: competition.leaguePath, dateParameter: parameter
+                        ), !result.matches.isEmpty else { return nil }
+                        return LiveNowGroup(
+                            leagueName: result.leagueName,
+                            leaguePath: competition.leaguePath,
+                            sport: competition.sport,
+                            matches: result.matches
+                        )
+                    }
+                }
+                var out: [LiveNowGroup] = []
+                for await item in group { if let item { out.append(item) } }
+                return out
+            }
+            let order = Dictionary(uniqueKeysWithValues: SportsHubService.allCompetitions.enumerated().map { ($0.element.leaguePath, $0.offset) })
+            var bucket = CalendarDay(date: day)
+            bucket.leagueMatches = groups
+                .sorted { (order[$0.leaguePath] ?? 0) < (order[$1.leaguePath] ?? 0) }
+                .flatMap { group in
+                    group.matches
+                        .filter { match in
+                            // An event with no parseable date
+                            // belongs to the day it was queried
+                            // for — the feed returned it in that
+                            // day's query (the Matches tab's own
+                            // convention).
+                            guard let start = match.startDate else { return true }
+                            return calendar.isDate(start, inSameDayAs: day)
+                        }
+                        .sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
+                        .map { (group: group, match: $0) }
+                }
+            bucket.leagueMatches = bucket.leagueMatches.filter { entry in
+                seenMatches.insert("\(entry.group.leaguePath)|\(entry.match.id)").inserted
+            }
+            bucket.tennis = allTennis.filter { match in
+                guard let start = match.startDate else { return false }
+                return calendar.isDate(start, inSameDayAs: day)
+            }
+            bucket.ufc = allCards.filter { card in
+                guard let date = card.date else { return false }
+                return calendar.isDate(date, inSameDayAs: day)
+            }
+            bucket.f1 = allRaces.filter { race in
+                guard let date = race.date else { return false }
+                return calendar.isDate(date, inSameDayAs: day)
+            }
+            if calendar.isDateInToday(day), let golfBoard, golfBoard.state == .live {
+                bucket.golf = golfBoard
+            }
+            days.append(bucket)
         }
         didLoad = true
     }
@@ -1429,47 +1568,61 @@ struct SportsCalendarView: View {
 
 // MARK: - Live wall (item 8)
 
-/// Every live match across all sports on one wall, grouped
-/// by league in the hub's order. Refresh rides the SAME
+/// Build 88 (F11): the wall is now TODAY'S FULL SCHEDULE —
+/// every match of the day (live, upcoming, finished), grouped
+/// by SPORT in the app's sport order, each sport's matches in
+/// kickoff order. Build 87's wall showed only live matches
+/// grouped by league, which made it a near-twin of Live Now
+/// (same data, same shape, same empty line); now Live Now is
+/// the live filter and the wall is the day's programme, useful
+/// even when nothing is live. Refresh rides the SAME
 /// 60-second loop pattern LiveNowView uses — no new polling.
+/// The sport sections are display buckets only: each row
+/// keeps its own competition group, so detail routing and
+/// Watch matching use the match's REAL leaguePath.
 struct LiveWallView: View {
-    @State private var groups: [LiveNowGroup] = []
+    @State private var sections: [TodaySportSchedule] = []
     @State private var didLoad = false
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18) {
-                if groups.isEmpty {
+                if sections.isEmpty {
                     Text(didLoad ? L("matches.empty") : L("common.loading"))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 40)
                 } else {
-                    ForEach(groups) { group in
+                    ForEach(sections) { section in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(group.leagueName ?? group.leaguePath)
-                                .font(AppTheme.fontSectionTitle)
-                                .padding(.horizontal, 16)
+                            HStack(spacing: 7) {
+                                Image(systemName: MatchesView.sportSymbolName(section.sport))
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(AppTheme.accent)
+                                Text(L(section.sport.titleKey))
+                                    .font(AppTheme.fontSectionTitle)
+                            }
+                            .padding(.horizontal, 16)
                             VStack(spacing: 0) {
-                                ForEach(Array(group.matches.enumerated()), id: \.element.id) { index, match in
+                                ForEach(Array(section.entries.enumerated()), id: \.offset) { index, entry in
                                     VStack(alignment: .leading, spacing: 6) {
                                         NavigationLink {
                                             MatchDetailView(
-                                                sport: group.sport, leaguePath: group.leaguePath,
-                                                match: match, leagueName: group.leagueName
+                                                sport: entry.group.sport, leaguePath: entry.group.leaguePath,
+                                                match: entry.match, leagueName: entry.group.leagueName
                                             )
                                         } label: {
-                                            MatchRowView(match: match, isStale: false, sport: group.sport)
+                                            MatchRowView(match: entry.match, isStale: false, sport: entry.group.sport)
                                         }
                                         .buttonStyle(PressOpacityButtonStyle())
                                         WatchPlayButton(
-                                            sport: group.sport, leaguePath: group.leaguePath,
-                                            match: match
+                                            sport: entry.group.sport, leaguePath: entry.group.leaguePath,
+                                            match: entry.match
                                         )
                                     }
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 8)
-                                    if index < group.matches.count - 1 {
+                                    if index < section.entries.count - 1 {
                                         Divider().padding(.leading, 12)
                                     }
                                 }
@@ -1501,7 +1654,7 @@ struct LiveWallView: View {
     }
 
     private func refresh() async {
-        groups = await SportsHubService.liveNow()
+        sections = await SportsHubService.todaySchedule()
         didLoad = true
     }
 }
@@ -1515,13 +1668,48 @@ struct LiveWallView: View {
 struct CrossLeagueScorersView: View {
     @State private var rows: [CrossScorerRow] = []
     @State private var didLoad = false
+    /// Build 88 (F1): leagues that have reported back so far —
+    /// the loading line names real progress instead of an
+    /// indefinite spinner.
+    @State private var settledLeagues = 0
+    /// At least one league answered (even with no leaders).
+    /// When every league failed or timed out, the page shows
+    /// the failure state with Retry — never an endless load.
+    @State private var anyLeagueAnswered = false
+    /// Bumped by Retry to re-run the load task.
+    @State private var loadGeneration = 0
+
+    private var leagueCount: Int { MatchSport.soccerLeagueCatalog.count }
 
     var body: some View {
         List {
             Section {
                 if rows.isEmpty {
-                    Text(didLoad ? L("matches.empty") : L("common.loading"))
-                        .foregroundStyle(.secondary)
+                    if !didLoad {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(L("common.loading"))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(settledLeagues)/\(leagueCount)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                                .monospacedDigit()
+                        }
+                    } else if anyLeagueAnswered {
+                        Text(L("matches.empty"))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        HStack {
+                            Label(L("matches.error"), systemImage: "exclamationmark.triangle")
+                                .font(AppTheme.fontMetadata)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button(L("matches.retry")) { loadGeneration += 1 }
+                                .font(AppTheme.fontMetadata.weight(.semibold))
+                                .foregroundStyle(AppTheme.accent)
+                        }
+                    }
                 } else {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         NavigationLink {
@@ -1569,10 +1757,37 @@ struct CrossLeagueScorersView: View {
         .listStyle(.insetGrouped)
         .navigationTitle(L("matches.scorers"))
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            rows = await CrossLeagueScorersService.fetch()
-            didLoad = true
+        .task(id: loadGeneration) { await load() }
+    }
+
+    /// Build 88 (F1): leagues are consumed AS THEY LAND — each
+    /// finished league merges into the ranked list immediately
+    /// (re-sorted, capped at the merged top 40), so the page
+    /// fills in progressively and the wait is bounded by the
+    /// service's per-league timeout, never by the slowest
+    /// league holding the rest hostage.
+    private func load() async {
+        rows = []
+        settledLeagues = 0
+        anyLeagueAnswered = false
+        didLoad = false
+        await withTaskGroup(of: CrossLeagueFetchOutcome.self) { group in
+            for league in MatchSport.soccerLeagueCatalog {
+                group.addTask { await CrossLeagueScorersService.fetchLeague(league) }
+            }
+            for await result in group {
+                settledLeagues += 1
+                if result.ok { anyLeagueAnswered = true }
+                if !result.rows.isEmpty {
+                    rows = Array(
+                        (rows + result.rows)
+                            .sorted { $0.entry.goals > $1.entry.goals }
+                            .prefix(40)
+                    )
+                }
+            }
         }
+        didLoad = true
     }
 }
 
@@ -1767,8 +1982,12 @@ struct SectionHighlightsView: View {
                     }
                 }
             }
+            .listRowBackground(AppTheme.surface)
         }
         .listStyle(.insetGrouped)
+        // Build 88 (F14): same shared chrome as the hub.
+        .scrollContentBackground(.hidden)
+        .cinematicBackground()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $selected) { video in
@@ -1788,19 +2007,7 @@ struct HighlightRow87: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                CachedImage(
-                    url: item.video.thumbnailURL,
-                    width: 104, height: 60,
-                    cornerRadius: 8,
-                    contentMode: .fill,
-                    iconName: "play.rectangle"
-                )
-                Image(systemName: "play.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(.white)
-                    .shadow(radius: 3)
-            }
+            HighlightThumb(url: item.video.thumbnailURL)
             VStack(alignment: .leading, spacing: 3) {
                 if let home = item.homeName, let away = item.awayName {
                     Text("\(home) – \(away)")

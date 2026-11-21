@@ -175,14 +175,21 @@ struct MatchesView: View {
         VStack(spacing: 0) {
             myTeamsStrip
 
-            Picker("", selection: $selectedSport) {
-                ForEach(MatchSport.allCases) { sport in
-                    Text(L(sport.titleKey)).tag(sport)
+            // Build 88 (sports look, owner-approved mockup): the
+            // segmented control gives way to the mockup's chip
+            // strip — one pill per sport with its symbol, the
+            // selected chip filled with the accent and glowing,
+            // the rest quiet surface pills. Same selection, same
+            // tabs; only the control's skin changed.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(MatchSport.allCases) { sport in
+                        sportChip(sport)
+                    }
                 }
+                .padding(.horizontal, AppTheme.spacingScreenMargin)
+                .padding(.vertical, 10)
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, AppTheme.spacingScreenMargin)
-            .padding(.vertical, 10)
 
             dayStrip
 
@@ -246,6 +253,56 @@ struct MatchesView: View {
         }
     }
 
+    // MARK: Sport chips (build 88)
+
+    /// One sport pill: symbol + title. Selected = accent fill
+    /// with a soft accent glow (the mockup's lit chip); the swap
+    /// springs on the shared chip token, stilled by Reduce
+    /// Motion via Motion.animate like every other swap.
+    private func sportChip(_ sport: MatchSport) -> some View {
+        let isSelected = sport == selectedSport
+        return Button {
+            withAnimation(Motion.animate(Motion.chipSwap)) { selectedSport = sport }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: Self.sportSymbolName(sport))
+                    .font(.system(size: 13, weight: .semibold))
+                Text(L(sport.titleKey))
+                    .font(AppTheme.fontCardTitle)
+            }
+            .foregroundStyle(isSelected ? AppTheme.onAccent : .primary)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 8)
+            .background(
+                Capsule().fill(isSelected ? AppTheme.accent : AppTheme.surface)
+            )
+            .overlay(
+                Capsule().strokeBorder(
+                    isSelected ? Color.clear : AppTheme.cardBorderColor, lineWidth: 1
+                )
+            )
+            .shadow(
+                color: isSelected ? AppTheme.accent.opacity(0.45) : .clear,
+                radius: isSelected ? 10 : 0, y: isSelected ? 3 : 0
+            )
+        }
+        .buttonStyle(PressOpacityButtonStyle())
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+
+    /// The Home sports cards' symbol map (builds 82/85/87 —
+    /// canonical SF Symbols names only; an unknown name renders
+    /// zero-size, the build-82 collapsed-card defect).
+    static func sportSymbolName(_ sport: MatchSport) -> String {
+        switch sport {
+        case .soccer: return "soccerball"
+        case .nfl: return "american.football.fill"
+        case .nba: return "basketball.fill"
+        case .mlb: return "baseball.fill"
+        case .nhl: return "hockey.puck.fill"
+        }
+    }
+
     // MARK: Hub entries (build 84, items 13/14)
 
     /// Build 84 (item 13): the count of matches live right now
@@ -259,6 +316,10 @@ struct MatchesView: View {
     /// Live Now (+count), Live Wall, Calendar, Highlights,
     /// Top Scorers — the same destinations from every sport
     /// tab, no duplicated entries anywhere else on the tab.
+    /// Build 88 (F1): Top Scorers is a SOCCER page (cross-league
+    /// goals leaders) — its chip renders only on the soccer
+    /// tab; offering it inside the NFL/NBA/MLB/NHL tabs put a
+    /// soccer page in another sport's context.
     private var hubRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
@@ -293,8 +354,10 @@ struct MatchesView: View {
                 hubChip(systemImage: "play.rectangle.on.rectangle", titleKey: "matches.highlights_hub") {
                     HighlightsHubView()
                 }
-                hubChip(systemImage: "list.number", titleKey: "matches.scorers") {
-                    CrossLeagueScorersView()
+                if selectedSport == .soccer {
+                    hubChip(systemImage: "list.number", titleKey: "matches.scorers") {
+                        CrossLeagueScorersView()
+                    }
                 }
             }
             .padding(.horizontal, AppTheme.spacingScreenMargin)
@@ -579,6 +642,7 @@ struct MatchesView: View {
                     staleBanner(updated)
                 }
                 List {
+                    featuredLiveSection(state)
                     // Build 83 (item 3): the league browser
                     // entry rides at the top of the Soccer tab
                     // only. The home's own loading is untouched —
@@ -598,6 +662,131 @@ struct MatchesView: View {
                 }
             }
         }
+    }
+
+    // MARK: Featured live match (build 88, owner-approved mockup)
+
+    /// The mockup's hero: while the selected sport has a match
+    /// live, the first live one is featured above the league
+    /// sections as a large glass card — a pulsing LIVE badge,
+    /// both crests with their FULL names, the score huge and
+    /// glowing between them, and the Watch action under the
+    /// score. Tapping the card opens the match page. Renders
+    /// nothing when nothing is live.
+    @ViewBuilder
+    private func featuredLiveSection(_ state: MatchesViewModel.SportState) -> some View {
+        if let featured = featuredLiveMatch(state) {
+            Section {
+                NavigationLink {
+                    MatchDetailView(
+                        sport: selectedSport,
+                        leaguePath: selectedSport.leaguePaths[featured.sectionIndex],
+                        match: featured.match,
+                        leagueName: state.sections[featured.sectionIndex].result?.leagueName
+                    )
+                } label: {
+                    featuredLiveCard(featured)
+                }
+                .buttonStyle(PressOpacityButtonStyle())
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+            }
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    private func featuredLiveMatch(
+        _ state: MatchesViewModel.SportState
+    ) -> (sectionIndex: Int, match: MatchEvent)? {
+        for section in state.sections {
+            if let match = dayMatches(in: section).first(where: { $0.state == .live }) {
+                return (section.index, match)
+            }
+        }
+        return nil
+    }
+
+    private func featuredLiveCard(
+        _ featured: (sectionIndex: Int, match: MatchEvent)
+    ) -> some View {
+        let match = featured.match
+        return VStack(spacing: 12) {
+            HStack(spacing: 6) {
+                LivePulseDot()
+                Text(L("matches.live"))
+                    .font(AppTheme.fontBadge)
+                    .foregroundStyle(.white)
+                if let clock = featuredClockText(match) {
+                    Text(clock)
+                        .font(AppTheme.fontBadge)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .monospacedDigit()
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(AppTheme.live, in: Capsule())
+            HStack(alignment: .top, spacing: 8) {
+                featuredSide(match.home)
+                Text("\(match.home.score ?? "0") – \(match.away.score ?? "0")")
+                    .font(.system(size: 40, weight: .black, design: .rounded))
+                    .foregroundStyle(AppTheme.accent)
+                    .monospacedDigit()
+                    .shadow(color: AppTheme.accent.opacity(0.55), radius: 14)
+                    .fixedSize()
+                    .padding(.top, 8)
+                featuredSide(match.away)
+            }
+            WatchPlayButton(
+                sport: selectedSport,
+                leaguePath: selectedSport.leaguePaths[featured.sectionIndex],
+                match: match
+            )
+        }
+        .padding(.vertical, 16)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(AppTheme.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [AppTheme.accent.opacity(0.65), AppTheme.cardBorderColor],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        )
+        .shadow(color: AppTheme.accent.opacity(0.22), radius: 18, y: 8)
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private func featuredSide(_ side: MatchTeamSide) -> some View {
+        VStack(spacing: 7) {
+            CachedImage(
+                url: side.logoURL,
+                width: 54, height: 54, cornerRadius: 27, iconName: "shield"
+            )
+            Text(side.name ?? "")
+                .font(AppTheme.fontTeamName)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// The featured card's clock, from payload fields only:
+    /// the display clock where the feed carries one (soccer /
+    /// NBA / NFL), else the payload's own status text (MLB's
+    /// inning, NHL's period line) — the same sources the match
+    /// rows read.
+    private func featuredClockText(_ match: MatchEvent) -> String? {
+        let clock = match.displayClock?.trimmingCharacters(in: .whitespaces)
+        if let clock, !clock.isEmpty, clock != "0.0" { return clock }
+        let detail = match.statusDetail?.trimmingCharacters(in: .whitespaces)
+        return (detail?.isEmpty == false) ? detail : nil
     }
 
     /// Build 83 (item 3): the league browser entry — one row

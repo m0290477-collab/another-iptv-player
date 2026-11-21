@@ -563,6 +563,13 @@ struct LiveStreamsView: View {
                 }
             )
             .equatable()
+            // Build 88 (F3): the floating tab bar pill overlays
+            // this tab's content — reserve its height at the
+            // bottom of the scroll surface so the last shelf/row
+            // never rests under it.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear.frame(height: LiveTabBarClearance.height)
+            }
         }
         .onChange(of: gridSearchText) { _, new in
             gridDebounceTask?.cancel()
@@ -614,6 +621,12 @@ struct LiveStreamsView: View {
                         .id(category.id)
                     }
                 }
+            }
+            // Build 88 (F3): same floating-bar clearance as the
+            // grid surface — the last category shelf must clear
+            // the tab bar pill.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear.frame(height: LiveTabBarClearance.height)
             }
             .refreshable {
                 // SwiftUI can cancel the refreshable task when the ScrollView redraws;
@@ -885,8 +898,6 @@ struct LiveCategoryShelfRow: View, Equatable {
         lhs.isStreamsLoading == rhs.isStreamsLoading
     }
 
-    @Environment(\.posterMetrics) private var posterMetrics
-
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // Round 8: the ONE shelf-header style — was a headline +
@@ -899,7 +910,7 @@ struct LiveCategoryShelfRow: View, Equatable {
 
             if items.isEmpty {
                 if isStreamsLoading {
-                    Color.clear.frame(height: posterMetrics.liveShelfIcon + 30)
+                    Color.clear.frame(height: LiveChannelTileMetrics.height + 52)
                 } else {
                     Text(L("live.empty.no_channel_in_category"))
                         .font(.caption)
@@ -908,13 +919,14 @@ struct LiveCategoryShelfRow: View, Equatable {
                 }
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: 12) {
+                    LazyHStack(alignment: .top, spacing: 14) {
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                            LiveStreamCard(
+                            // Build 88 (Part 2-A): the wide glass
+                            // logo tile replaces the small square
+                            // card on the category shelves.
+                            LiveChannelTile(
                                 playlistId: playlist.id,
                                 stream: item.stream,
-                                width: posterMetrics.liveShelfLabelWidth,
-                                iconSize: posterMetrics.liveShelfIcon,
                                 imageLoadProfile: .shelf
                             ) { stream, history in
                                 onStreamSelected?(stream, history)
@@ -965,8 +977,8 @@ struct LiveCategoryShelfRow: View, Equatable {
             .compactMap { URL(string: $0) }
         ListImagePrefetch.start(
             urls: urls,
-            width: posterMetrics.liveShelfIcon,
-            height: posterMetrics.liveShelfIcon,
+            width: LiveChannelTileMetrics.logoWidth,
+            height: LiveChannelTileMetrics.logoHeight,
             loadProfile: .shelf
         )
     }
@@ -981,8 +993,8 @@ struct LiveCategoryShelfRow: View, Equatable {
             .compactMap { URL(string: $0) }
         ListImagePrefetch.start(
             urls: urls,
-            width: posterMetrics.liveShelfIcon,
-            height: posterMetrics.liveShelfIcon,
+            width: LiveChannelTileMetrics.logoWidth,
+            height: LiveChannelTileMetrics.logoHeight,
             loadProfile: .shelf
         )
     }
@@ -993,8 +1005,8 @@ struct LiveCategoryShelfRow: View, Equatable {
             .compactMap { URL(string: $0) }
         ListImagePrefetch.stop(
             urls: urls,
-            width: posterMetrics.liveShelfIcon,
-            height: posterMetrics.liveShelfIcon,
+            width: LiveChannelTileMetrics.logoWidth,
+            height: LiveChannelTileMetrics.logoHeight,
             loadProfile: .shelf
         )
     }
@@ -1083,6 +1095,148 @@ struct LiveStreamCard: View {
     }
 }
 
+/// Build 88 (F3): bottom clearance for the Live tab's scroll
+/// surfaces. On iOS 26 the system tab bar renders as a floating
+/// glass pill OVER the content, and the last shelf/row rested
+/// half-hidden under it (owner's build-87 recording). The inset
+/// reserves the pill's height plus its breathing margin.
+enum LiveTabBarClearance {
+    static let height: CGFloat = 84
+}
+
+/// Shared geometry for the wide Live TV tile (build 88) — the
+/// shelf rows, the grouped browse and the prefetch requests all
+/// size from here, so a logo is decoded once at the size every
+/// surface renders.
+enum LiveChannelTileMetrics {
+    static let width: CGFloat = 216
+    static let height: CGFloat = 122
+    static let logoWidth: CGFloat = 148
+    static let logoHeight: CGFloat = 82
+}
+
+/// Build 88: the approved mockup's press treatment for the wide
+/// channel tile — the card lifts (scale), an accent border lights
+/// around the tile, and a soft accent glow with an expanding ring
+/// reads as the ripple. The border/ring overlays are anchored to
+/// the tile's exact size at the label's top, so the name under the
+/// tile stays outside the lit frame. Transform and opacity only,
+/// routed through `Motion.animate`, so Reduce Motion / motion-off
+/// still the whole state change.
+private struct LiveTileButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .overlay(alignment: .top) {
+                RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                    .stroke(AppTheme.accent, lineWidth: 1.6)
+                    .frame(width: LiveChannelTileMetrics.width, height: LiveChannelTileMetrics.height)
+                    .opacity(configuration.isPressed ? 1 : 0)
+            }
+            .overlay(alignment: .top) {
+                RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                    .stroke(AppTheme.accent.opacity(0.45), lineWidth: 1)
+                    .frame(width: LiveChannelTileMetrics.width, height: LiveChannelTileMetrics.height)
+                    .scaleEffect(configuration.isPressed ? 1.045 : 1.0)
+                    .opacity(configuration.isPressed ? 1 : 0)
+            }
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .shadow(
+                color: AppTheme.accent.opacity(configuration.isPressed ? 0.40 : 0),
+                radius: configuration.isPressed ? 16 : 0,
+                y: 6
+            )
+            .animation(Motion.animate(Motion.pressSpring), value: configuration.isPressed)
+    }
+}
+
+/// Build 88 (Part 2-A — the owner's Playra pick, built exactly
+/// from the approved livetv-max mockup): the wide glass channel
+/// tile. The channel logo sits LARGE and centered on the shared
+/// card gradient, aspect-fit — never stretched, never cropped —
+/// and the FULL channel name stands under the tile. One tile
+/// system for the Live TV category shelves and the grouped "All"
+/// browse; the small square `LiveStreamCard` remains only where
+/// it was already the surface (the trending strip).
+struct LiveChannelTile: View {
+    let playlistId: UUID
+    let stream: DBLiveStream
+    var imageLoadProfile: ImageLoadProfile = .shelf
+    var onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil
+
+    // The same badge stores the square card reads (NEW / pin /
+    // audio-only) — one badge system for every channel tile.
+    @ObservedObject private var firstSeenStore = FirstSeenStore.shared
+    @ObservedObject private var pinnedStore = PinnedChannelStore.shared
+    @ObservedObject private var audioOnlyStore = AudioOnlyStore.shared
+
+    var body: some View {
+        Button {
+            onStreamSelected?(stream, nil)
+        } label: {
+            VStack(alignment: .center, spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                        .fill(AppTheme.cardGradient)
+                    RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
+                        .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+                    CachedImage(
+                        url: stream.streamIcon.flatMap { URL(string: $0) },
+                        width: LiveChannelTileMetrics.logoWidth,
+                        height: LiveChannelTileMetrics.logoHeight,
+                        cornerRadius: AppTheme.smallCornerRadius,
+                        iconName: "tv",
+                        loadProfile: imageLoadProfile
+                    )
+                }
+                .frame(width: LiveChannelTileMetrics.width, height: LiveChannelTileMetrics.height)
+                .overlay(alignment: .topLeading) {
+                    if firstSeenStore.isNewLive(playlistId: playlistId, streamId: stream.streamId) {
+                        NewContentBadge()
+                            .padding(8)
+                    }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if pinnedStore.isPinned(playlistId: playlistId, streamId: stream.streamId) {
+                        Image(systemName: "pin.fill")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.accent)
+                            .padding(8)
+                    }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if audioOnlyStore.isEnabled(playlistId: playlistId, streamId: stream.streamId) {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(4)
+                            .background(AppTheme.accent, in: Circle())
+                            .padding(8)
+                            .accessibilityLabel(L("audioonly.badge"))
+                    }
+                }
+
+                Text(stream.name)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .frame(width: LiveChannelTileMetrics.width)
+                    .foregroundColor(.primary)
+
+                // The provider's own channel number, only when the
+                // provider supplied one (same rule as the square
+                // card — nothing is faked).
+                if let number = stream.channelNumber {
+                    Text(L("channels.number_format", String(number)))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .buttonStyle(LiveTileButtonStyle())
+    }
+}
+
 // MARK: - Trending Channels shelf (home header)
 
 /// "Trending Channels" row on the Live home header. There is no popularity
@@ -1164,6 +1318,15 @@ struct TrendingChannelsShelf: View {
 }
 
 // MARK: - Category Detail View
+
+/// Build 88 (Part 2-A — the owner's Playra pick): the group page
+/// is a SEQUENTIAL LIST — logo thumb, FULL channel name, favorite
+/// star — with a search field scoped to THIS group and an
+/// "N of N" count header. (Builds ≤87 rendered the shared channel
+/// grid here; the grid remains on the tab's flat browse states
+/// and All Channels. The build-63 full-catalog search on this
+/// page is superseded by the plan's in-group search — the global
+/// search entry on the tab is unchanged.)
 struct LiveCategoryDetailView: View {
     let playlist: Playlist
     let category: DBCategory
@@ -1171,37 +1334,95 @@ struct LiveCategoryDetailView: View {
     @State private var searchText = ""
     @State private var debouncedQuery = ""
     @State private var debounceTask: Task<Void, Never>?
+    /// The group's full display list: the saved per-category
+    /// channel order, per-channel hides and dead-channel hiding
+    /// applied — the same processing the tab's shelves publish, so
+    /// this page matches the shelf it was opened from.
+    @State private var groupItems: [LiveStreamWithCategory] = []
+    /// `groupItems` narrowed by the in-group search.
     @State private var displayItems: [LiveStreamWithCategory] = []
 
     @ObservedObject private var contentStore = PlaylistContentStore.shared
-    @ObservedObject private var hiddenStore = HiddenCategoryStore.shared
+    @ObservedObject private var channelOrderStore = ChannelOrderStore.shared
+    @ObservedObject private var hiddenChannelStore = HiddenChannelStore.shared
+    @ObservedObject private var channelHealth = ChannelHealthStore.shared
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
+    @Query<FavoriteLiveRequest> private var favoriteLiveChannels: [LiveStreamWithCategory]
 
-    private var currentStreams: [DBLiveStream] { displayItems.map(\.stream) }
+    init(playlist: Playlist, category: DBCategory) {
+        self.playlist = playlist
+        self.category = category
+        _favoriteLiveChannels = Query(
+            FavoriteLiveRequest(playlistId: playlist.id),
+            in: \.appDatabase
+        )
+    }
+
+    private var favoriteIds: Set<Int> {
+        Set(favoriteLiveChannels.map(\.stream.streamId))
+    }
 
     var body: some View {
-        LiveCategoryContent(
-            playlist: playlist,
-            items: displayItems,
-            onStreamSelected: { stream, history in
-                let selection = LivePlayerSelection(stream: stream, history: history)
-                playerOverlay.present(playlistId: playlist.id) {
-                    LivePlayerShell(
-                        playlist: playlist,
-                        queue: currentStreams,
-                        sections: [LiveChannelCategorySection(id: category.id, title: category.name, streams: currentStreams)],
-                        initialStream: selection.stream,
-                        initialHistory: selection.history,
-                        subtitle: category.name
-                    )
+        VStack(spacing: 0) {
+            CatalogSearchField(text: $searchText, placeholder: L("live.search_placeholder"))
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+
+            // The "N of N" header: visible rows over the group's
+            // full count (identical while no search is active).
+            HStack {
+                Spacer()
+                Text(L("live.group.count_format", displayItems.count, groupItems.count))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+
+            if groupItems.isEmpty {
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "tv.slash")
+                        .font(.largeTitle)
+                        .foregroundColor(.secondary)
+                    Text(L("live.empty.no_channel_in_category"))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            } else if displayItems.isEmpty {
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "magnifyingglass")
+                        .font(.largeTitle)
+                        .foregroundColor(.secondary)
+                    Text(L("list.no_result"))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(displayItems) { item in
+                            channelRow(item)
+                            if item.stream.streamId != displayItems.last?.stream.streamId {
+                                Rectangle()
+                                    .fill(AppTheme.cardBorderColor)
+                                    .frame(height: 0.5)
+                                    .padding(.leading, 104)
+                            }
+                        }
+                    }
+                    .padding(.bottom, 12)
                 }
             }
-        )
-        .equatable()
+        }
         .navigationTitle(category.name)
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.hidden, for: .tabBar)
-        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: L("live.search_placeholder"))
+        .cinematicBackground()
         .onChange(of: searchText) { _, new in
             debounceTask?.cancel()
             debounceTask = Task {
@@ -1213,30 +1434,165 @@ struct LiveCategoryDetailView: View {
         .onDisappear { debounceTask?.cancel(); debounceTask = nil }
         .task(id: debouncedQuery) { await recomputeItems() }
         .task(id: contentStore.streamsLoaded) { await recomputeItems() }
+        .task(id: hiddenChannelStore.version) { await recomputeItems() }
+        .task(id: channelOrderStore.version) { await recomputeItems() }
+        .task(id: channelHealth.revision) { await recomputeItems() }
+    }
+
+    private func channelRow(_ item: LiveStreamWithCategory) -> some View {
+        let isFavorite = favoriteIds.contains(item.stream.streamId)
+        return HStack(spacing: 12) {
+            Button {
+                play(item.stream)
+            } label: {
+                HStack(spacing: 12) {
+                    CachedImage(
+                        url: item.stream.streamIcon.flatMap { URL(string: $0) },
+                        width: 76,
+                        height: 46,
+                        cornerRadius: AppTheme.smallCornerRadius,
+                        iconName: "tv",
+                        loadProfile: .shelf
+                    )
+                    Text(item.stream.name)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressOpacityButtonStyle())
+
+            Button {
+                toggleFavorite(item.stream)
+            } label: {
+                Image(systemName: isFavorite ? "star.fill" : "star")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(isFavorite ? AppTheme.ratingGold : Color.secondary)
+                    .symbolEffect(.bounce, value: isFavorite)
+                    .frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L(isFavorite ? "favorites.remove" : "favorites.add"))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .liveCardContextMenu(
+            playlist: playlist,
+            stream: item.stream,
+            categoryId: category.id,
+            categoryName: category.name
+        )
+    }
+
+    /// Playback keeps the pre-build-88 semantics: the shell's
+    /// queue is the whole group in display order, opened at the
+    /// tapped channel.
+    private func play(_ stream: DBLiveStream) {
+        let queue = groupItems.map(\.stream)
+        playerOverlay.present(playlistId: playlist.id) {
+            LivePlayerShell(
+                playlist: playlist,
+                queue: queue,
+                sections: [LiveChannelCategorySection(id: category.id, title: category.name, streams: queue)],
+                initialStream: stream,
+                initialHistory: nil,
+                subtitle: category.name
+            )
+        }
+    }
+
+    /// The same DBFavorite write the channel context menu and the
+    /// in-player star perform: the CURRENT state is read fresh at
+    /// tap time and the insert/delete follows it (the composite
+    /// primary key makes a blind insert throw and a blind delete
+    /// must stay a no-op). The star itself renders from the
+    /// `FavoriteLiveRequest` query, so it always shows the stored
+    /// truth once the write lands.
+    private func toggleFavorite(_ stream: DBLiveStream) {
+        let streamId = stream.streamId
+        let playlistId = playlist.id
+        Task {
+            let fresh = try? await AppDatabase.shared.read { db in
+                try DBFavorite
+                    .filter(Column("streamId") == streamId
+                        && Column("playlistId") == playlistId
+                        && Column("type") == "live")
+                    .fetchCount(db) > 0
+            }
+            let currentValue = fresh ?? favoriteIds.contains(streamId)
+            let nextValue = !currentValue
+            if nextValue {
+                FavoriteSnapshotStore.shared.record(playlistId: playlistId, type: "live", streamId: streamId, title: stream.name, imageURL: stream.streamIcon)
+            } else {
+                FavoriteSnapshotStore.shared.remove(playlistId: playlistId, type: "live", streamId: streamId)
+            }
+            do {
+                try await AppDatabase.shared.write { db in
+                    if nextValue {
+                        try DBFavorite(
+                            streamId: streamId, playlistId: playlistId, type: "live"
+                        ).insert(db)
+                    } else {
+                        try DBFavorite
+                            .filter(Column("streamId") == streamId
+                                && Column("playlistId") == playlistId
+                                && Column("type") == "live")
+                            .deleteAll(db)
+                    }
+                }
+            } catch {
+                // The query keeps the star on the stored truth.
+            }
+        }
     }
 
     private func recomputeItems() async {
-        guard playlist.id == contentStore.activePlaylistId else { displayItems = []; return }
-        let base = contentStore.liveStreamsByCategoryId[category.id] ?? []
+        guard playlist.id == contentStore.activePlaylistId else {
+            groupItems = []; displayItems = []; return
+        }
+        let pid = playlist.id
+        let rawBase = contentStore.liveStreamsByCategoryId[category.id] ?? []
+        let savedOrder = channelOrderStore.orderedIds(playlistId: pid, categoryId: category.id)
+        let hiddenChannels = hiddenChannelStore.hiddenIds(playlistId: pid)
+        let deadKeys: Set<String> = ChannelHealthStore.hideDeadEnabled
+            ? channelHealth.deadKeys() : []
         let q = debouncedQuery.trimmingCharacters(in: .whitespaces)
-        if q.isEmpty { displayItems = base; return }
-        // Build 63 (item 15): a non-empty query searches the FULL
-        // live catalog (hidden categories excluded); the empty
-        // query above keeps the category bucket untouched.
-        let hidden = hiddenStore.hiddenIds(playlistId: playlist.id, type: "live")
-        let source = contentStore.liveStreams
-        let result = await Task.detached(priority: .userInitiated) {
-            let visible = source.filter { !hidden.contains($0.stream.categoryId ?? "") }
-            // Build 61 (B8, C11 + H5): the in-list field matches the
-            // provider channel number as well as the name.
-            let filtered = visible.filter {
+        let result = await Task.detached(priority: .userInitiated) { () -> (
+            group: [LiveStreamWithCategory],
+            display: [LiveStreamWithCategory]
+        ) in
+            var base = rawBase
+            if !savedOrder.isEmpty {
+                base = ChannelOrderStore.applySavedOrder(base, saved: savedOrder) {
+                    String($0.stream.streamId)
+                }
+            }
+            if !hiddenChannels.isEmpty {
+                base = base.filter { !hiddenChannels.contains($0.stream.streamId) }
+            }
+            if !deadKeys.isEmpty {
+                base = base.filter {
+                    !deadKeys.contains(ImportedSubtitleStore.contentKey(
+                        playlistId: pid, type: "live", streamId: String($0.stream.streamId)
+                    ))
+                }
+            }
+            if q.isEmpty { return (base, base) }
+            // In-group search (build 88 plan): name OR the
+            // provider channel number (C11/H5), relevance-sorted.
+            let filtered = base.filter {
                 CatalogTextSearch.matchesSectionFuzzy(search: q, text: $0.stream.name)
                     || ($0.stream.channelNumber.map { String($0) == q } ?? false)
             }
-            return CatalogTextSearch.sortLiveByRelevance(filtered, search: q)
+            return (base, CatalogTextSearch.sortLiveByRelevance(filtered, search: q))
         }.value
         guard !Task.isCancelled else { return }
-        displayItems = result
+        groupItems = result.group
+        displayItems = result.display
     }
 }
 
@@ -1460,22 +1816,40 @@ struct LiveCategoryContent: View, Equatable {
                 ScrollView {
                     if displayGrouped {
                         // Build 80: one headed section per category
-                        // group — header + that group's own lazy
-                        // grid, sections stacked lazily so off-screen
-                        // groups are never built.
+                        // group, sections stacked lazily so off-screen
+                        // groups are never built. Build 88 (Part
+                        // 2-A): each group renders as a SHELF of the
+                        // wide glass logo tiles (the approved
+                        // livetv-max mockup) instead of the small
+                        // multi-column grid — the pagination budget
+                        // and its load-more triggers are unchanged.
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(groupedVisibleSlices, id: \.section.id) { slice in
-                                VStack(alignment: .leading, spacing: 0) {
-                                    LiveGridSectionHeader(title: slice.section.title, count: slice.section.items.count)
+                                VStack(alignment: .leading, spacing: 10) {
+                                    LiveGridSectionHeader(playlist: playlist, section: slice.section)
                                         .padding(.top, slice.offset == 0 ? 6 : 22)
-                                        .padding(.bottom, 10)
-                                    LazyVGrid(columns: columns, spacing: posterMetrics.gridRowSpacing) {
-                                        ForEach(Array(slice.items.enumerated()), id: \.element.stream.streamId) { index, item in
-                                            channelCell(item)
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        LazyHStack(alignment: .top, spacing: 14) {
+                                            ForEach(Array(slice.items.enumerated()), id: \.element.stream.streamId) { index, item in
+                                                LiveChannelTile(
+                                                    playlistId: playlist.id,
+                                                    stream: item.stream,
+                                                    imageLoadProfile: .grid
+                                                ) { stream, history in
+                                                    onStreamSelected?(stream, history)
+                                                }
+                                                .liveCardContextMenu(
+                                                    playlist: playlist,
+                                                    stream: item.stream,
+                                                    categoryId: item.stream.categoryId,
+                                                    categoryName: item.categoryName
+                                                )
+                                                .shelfCardAppear(index: index)
                                                 .onAppear { if slice.offset + index >= visibleCount - 15 { loadMore() } }
+                                            }
                                         }
+                                        .padding(.horizontal, 16)
                                     }
-                                    .padding(.horizontal)
                                 }
                             }
                         }
@@ -1565,30 +1939,39 @@ struct LiveCategoryContent: View, Equatable {
 /// Build 80: the in-grid category header for the grouped "All"
 /// browse. It reuses the app's ONE shelf-header treatment from
 /// `CinematicSectionHeader` — the accent small-caps title and the
-/// real-count accent badge — without that component's "See all"
-/// navigation link (the grid already shows the whole group; there
-/// is nowhere further to navigate to from inside it).
+/// real-count accent badge. Build 88 (Part 2-A): the header now
+/// also carries that component's "See all" link into the group's
+/// sequential-list page, exactly as the category shelves do; when
+/// the section's category cannot be resolved from the content
+/// store (defensive — sections are built from those categories),
+/// it falls back to the plain title + count treatment.
 private struct LiveGridSectionHeader: View {
-    let title: String
-    let count: Int
+    let playlist: Playlist
+    let section: LiveChannelGridSection
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text("• \(title.uppercased()) •")
-                .font(AppFont.font(.subheadline, weight: .bold))
-                .foregroundStyle(AppTheme.accent)
-                .lineLimit(1)
-            Spacer()
-            if count > 0 {
-                Text(CatalogCountFormatter.string(count))
-                    .font(AppTheme.fontBadge)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(AppTheme.accent))
+        if let category = PlaylistContentStore.shared.liveCategories.first(where: { $0.id == section.id }) {
+            CinematicSectionHeader(title: section.title, count: section.items.count) {
+                LiveCategoryDetailView(playlist: playlist, category: category)
             }
+        } else {
+            HStack(alignment: .firstTextBaseline) {
+                Text("• \(section.title.uppercased()) •")
+                    .font(AppFont.font(.subheadline, weight: .bold))
+                    .foregroundStyle(AppTheme.accent)
+                    .lineLimit(1)
+                Spacer()
+                if section.items.count > 0 {
+                    Text(CatalogCountFormatter.string(section.items.count))
+                        .font(AppTheme.fontBadge)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(AppTheme.accent))
+                }
+            }
+            .padding(.horizontal, 16)
         }
-        .padding(.horizontal, 16)
     }
 }
 
@@ -1758,6 +2141,18 @@ struct LivePlayerShell: View {
         queue.firstIndex(where: { $0.streamId == session.stream.streamId })
     }
 
+    /// Build 88 (Part 2-A): the current group for the in-player channel
+    /// list — the section containing the playing channel, falling back
+    /// to the playback queue when no section contains it.
+    private var currentGroupChannels: [DBLiveStream] {
+        if let section = sections.first(where: { section in
+            section.streams.contains(where: { $0.streamId == session.stream.streamId })
+        }) {
+            return section.streams
+        }
+        return queue
+    }
+
     /// Category name of the channel on screen, shown under the title. Derived from the
     /// current stream so it updates on zap, and never echoes the channel name itself.
     private var liveSubtitle: String? {
@@ -1818,11 +2213,14 @@ struct LivePlayerShell: View {
                     onToggleFavorite: toggleFavorite
                 )
 
-                if showChannelSidePanel, !sections.isEmpty {
-                    LiveChannelSidePanel(
-                        sections: panelSections,
-                        currentItemId: String(session.stream.streamId),
-                        onSelectChannel: { id in selectPanelItem(id: id) }
+                if showChannelSidePanel, !currentGroupChannels.isEmpty {
+                    // Build 88 (Part 2-A): the owner's Playra pick — the
+                    // current group's channels as one sequential list
+                    // under the video (positional numbers, up/down zap).
+                    PlayerChannelList(
+                        channels: currentGroupChannels,
+                        currentChannelId: session.stream.streamId,
+                        onSelect: { stream in switchTo(stream: stream, resumeTimeMs: nil) }
                     )
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .zIndex(1)

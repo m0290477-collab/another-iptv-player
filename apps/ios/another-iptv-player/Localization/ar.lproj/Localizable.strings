@@ -1224,3 +1224,8 @@
 "matches.tab.nhl" = "NHL";
 "matches.tennis" = "التنس";
 "matches.ufc" = "UFC";
+"catalog.count_of_total" = "%d من %d";
+"live.group.count_format" = "%d من %d";
+"player.channel_list.title" = "القنوات";
+"settings.hub.refresh" = "تحديث";
+"matches.live_none_now" = "لا توجد مباريات مباشرة الآن";
