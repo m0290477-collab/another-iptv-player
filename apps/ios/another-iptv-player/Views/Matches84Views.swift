@@ -184,6 +184,12 @@ struct SafariView: UIViewControllerRepresentable {
 // shared Nuke pipeline, with the initials disc ONLY as the
 // no-photo fallback — i.e. only where ESPN carries no photo
 // for that athlete anywhere.
+//
+// Build 86: SOCCER surfaces additionally pass a
+// `SoccerPhotoQuery` to the same disc — where ESPN has no
+// photo, a verified fallback (FPL → Wikidata → TheSportsDB,
+// `SoccerPhotoResolver`) swaps in over the initials. Every
+// other sport passes nil and is unchanged.
 
 // MARK: - Player page (item 4)
 
@@ -200,6 +206,10 @@ struct PlayerPageView: View {
 
     @State private var profile: PlayerProfile?
     @State private var didLoad = false
+    /// Build 86: TheSportsDB biography (soccer only) —
+    /// rendered only when the free source verifies the
+    /// record as this player (name + team).
+    @State private var playerBio: String?
 
     var body: some View {
         List {
@@ -213,6 +223,9 @@ struct PlayerPageView: View {
                 }
                 if !profile.recentEvents.isEmpty {
                     recentSection(profile)
+                }
+                if let playerBio {
+                    bioSection(playerBio)
                 }
             } else if didLoad {
                 Section {
@@ -237,13 +250,39 @@ struct PlayerPageView: View {
                 sport: sport, leaguePath: leaguePath, athleteId: athleteId
             )
             didLoad = true
+            // Build 86: the biography lookup runs only once
+            // the profile (and with it the verified team) is
+            // known — soccer only.
+            if sport == .soccer, let profile {
+                playerBio = await SportsDBService.playerBio(
+                    name: profile.name, teamName: profile.teamName
+                )
+            }
+        }
+    }
+
+    private func bioSection(_ bio: String) -> some View {
+        Section {
+            Text(bio)
+                .font(.subheadline)
+        } header: {
+            Text(L("matches.player.bio"))
         }
     }
 
     private func headerSection(_ profile: PlayerProfile) -> some View {
         Section {
             HStack(spacing: 14) {
-                PlayerPhotoDisc(url: profile.headshotURL, name: profile.name, size: 72)
+                PlayerPhotoDisc(
+                    url: profile.headshotURL, name: profile.name, size: 72,
+                    fallback: sport == .soccer
+                        ? SoccerPhotoQuery(
+                            athleteId: profile.athleteId, name: profile.name,
+                            teamName: profile.teamName, leaguePath: leaguePath,
+                            citizenship: profile.citizenship, dateOfBirth: nil
+                        )
+                        : nil
+                )
                 VStack(alignment: .leading, spacing: 4) {
                     Text(profile.name)
                         .font(.title3.weight(.bold))
@@ -452,7 +491,16 @@ struct LeadersView: View {
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(.secondary)
                 .frame(width: 22, alignment: .trailing)
-            PlayerPhotoDisc(url: row.headshotURL, name: row.name, size: 36)
+            PlayerPhotoDisc(
+                url: row.headshotURL, name: row.name, size: 36,
+                fallback: sport == .soccer
+                    ? SoccerPhotoQuery(
+                        athleteId: row.athleteId, name: row.name,
+                        teamName: row.teamName, leaguePath: leaguePath,
+                        citizenship: nil, dateOfBirth: nil
+                    )
+                    : nil
+            )
             VStack(alignment: .leading, spacing: 1) {
                 Text(row.name)
                     .font(.subheadline.weight(.semibold))

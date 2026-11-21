@@ -419,6 +419,11 @@ struct SquadPlayer: Identifiable {
     /// Build 84 (item 4): payload athlete id for the player
     /// page; nil when the payload carried none.
     var athleteId: String? = nil
+    /// Build 86: the site roster payload's own citizenship /
+    /// date of birth — corroboration inputs for the soccer
+    /// photo fallback's identity gates (never rendered).
+    var citizenship: String? = nil
+    var dateOfBirth: String? = nil
 }
 
 enum TeamService {
@@ -447,6 +452,11 @@ enum TeamService {
             let lastName: String?
             let headshot: Headshot?
             let position: Pos?
+            /// Build 86: corroboration inputs for the soccer
+            /// photo fallback (the soccer roster payload
+            /// carries both; other sports may not).
+            let citizenship: String?
+            let dateOfBirth: String?
             /// Build 85: baseball's roster payload GROUPS its
             /// athletes by position — each top-level entry is a
             /// group ({position: "Pitchers", items: [...]})
@@ -530,7 +540,9 @@ enum TeamService {
                 positionName: athlete.position?.displayName ?? athlete.position?.name
                     ?? pair.groupPosition,
                 headshotURL: headshot,
-                athleteId: athlete.id
+                athleteId: athlete.id,
+                citizenship: athlete.citizenship,
+                dateOfBirth: athlete.dateOfBirth
             )
         }
     }

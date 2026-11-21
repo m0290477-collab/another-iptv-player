@@ -1183,3 +1183,7 @@
 "matches.transactions" = "交易";
 "matches.detail.recap" = "比赛回顾";
 "matches.injuries.expected_return" = "预计回归";
+
+"matches.team.stadium" = "球场";
+"matches.team.about" = "关于俱乐部";
+"matches.player.bio" = "简介";

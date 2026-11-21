@@ -1183,3 +1183,7 @@
 "matches.transactions" = "Transactions";
 "matches.detail.recap" = "Résumé du match";
 "matches.injuries.expected_return" = "Retour prévu";
+
+"matches.team.stadium" = "Stade";
+"matches.team.about" = "À propos du club";
+"matches.player.bio" = "Biographie";

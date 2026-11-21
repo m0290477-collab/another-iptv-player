@@ -1183,3 +1183,7 @@
 "matches.transactions" = "Трансферы";
 "matches.detail.recap" = "Обзор матча";
 "matches.injuries.expected_return" = "Ожидаемое возвращение";
+
+"matches.team.stadium" = "Стадион";
+"matches.team.about" = "О клубе";
+"matches.player.bio" = "Биография";

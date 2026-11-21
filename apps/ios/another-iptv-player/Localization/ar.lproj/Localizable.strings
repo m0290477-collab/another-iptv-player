@@ -1183,3 +1183,7 @@
 "matches.transactions" = "الانتقالات";
 "matches.detail.recap" = "ملخص المباراة";
 "matches.injuries.expected_return" = "العودة المتوقعة";
+
+"matches.team.stadium" = "الملعب";
+"matches.team.about" = "نبذة عن النادي";
+"matches.player.bio" = "السيرة";

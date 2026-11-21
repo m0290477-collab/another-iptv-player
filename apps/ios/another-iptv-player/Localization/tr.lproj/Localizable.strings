@@ -1201,3 +1201,7 @@
 "matches.transactions" = "Transferler";
 "matches.detail.recap" = "Maç özeti";
 "matches.injuries.expected_return" = "Beklenen dönüş";
+
+"matches.team.stadium" = "Stadyum";
+"matches.team.about" = "Kulüp Hakkında";
+"matches.player.bio" = "Biyografi";

@@ -1201,3 +1201,7 @@
 "matches.transactions" = "Transactions";
 "matches.detail.recap" = "Recap";
 "matches.injuries.expected_return" = "Expected return";
+
+"matches.team.stadium" = "Stadium";
+"matches.team.about" = "About";
+"matches.player.bio" = "Biography";

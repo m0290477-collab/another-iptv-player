@@ -12,7 +12,16 @@ struct PlayerPhotoDisc: View {
     let url: URL?
     let name: String?
     let size: CGFloat
+    /// Build 86: SOCCER ONLY — when the ESPN photo is absent
+    /// or fails to load, the disc resolves a verified fallback
+    /// through `SoccerPhotoResolver` (FPL → Wikidata →
+    /// TheSportsDB) and swaps it in over the monogram. Nil on
+    /// every NBA / NFL / MLB surface: those discs behave
+    /// exactly as before (their ESPN photos are complete).
+    var fallback: SoccerPhotoQuery? = nil
     @State private var loadFailed = false
+    @State private var fallbackURL: URL?
+    @State private var fallbackFailed = false
 
     private var initials: String {
         let parts = (name ?? "").split(separator: " ").prefix(2)
@@ -20,16 +29,36 @@ struct PlayerPhotoDisc: View {
         return letters.isEmpty ? "?" : letters.joined()
     }
 
+    private var displayURL: URL? {
+        if let url, !loadFailed { return url }
+        if let fallbackURL, !fallbackFailed { return fallbackURL }
+        return nil
+    }
+
+    /// The resolution task re-runs when the primary photo
+    /// fails (the key flips), so a dead ESPN CDN pattern still
+    /// gets its fallback attempt; with no primary URL it runs
+    /// on first appearance. Lazy per visible row, and the
+    /// resolver caches by athlete id — a player resolves at
+    /// most once, ever.
+    private var resolutionKey: String {
+        guard let fallback else { return "" }
+        return fallback.athleteId + (loadFailed ? "|failed" : "")
+    }
+
     var body: some View {
         Group {
-            if let url, !loadFailed {
+            if let displayURL {
                 CachedImage(
-                    url: url,
+                    url: displayURL,
                     width: size, height: size,
                     cornerRadius: size / 2,
                     contentMode: .fill,
                     iconName: "person.fill",
-                    onLoadFailed: { loadFailed = true }
+                    onLoadFailed: {
+                        if let url, displayURL == url { loadFailed = true }
+                        else { fallbackFailed = true }
+                    }
                 )
             } else {
                 ZStack {
@@ -44,6 +73,11 @@ struct PlayerPhotoDisc: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .accessibilityHidden(true)
+        .task(id: resolutionKey) {
+            guard let fallback, fallbackURL == nil else { return }
+            guard url == nil || loadFailed else { return }
+            fallbackURL = await SoccerPhotoResolver.shared.photo(for: fallback)
+        }
     }
 }
 
@@ -524,7 +558,14 @@ struct TopScorersView: View {
                         .font(AppTheme.fontMetadata.weight(.bold))
                         .monospacedDigit()
                         .frame(width: 22, alignment: .trailing)
-                    PlayerPhotoDisc(url: scorer.headshotURL, name: scorer.name, size: 38)
+                    PlayerPhotoDisc(
+                        url: scorer.headshotURL, name: scorer.name, size: 38,
+                        fallback: SoccerPhotoQuery(
+                            athleteId: scorer.athleteId, name: scorer.name,
+                            teamName: scorer.teamName, leaguePath: leaguePath,
+                            citizenship: nil, dateOfBirth: nil
+                        )
+                    )
                     VStack(alignment: .leading, spacing: 1) {
                         Text(scorer.name)
                             .font(AppTheme.fontCardTitle)
@@ -667,18 +708,18 @@ struct LineupsView: View {
             }
             ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
                 if !group.1.isEmpty {
-                    ForEach(group.1) { playerRow($0) }
+                    ForEach(group.1) { playerRow($0, teamName: side.teamName) }
                 }
             }
             if !side.bench.isEmpty {
                 Divider().background(AppTheme.cardBorderColor)
-                ForEach(side.bench) { playerRow($0) }
+                ForEach(side.bench) { playerRow($0, teamName: side.teamName) }
             }
         }
     }
 
     @ViewBuilder
-    private func playerRow(_ player: MatchLineupPlayer) -> some View {
+    private func playerRow(_ player: MatchLineupPlayer, teamName: String?) -> some View {
         // Build 84 (item 4): lineup rows open the player page.
         if let athleteId = player.athleteId {
             NavigationLink {
@@ -687,17 +728,20 @@ struct LineupsView: View {
                     athleteId: athleteId, fallbackName: player.name
                 )
             } label: {
-                playerRowContent(player)
+                playerRowContent(player, teamName: teamName)
             }
             .buttonStyle(PressOpacityButtonStyle())
         } else {
-            playerRowContent(player)
+            playerRowContent(player, teamName: teamName)
         }
     }
 
-    private func playerRowContent(_ player: MatchLineupPlayer) -> some View {
+    private func playerRowContent(_ player: MatchLineupPlayer, teamName: String?) -> some View {
         HStack(spacing: 10) {
-            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 32)
+            PlayerPhotoDisc(
+                url: player.headshotURL, name: player.name, size: 32,
+                fallback: lineupFallback(player, teamName: teamName)
+            )
             Text(player.name)
                 .font(AppTheme.fontCardTitle)
                 .lineLimit(1)
@@ -709,6 +753,18 @@ struct LineupsView: View {
                     .lineLimit(1)
             }
         }
+    }
+
+    /// Build 86: the soccer photo fallback for a lineup
+    /// player — SOCCER surfaces only, and only with a real
+    /// athlete id to key the resolver's cache by.
+    private func lineupFallback(_ player: MatchLineupPlayer, teamName: String?) -> SoccerPhotoQuery? {
+        guard sport == .soccer, let athleteId = player.athleteId else { return nil }
+        return SoccerPhotoQuery(
+            athleteId: athleteId, name: player.name,
+            teamName: teamName, leaguePath: leaguePath,
+            citizenship: nil, dateOfBirth: nil
+        )
     }
 }
 
@@ -795,7 +851,10 @@ private struct PitchView: View {
 
     private func benchRow(_ player: MatchLineupPlayer) -> some View {
         HStack(spacing: 10) {
-            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 28)
+            PlayerPhotoDisc(
+                url: player.headshotURL, name: player.name, size: 28,
+                fallback: photoFallback(player)
+            )
             Text(player.name)
                 .font(AppTheme.fontMetadata)
                 .lineLimit(1)
@@ -812,7 +871,10 @@ private struct PitchView: View {
     private func marker(_ player: MatchLineupPlayer) -> some View {
         let flatIndex = lines.flatMap { $0 }.firstIndex(of: player) ?? 0
         let content = VStack(spacing: 2) {
-            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 34)
+            PlayerPhotoDisc(
+                url: player.headshotURL, name: player.name, size: 34,
+                fallback: photoFallback(player)
+            )
             Text(shortName(player.name))
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.white)
@@ -844,6 +906,17 @@ private struct PitchView: View {
         }
     }
 
+    /// Build 86: the soccer photo fallback for a pitch
+    /// player (the pitch renders for soccer only).
+    private func photoFallback(_ player: MatchLineupPlayer) -> SoccerPhotoQuery? {
+        guard sport == .soccer, let athleteId = player.athleteId else { return nil }
+        return SoccerPhotoQuery(
+            athleteId: athleteId, name: player.name,
+            teamName: side.teamName, leaguePath: leaguePath,
+            citizenship: nil, dateOfBirth: nil
+        )
+    }
+
     private func shortName(_ name: String) -> String {
         let parts = name.split(separator: " ")
         guard let last = parts.last else { return name }
@@ -868,6 +941,10 @@ struct TeamPageView: View {
     /// its wins/losses(/ties) stats. Nil when the standings
     /// carry no entry for this team.
     @State private var recordText: String?
+    /// Build 86: TheSportsDB club details (stadium name +
+    /// description) — soccer only, rendered only when the
+    /// free source verifies an exact-name club record.
+    @State private var teamDetails: SportsDBService.TeamDetails?
     @ObservedObject private var followStore = FollowedTeamsStore.shared
 
     private var isFollowed: Bool {
@@ -933,8 +1010,33 @@ struct TeamPageView: View {
                         .font(AppTheme.fontCardTitle)
                 }
                 .buttonStyle(PressOpacityButtonStyle())
+                // Build 86: the club's home stadium, from
+                // TheSportsDB's verified club record.
+                if let stadium = teamDetails?.stadium {
+                    HStack(spacing: 8) {
+                        Image(systemName: "sportscourt")
+                            .foregroundStyle(AppTheme.accent)
+                        Text(stadium)
+                            .font(AppTheme.fontCardTitle)
+                            .lineLimit(1)
+                        Spacer()
+                        Text(L("matches.team.stadium"))
+                            .font(AppTheme.fontMetadata)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .listRowBackground(AppTheme.surface)
+
+            // Build 86: the club description, from the same
+            // verified TheSportsDB record (soccer only).
+            if let about = teamDetails?.descriptionText {
+                Section {
+                    Text(about)
+                        .font(.subheadline)
+                } header: { extrasSectionHeader(L("matches.team.about")) }
+                .listRowBackground(AppTheme.surface)
+            }
 
             // Build 84 (item 12): the FULL season lists — the
             // build-63 prefix(8) caps are gone; the schedule
@@ -979,7 +1081,10 @@ struct TeamPageView: View {
                             )
                         } label: {
                             HStack(spacing: 10) {
-                                PlayerPhotoDisc(url: row.headshotURL, name: row.name, size: 30)
+                                PlayerPhotoDisc(
+                                    url: row.headshotURL, name: row.name, size: 30,
+                                    fallback: soccerFallback(athleteId: row.athleteId, name: row.name)
+                                )
                                 Text(row.name)
                                     .font(AppTheme.fontCardTitle)
                                     .lineLimit(1)
@@ -1064,12 +1169,23 @@ struct TeamPageView: View {
                     }
                 }
             }
+            // Build 86: TheSportsDB club details (soccer
+            // only) — one cached lookup per club.
+            if team.sport == .soccer {
+                teamDetails = await SportsDBService.teamDetails(teamName: team.name)
+            }
         }
     }
 
     private func squadRow(_ player: SquadPlayer) -> some View {
         HStack(spacing: 10) {
-            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 32)
+            PlayerPhotoDisc(
+                url: player.headshotURL, name: player.name, size: 32,
+                fallback: soccerFallback(
+                    athleteId: player.athleteId, name: player.name,
+                    citizenship: player.citizenship, dateOfBirth: player.dateOfBirth
+                )
+            )
             Text(player.name)
                 .font(AppTheme.fontCardTitle)
                 .lineLimit(1)
@@ -1081,6 +1197,21 @@ struct TeamPageView: View {
                     .lineLimit(1)
             }
         }
+    }
+
+    /// Build 86: the soccer photo fallback query for a
+    /// player on this team — nil for every other sport, and
+    /// nil without a real athlete id to cache by.
+    private func soccerFallback(
+        athleteId: String?, name: String,
+        citizenship: String? = nil, dateOfBirth: String? = nil
+    ) -> SoccerPhotoQuery? {
+        guard team.sport == .soccer, let athleteId else { return nil }
+        return SoccerPhotoQuery(
+            athleteId: athleteId, name: name,
+            teamName: team.name, leaguePath: team.leaguePath,
+            citizenship: citizenship, dateOfBirth: dateOfBirth
+        )
     }
 
     private var followButton: some View {
@@ -1260,7 +1391,14 @@ struct TeamSearchView: View {
                                     url: CoreCoordinates.headshotURL(
                                         sport: hit.sport, athleteId: hit.athleteId, href: nil
                                     ),
-                                    name: hit.name, size: 28
+                                    name: hit.name, size: 28,
+                                    fallback: hit.sport == .soccer
+                                        ? SoccerPhotoQuery(
+                                            athleteId: hit.athleteId, name: hit.name,
+                                            teamName: nil, leaguePath: hit.leaguePath,
+                                            citizenship: nil, dateOfBirth: nil
+                                        )
+                                        : nil
                                 )
                                 Text(hit.name)
                                     .font(AppTheme.fontCardTitle)

@@ -1183,3 +1183,7 @@
 "matches.transactions" = "लेन-देन";
 "matches.detail.recap" = "मैच सारांश";
 "matches.injuries.expected_return" = "अपेक्षित वापसी";
+
+"matches.team.stadium" = "स्टेडियम";
+"matches.team.about" = "क्लब के बारे में";
+"matches.player.bio" = "जीवनी";
