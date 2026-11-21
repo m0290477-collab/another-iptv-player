@@ -1927,14 +1927,22 @@ struct LiveCategoryContent: View, Equatable {
         // body and re-diffed the whole shelf stack for nothing.
         // The signature follows this file's existing cheap
         // compare convention (counts + boundary ids).
-        let unchanged = displayGrouped == newGrouped
-            && displayItems.count == result.flat.count
-            && displayItems.first?.stream.streamId == result.flat.first?.stream.streamId
-            && displayItems.last?.stream.streamId == result.flat.last?.stream.streamId
-            && displaySections.count == result.sections.count
-            && displaySections.first?.id == result.sections.first?.id
+        // Build 89 fix round 1: the signature staged into separate
+        // statements — the single chained expression timed out the
+        // Swift type-checker on Codemagic #86 (LiveStreamsView.swift
+        // "unable to type-check this expression in reasonable time").
+        // Same comparisons, same result.
+        let sameMode = displayGrouped == newGrouped
+        let sameCount = displayItems.count == result.flat.count
+        let sameFirst = displayItems.first?.stream.streamId == result.flat.first?.stream.streamId
+        let sameLast = displayItems.last?.stream.streamId == result.flat.last?.stream.streamId
+        let sameSectionCount = displaySections.count == result.sections.count
+        let sameSectionEdges = displaySections.first?.id == result.sections.first?.id
             && displaySections.last?.id == result.sections.last?.id
-            && displaySections.reduce(0) { $0 + $1.items.count } == result.sections.reduce(0) { $0 + $1.items.count }
+        let oldSectionTotal = displaySections.reduce(0) { $0 + $1.items.count }
+        let newSectionTotal = result.sections.reduce(0) { $0 + $1.items.count }
+        let unchanged = sameMode && sameCount && sameFirst && sameLast
+            && sameSectionCount && sameSectionEdges && oldSectionTotal == newSectionTotal
         if unchanged { return }
         displayItems = result.flat
         displaySections = result.sections
