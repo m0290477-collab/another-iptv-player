@@ -749,7 +749,10 @@ struct PlayerProfile {
     /// the NHL / MLB-enrichment constructors keep building
     /// their profiles exactly as before — they leave this
     /// empty and their pages render the flat `statLines`.
-    let statGroups: [(category: String?, lines: [(label: String, value: String)])] = []
+    /// `var`, not `let`: a defaulted `let` is excluded from
+    /// the memberwise initializer entirely, so the ESPN
+    /// constructor could not pass it (Codemagic #88).
+    var statGroups: [(category: String?, lines: [(label: String, value: String)])] = []
     let recentEvents: [(name: String, date: Date)]
 }
 

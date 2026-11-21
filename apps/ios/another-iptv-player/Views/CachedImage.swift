@@ -326,7 +326,7 @@ struct CachedImage: View {
 
     /// Build 90 (F5c): the LazyImage disappear action per profile
     /// (see the `.onDisappear` call site for the full reasoning).
-    private var disappearAction: LazyImage.DisappearAction? {
+    private var disappearAction: LazyImage.DisappearBehavior? {
         switch loadProfile {
         case .standard, .grid:
             return .cancel
