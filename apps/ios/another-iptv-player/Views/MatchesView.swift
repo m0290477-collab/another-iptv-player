@@ -150,6 +150,8 @@ struct MatchesView: View {
     @AppStorage("explainer.seen.soccer") private var explainerSeenSoccer = false
     @AppStorage("explainer.seen.nfl") private var explainerSeenNFL = false
     @AppStorage("explainer.seen.nba") private var explainerSeenNBA = false
+    /// Build 85: the MLB tab's first-entry explainer flag.
+    @AppStorage("explainer.seen.mlb") private var explainerSeenMLB = false
     /// The sport whose explainer sheet is currently presented.
     @State private var explainerSport: MatchSport?
     /// The last sport the explainer was presented for — by the
@@ -305,6 +307,7 @@ struct MatchesView: View {
         case .soccer: return explainerSeenSoccer
         case .nfl: return explainerSeenNFL
         case .nba: return explainerSeenNBA
+        case .mlb: return explainerSeenMLB
         }
     }
 
@@ -313,6 +316,7 @@ struct MatchesView: View {
         case .soccer: explainerSeenSoccer = true
         case .nfl: explainerSeenNFL = true
         case .nba: explainerSeenNBA = true
+        case .mlb: explainerSeenMLB = true
         }
     }
 
@@ -623,6 +627,7 @@ struct MatchesView: View {
                         } label: {
                             MatchRowView(
                                 match: match, isStale: sportState.isStale,
+                                sport: selectedSport,
                                 watchContext: (
                                     sport: selectedSport,
                                     leaguePath: selectedSport.leaguePaths[section.index]
@@ -767,6 +772,10 @@ struct MatchesView: View {
 struct MatchRowView: View {
     let match: MatchEvent
     let isStale: Bool
+    /// Build 85: the row's sport when the caller knows it —
+    /// baseball's live label is the payload's own status text
+    /// (inning + half), not a composed quarter/clock.
+    var sport: MatchSport? = nil
     /// Build 84 (item 3b): when a surface provides its sport +
     /// league, the row carries the Watch action under the
     /// teams (rendered only when the active playlist has a
@@ -862,16 +871,35 @@ struct MatchRowView: View {
                     .multilineTextAlignment(.trailing)
             }
         case .finished:
-            Text(L("matches.final"))
+            // Build 85: baseball's payload text carries the
+            // extra-inning truth ("Final/11") — show it
+            // verbatim instead of the generic Final word.
+            Text(finishedText)
                 .font(AppTheme.fontMetadata.weight(.semibold))
                 .foregroundStyle(.secondary)
         }
     }
 
+    private var finishedText: String {
+        if sport == .mlb,
+           let detail = match.statusDetail?.trimmingCharacters(in: .whitespaces),
+           !detail.isEmpty {
+            return detail
+        }
+        return L("matches.final")
+    }
+
     /// Live clock label built ONLY from payload fields: soccer's
     /// displayClock already reads like "67'"; NFL/NBA pair a period
     /// with a game clock ("Q3 2:14", period 5+ = "OT").
+    /// Build 85: baseball's period is the INNING and its
+    /// displayClock is a dummy "0:00" — the label is the
+    /// payload's own status text ("Top 5th"), verbatim.
     private var liveClockText: String? {
+        if sport == .mlb {
+            let detail = match.statusDetail?.trimmingCharacters(in: .whitespaces)
+            return (detail?.isEmpty == false) ? detail : nil
+        }
         let clock = match.displayClock?.trimmingCharacters(in: .whitespaces)
         let hasClock = clock != nil && clock != "0.0" && !(clock?.isEmpty ?? true)
         guard let period = match.period, period > 0 else {

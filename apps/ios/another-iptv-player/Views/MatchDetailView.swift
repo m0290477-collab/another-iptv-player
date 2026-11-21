@@ -54,6 +54,9 @@ struct MatchDetailView: View {
     @State private var detailTab = 0
     /// Build 81 (item 3): the highlight currently playing in-app.
     @State private var playingHighlight: MatchVideo?
+    /// Build 85 (sweep): the recap article open in the Safari
+    /// sheet, when the user taps it.
+    @State private var articleURL: URL?
     @EnvironmentObject private var playerOverlay: PlayerOverlayController
 
     private enum DetailTab: Hashable {
@@ -81,11 +84,13 @@ struct MatchDetailView: View {
     private var hasStats: Bool { !(detail?.stats.isEmpty ?? true) }
     private var hasBoxScore: Bool { !(detail?.boxScore.isEmpty ?? true) }
     private var hasPlays: Bool { !(detail?.playsFeed.isEmpty ?? true) }
-    /// Facts exists when any of its three groups has real data:
-    /// the timeline, the payload's match info, or its videos.
+    /// Facts exists when any of its groups has real data:
+    /// the timeline, the payload's match info, its videos,
+    /// or (build 85) its recap/preview article.
     private var hasFacts: Bool {
         guard let detail else { return false }
         return hasTimeline || detail.info != nil || !detail.videos.isEmpty
+            || detail.article != nil
     }
     private var hasH2H: Bool { !(detail?.h2h?.meetings.isEmpty ?? true) }
     private var hasCommentary: Bool { !(detail?.commentary.isEmpty ?? true) }
@@ -164,6 +169,24 @@ struct MatchDetailView: View {
         .fullScreenCover(item: $playingHighlight) { video in
             HighlightPlayerView(url: video.url)
         }
+        // Build 85 (sweep): the recap article in the in-app
+        // Safari sheet (the news surface's own pattern).
+        .sheet(item: articleSafariItem) { item in
+            SafariView(url: item.url)
+                .ignoresSafeArea()
+        }
+    }
+
+    private struct ArticleSafariItem: Identifiable {
+        let url: URL
+        var id: String { url.absoluteString }
+    }
+
+    private var articleSafariItem: Binding<ArticleSafariItem?> {
+        Binding(
+            get: { articleURL.map { ArticleSafariItem(url: $0) } },
+            set: { articleURL = $0?.url }
+        )
     }
 
     private func load() async {
@@ -285,6 +308,40 @@ struct MatchDetailView: View {
                             }
                         } header: {
                             sectionHeader(L("matches.detail.highlights"))
+                        }
+                        .listRowBackground(AppTheme.surface)
+                    }
+                    if let article = detail.article {
+                        // Build 85 (sweep): the summary's own
+                        // recap/preview article — headline and
+                        // description verbatim; the row opens
+                        // the publisher page in the Safari
+                        // sheet when the payload carries a link.
+                        Section {
+                            Button {
+                                articleURL = article.webURL
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(article.headline)
+                                        .font(AppTheme.fontCardTitle)
+                                        .foregroundStyle(.primary)
+                                        .multilineTextAlignment(.leading)
+                                        .lineLimit(3)
+                                    if let summary = article.summary, !summary.isEmpty {
+                                        Text(summary)
+                                            .font(AppTheme.fontMetadata)
+                                            .foregroundStyle(.secondary)
+                                            .multilineTextAlignment(.leading)
+                                            .lineLimit(4)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PressOpacityButtonStyle())
+                            .disabled(article.webURL == nil)
+                        } header: {
+                            sectionHeader(L("matches.detail.recap"))
                         }
                         .listRowBackground(AppTheme.surface)
                     }
@@ -470,6 +527,17 @@ struct MatchDetailView: View {
         .frame(width: 118)
     }
 
+    /// Build 85: baseball's state text is the payload's own
+    /// status detail ("Top 5th" live, "Final/11" finished) —
+    /// its displayClock is a dummy "0:00" and its period is
+    /// the inning, so neither shipped label applies.
+    private var baseballStatusText: String? {
+        guard sport == .mlb else { return nil }
+        let raw = seedMatch?.statusDetail ?? detail?.header?.statusDetail
+        let trimmed = raw?.trimmingCharacters(in: .whitespaces)
+        return (trimmed?.isEmpty == false) ? trimmed : nil
+    }
+
     @ViewBuilder
     private var statePill: some View {
         switch state {
@@ -478,7 +546,11 @@ struct MatchDetailView: View {
                 Circle().fill(Color.white).frame(width: 6, height: 6)
                 Text(L("matches.live"))
                     .font(AppTheme.fontBadge)
-                if let clock = seedMatch?.displayClock ?? detail?.header?.displayClock {
+                if let baseballStatusText {
+                    Text(baseballStatusText)
+                        .font(AppTheme.fontBadge)
+                        .monospacedDigit()
+                } else if let clock = seedMatch?.displayClock ?? detail?.header?.displayClock {
                     Text(clock)
                         .font(AppTheme.fontBadge)
                         .monospacedDigit()
@@ -489,7 +561,7 @@ struct MatchDetailView: View {
             .padding(.vertical, 5)
             .background(Capsule().fill(AppTheme.live))
         case .finished:
-            Text(L("matches.final"))
+            Text(baseballStatusText ?? L("matches.final"))
                 .font(AppTheme.fontBadge)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 12)
@@ -613,9 +685,10 @@ struct MatchDetailView: View {
 
     // MARK: Header extras (build 84, items 18/20)
 
-    /// The win-probability curve and the quarter linescore
-    /// grid, in their own section under the header — each
-    /// rendered only when the summary publishes it (NBA/NFL).
+    /// The win-probability curve and the linescore grid, in
+    /// their own section under the header — each rendered
+    /// only when the summary publishes it (NBA/NFL quarters;
+    /// build 85: baseball's innings + win probability too).
     @ViewBuilder
     private var headerExtrasSection: some View {
         if let detail,
@@ -638,7 +711,18 @@ struct MatchDetailView: View {
 
     /// Q1 Q2 Q3 Q4 (OT…) T per team, from the header
     /// competitors' payload linescores; T is the header score.
+    /// Build 85: baseball renders its own grid (inning numbers
+    /// + R/H/E) — see `baseballLinescoreGrid`.
+    @ViewBuilder
     private func linescoreGrid(_ detail: MatchDetail) -> some View {
+        if sport == .mlb {
+            baseballLinescoreGrid(detail)
+        } else {
+            quarterLinescoreGrid(detail)
+        }
+    }
+
+    private func quarterLinescoreGrid(_ detail: MatchDetail) -> some View {
         let periods = max(detail.homeLinescores.count, detail.awayLinescores.count)
         return VStack(spacing: 6) {
             HStack(spacing: 0) {
@@ -662,6 +746,75 @@ struct MatchDetailView: View {
             )
         }
         .padding(.vertical, 2)
+    }
+
+    /// Build 85: the baseball linescore — one column per
+    /// inning (the header competitors' payload linescores),
+    /// then R (the header score) / H / E from the same
+    /// competitors' payload fields. Nine-plus innings never
+    /// fit a phone width, so the grid scrolls horizontally;
+    /// a team whose game hasn't started has no linescores
+    /// and the section simply doesn't render (the caller's
+    /// own condition).
+    private func baseballLinescoreGrid(_ detail: MatchDetail) -> some View {
+        let innings = max(detail.homeLinescores.count, detail.awayLinescores.count)
+        return ScrollView(.horizontal, showsIndicators: false) {
+            VStack(spacing: 6) {
+                HStack(spacing: 0) {
+                    Color.clear.frame(width: 112, height: 16)
+                    ForEach(0..<innings, id: \.self) { index in
+                        Text("\(index + 1)")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24)
+                    }
+                    ForEach(["R", "H", "E"], id: \.self) { label in
+                        Text(label)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28)
+                    }
+                }
+                baseballLinescoreRow(
+                    side: detail.header?.home, values: detail.homeLinescores,
+                    innings: innings, hits: detail.homeHits, errors: detail.homeErrors
+                )
+                baseballLinescoreRow(
+                    side: detail.header?.away, values: detail.awayLinescores,
+                    innings: innings, hits: detail.awayHits, errors: detail.awayErrors
+                )
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func baseballLinescoreRow(
+        side: MatchTeamSide?, values: [String], innings: Int,
+        hits: String?, errors: String?
+    ) -> some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 7) {
+                CachedImage(url: side?.logoURL, width: 20, height: 20, cornerRadius: 10, iconName: "shield")
+                Text(side?.name ?? "")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .frame(width: 112, alignment: .leading)
+            ForEach(0..<innings, id: \.self) { index in
+                Text(index < values.count ? values[index] : "–")
+                    .font(.caption.monospacedDigit())
+                    .frame(width: 24)
+            }
+            Text(side?.score ?? "–")
+                .font(.caption.weight(.bold).monospacedDigit())
+                .frame(width: 28)
+            Text(hits ?? "–")
+                .font(.caption.monospacedDigit())
+                .frame(width: 28)
+            Text(errors ?? "–")
+                .font(.caption.monospacedDigit())
+                .frame(width: 28)
+        }
     }
 
     private func linescoreRow(side: MatchTeamSide?, values: [String], periods: Int) -> some View {

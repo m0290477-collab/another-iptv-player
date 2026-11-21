@@ -33,6 +33,12 @@ enum MatchSport: String, CaseIterable, Identifiable {
     case soccer
     case nfl
     case nba
+    /// Build 85: Major League Baseball — a full fourth sport on
+    /// the same free ESPN public data (site/v2 path
+    /// baseball/mlb), verified live 2026-11-21 (scoreboard,
+    /// standings, teams/roster/schedule, news, core leaders +
+    /// athletes — see the build-85 report).
+    case mlb
 
     var id: String { rawValue }
 
@@ -54,6 +60,8 @@ enum MatchSport: String, CaseIterable, Identifiable {
             return ["football/nfl"]
         case .nba:
             return ["basketball/nba"]
+        case .mlb:
+            return ["baseball/mlb"]
         }
     }
 
@@ -62,6 +70,7 @@ enum MatchSport: String, CaseIterable, Identifiable {
         case .soccer: return "matches.tab.soccer"
         case .nfl: return "matches.tab.nfl"
         case .nba: return "matches.tab.nba"
+        case .mlb: return "matches.tab.mlb"
         }
     }
 }
@@ -154,6 +163,12 @@ struct MatchEvent: Identifiable {
     let displayClock: String?
     /// Live period from the payload (NBA/NFL quarter etc.); nil for soccer.
     let period: Int?
+    /// Build 85: the payload's own status text
+    /// (`status.type.shortDetail`, e.g. baseball's "Top 5th" /
+    /// "Final/11"). Baseball rows and the baseball detail
+    /// header render THIS as their state label — the inning is
+    /// not a quarter and "0:00" is not a clock.
+    let statusDetail: String?
     let home: MatchTeamSide
     let away: MatchTeamSide
 }
@@ -198,6 +213,14 @@ struct ESPNStatus: Decodable {
 struct ESPNStatusType: Decodable {
     let state: String?
     let completed: Bool?
+    /// Build 85: the payload's own state text ("Final/11",
+    /// "Top 5th", "Bot 7th" in baseball; short status strings
+    /// in the other sports). Baseball's `displayClock` is a
+    /// dummy "0:00" and its period is the inning, so the live
+    /// label for a baseball game IS this text — rendered
+    /// verbatim, never composed.
+    let detail: String?
+    let shortDetail: String?
 }
 
 struct ESPNCompetition: Decodable {
@@ -211,6 +234,12 @@ struct ESPNCompetitor: Decodable {
     /// Build 84 (item 20): per-period linescores (NBA/NFL
     /// header competitors carry them; soccer's do not).
     let linescores: [ESPNLinescore]?
+    /// Build 85: baseball's R/H/E companions — the summary
+    /// header competitors carry total hits and errors next to
+    /// the per-inning linescores (verified live in the 2025
+    /// World Series Game 7 summary: hits 14 / errors 0).
+    let hits: Int?
+    let errors: Int?
 }
 
 struct ESPNLinescore: Decodable {
@@ -505,6 +534,7 @@ enum MatchesService {
             state: state,
             displayClock: event.status?.displayClock,
             period: event.status?.period,
+            statusDetail: event.status?.type?.shortDetail ?? event.status?.type?.detail,
             home: mapSide(homeRaw),
             away: mapSide(awayRaw)
         )
@@ -582,6 +612,10 @@ struct MatchDetailHeader {
     let state: MatchState
     let displayClock: String?
     let period: Int?
+    /// Build 85: the summary header's own status text
+    /// (baseball's "Top 5th" / "Final/11") — the detail
+    /// header's live/final pill renders it for baseball.
+    let statusDetail: String?
     /// Build 65: real kickoff from the summary payload (nil when
     /// the payload carries none — the view then shows no date
     /// rather than an invented one).
@@ -623,12 +657,35 @@ struct MatchDetail {
     /// lists for this match (US feeds; often empty) — extra
     /// Watch-matching needles on the detail screen.
     let broadcastNames: [String]
+    /// Build 85: baseball's R/H/E totals from the summary
+    /// header competitors (the runs themselves are the header
+    /// scores) — the inning linescore grid's trailing columns.
+    /// Nil for every other sport.
+    let homeHits: String?
+    let homeErrors: String?
+    let awayHits: String?
+    let awayErrors: String?
+    /// Build 85 (sweep): the summary's own recap/preview
+    /// article (`article` — headline + description + web link,
+    /// verified live in MLB, NFL and NBA summaries). Rendered
+    /// in Facts; tapping opens the publisher page. Nil when
+    /// the payload carries none.
+    let article: MatchArticle?
 
     var isEmpty: Bool {
         timeline.isEmpty && stats.isEmpty && leaders.isEmpty && lineups.isEmpty
             && videos.isEmpty && commentary.isEmpty && h2h == nil
-            && boxScore.isEmpty && playsFeed.isEmpty
+            && boxScore.isEmpty && playsFeed.isEmpty && article == nil
     }
+}
+
+/// Build 85 (sweep): the summary payload's own article —
+/// ESPN's recap (finished games) or preview (upcoming),
+/// headline and description verbatim, with its web link.
+struct MatchArticle {
+    let headline: String
+    let summary: String?
+    let webURL: URL?
 }
 
 /// Build 84 (item 11): one player line of a box score — the
@@ -790,6 +847,18 @@ private struct ESPNSummary: Decodable {
     let predictor: ESPNPredictor?
     let drives: ESPNDrives?
     let broadcasts: [ESPNBroadcast]?
+    // Build 85 (sweep): the summary's recap/preview article.
+    let article: ESPNArticle?
+}
+
+private struct ESPNArticle: Decodable {
+    struct Links: Decodable {
+        struct Web: Decodable { let href: String? }
+        let web: Web?
+    }
+    let headline: String?
+    let description: String?
+    let links: Links?
 }
 
 private struct ESPNWinProbability: Decodable {
@@ -943,6 +1012,11 @@ private struct ESPNClock: Decodable {
 private struct ESPNPeriod: Decodable {
     let number: Int?
     let displayValue: String?
+    /// Build 85: baseball's half-inning marker ("Top" /
+    /// "Bottom" / "End") — the payload's own word, paired
+    /// with `displayValue` ("1st Inning") for the play
+    /// label.
+    let type: String?
 }
 
 private struct ESPNPlayType: Decodable {
@@ -982,6 +1056,10 @@ private struct ESPNBoxscorePlayerGroup: Decodable {
     let name: String?
     /// NFL group title ("Indianapolis Passing").
     let text: String?
+    /// Build 85: baseball's group kind — the MLB payload
+    /// names its two groups ONLY here ("batting" /
+    /// "pitching"); name and text are both nil.
+    let type: String?
     let labels: [String]?
     let athletes: [ESPNBoxscorePlayerEntry]?
     let totals: [String]?
@@ -1042,6 +1120,7 @@ extension MatchesService {
         case .soccer: segment = "soccer"
         case .nba: segment = "nba"
         case .nfl: segment = "nfl"
+        case .mlb: segment = "mlb"
         }
         return URL(string: "https://a.espncdn.com/i/headshots/\(segment)/players/full/\(id).png")
     }
@@ -1081,7 +1160,24 @@ extension MatchesService {
             winProbability: (summary.winprobability ?? []).compactMap { $0.homeWinPercentage },
             homeLinescores: (homeCompetitor?.linescores ?? []).compactMap { $0.displayValue },
             awayLinescores: (awayCompetitor?.linescores ?? []).compactMap { $0.displayValue },
-            broadcastNames: (summary.broadcasts ?? []).compactMap { $0.media?.name ?? $0.station }
+            broadcastNames: (summary.broadcasts ?? []).compactMap { $0.media?.name ?? $0.station },
+            homeHits: homeCompetitor?.hits.map(String.init),
+            homeErrors: homeCompetitor?.errors.map(String.init),
+            awayHits: awayCompetitor?.hits.map(String.init),
+            awayErrors: awayCompetitor?.errors.map(String.init),
+            article: mapArticle(summary)
+        )
+    }
+
+    /// Build 85 (sweep): the summary's recap/preview article —
+    /// headline required, everything else verbatim.
+    private static func mapArticle(_ summary: ESPNSummary) -> MatchArticle? {
+        guard let article = summary.article,
+              let headline = article.headline, !headline.isEmpty else { return nil }
+        return MatchArticle(
+            headline: headline,
+            summary: article.description,
+            webURL: article.links?.web?.href.flatMap { URL(string: $0) }
         )
     }
 
@@ -1112,8 +1208,22 @@ extension MatchesService {
                     )
                 }
                 guard !players.isEmpty else { return nil }
+                // Build 85: baseball's groups carry neither a
+                // name nor a text — only `type` ("batting" /
+                // "pitching") — so the title comes from the
+                // payload's own kind word, localized.
+                let title: String?
+                if let text = group.text ?? group.name {
+                    title = text
+                } else if sport == .mlb, group.type == "batting" {
+                    title = L("matches.box.batting")
+                } else if sport == .mlb, group.type == "pitching" {
+                    title = L("matches.box.pitching")
+                } else {
+                    title = nil
+                }
                 return MatchBoxScoreGroup(
-                    title: group.text ?? group.name,
+                    title: title,
                     columns: group.labels ?? [],
                     players: players,
                     totals: group.totals ?? []
@@ -1155,7 +1265,16 @@ extension MatchesService {
             let text = play.text ?? play.type?.text ?? ""
             guard !text.isEmpty else { return nil }
             let periodLabel: String?
-            if let period = play.period?.number, period > 0 {
+            if sport == .mlb {
+                // Build 85: an inning is not a quarter — the
+                // label is the payload's own half + inning
+                // ("Top" + "1st Inning"), falling back to
+                // whichever half the payload carried.
+                let parts = [play.period?.type, play.period?.displayValue]
+                    .compactMap { $0?.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+                periodLabel = parts.isEmpty ? nil : parts.joined(separator: " ")
+            } else if let period = play.period?.number, period > 0 {
                 periodLabel = period <= 4 ? "Q\(period)" : "OT"
             } else {
                 periodLabel = play.period?.displayValue
@@ -1175,7 +1294,11 @@ extension MatchesService {
                 scoringPlay: play.scoringPlay ?? false
             )
         }
-        return Array(entries.reversed().prefix(250))
+        // Build 85: a baseball game carries ~700+ plays (each
+        // pitch is one) against an NBA game's ~450 — the cap
+        // rises for baseball so a full game stays readable;
+        // the shipped NBA/NFL cap is unchanged.
+        return Array(entries.reversed().prefix(sport == .mlb ? 600 : 250))
     }
 
     /// Build 80 (item 16): Facts-tab match info — only fields the
@@ -1308,6 +1431,8 @@ extension MatchesService {
             state: state,
             displayClock: competition?.status?.displayClock,
             period: competition?.status?.period,
+            statusDetail: competition?.status?.type?.shortDetail
+                ?? competition?.status?.type?.detail,
             startDate: competition?.date.flatMap { parseEventDate($0) }
         )
     }
@@ -1367,7 +1492,14 @@ extension MatchesService {
         let participants = play.participants ?? play.athletesInvolved ?? []
         let athlete = participants.first?.athlete
         var minute = play.clock?.displayValue
-        if let period = play.period?.number, sport != .soccer {
+        if sport == .mlb {
+            // Build 85: the payload's own half + inning text
+            // ("Top 9th Inning") — never a quarter label.
+            let parts = [play.period?.type, play.period?.displayValue]
+                .compactMap { $0?.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            if !parts.isEmpty { minute = parts.joined(separator: " ") }
+        } else if let period = play.period?.number, sport != .soccer {
             let label = period <= 4 ? "Q\(period)" : "OT"
             minute = [label, minute].compactMap { $0 }.joined(separator: " ")
         }

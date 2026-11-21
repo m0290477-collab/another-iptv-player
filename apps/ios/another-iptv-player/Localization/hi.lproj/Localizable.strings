@@ -1163,3 +1163,23 @@
 "matches.next_in" = "%@ में";
 "matches.team.leaders" = "टीम के अग्रणी";
 "matches.last_updated" = "अंतिम अपडेट %@";
+
+/* Build 85: MLB section + free-ESPN sweep */
+"matches.tab.mlb" = "MLB";
+"matches.explainer.mlb.title" = "MLB में आपका स्वागत है";
+"matches.explainer.mlb.live.title" = "लाइव स्कोर";
+"matches.explainer.mlb.live.detail" = "हर मैच, तुरंत अपडेट";
+"matches.explainer.mlb.standings.title" = "स्टैंडिंग";
+"matches.explainer.mlb.standings.detail" = "पूरी MLB स्टैंडिंग";
+"matches.explainer.mlb.stats.title" = "आँकड़े और शीर्ष खिलाड़ी";
+"matches.explainer.mlb.stats.detail" = "हर खेल के पीछे के आँकड़े";
+"matches.explainer.mlb.follow.title" = "अपनी टीमों को फ़ॉलो करें";
+"matches.explainer.mlb.follow.detail" = "मैच, परिणाम और अगले मैच की उलटी गिनती";
+"matches.box.batting" = "बल्लेबाज़ी";
+"matches.box.pitching" = "गेंदबाज़ी";
+"matches.player.bats" = "बल्लेबाज़ी";
+"matches.player.throws" = "थ्रो";
+"matches.injuries" = "चोटें";
+"matches.transactions" = "लेन-देन";
+"matches.detail.recap" = "मैच सारांश";
+"matches.injuries.expected_return" = "अपेक्षित वापसी";

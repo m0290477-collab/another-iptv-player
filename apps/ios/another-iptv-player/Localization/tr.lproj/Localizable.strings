@@ -1181,3 +1181,23 @@
 "matches.next_in" = "%@ sonra";
 "matches.team.leaders" = "Takım Liderleri";
 "matches.last_updated" = "Son güncelleme: %@";
+
+/* Build 85: MLB section + free-ESPN sweep */
+"matches.tab.mlb" = "MLB";
+"matches.explainer.mlb.title" = "MLB'ye hoş geldiniz";
+"matches.explainer.mlb.live.title" = "Canlı skorlar";
+"matches.explainer.mlb.live.detail" = "Her maç, anında güncellenir";
+"matches.explainer.mlb.standings.title" = "Puan durumu";
+"matches.explainer.mlb.standings.detail" = "MLB puan durumunun tamamı";
+"matches.explainer.mlb.stats.title" = "İstatistikler ve öne çıkanlar";
+"matches.explainer.mlb.stats.detail" = "Her maçın arkasındaki rakamlar";
+"matches.explainer.mlb.follow.title" = "Takımlarını takip et";
+"matches.explainer.mlb.follow.detail" = "Fikstür, sonuçlar ve bir sonraki maça geri sayım";
+"matches.box.batting" = "Vuruş";
+"matches.box.pitching" = "Atış";
+"matches.player.bats" = "Vuruş eli";
+"matches.player.throws" = "Atış eli";
+"matches.injuries" = "Sakatlıklar";
+"matches.transactions" = "Transferler";
+"matches.detail.recap" = "Maç özeti";
+"matches.injuries.expected_return" = "Beklenen dönüş";

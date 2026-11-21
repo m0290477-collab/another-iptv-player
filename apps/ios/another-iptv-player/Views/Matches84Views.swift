@@ -278,6 +278,7 @@ struct PlayerPageView: View {
     private func hasIdentityRows(_ profile: PlayerProfile) -> Bool {
         profile.positionName != nil || profile.jersey != nil
             || profile.age != nil || profile.citizenship != nil
+            || profile.batsText != nil || profile.throwsText != nil
     }
 
     private func identitySection(_ profile: PlayerProfile) -> some View {
@@ -293,6 +294,14 @@ struct PlayerPageView: View {
             }
             if let citizenship = profile.citizenship {
                 infoRow(L("matches.player.nationality"), citizenship)
+            }
+            // Build 85: baseball's hands — rendered only
+            // where the payload carries them (MLB).
+            if let bats = profile.batsText {
+                infoRow(L("matches.player.bats"), bats)
+            }
+            if let throwsText = profile.throwsText {
+                infoRow(L("matches.player.throws"), throwsText)
             }
         }
     }
@@ -368,13 +377,29 @@ struct LeadersView: View {
             }
             if categories.count > 1 {
                 Section {
-                    Picker(L("matches.leaders"), selection: categorySelection) {
-                        ForEach(categories) { category in
-                            Text(category.displayName).tag(category.name)
+                    // Build 85: a segmented control fits the
+                    // shipped sports' 2–3 categories; MLB's
+                    // eighteen verified categories get a menu
+                    // picker instead of overflowing. (Two
+                    // branches because the two styles are
+                    // different concrete types.)
+                    if categories.count > 4 {
+                        Picker(L("matches.leaders"), selection: categorySelection) {
+                            ForEach(categories) { category in
+                                Text(category.displayName).tag(category.name)
+                            }
                         }
+                        .pickerStyle(.menu)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                    } else {
+                        Picker(L("matches.leaders"), selection: categorySelection) {
+                            ForEach(categories) { category in
+                                Text(category.displayName).tag(category.name)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
                     }
-                    .pickerStyle(.segmented)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
                 }
                 .listRowBackground(Color.clear)
             }
@@ -551,7 +576,7 @@ struct LeagueNewsView: View {
 
 // MARK: - Live Now (item 13)
 
-/// Every live match across all 19 competitions right now,
+/// Every live match across all 20 competitions right now,
 /// grouped by competition. Refreshes on the Matches cadence
 /// (the shared 60-second loop pattern — no new timer system),
 /// and each row carries the Watch action where item 3b matches.
@@ -582,7 +607,7 @@ struct LiveNowView: View {
                                                 match: match, leagueName: group.leagueName
                                             )
                                         } label: {
-                                            MatchRowView(match: match, isStale: false)
+                                            MatchRowView(match: match, isStale: false, sport: group.sport)
                                         }
                                         .buttonStyle(PressOpacityButtonStyle())
                                         WatchPlayButton(
@@ -1118,6 +1143,12 @@ struct CompareTeamsView: View {
         case .nba, .nfl:
             candidates = ["wins", "losses", "ties", "winPercent",
                           "pointsFor", "pointsAgainst", "pointDifferential", "streak"]
+        case .mlb:
+            // Build 85: the MLB payload's own comparison set,
+            // including its published Last Ten Games record.
+            candidates = ["wins", "losses", "winPercent", "gamesBehind",
+                          "pointsFor", "pointsAgainst", "pointDifferential",
+                          "Last Ten Games", "streak"]
         }
         return candidates.filter { own.stats[$0] != nil || other.stats[$0] != nil }
     }

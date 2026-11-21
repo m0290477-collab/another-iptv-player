@@ -1163,3 +1163,23 @@
 "matches.next_in" = "через %@";
 "matches.team.leaders" = "Лидеры команды";
 "matches.last_updated" = "Обновлено: %@";
+
+/* Build 85: MLB section + free-ESPN sweep */
+"matches.tab.mlb" = "MLB";
+"matches.explainer.mlb.title" = "Добро пожаловать в MLB";
+"matches.explainer.mlb.live.title" = "Счёт в прямом эфире";
+"matches.explainer.mlb.live.detail" = "Каждый матч, обновление мгновенно";
+"matches.explainer.mlb.standings.title" = "Турнирная таблица";
+"matches.explainer.mlb.standings.detail" = "Полная таблица MLB";
+"matches.explainer.mlb.stats.title" = "Статистика и лучшие игроки";
+"matches.explainer.mlb.stats.detail" = "Цифры каждого матча";
+"matches.explainer.mlb.follow.title" = "Следите за своими командами";
+"matches.explainer.mlb.follow.detail" = "Расписание, результаты и обратный отсчёт до следующего матча";
+"matches.box.batting" = "Бэттинг";
+"matches.box.pitching" = "Питчинг";
+"matches.player.bats" = "Бьёт";
+"matches.player.throws" = "Бросает";
+"matches.injuries" = "Травмы";
+"matches.transactions" = "Трансферы";
+"matches.detail.recap" = "Обзор матча";
+"matches.injuries.expected_return" = "Ожидаемое возвращение";

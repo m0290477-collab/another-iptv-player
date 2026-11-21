@@ -106,6 +106,7 @@ enum CoreCoordinates {
         case .soccer: return "soccer"
         case .nba: return "basketball"
         case .nfl: return "football"
+        case .mlb: return "baseball"
         }
     }
 
@@ -115,6 +116,7 @@ enum CoreCoordinates {
         case .soccer: return "soccer"
         case .nba: return "nba"
         case .nfl: return "nfl"
+        case .mlb: return "mlb"
         }
     }
 
@@ -126,6 +128,10 @@ enum CoreCoordinates {
         case .soccer: return month >= 7 ? year : year - 1
         case .nba: return month >= 10 ? year : year - 1
         case .nfl: return month >= 9 ? year : year - 1
+        // Build 85: the MLB season is a single calendar year
+        // (spring training opens in February) — before
+        // February the completed season is last year's.
+        case .mlb: return month >= 2 ? year : year - 1
         }
     }
 
@@ -146,6 +152,7 @@ enum CoreCoordinates {
         case .soccer: return "eng.1"
         case .nba: return "nba"
         case .nfl: return "nfl"
+        case .mlb: return "mlb"
         }
     }
 
@@ -219,6 +226,21 @@ enum MatchesLeadersService {
         case .soccer: return ["goalsLeaders", "assistsLeaders"]
         case .nba: return ["pointsPerGame", "assistsPerGame", "reboundsPerGame"]
         case .nfl: return ["passingYards", "rushingYards", "receivingYards"]
+        // Build 85: EVERY category the MLB core leaders
+        // payload verified live 2026-11-21 (25 leaders each,
+        // seasons/2026/types/2) — batting first, then
+        // pitching. Two payload categories are deliberately
+        // NOT surfaced: "MLBRating" (a rating — this app
+        // never shows player ratings) and "opponentAvg"
+        // (its leaderboard is topped by a 1.0-inning pitcher:
+        // the payload applies no minimum qualifier, so the
+        // ranking is meaningless as published).
+        case .mlb: return [
+            "avg", "homeRuns", "RBIs", "hits", "runs", "stolenBases",
+            "OPS", "onBasePct", "slugAvg", "WARBR",
+            "ERA", "WHIP", "wins", "strikeouts", "saves",
+            "qualityStarts", "holds", "avgGameScore"
+        ]
         }
     }
 
@@ -451,6 +473,12 @@ struct PlayerProfile {
     let jersey: String?
     let positionName: String?
     let citizenship: String?
+    /// Build 85: baseball's batting / throwing hands — the
+    /// core athlete payload carries them as objects with a
+    /// displayValue ("Left" / "Right"); nil for every other
+    /// sport (their payloads carry no such fields).
+    let batsText: String?
+    let throwsText: String?
     let headshotURL: URL?
     let teamId: String?
     let teamName: String?
@@ -477,11 +505,16 @@ enum PlayerProfileService {
         let jersey: String?
         let position: Position?
         let citizenship: String?
+        /// Build 85: baseball's bats/throws objects
+        /// ({type, abbreviation, displayValue}).
+        let bats: Hand?
+        let throws: Hand?
         let headshot: Headshot?
         let team: Ref?
         let statistics: Ref?
         let events: Ref?
         struct Position: Decodable { let displayName: String?; let name: String? }
+        struct Hand: Decodable { let displayValue: String?; let abbreviation: String? }
         struct Headshot: Decodable { let href: String? }
         struct Ref: Decodable { let ref: String?; enum CodingKeys: String, CodingKey { case ref = "$ref" } }
     }
@@ -568,6 +601,8 @@ enum PlayerProfileService {
             jersey: athlete.jersey,
             positionName: athlete.position?.displayName ?? athlete.position?.name,
             citizenship: athlete.citizenship,
+            batsText: athlete.bats?.displayValue ?? athlete.bats?.abbreviation,
+            throwsText: athlete.throws?.displayValue ?? athlete.throws?.abbreviation,
             headshotURL: CoreCoordinates.headshotURL(sport: sport, athleteId: athleteId, href: athlete.headshot?.href),
             teamId: teamId,
             teamName: team.name,
@@ -717,6 +752,10 @@ enum PlayerSearchService {
         case "soccer": return .soccer
         case "basketball": return .nba
         case "football": return .nfl
+        // Build 85: verified live 2026-11-21 — baseball
+        // players carry sport "baseball" and
+        // defaultLeagueSlug "mlb" in the search payload.
+        case "baseball": return .mlb
         default: return nil
         }
     }
@@ -865,7 +904,7 @@ enum LiveTableAdjuster {
                 let ga = int(a.stats["pointDifferential"]), gb = int(b.stats["pointDifferential"])
                 if ga != gb { return ga > gb }
                 return int(a.stats["pointsFor"]) > int(b.stats["pointsFor"])
-            case .nba, .nfl:
+            case .nba, .nfl, .mlb:
                 let wa = double(a.stats["winPercent"]), wb = double(b.stats["winPercent"])
                 if wa != wb { return wa > wb }
                 return int(a.stats["wins"]) > int(b.stats["wins"])
@@ -895,7 +934,7 @@ enum LiveTableAdjuster {
             else { bump("ties", by: 1); bump("points", by: 1) }
             let diff = int(stats["pointsFor"]) - int(stats["pointsAgainst"])
             stats["pointDifferential"] = diff > 0 ? "+\(diff)" : "\(diff)"
-        case .nba, .nfl:
+        case .nba, .nfl, .mlb:
             if scored > conceded { bump("wins", by: 1) }
             else if scored < conceded { bump("losses", by: 1) }
             else if stats["ties"] != nil { bump("ties", by: 1) }
@@ -969,6 +1008,12 @@ enum MatchWatchService {
             return ["ESPN", "ABC", "TNT", "NBA TV", "Prime Video"]
         case .nfl:
             return ["CBS", "FOX", "NBC", "ESPN", "Prime Video", "NFL Network", "Peacock", "Paramount"]
+        case .mlb:
+            // Build 85: MLB's national carriers (the WS
+            // sample's scoreboard payload itself lists Fox) —
+            // needles against the user's own channel names,
+            // exactly like the other sports.
+            return ["ESPN", "FOX", "FS1", "TBS", "MLB Network", "Apple TV", "Peacock", "NBC", "ABC"]
         case .soccer:
             var patterns = ["beIN Sports", "beIN"]
             switch CoreCoordinates.slug(from: leaguePath) {
@@ -1189,12 +1234,13 @@ struct HubHighlight: Identifiable {
 /// scoreboards; Highlights reads today's + yesterday's finished
 /// matches and their summaries' verified videos.
 enum SportsHubService {
-    /// All 19 competitions: the 17-league soccer catalog plus
-    /// the NFL and NBA.
+    /// All 20 competitions: the 17-league soccer catalog plus
+    /// the NFL, the NBA and (build 85) MLB.
     static var allCompetitions: [(sport: MatchSport, leaguePath: String)] {
         MatchSport.soccerLeagueCatalog.map { (sport: MatchSport.soccer, leaguePath: $0.leaguePath) }
             + [(sport: MatchSport.nfl, leaguePath: "football/nfl"),
-               (sport: MatchSport.nba, leaguePath: "basketball/nba")]
+               (sport: MatchSport.nba, leaguePath: "basketball/nba"),
+               (sport: MatchSport.mlb, leaguePath: "baseball/mlb")]
     }
 
     static func liveNow() async -> [LiveNowGroup] {

@@ -1163,3 +1163,23 @@
 "matches.next_in" = "en %@";
 "matches.team.leaders" = "Líderes del equipo";
 "matches.last_updated" = "Última actualización: %@";
+
+/* Build 85: MLB section + free-ESPN sweep */
+"matches.tab.mlb" = "MLB";
+"matches.explainer.mlb.title" = "Bienvenido a la MLB";
+"matches.explainer.mlb.live.title" = "Resultados en vivo";
+"matches.explainer.mlb.live.detail" = "Cada partido, actualizado al instante";
+"matches.explainer.mlb.standings.title" = "Clasificación";
+"matches.explainer.mlb.standings.detail" = "La clasificación completa de la MLB";
+"matches.explainer.mlb.stats.title" = "Estadísticas y destacados";
+"matches.explainer.mlb.stats.detail" = "Los números detrás de cada partido";
+"matches.explainer.mlb.follow.title" = "Sigue a tus equipos";
+"matches.explainer.mlb.follow.detail" = "Calendario, resultados y cuenta regresiva del próximo partido";
+"matches.box.batting" = "Bateo";
+"matches.box.pitching" = "Lanzamiento";
+"matches.player.bats" = "Batea";
+"matches.player.throws" = "Lanza";
+"matches.injuries" = "Lesiones";
+"matches.transactions" = "Movimientos";
+"matches.detail.recap" = "Resumen";
+"matches.injuries.expected_return" = "Regreso previsto";

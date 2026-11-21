@@ -1139,8 +1139,8 @@ struct HomeView: View {
 
     // MARK: Sports entries (build 81, item 9)
 
-    /// One card per covered sport (Soccer / NFL / NBA — the
-    /// `MatchSport` cases, in the Matches picker's own order),
+    /// One card per covered sport (Soccer / NFL / NBA / MLB —
+    /// the `MatchSport` cases, in the Matches picker's own order),
     /// deep-linking into the existing Matches destination with the
     /// sport preselected. Design A section language: the shared
     /// small-caps header (its See All opens Matches on the default
@@ -1203,6 +1203,11 @@ struct HomeView: View {
         // "american.football.fill".
         case .nfl: return "american.football.fill"
         case .nba: return "basketball.fill"
+        // Build 85: "baseball.fill" is the canonical SF
+        // Symbols name for the baseball (same naming family
+        // as basketball.fill) — the fourth card joins the
+        // row at the same fixed 80pt height by construction.
+        case .mlb: return "baseball.fill"
         }
     }
 

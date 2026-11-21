@@ -108,6 +108,34 @@ struct SportsExplainerContent {
                         detailKey: "matches.explainer.nba.follow.detail")
                 ]
             )
+        case .mlb:
+            // Build 85: live scores (baseball tab), standings
+            // (AL/NL from the league header), stats & leaders
+            // (box score with live batting/pitching lines,
+            // the verified core leaders) — all shipped this
+            // build. Follow is worded for what is TRUE locally:
+            // fixtures, results and the next-game countdown on
+            // the team page and My Teams strip. NO score-alert
+            // promise: run alerts are out of scope for this
+            // sport (no server change was authorized), and the
+            // kickoff bell on any fixture is the reminder path.
+            return SportsExplainerContent(
+                titleKey: "matches.explainer.mlb.title",
+                rows: [
+                    Row(icon: "bolt.fill",
+                        titleKey: "matches.explainer.mlb.live.title",
+                        detailKey: "matches.explainer.mlb.live.detail"),
+                    Row(icon: "chart.bar.fill",
+                        titleKey: "matches.explainer.mlb.standings.title",
+                        detailKey: "matches.explainer.mlb.standings.detail"),
+                    Row(icon: "list.number",
+                        titleKey: "matches.explainer.mlb.stats.title",
+                        detailKey: "matches.explainer.mlb.stats.detail"),
+                    Row(icon: "bell.fill",
+                        titleKey: "matches.explainer.mlb.follow.title",
+                        detailKey: "matches.explainer.mlb.follow.detail")
+                ]
+            )
         }
     }
 }

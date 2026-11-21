@@ -1163,3 +1163,23 @@
 "matches.next_in" = "%@后开赛";
 "matches.team.leaders" = "球队领袖";
 "matches.last_updated" = "最后更新 %@";
+
+/* Build 85: MLB section + free-ESPN sweep */
+"matches.tab.mlb" = "MLB";
+"matches.explainer.mlb.title" = "欢迎来到 MLB";
+"matches.explainer.mlb.live.title" = "实时比分";
+"matches.explainer.mlb.live.detail" = "每场比赛，即时更新";
+"matches.explainer.mlb.standings.title" = "积分榜";
+"matches.explainer.mlb.standings.detail" = "完整的 MLB 积分榜";
+"matches.explainer.mlb.stats.title" = "数据与最佳球员";
+"matches.explainer.mlb.stats.detail" = "每场比赛背后的数据";
+"matches.explainer.mlb.follow.title" = "关注你的球队";
+"matches.explainer.mlb.follow.detail" = "赛程、结果和下一场比赛倒计时";
+"matches.box.batting" = "打击";
+"matches.box.pitching" = "投球";
+"matches.player.bats" = "打击";
+"matches.player.throws" = "投球";
+"matches.injuries" = "伤病";
+"matches.transactions" = "交易";
+"matches.detail.recap" = "比赛回顾";
+"matches.injuries.expected_return" = "预计回归";

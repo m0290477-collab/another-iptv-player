@@ -1163,3 +1163,23 @@
 "matches.next_in" = "بعد %@";
 "matches.team.leaders" = "أبرز لاعبي الفريق";
 "matches.last_updated" = "آخر تحديث %@";
+
+/* Build 85: MLB section + free-ESPN sweep */
+"matches.tab.mlb" = "MLB";
+"matches.explainer.mlb.title" = "مرحباً بك في MLB";
+"matches.explainer.mlb.live.title" = "النتائج المباشرة";
+"matches.explainer.mlb.live.detail" = "كل مباراة، تُحدَّث فوراً";
+"matches.explainer.mlb.standings.title" = "الترتيب";
+"matches.explainer.mlb.standings.detail" = "ترتيب MLB الكامل";
+"matches.explainer.mlb.stats.title" = "الإحصائيات وأبرز اللاعبين";
+"matches.explainer.mlb.stats.detail" = "الأرقام وراء كل مباراة";
+"matches.explainer.mlb.follow.title" = "تابع فرقك";
+"matches.explainer.mlb.follow.detail" = "المباريات والنتائج والعد التنازلي للمباراة القادمة";
+"matches.box.batting" = "الضرب";
+"matches.box.pitching" = "الرمي";
+"matches.player.bats" = "يضرب";
+"matches.player.throws" = "يرمي";
+"matches.injuries" = "الإصابات";
+"matches.transactions" = "الانتقالات";
+"matches.detail.recap" = "ملخص المباراة";
+"matches.injuries.expected_return" = "العودة المتوقعة";

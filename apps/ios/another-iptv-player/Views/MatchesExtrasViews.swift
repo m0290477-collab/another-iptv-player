@@ -143,6 +143,33 @@ struct StandingsView: View {
                             .font(AppTheme.fontCardTitle)
                     }
                     .buttonStyle(PressOpacityButtonStyle())
+                    // Build 85 (sweep): injuries + transactions
+                    // — linked ONLY for the leagues whose
+                    // endpoints verified live with real data
+                    // (injuries: MLB + NBA; transactions: the
+                    // three US leagues). Soccer's injuries
+                    // endpoint is an empty shell and the NFL's
+                    // weighs 8.8 MB, so neither appears.
+                    if sport == .mlb || sport == .nba {
+                        NavigationLink {
+                            LeagueInjuriesView(
+                                sport: sport, leaguePath: leaguePath, leagueName: leagueName
+                            )
+                        } label: {
+                            Label(L("matches.injuries"), systemImage: "cross.case")
+                                .font(AppTheme.fontCardTitle)
+                        }
+                        .buttonStyle(PressOpacityButtonStyle())
+                    }
+                    if sport != .soccer {
+                        NavigationLink {
+                            LeagueTransactionsView(leaguePath: leaguePath, leagueName: leagueName)
+                        } label: {
+                            Label(L("matches.transactions"), systemImage: "arrow.left.arrow.right")
+                                .font(AppTheme.fontCardTitle)
+                        }
+                        .buttonStyle(PressOpacityButtonStyle())
+                    }
                 }
                 .listRowBackground(AppTheme.surface)
             }
@@ -284,6 +311,34 @@ struct StandingsView: View {
                    StandingColumn(statName: "losses", width: 28, bold: false),
                    StandingColumn(statName: "ties", width: 26, bold: false),
                    StandingColumn(statName: "winPercent", width: 44, bold: false)]
+        case .mlb:
+            // Build 85: the MLB standings payload's own stats
+            // (verified live 2026-11-21): wins/losses/
+            // winPercent ("PCT") / gamesBehind ("GB") /
+            // pointsFor ("RS") / pointsAgainst ("RA") /
+            // pointDifferential ("DIFF") / streak ("STRK"),
+            // plus its Home / Road record splits — labels all
+            // resolve from the payload's abbreviations at
+            // render time, like every other sport. Short is
+            // the record core; Full adds the run columns, the
+            // splits and the streak. (The payload's `points`
+            // stat is a games-behind variant — "GBP" — and is
+            // deliberately not used as a points column.)
+            return fullMode
+                ? [StandingColumn(statName: "wins", width: 26, bold: false),
+                   StandingColumn(statName: "losses", width: 26, bold: false),
+                   StandingColumn(statName: "winPercent", width: 42, bold: false),
+                   StandingColumn(statName: "gamesBehind", width: 34, bold: false),
+                   StandingColumn(statName: "pointsFor", width: 34, bold: false),
+                   StandingColumn(statName: "pointsAgainst", width: 34, bold: false),
+                   StandingColumn(statName: "pointDifferential", width: 38, bold: false),
+                   StandingColumn(statName: "Home", width: 38, bold: false),
+                   StandingColumn(statName: "Road", width: 38, bold: false),
+                   StandingColumn(statName: "streak", width: 36, bold: false)]
+                : [StandingColumn(statName: "wins", width: 28, bold: false),
+                   StandingColumn(statName: "losses", width: 28, bold: false),
+                   StandingColumn(statName: "winPercent", width: 44, bold: false),
+                   StandingColumn(statName: "gamesBehind", width: 36, bold: false)]
         }
     }
 
@@ -806,6 +861,13 @@ struct TeamPageView: View {
     /// Build 84 (item 12): the team's own leaders from the
     /// verified core team-leaders endpoint.
     @State private var teamLeaders: [(category: String, rows: [LeaderRow84])] = []
+    /// Build 85: the team's season record for the header —
+    /// read from the league STANDINGS payload (the teams
+    /// endpoint carries no record): its `overall` stat when
+    /// the feed publishes one ("93-68"), else composed from
+    /// its wins/losses(/ties) stats. Nil when the standings
+    /// carry no entry for this team.
+    @State private var recordText: String?
     @ObservedObject private var followStore = FollowedTeamsStore.shared
 
     private var isFollowed: Bool {
@@ -831,9 +893,17 @@ struct TeamPageView: View {
             Section {
                 HStack(spacing: 14) {
                     CachedImage(url: team.logoURL, width: 52, height: 52, cornerRadius: 26, iconName: "shield")
-                    Text(team.name)
-                        .font(AppTheme.fontSectionTitle)
-                        .lineLimit(2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(team.name)
+                            .font(AppTheme.fontSectionTitle)
+                            .lineLimit(2)
+                        if let recordText {
+                            Text(recordText)
+                                .font(AppTheme.fontMetadata.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
                     Spacer()
                     followButton
                 }
@@ -975,6 +1045,25 @@ struct TeamPageView: View {
             teamLeaders = await MatchesLeadersService.fetchTeam(
                 sport: team.sport, leaguePath: team.leaguePath, teamId: team.id
             )
+            // Build 85: the header record, from the standings
+            // payload's own entry for this team (disk-cached
+            // service — no extra network when the table was
+            // already fetched).
+            let standings = await MatchesStandingsService.fetch(
+                sport: team.sport, leaguePath: team.leaguePath
+            )
+            if let entry = standings.groups.flatMap({ $0.entries })
+                .first(where: { $0.teamId == team.id }) {
+                if let overall = entry.stats["overall"], !overall.isEmpty {
+                    recordText = overall
+                } else if let wins = entry.stats["wins"], let losses = entry.stats["losses"] {
+                    if let ties = entry.stats["ties"], ties != "0" {
+                        recordText = "\(wins)–\(losses)–\(ties)"
+                    } else {
+                        recordText = "\(wins)–\(losses)"
+                    }
+                }
+            }
         }
     }
 
@@ -1116,7 +1205,7 @@ struct GoalAlertHostView: View {
 
 // MARK: - 12c Team search
 
-/// Finds any team across the three sports (the full team lists
+/// Finds any team across the four sports (the full team lists
 /// load once from the feed) and opens its team page. Build 84
 /// (item 9): players are searchable too — ESPN's public search
 /// (verified) — grouped under their own Players section, each
@@ -1363,7 +1452,7 @@ struct LeaguePageView: View {
                         )
                     } label: {
                         MatchRowView(
-                            match: match, isStale: false,
+                            match: match, isStale: false, sport: .soccer,
                             watchContext: (sport: .soccer, leaguePath: league.leaguePath)
                         )
                     }

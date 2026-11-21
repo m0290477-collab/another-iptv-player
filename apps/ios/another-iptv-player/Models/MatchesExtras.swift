@@ -447,6 +447,12 @@ enum TeamService {
             let lastName: String?
             let headshot: Headshot?
             let position: Pos?
+            /// Build 85: baseball's roster payload GROUPS its
+            /// athletes by position — each top-level entry is a
+            /// group ({position: "Pitchers", items: [...]})
+            /// rather than a player. The other sports' rosters
+            /// are flat (no `items`), so this stays nil there.
+            let items: [Athlete]?
         }
         struct Headshot: Decodable { let href: String? }
         struct Pos: Decodable { let displayName: String?; let name: String? }
@@ -484,17 +490,36 @@ enum TeamService {
     }
 
     /// 12a: the squad as the feed lists it (photos via payload
-    /// headshot or the 8c CDN pattern).
+    /// headshot or the 8c CDN pattern). Build 85: baseball's
+    /// GROUPED roster is flattened in payload order, each
+    /// player keeping his own position (the group's position
+    /// name is the fallback when an entry carries none).
     static func squad(sport: MatchSport, leaguePath: String, teamId: String) async -> [SquadPlayer] {
         let path = leaguePath
         guard let url = URL(string: "https://site.api.espn.com/apis/site/v2/sports/\(path)/teams/\(teamId)/roster"),
               let (data, _) = try? await URLSession.shared.data(from: url),
               let wire = try? JSONDecoder().decode(RosterWire.self, from: data) else { return [] }
-        return (wire.athletes ?? []).compactMap { athlete in
+        var flat: [(athlete: RosterWire.Athlete, groupPosition: String?)] = []
+        for entry in wire.athletes ?? [] {
+            if let items = entry.items, !items.isEmpty {
+                let groupName = entry.position?.displayName ?? entry.position?.name
+                for item in items { flat.append((item, groupName)) }
+            } else {
+                flat.append((entry, nil))
+            }
+        }
+        return flat.compactMap { pair in
+            let athlete = pair.athlete
             let name = athlete.displayName
                 ?? [athlete.firstName, athlete.lastName].compactMap { $0 }.joined(separator: " ")
             guard !name.isEmpty else { return nil }
-            let segment = sport == .nfl ? "nfl" : sport == .nba ? "nba" : "soccer"
+            let segment: String
+            switch sport {
+            case .soccer: segment = "soccer"
+            case .nba: segment = "nba"
+            case .nfl: segment = "nfl"
+            case .mlb: segment = "mlb"
+            }
             let headshot = athlete.headshot?.href.flatMap { URL(string: $0) }
                 ?? athlete.id.flatMap {
                     URL(string: "https://a.espncdn.com/i/headshots/\(segment)/players/full/\($0).png")
@@ -502,7 +527,8 @@ enum TeamService {
             return SquadPlayer(
                 id: athlete.id ?? name,
                 name: name,
-                positionName: athlete.position?.displayName ?? athlete.position?.name,
+                positionName: athlete.position?.displayName ?? athlete.position?.name
+                    ?? pair.groupPosition,
                 headshotURL: headshot,
                 athleteId: athlete.id
             )
@@ -589,6 +615,11 @@ final class GoalAlertService {
         for key in leagues {
             let parts = key.split(separator: "|").map(String.init)
             guard parts.count == 2, let sport = MatchSport(rawValue: parts[0]) else { continue }
+            // Build 85: baseball has no goals — the in-app
+            // celebration (a soccer-scored moment by design)
+            // never fires for an MLB follow; run alerts are
+            // out of scope for this sport entirely.
+            if sport == .mlb { continue }
             let events = await MatchesService.todaysMatches(sport: sport, leaguePath: parts[1])
             for event in events where event.state == .live {
                 let scoreKey = "\(event.id)"
