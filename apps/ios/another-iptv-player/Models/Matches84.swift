@@ -570,8 +570,8 @@ enum PlayerProfileService {
             citizenship: athlete.citizenship,
             headshotURL: CoreCoordinates.headshotURL(sport: sport, athleteId: athleteId, href: athlete.headshot?.href),
             teamId: teamId,
-            teamName: team?.name,
-            teamLogoURL: team?.logoURL,
+            teamName: team.name,
+            teamLogoURL: team.logoURL,
             statLines: await stats,
             recentEvents: await events
         )

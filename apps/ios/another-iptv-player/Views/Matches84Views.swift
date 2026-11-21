@@ -1,5 +1,6 @@
 import SwiftUI
 import SafariServices
+import GRDB
 
 // Build 84: the combined sports update's surfaces — the Watch
 // action (item 3b), the player page (item 4), league leaders
@@ -415,7 +416,7 @@ struct LeadersView: View {
         Binding(
             get: { selectedCategory ?? categories.first?.name ?? "" },
             set: { newValue in
-                Motion.animate(.chipSwap) { selectedCategory = newValue }
+                withAnimation(Motion.animate(Motion.chipSwap)) { selectedCategory = newValue }
             }
         )
     }
@@ -990,7 +991,7 @@ struct CompareTeamsView: View {
                     Section {
                         ForEach(allEntries.filter { $0.teamId != team.id }, id: \.id) { entry in
                             Button {
-                                Motion.animate(.chipSwap) { opponent = entry }
+                                withAnimation(Motion.animate(Motion.chipSwap)) { opponent = entry }
                             } label: {
                                 HStack(spacing: 10) {
                                     CachedImage(url: entry.logoURL, width: 26, height: 26, cornerRadius: 13, iconName: "shield")
@@ -1034,7 +1035,12 @@ struct CompareTeamsView: View {
     }
 
     private func comparisonSection(own: StandingEntry, other: StandingEntry) -> some View {
-        Section {
+        // Build 84 fix round 1: a plain Group of rows, not a
+        // Section — returned opaquely into the List builder, the
+        // Section form made the compiler synthesise a Table row
+        // content type that does not conform to View. The rows
+        // themselves are unchanged.
+        Group {
             HStack {
                 compareHeader(own)
                 Spacer()
@@ -1065,7 +1071,7 @@ struct CompareTeamsView: View {
                 }
             }
             Button {
-                Motion.animate(.chipSwap) { opponent = nil }
+                withAnimation(Motion.animate(Motion.chipSwap)) { opponent = nil }
             } label: {
                 Text(L("matches.compare.pick"))
                     .font(.subheadline.weight(.semibold))

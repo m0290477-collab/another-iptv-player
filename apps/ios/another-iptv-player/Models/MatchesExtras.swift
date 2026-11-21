@@ -106,7 +106,7 @@ enum MatchesStandingsService {
               let result = await SportsDiskCache.espnData(url: url, cacheKey: "st|\(path)"),
               let wire = try? JSONDecoder().decode(Wire.self, from: result.data)
         else { return ([], nil) }
-        let groups = (wire.children ?? []).compactMap { child in
+        let groups = (wire.children ?? []).compactMap { child -> StandingGroup? in
             let entries = (child.standings?.entries ?? []).compactMap { entry -> StandingEntry? in
                 guard let team = entry.team,
                       let name = team.displayName ?? team.name, !name.isEmpty else { return nil }
