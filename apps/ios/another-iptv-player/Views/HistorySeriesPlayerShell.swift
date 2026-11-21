@@ -261,7 +261,7 @@ private struct SeriesPlaybackSession: Equatable {
         streamId = history.streamId
         title = history.title
         subtitle = history.secondaryTitle
-        artworkURL = history.imageURL.flatMap { URL(string: $0) }
+        artworkURL = history.imageURL.flatMap { ArtworkURL.url(from: $0) }
         resumeTimeMs = history.lastTimeMs
         containerExtension = history.containerExtension
         seriesId = history.seriesId
@@ -277,7 +277,7 @@ private struct SeriesPlaybackSession: Equatable {
             return num + t
         }()
         subtitle = seriesTitle
-        artworkURL = episode.cover.flatMap { URL(string: $0) }
+        artworkURL = episode.cover.flatMap { ArtworkURL.url(from: $0) }
         resumeTimeMs = resumeHistory?.lastTimeMs
         containerExtension = episode.containerExtension
         self.seriesId = seriesId

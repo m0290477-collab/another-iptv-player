@@ -28,7 +28,10 @@ enum IPTVRemoteImagePipeline {
         let urlConf = DataLoader.defaultConfiguration
         // Round 15 (C10): per-host connections raised to 10 (spec range
         // 8-12) so poster grids fill in parallel instead of queueing.
-        urlConf.httpMaximumConnectionsPerHost = 10
+        // Build 89 (item 7): raised to the top of that range (12) to
+        // match the widened data-loading queue below — the queue, not
+        // the session, was the narrower gate.
+        urlConf.httpMaximumConnectionsPerHost = 12
         // Round 20 (R20-5): per-request timeout 10s → 5s. This loader
         // serves ONLY tile/poster art (small files); a poster that has
         // not started arriving within 5s is, for scrolling purposes,
@@ -65,6 +68,35 @@ enum IPTVRemoteImagePipeline {
             // Round 15 (C11): the dead #available(iOS 15) guard is gone
             // — the deployment target is iOS 18.
             $0.isUsingPrepareForDisplay = true
+            // Build 89 (items 7+8): Nuke 13's default task queues
+            // serialize this pipeline — verified in the 13.0.1
+            // sources (ImagePipeline+Configuration.swift): data
+            // loading capped at 6 concurrent, image DECODING at 1,
+            // processing at 2, decompressing at 2. On a cold Movies
+            // open, hundreds of poster requests to the one panel
+            // host funnelled through those queues: on-screen posters
+            // waited behind speculative ones, every decode queued
+            // single-file behind every other, and the wait blew the
+            // loader's 5 s request timeout — the timeouts then fed
+            // the failure memo and the tab showed title cards for
+            // valid posters. The queues are priority-aware, so
+            // widening them does not let the low-priority prefetcher
+            // overtake render work; it only removes the artificial
+            // serialization.
+            $0.dataLoadingQueue.maxConcurrentOperationCount = 12
+            $0.imageDecodingQueue.maxConcurrentOperationCount = 4
+            $0.imageProcessingQueue.maxConcurrentOperationCount = 4
+            $0.imageDecompressingQueue.maxConcurrentOperationCount = 4
+            // Build 89 (item 8): the default data-cache policy
+            // (.storeOriginalData, same source) keeps only the
+            // original bytes on disk, so after a memory-cache
+            // eviction — or on the next launch — every poster paid
+            // a full decode + resize of a multi-megapixel original
+            // again. Storing the processed variants too (.storeAll)
+            // makes re-display a disk read of the small resized
+            // image; the 300 MB DataCache cap above still bounds
+            // total disk use.
+            $0.dataCachePolicy = .storeAll
         }
     }
 }
@@ -110,8 +142,10 @@ struct CachedImage: View {
                 // immediately instead of re-issuing a doomed
                 // request on every scroll reappearance (the
                 // pipeline keeps no negative cache; see
-                // ArtworkFailureMemo). After the memo's TTL the
-                // URL is retried normally.
+                // ArtworkFailureMemo). After the memo's backoff
+                // window (Build 89: 30 s for a first failure,
+                // growing only on repeated failure) the URL is
+                // retried normally.
                 // Build 82 (items 1+4): the failure hook fires
                 // here too — the load DID fail, and call sites
                 // with a fallback image (the detail hero's
@@ -129,7 +163,7 @@ struct CachedImage: View {
                             .resizable()
                             .aspectRatio(contentMode: contentMode)
                             .onAppear { ArtworkFailureMemo.shared.recordSuccess(url) }
-                    } else if state.error != nil {
+                    } else if let loadError = state.error {
                         // Round 19 (R19-2): a failed image NEVER
                         // renders as a warning glyph — it falls back
                         // to the same invisible placeholder as the
@@ -139,9 +173,20 @@ struct CachedImage: View {
                         // Build 81 (item 5b): the failure is also
                         // memoized so the URL is not retried on
                         // every reappearance.
+                        // Build 89 (item 7): a cancellation is NOT
+                        // a failure — the .grid/.standard profiles
+                        // cancel a load when its cell scrolls off,
+                        // so fast scrolling must never poison the
+                        // memo with URLs that were simply never
+                        // given the chance to load. The failure
+                        // hook still fires either way: from the
+                        // call site's perspective this art did not
+                        // arrive.
                         placeholder
                             .onAppear {
-                                ArtworkFailureMemo.shared.recordFailure(url)
+                                if !Self.isCancellation(loadError) {
+                                    ArtworkFailureMemo.shared.recordFailure(url)
+                                }
                                 onLoadFailed?()
                             }
                     } else {
@@ -180,6 +225,28 @@ struct CachedImage: View {
 
     private func makeRequest(url: URL) -> ImageRequest {
         Self.request(url: url, width: width, height: height, contentMode: contentMode, loadProfile: loadProfile)
+    }
+
+    /// Build 89 (item 7): true when a load error is really a
+    /// cancellation — the pipeline's own `.cancelled` case, a
+    /// Swift `CancellationError`, or a wrapped `URLError` with
+    /// code `.cancelled` (the shape a DataLoader failure takes
+    /// when its session task is cancelled). Cancellations are an
+    /// artifact of scrolling, not of the URL, and are excluded
+    /// from the failure memo.
+    private static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if let pipelineError = error as? ImagePipeline.Error {
+            if case .cancelled = pipelineError { return true }
+            if let underlying = pipelineError.dataLoadingError {
+                return isCancellation(underlying)
+            }
+            return false
+        }
+        if let urlError = error as? URLError {
+            return urlError.code == .cancelled
+        }
+        return false
     }
 
     /// The exact ImageRequest the render path uses. ListImagePrefetch
@@ -230,13 +297,28 @@ struct CachedImage: View {
         // its cap, so crispness is unchanged; the caps bind only where
         // the old blanket values allowed pure waste. The pipeline's
         // 150 MB / 1500-item memory cache remains the second bound.
+        //
+        // Build 89 (item 9): the .high cap rises 1600 → 2048. The
+        // tallest phone hero (the poster-aspect carousel card,
+        // ≈ 520 pt tall → 1560 px at 3x) sat within 3% of the old
+        // cap, and any taller or wider variant — iPad heroes, a
+        // full-width detail backdrop on a large phone in landscape
+        // — crossed it and decoded BELOW display pixels, then
+        // upscaled soft. 2048 px keeps every real hero surface at
+        // full device pixels while staying a hard bound (a full
+        // 2048×2048 decode is a 16 MB bitmap; the memory cache's
+        // cost limit governs how many are alive at once). The
+        // other profiles' caps were re-audited against their real
+        // surfaces (shelf poster 450 px, grid poster 600 px,
+        // channel logo 444 px, Continue Watching 480 px) and none
+        // binds below display need, so they are unchanged.
         let s = UIScreen.main.scale
         let cap: CGFloat
         switch loadProfile {
         case .standard: cap = 512
         case .shelf: cap = 640
         case .grid: cap = 768
-        case .high: cap = 1600
+        case .high: cap = 2048
         }
         return CGSize(
             width: min(ceil(width * s), cap),

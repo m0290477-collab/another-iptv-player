@@ -2013,171 +2013,15 @@ struct StorageSettingsSection: View {
 /// `ProviderExpiryStore` (recorded from real provider verifies);
 /// a playlist with no recorded expiry says so, and M3U playlists
 /// carry no provider account at all.
-struct SubscriptionSettingsSection: View {
-    let playlists: [Playlist]
-
-    var body: some View {
-        Section(header: ScopedSectionHeader(title: L("subscription.title"), thisPlaylist: false)) {
-            NavigationLink {
-                SubscriptionOverviewView(playlists: playlists)
-            } label: {
-                HStack(spacing: 12) {
-                    SettingsIconTile(systemImage: "calendar.badge.clock", tint: .orange)
-                    Text(L("subscription.title"))
-                    Spacer()
-                    if !playlists.isEmpty {
-                        Text("\(playlists.count)")
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-        }
-        .settingsCardRows()
-    }
-}
-
-struct SubscriptionOverviewView: View {
-    let playlists: [Playlist]
-
-    /// Build 61 (B10, Z2): the Xtream account's real connection
-    /// fields, fetched live per playlist (`user_info`:
-    /// `status` / `active_cons` / `max_connections`). A playlist
-    /// whose verify fails, or whose panel omits a field, simply
-    /// renders no row for it — nothing is invented.
-    @State private var userInfos: [UUID: XtreamUserInfo] = [:]
-
-    var body: some View {
-        List {
-            ForEach(playlists) { playlist in
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 8) {
-                        Text(playlist.name)
-                            .font(.body.weight(.semibold))
-                            .lineLimit(1)
-                        Spacer()
-                        Text(playlist.kind == .m3u ? "M3U" : "Xtream")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundColor(.primary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(AppTheme.overlayFill(0.16), in: Capsule())
-                    }
-                    Text(providerLabel(for: playlist))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                    expiryLine(for: playlist)
-                    connectionLines(for: playlist)
-                }
-                .padding(.vertical, 2)
-                .settingsCardRows()
-            }
-        }
-        .listStyle(.insetGrouped)
-        .cinematicScrollBackground()
-        .navigationTitle(L("subscription.title"))
-        .navigationBarTitleDisplayMode(.inline)
-        .task { await loadUserInfos() }
-    }
-
-    /// Z2 fetch: one lightweight verify per Xtream playlist (the
-    /// same call the account card uses); the result also refreshes
-    /// the recorded expiry, exactly like the other verify sites.
-    private func loadUserInfos() async {
-        for playlist in playlists where playlist.kind == .xtream {
-            let client = XtreamAPIClient(playlist: playlist)
-            guard let response = try? await client.verify(),
-                  let info = response.userInfo else { continue }
-            ProviderExpiryStore.record(playlistId: playlist.id, expDate: info.expDate)
-            userInfos[playlist.id] = info
-        }
-    }
-
-    /// Z2 rows: status / active connections / max connections —
-    /// each rendered ONLY when the API actually returned it.
-    @ViewBuilder
-    private func connectionLines(for playlist: Playlist) -> some View {
-        if let info = userInfos[playlist.id] {
-            if let status = info.status, !status.isEmpty {
-                connectionRow(label: L("subscription.status"), value: status)
-            }
-            if let active = info.activeCons, !active.isEmpty {
-                connectionRow(label: L("subscription.connections_active"), value: active)
-            }
-            if let max = info.maxConnections, !max.isEmpty {
-                connectionRow(label: L("subscription.connections_max"), value: max)
-            }
-        }
-    }
-
-    private func connectionRow(label: String, value: String) -> some View {
-        HStack(spacing: 6) {
-            Text(label)
-                .font(.caption)
-                .foregroundColor(.secondary)
-            Text(value)
-                .font(.caption.weight(.semibold))
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    /// The provider/server label: the server's host only — never
-    /// the full URL, and never a credential.
-    private func providerLabel(for playlist: Playlist) -> String {
-        if playlist.kind == .m3u { return L("subscription.m3u_source") }
-        if let host = URL(string: playlist.serverURL)?.host, !host.isEmpty {
-            return L("subscription.provider_format", host)
-        }
-        return L("subscription.provider_unknown")
-    }
-
-    @ViewBuilder
-    private func expiryLine(for playlist: Playlist) -> some View {
-        if playlist.kind == .m3u {
-            Text(L("settings.account.no_expiry"))
-                .font(.caption)
-                .foregroundColor(.secondary)
-        } else if let expiry = ProviderExpiryStore.expiryDate(playlistId: playlist.id) {
-            if ProviderExpiryStore.isExpired(expiryDate: expiry) {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .foregroundColor(.red)
-                    Text(L("subscription.expired_format", formatted(expiry)))
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.red)
-                }
-            } else {
-                Text(L("subscription.active_format", formatted(expiry), remainingText(expiry: expiry)))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        } else {
-            Text(L("settings.account.no_expiry"))
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-    }
-
-    private func formatted(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
-    }
-
-    /// Same honest calendar-day math as the account card.
-    private func remainingText(expiry: Date) -> String {
-        let calendar = Calendar.current
-        if calendar.isDateInToday(expiry) { return L("settings.account.expires_today") }
-        let days = calendar.dateComponents(
-            [.day],
-            from: calendar.startOfDay(for: Date()),
-            to: calendar.startOfDay(for: expiry)
-        ).day ?? 0
-        if days <= 1 { return L("settings.account.day_left") }
-        return L("settings.account.days_left", days)
-    }
-}
+/// Build 89 (item 6): the SubscriptionSettingsSection and
+/// SubscriptionOverviewView that used to sit here are REMOVED.
+/// They repeated, per playlist, the same subscription facts
+/// (expiry, time remaining, status, connections) that the
+/// Account page's playlist-information card already shows for
+/// the active playlist — the owner ordered the duplication
+/// gone ("everything in one section, one box"). The facts live
+/// in that one card now; the Xtream card also carries the
+/// account status row the overview used to show.
 
 /// Item 13 (the missing half): the in-app FAQ and the diagnostics
 /// copy action. Privacy Policy / Terms already live in
@@ -2983,6 +2827,17 @@ struct XtreamAccountSettingsSection: View {
                         .font(.caption.weight(.semibold))
                     }
                 } else if let userInfo = authResponse?.userInfo {
+                    // Build 89 (item 6): the account status the
+                    // removed Provider Subscriptions overview
+                    // showed now lives HERE, in the one card —
+                    // every subscription fact (status, expiry,
+                    // time remaining, connections) in one place.
+                    if let status = userInfo.status, !status.isEmpty {
+                        accountInfoRow(
+                            label: L("subscription.status"),
+                            value: status
+                        )
+                    }
                     if let expiry = providerExpiryDate(userInfo.expDate) {
                         accountInfoRow(
                             label: L("settings.account.provider_subscription"),

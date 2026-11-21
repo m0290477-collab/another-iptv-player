@@ -175,7 +175,7 @@ struct FavoriteGroupsView: View {
         let resolved = resolve(item)
         HStack(spacing: 12) {
             CachedImage(
-                url: item.imageURL.flatMap { URL(string: $0) },
+                url: item.imageURL.flatMap { ArtworkURL.url(from: $0) },
                 width: 44, height: 44,
                 cornerRadius: AppTheme.smallCornerRadius,
                 iconName: item.type == "live" ? "tv" : (item.type == "vod" ? "film" : "play.tv")

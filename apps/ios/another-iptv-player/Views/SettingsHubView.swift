@@ -50,6 +50,14 @@ import SwiftUI
 /// the FIXED brand tokens; the interactive chrome (chips, pill,
 /// switches) reads the existing accent token, so the accent
 /// picker keeps governing this surface like every other.
+///
+/// Build 89 (item 6, consolidation): the header card and the
+/// playlist card MERGE into one playlist box — the owner
+/// counted the duplication (name twice, expiry twice, counts
+/// truncated) and ordered everything into a single section.
+/// The box carries name, connection status, the FULL counts,
+/// expiry and Refresh, each exactly once; see playlistBox.
+
 struct SettingsHubView: View {
     let playlist: Playlist
     let onDismiss: () -> Void
@@ -93,9 +101,7 @@ struct SettingsHubView: View {
     private var hub: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 22) {
-                headerCard
-
-                playlistCard
+                playlistBox
 
                 hubSection(title: L("settings.hub.section_general")) {
                     hubRow(
@@ -225,26 +231,34 @@ struct SettingsHubView: View {
         .toggleStyle(GlowingToggleStyle())
     }
 
-    // MARK: - Header card
+    // MARK: - Playlist box (build 89 consolidation)
 
-    /// Build 71 profile header (Style 3), build 88 glass pass:
-    /// the avatar is the flame brand mark on a dark disc inside a
-    /// glowing brand-gradient ring (the approved mockup's header;
-    /// it replaced the build-71 monogram — the playlist's name
-    /// still sits right beside it as the title, so no identity is
-    /// lost), the playlist's name as the title, and a
-    /// subtitle composed ONLY of real state: the real playlist
-    /// count and the provider expiry recorded in
-    /// `ProviderExpiryStore` (the same source as the account
-    /// card). Any piece with no real value is omitted; if nothing
-    /// applies, the subtitle falls back to the playlist's real
-    /// server URL, exactly what the build-66 header showed. The
-    /// thin line under the header is the subscription's
-    /// remaining-validity bar: it drains across the final year
-    /// before the recorded expiry (full at a year or more left,
-    /// empty once expired, full when no expiry is recorded).
-    private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
+    /// Build 89 (item 6): the hub's ONE playlist box. Builds
+    /// 71–88 carried TWO cards at the top of the hub — the
+    /// profile header (playlist name + "N playlists - Active
+    /// until ...") and a playlist glass card under it (the name
+    /// AGAIN, the counts truncated to "680...", the expiry
+    /// AGAIN, Refresh) — and the owner ordered the duplication
+    /// gone: everything about the playlist in one section, one
+    /// box. Each fact now appears exactly once in this single
+    /// glass box: the flame brand mark in its glowing ring, the
+    /// playlist's name, its connection status (the last real
+    /// verify/sync verdict in `PlaylistHealthStore` — the same
+    /// read My Playlists renders — plus the real playlist
+    /// count), the imported counts as stat cells whose numbers
+    /// render IN FULL (see countsRow), the recorded provider
+    /// expiry, the remaining-validity bar, and the glowing
+    /// Refresh pill. Every value comes from the same stores the
+    /// two cards read; Refresh runs the same per-playlist
+    /// refresh it always ran (Xtream catalog refresh / M3U
+    /// remote re-import; no pill for a local-file M3U, which has
+    /// no remote source). The thin line at the bottom is the
+    /// subscription's remaining-validity bar: it drains across
+    /// the final year before the recorded expiry (full at a
+    /// year or more left, empty once expired, full when no
+    /// expiry is recorded).
+    private var playlistBox: some View {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 14) {
                 ZStack {
                     Circle()
@@ -259,18 +273,22 @@ struct SettingsHubView: View {
                         .stroke(AppTheme.brandGradient, lineWidth: 2.5)
                 }
                 .shadow(color: AppTheme.accentStart.opacity(0.45), radius: 12, y: 4)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(headerTitle)
                         .font(.title2.weight(.bold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                    Text(headerSubtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    statusLine
                 }
-                Spacer(minLength: 0)
+                Spacer(minLength: 8)
+                if !isM3U || !currentPlaylist.serverURL.isEmpty {
+                    refreshPill
+                }
             }
+
+            countsRow
+
+            expiryLine
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -284,10 +302,12 @@ struct SettingsHubView: View {
             .frame(height: 4)
         }
         .padding(18)
-        // Build 88: the shared glass card (card gradient + the
-        // warm brand glow low in the card — the FIXED Design-4
-        // orange, never the user accent — + the top sheen).
+        // The shared glass card (card gradient + the warm brand
+        // glow low in the card — the FIXED Design-4 orange, never
+        // the user accent — + the top sheen).
         .settingsGlassCard()
+        .sectionAppear()
+        .task { await loadPlaylistCounts() }
     }
 
     /// The header's display name: the active playlist's real
@@ -299,25 +319,6 @@ struct SettingsHubView: View {
         return playlist.username.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var headerSubtitle: String {
-        var parts: [String] = []
-        if let count = allPlaylists?.count {
-            parts.append(
-                count == 1
-                    ? L("settings.hub.playlist_count_one")
-                    : L("settings.hub.playlists_count_format", count)
-            )
-        }
-        if !isM3U, let expiry = ProviderExpiryStore.expiryDate(playlistId: playlist.id) {
-            if ProviderExpiryStore.isExpired(expiryDate: expiry) {
-                parts.append(L("subscription.expired_format", formattedExpiry(expiry)))
-            } else {
-                parts.append(L("settings.hub.active_until_format", formattedExpiry(expiry)))
-            }
-        }
-        guard !parts.isEmpty else { return playlist.serverURL }
-        return parts.joined(separator: " • ")
-    }
 
     /// Remaining-validity fraction for the header line: full
     /// when no expiry is recorded (nothing running out) or when
@@ -341,7 +342,7 @@ struct SettingsHubView: View {
         return formatter.string(from: date)
     }
 
-    // MARK: - Playlist card (build 88)
+    // MARK: - Playlist box helpers
 
     /// The freshest record of the hub's playlist (the sections in
     /// SettingsComponents resolve theirs the same way).
@@ -349,82 +350,125 @@ struct SettingsHubView: View {
         allPlaylists?.first(where: { $0.id == playlist.id }) ?? playlist
     }
 
-    /// The mockup's playlist card, built ONLY from real state:
-    /// the playlist's display name, its real imported counts
-    /// (record-layer `importedCounts` — the same read the gate's
-    /// completion card uses; the movies/series segments exist
-    /// only for Xtream, whose catalog has them), its real
-    /// recorded expiry line (omitted when none is recorded, and
-    /// for M3U, which carries no provider account), and the
-    /// glowing Refresh pill. Refresh runs the app's own refresh
-    /// for this playlist — Xtream: `PlaylistContentStore`'s
-    /// catalog refresh (the Home pull-to-refresh call); M3U with
-    /// a remote URL: the Content & Data section's re-import,
-    /// step for step — then re-reads the counts. A local-file
-    /// M3U has no remote source, so it gets no pill (its refresh
-    /// lives in Playlists → Content & Data, from file).
-    private var playlistCard: some View {
-        HStack(spacing: 14) {
-            SettingsIconTile(
-                systemImage: isM3U ? "list.bullet" : "tv",
-                tint: AppTheme.accent,
-                size: 44,
-                glowColor: AppTheme.accent.opacity(0.45)
-            )
-            VStack(alignment: .leading, spacing: 4) {
-                Text(headerTitle)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                countsLine
-                playlistCardExpiry
-            }
-            Spacer(minLength: 8)
-            if !isM3U || !currentPlaylist.serverURL.isEmpty {
-                refreshPill
-            }
+    /// The box's status line: the playlist's last known
+    /// connection verdict — dot + label, the My Playlists
+    /// convention, read fresh from `PlaylistHealthStore` on
+    /// every render (a refresh that records a new verdict shows
+    /// it as soon as the pill settles) — and the real playlist
+    /// count. Neither piece repeats the name or the expiry,
+    /// which live in the box's title and expiry line.
+    private var statusLine: some View {
+        let health = PlaylistHealthStore.health(for: playlist.id)
+        return HStack(spacing: 6) {
+            Circle()
+                .fill(healthColor(health))
+                .frame(width: 8, height: 8)
+            Text(statusText(health))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
-        .padding(16)
-        .settingsGlassCard(cornerRadius: AppTheme.cornerRadius)
-        .sectionAppear()
-        .task { await loadPlaylistCounts() }
+        .accessibilityElement(children: .combine)
     }
 
-    /// The counts line: one icon + count segment per catalog
-    /// kind this playlist actually carries, formatted with the
-    /// app's canonical count strings. Nothing renders until the
-    /// first real read lands — never a placeholder 0.
+    private func statusText(_ health: PlaylistHealth) -> String {
+        var parts: [String] = [healthLabel(health)]
+        if let count = allPlaylists?.count {
+            parts.append(
+                count == 1
+                    ? L("settings.hub.playlist_count_one")
+                    : L("settings.hub.playlists_count_format", count)
+            )
+        }
+        return parts.joined(separator: " • ")
+    }
+
+    private func healthLabel(_ health: PlaylistHealth) -> String {
+        switch health {
+        case .responds: return L("playlists.health.responds")
+        case .refused: return L("playlists.health.refused")
+        case .expired: return L("playlists.health.expired")
+        case .unknown: return L("playlists.health.unknown")
+        }
+    }
+
+    private func healthColor(_ health: PlaylistHealth) -> Color {
+        switch health {
+        case .responds: return .green
+        case .refused: return .red
+        case .expired: return .orange
+        case .unknown: return .gray.opacity(0.5)
+        }
+    }
+
+    /// The counts row: one stat cell per catalog kind this
+    /// playlist actually carries (Xtream: live / movies /
+    /// series; M3U: live only, as before). The build-88 card
+    /// squeezed its counts into one line beside the Refresh
+    /// pill until "6,801" rendered as "680...". Here the row
+    /// spans the whole box and nothing competes with the
+    /// numbers: each cell is an icon + short label over the
+    /// FULL count (locale-grouped: "6,801" / "22,342" /
+    /// "8,473"), a single line at full size in its own equal
+    /// share of the width, so a count cannot truncate at any
+    /// screen size. Nothing renders until the first real read
+    /// lands — never a placeholder 0.
     @ViewBuilder
-    private var countsLine: some View {
+    private var countsRow: some View {
         if let counts = playlistCounts {
-            HStack(spacing: 10) {
-                countSegment(icon: "tv", text: L("addplaylist.summary.live", counts.live))
+            HStack(alignment: .top, spacing: 12) {
+                countStat(
+                    icon: "tv",
+                    label: L("dashboard.live"),
+                    value: counts.live,
+                    summary: L("addplaylist.summary.live", counts.live)
+                )
                 if !isM3U {
-                    countSegment(icon: "film", text: L("addplaylist.summary.movies", counts.movies))
-                    countSegment(icon: "rectangle.stack", text: L("addplaylist.summary.series", counts.series))
+                    countStat(
+                        icon: "film",
+                        label: L("dashboard.movies"),
+                        value: counts.movies,
+                        summary: L("addplaylist.summary.movies", counts.movies)
+                    )
+                    countStat(
+                        icon: "rectangle.stack",
+                        label: L("dashboard.series"),
+                        value: counts.series,
+                        summary: L("addplaylist.summary.series", counts.series)
+                    )
                 }
             }
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
         }
     }
 
-    private func countSegment(icon: String, text: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(AppTheme.accent)
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    private func countStat(icon: String, label: String, value: Int, summary: String) -> some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+                Text(label)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Text(value.formatted())
+                .font(.headline)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
         }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(summary)
     }
 
-    /// The card's expiry line: the recorded provider expiry,
-    /// from the same store the header reads. Omitted entirely
-    /// when nothing real is recorded.
+    /// The box's expiry line: the recorded provider expiry,
+    /// from the same store the account card reads — shown in
+    /// the hub exactly once, here. Omitted entirely when
+    /// nothing real is recorded (and for M3U, which carries no
+    /// provider account).
     @ViewBuilder
-    private var playlistCardExpiry: some View {
+    private var expiryLine: some View {
         if !isM3U, let expiry = ProviderExpiryStore.expiryDate(playlistId: playlist.id) {
             if ProviderExpiryStore.isExpired(expiryDate: expiry) {
                 Text(L("subscription.expired_format", formattedExpiry(expiry)))
@@ -627,7 +671,9 @@ struct SettingsHubView: View {
             } else {
                 XtreamAccountSettingsSection(playlist: playlist, onDismiss: onDismiss)
             }
-            SubscriptionSettingsSection(playlists: allPlaylists ?? [])
+            // Build 89 (item 6): the separate Provider
+            // Subscriptions section is gone — the subscription
+            // facts live inside the account card above, once.
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(16)

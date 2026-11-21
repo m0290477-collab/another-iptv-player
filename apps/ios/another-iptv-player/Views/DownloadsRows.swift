@@ -60,7 +60,7 @@ struct DownloadRecordingRow: View {
     var body: some View {
         HStack(spacing: 12) {
             CachedImage(
-                url: item.imageURL.flatMap { URL(string: $0) },
+                url: item.imageURL.flatMap { ArtworkURL.url(from: $0) },
                 width: 56, height: 56,
                 iconName: "record.circle",
                 loadProfile: .grid
@@ -131,7 +131,7 @@ struct DownloadRowContent: View {
     var body: some View {
         HStack(spacing: 12) {
             CachedImage(
-                url: item.imageURL.flatMap { URL(string: $0) },
+                url: item.imageURL.flatMap { ArtworkURL.url(from: $0) },
                 width: 56, height: 56,
                 iconName: item.type == "episode" ? "play.tv" : (item.type == "recording" ? "record.circle" : "film"),
                 loadProfile: .grid

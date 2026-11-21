@@ -128,7 +128,7 @@ struct FavoritesView: View {
                 let snap = snapshotStore.snapshot(playlistId: playlist.id, type: favorite.type, streamId: favorite.streamId)
                 HStack(spacing: 12) {
                     CachedImage(
-                        url: snap?.imageURL.flatMap { URL(string: $0) },
+                        url: snap?.imageURL.flatMap { ArtworkURL.url(from: $0) },
                         width: 44, height: 44,
                         cornerRadius: AppTheme.smallCornerRadius,
                         iconName: "exclamationmark.triangle"
@@ -274,7 +274,7 @@ struct FavoritesView: View {
                     } label: {
                         HStack(spacing: 12) {
                             CachedImage(
-                                url: item.stream.streamIcon.flatMap { URL(string: $0) },
+                                url: item.stream.streamIcon.flatMap { ArtworkURL.url(from: $0) },
                                 width: 52, height: 38,
                                 cornerRadius: 8,
                                 contentMode: .fit,

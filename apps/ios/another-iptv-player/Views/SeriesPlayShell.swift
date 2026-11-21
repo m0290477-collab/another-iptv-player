@@ -367,7 +367,7 @@ private struct EpisodePlaySession: Equatable {
             return num + t
         }()
         subtitle = seriesName
-        artworkURL = (episode.cover ?? seriesCover).flatMap { URL(string: $0) }
+        artworkURL = (episode.cover ?? seriesCover).flatMap { ArtworkURL.url(from: $0) }
         self.resumeTimeMs = resumeTimeMs
         containerExtension = episode.containerExtension
     }

@@ -409,19 +409,14 @@ struct HomeView: View {
                             SkeletonShelf()
                         }
 
-                        // Build 87 (owner decision, design 18):
-                        // the slim live-scores strip DIRECTLY
-                        // under the hero — one compact bar of
-                        // today's scores fed by the SAME
-                        // matchResults data the Match Results
-                        // cards below render (no new fetch). It
-                        // exists only when today has live or
-                        // finished matches (exactly when
-                        // matchResults is non-empty), under the
-                        // same section gate.
-                        if !UserDefaults.standard.bool(forKey: "sections.hidden.matches") {
-                            homeLiveStrip
-                        }
+                        // Build 89 (item 1, owner — "مكرر"): the
+                        // build-87 live-scores strip that sat here
+                        // is REMOVED. It rendered the SAME
+                        // matchResults entries the Match Results
+                        // cards below render — the same matches
+                        // twice on one screen. Match Results is
+                        // now the ONLY place today's matches
+                        // appear on Home; no other section moves.
 
                         // Build 77 (Design A) — sections 2–5, in
                         // the owner's picked order. Everything that
@@ -451,11 +446,13 @@ struct HomeView: View {
                         // Build 87 (owner decision, design 15):
                         // Continue Watching now sits directly
                         // under Match Results — the picked
-                        // top-to-bottom order is hero → strip →
-                        // sports → Match Results → Continue
-                        // Watching → Most Popular Movies → Top
-                        // Series → Support. Same content and
-                        // destinations, re-ordered only.
+                        // top-to-bottom order is hero → sports →
+                        // Match Results → Continue Watching →
+                        // Most Popular Movies → Top Series →
+                        // Support (build 89: the strip between
+                        // hero and sports is gone — item 1). Same
+                        // content and destinations, re-ordered
+                        // only.
                         mergedContinueRail
 
                         // Section 3: Most Popular Movies — the
@@ -1036,8 +1033,9 @@ struct HomeView: View {
     /// screen width, 3:4) with the previous/next cards peeking
     /// at the edges, scaled down and darkened by the scroll
     /// transition; page dots CENTERED below. Portrait posters
-    /// are the design's native art; wide backdrops fill the
-    /// same card (HeroPosterCard owns the art chain). The
+    /// are the design's native art; wide backdrops show whole
+    /// in the same card (build 89, item 2 — HeroPosterCard
+    /// owns the art chain and the fit treatment). The
     /// pager stays a horizontal ScrollView (the build-80
     /// gesture negotiation with the page scroll is unchanged),
     /// snapping view-aligned; the auto-advance timer, the
@@ -1071,10 +1069,21 @@ struct HomeView: View {
                                 onDetails: { showFeaturedDetails(featured[index]) }
                             )
                             .scrollTransition(.interactive, axis: .horizontal) { content, phase in
-                                content
-                                    .scaleEffect(phase.isIdentity ? 1 : 0.9)
-                                    .brightness(phase.isIdentity ? 0 : -0.3)
-                                    .opacity(phase.isIdentity ? 1 : 0.75)
+                                // Build 89 (item 2): CONTINUOUS
+                                // travel treatment from the phase
+                                // value — builds 87/88 switched on
+                                // isIdentity, so the scale/darken
+                                // POPPED at the identity boundary
+                                // mid-swipe and fed the ghosting
+                                // the owner recorded. The card now
+                                // eases through the whole travel;
+                                // the info panel's own fade lives
+                                // in HeroPosterCard.
+                                let travel = min(1, abs(phase.value))
+                                return content
+                                    .scaleEffect(1 - 0.1 * travel)
+                                    .brightness(-0.3 * travel)
+                                    .opacity(1 - 0.25 * travel)
                             }
                             .id(index)
                         }
@@ -1314,155 +1323,6 @@ struct HomeView: View {
         // deployment target is iOS 18) — the fifth card.
         case .nhl: return "hockey.puck.fill"
         }
-    }
-
-    // MARK: Live-scores strip (build 87, owner decision — design 18)
-
-    /// Design 18's slim strip: ONE rounded bar under the hero,
-    /// its cells divided by vertical hairlines — each cell a
-    /// state line (LIVE chip + clock, or FT, sport at the end)
-    /// over two team rows (logo + full name + own score —
-    /// build 88, F4). Fed by `matchResults` itself — the same
-    /// entries, in the same order, as the Match Results cards
-    /// below; a tap opens the same match detail. Renders
-    /// nothing when today has no live or finished match.
-    @ViewBuilder
-    private var homeLiveStrip: some View {
-        Group {
-            if !matchResults.isEmpty {
-                stripBar
-                    // Build 87 (per-surface motion): the strip
-                    // slides in/out as the day's matches appear
-                    // and clear, on the standard token.
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .animation(Motion.animate(.easeInOut(duration: 0.35)), value: matchResults.isEmpty)
-    }
-
-    private var stripBar: some View {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    ForEach(Array(matchResults.enumerated()), id: \.element.id) { index, entry in
-                        if index > 0 {
-                            Rectangle()
-                                .fill(AppTheme.cardBorderColor)
-                                .frame(width: 0.5)
-                                .padding(.vertical, 10)
-                        }
-                        NavigationLink {
-                            MatchDetailView(sport: entry.sport, leaguePath: entry.leaguePath, match: entry.match)
-                        } label: {
-                            stripCell(entry)
-                        }
-                        .buttonStyle(PressOpacityButtonStyle())
-                    }
-                }
-            }
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(AppTheme.surface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(AppTheme.cardBorderColor, lineWidth: 1)
-                    )
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.horizontal, 16)
-            .sectionAppear()
-    }
-
-    /// Build 88 (F4): the strip cell is now a two-row match
-    /// card — the SAME structure as the Match Results cards
-    /// below (build 80, item 8): a slim state line (LIVE chip
-    /// + clock, or FT, with the sport at the line's end), then
-    /// one row per team — logo + FULL name + that team's own
-    /// score at the row's end. The build-87 single line (both
-    /// names and the score on one row) truncated BOTH names at
-    /// strip width ("Denve… / Housto…" — the owner's
-    /// recording, confirmed at full resolution). The name is
-    /// the only flexible element in its row; the score keeps
-    /// its reserved slot and the build-87 roll/flash on a
-    /// change (StripScoreView, per team now).
-    private func stripCell(_ entry: HomeMatchEntry) -> some View {
-        let match = entry.match
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 5) {
-                if match.state == .live {
-                    Text(L("matches.live"))
-                        .font(.system(size: 9, weight: .black))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(AppTheme.live))
-                    if let clock = stripClockText(entry) {
-                        Text(clock)
-                            .font(AppTheme.fontBadge)
-                            .foregroundStyle(AppTheme.live)
-                            .monospacedDigit()
-                    }
-                } else {
-                    Text(stripClockText(entry) ?? L("matches.final"))
-                        .font(AppTheme.fontBadge)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                Spacer(minLength: 4)
-                Text(L(entry.sport.titleKey))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            stripTeamRow(match.home)
-            stripTeamRow(match.away)
-        }
-        .frame(width: 232, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .contentShape(Rectangle())
-    }
-
-    /// Build 88 (F4): one strip team row — logo, FULL name
-    /// (the row's whole width at the shared team-name font;
-    /// the scale factor remains only as a safety net, the
-    /// build-80 rule), and that team's own score at the end.
-    private func stripTeamRow(_ side: MatchTeamSide) -> some View {
-        HStack(spacing: 6) {
-            CachedImage(url: side.logoURL, width: 18, height: 18, cornerRadius: 9, iconName: "shield")
-            Text(side.name ?? "")
-                .font(AppTheme.fontTeamName)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            StripScoreView(text: side.score ?? "0")
-                .font(.headline.weight(.bold))
-                .foregroundStyle(.primary)
-                .layoutPriority(1)
-        }
-    }
-
-    /// The strip's state text from payload fields only — the
-    /// MatchRowView rule: statusDetail for baseball/hockey,
-    /// the displayClock (with Q/OT period) for the rest, the
-    /// payload's short status for finished matches.
-    private func stripClockText(_ entry: HomeMatchEntry) -> String? {
-        let match = entry.match
-        if entry.sport == .mlb || entry.sport == .nhl,
-           let detail = match.statusDetail?.trimmingCharacters(in: .whitespaces),
-           !detail.isEmpty {
-            return detail
-        }
-        if match.state == .finished {
-            return L("matches.final")
-        }
-        let clock = match.displayClock?.trimmingCharacters(in: .whitespaces)
-        let hasClock = clock != nil && clock != "0.0" && !(clock?.isEmpty ?? true)
-        guard let period = match.period, period > 0 else {
-            return hasClock ? clock : nil
-        }
-        let periodLabel = period <= 4 ? "Q\(period)" : "OT"
-        return hasClock ? "\(periodLabel) \(clock!)" : periodLabel
     }
 
     /// Build 87 (owner decision, design 15): the hairline that
@@ -2353,7 +2213,17 @@ private struct HomeMatchResultCard: View {
         // priority on the chip), the name is the ONLY flexible
         // element, and the card clips its own bounds as a final
         // guard — nothing can render outside the card again.
-        VStack(alignment: .leading, spacing: 4) {
+        // Build 89 (item 10, owner): the card still read too
+        // tall — dead space between the chip line and the team
+        // rows. Compacted again on the same structure: tighter
+        // stack spacing and vertical padding, a slimmer chip,
+        // 20 pt logos, and the score now renders through
+        // RollingScoreView so the build-88 roll + flash on a
+        // changed score lives in these cards (it used to live
+        // in the live-scores strip removed by item 1). Full
+        // names, the reserved score column and the chip's
+        // trailing alignment are unchanged.
+        VStack(alignment: .leading, spacing: 3) {
             HStack {
                 Spacer(minLength: 0)
                 stateChip
@@ -2370,7 +2240,7 @@ private struct HomeMatchResultCard: View {
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
@@ -2391,12 +2261,12 @@ private struct HomeMatchResultCard: View {
     /// (build 84). A side the payload has not scored yet reads
     /// "0", the same rule Home's score lines used.
     private func teamRow(_ side: MatchTeamSide) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
             CachedImage(
                 url: side.logoURL,
-                width: 22,
-                height: 22,
-                cornerRadius: 11,
+                width: 20,
+                height: 20,
+                cornerRadius: 10,
                 iconName: "shield"
             )
             Text(side.name ?? "")
@@ -2405,11 +2275,12 @@ private struct HomeMatchResultCard: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text(side.score ?? "0")
+            // Build 89 (item 10): the score rolls + flashes on
+            // a change (RollingScoreView, the build-88 effect)
+            // inside the same reserved 36 pt trailing column.
+            RollingScoreView(text: side.score ?? "0")
                 .font(.headline.weight(.bold))
                 .foregroundStyle(.primary)
-                .monospacedDigit()
-                .fixedSize()
                 .frame(width: 36, alignment: .trailing)
                 .layoutPriority(1)
         }
@@ -2431,7 +2302,7 @@ private struct HomeMatchResultCard: View {
             .foregroundStyle(.white)
             .monospacedDigit()
             .padding(.horizontal, 7)
-            .padding(.vertical, 3)
+            .padding(.vertical, 2)
             .background(Capsule().fill(AppTheme.live))
             .fixedSize()
         } else {
@@ -2439,7 +2310,7 @@ private struct HomeMatchResultCard: View {
                 .font(AppTheme.fontBadge)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 7)
-                .padding(.vertical, 3)
+                .padding(.vertical, 2)
                 .background(Capsule().fill(AppTheme.overlayFill(0.10)))
                 .fixedSize()
         }
@@ -2495,12 +2366,15 @@ private struct HomeSectionHeader<Destination: View>: View {
     }
 }
 
-/// Build 87 (per-surface motion): the live strip's score —
-/// digits roll on a change (numeric content transition) and
-/// the changed score gets ONE brief accent flash, then
-/// settles. Nothing loops; the flash is driven solely by an
-/// actual score change in the data.
-private struct StripScoreView: View {
+/// Build 87 (per-surface motion), build 89 (item 10): a live
+/// score — digits roll on a change (numeric content
+/// transition) and the changed score gets ONE brief accent
+/// flash, then settles. Nothing loops; the flash is driven
+/// solely by an actual score change in the data. Built for
+/// the (now removed) live-scores strip; since build 89 it
+/// renders the Match Results cards' scores, so the effect
+/// survives on Home's one remaining match surface.
+private struct RollingScoreView: View {
     let text: String
     @State private var flash = false
 

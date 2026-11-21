@@ -20,6 +20,20 @@ import SwiftUI
 // CachedImage's designed placeholder (gradient + icon — the
 // overlay title is the ONE title in that state, build 88
 // F8) — never a blank slab.
+//
+// Build 89 (item 2, owner — "مش صورة كامله، يقص الصور"):
+// the art is now aspect-FITTED and shown WHOLE. Builds
+// 87/88 aspect-FILLED it into this 3:4 card, which crops
+// roughly a tenth of a 2:3 poster's height (the cut heads
+// and titles in the owner's recording) and over half of a
+// wide backdrop's width. The fitted picture rests on the
+// card's near-black ground — no blurred pillars (the owner
+// rejected those in build 81) — and the scrim, glass panel,
+// failure-swap chain and title-card fallback are unchanged.
+// The same round fixes the recording's mid-swipe ghosting:
+// the glass info panel now fades with the card's distance
+// from the centre (see panelVisibility), so two panels can
+// never overlap mid-transition — only the art travels.
 
 struct HeroPosterCard: View {
     let title: String
@@ -42,10 +56,38 @@ struct HeroPosterCard: View {
     /// Build 82 (item 1): a backdrop that exists but fails to
     /// load swaps to the poster instead of stranding the card.
     @State private var backdropLoadFailed = false
-    /// Build 87 (per-surface motion): the art's parallax
-    /// shift, measured by the background reader below from
-    /// the card's own global position (zero when centered).
-    @State private var parallax: CGFloat = 0
+    /// Build 89 (item 2): the card's signed distance from
+    /// the screen centre in points, measured by the
+    /// background reader below (zero when centered). It
+    /// drives the info panel's travel fade (see
+    /// panelVisibility). It replaces the build-87 parallax
+    /// state: the fitted art no longer shifts inside the
+    /// card, because any shift or scale would push part of
+    /// the whole picture past the card's clip and cut it.
+    @State private var centerDelta: CGFloat = 0
+
+    /// How visible this card's glass info panel is, from
+    /// its distance to the centre: fully visible while the
+    /// card sits (nearly) centered, fading as it travels,
+    /// gone once it rests as a peek neighbour. During a
+    /// swipe BOTH passing cards are off-centre, so both
+    /// panels are faded at the crossing — two readable
+    /// panels can never double-render mid-transition again
+    /// (the owner's recording showed the outgoing and
+    /// incoming titles/buttons overlapping while the cards
+    /// crossed). Only the art travels; the panel belongs
+    /// to the centered card alone, which is design 4's own
+    /// rule (the overlay lives on the center card; peeks
+    /// are scaled, darkened art). Positional, not animated,
+    /// so Reduce Motion needs no exception.
+    private var panelVisibility: CGFloat {
+        let travel = abs(centerDelta)
+        let fadeStart = width * 0.15
+        let fadeEnd = width * 0.65
+        if travel <= fadeStart { return 1 }
+        if travel >= fadeEnd { return 0 }
+        return 1 - (travel - fadeStart) / (fadeEnd - fadeStart)
+    }
 
     private var height: CGFloat { width * 4 / 3 }
 
@@ -99,8 +141,12 @@ struct HeroPosterCard: View {
             // FeaturedSlide pattern — the buttons above keep
             // their own actions, never both).
             ZStack {
-                // The near-black ground (visible only while art
-                // loads or when the title card renders).
+                // The near-black ground: visible while art
+                // loads, when the title card renders, and —
+                // build 89 (item 2) — as the bands around the
+                // aspect-fitted whole picture (thin side bands
+                // for a portrait poster; top/bottom bands for
+                // a wide backdrop, under the scrim below).
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(Color.black)
                 CachedImage(
@@ -108,7 +154,9 @@ struct HeroPosterCard: View {
                     width: width,
                     height: height,
                     cornerRadius: 24,
-                    contentMode: .fill,
+                    // Build 89 (item 2): FIT, not fill — the
+                    // whole picture shows, nothing is cut.
+                    contentMode: .fit,
                     iconName: iconName,
                     loadProfile: .high,
                     // Build 88 (F8): NO title is passed. The
@@ -125,10 +173,11 @@ struct HeroPosterCard: View {
                         if artURL == backdropURL { backdropLoadFailed = true }
                     }
                 )
-                // Parallax: the art is scaled a touch so the
-                // shift never bares an edge against the frame.
-                .scaleEffect(1.06)
-                .offset(x: parallax)
+                // Build 89 (item 2): NO scale and NO offset on
+                // the fitted art (builds 87/88 scaled it 1.06
+                // for parallax) — either would push part of
+                // the whole picture past the card's clip and
+                // cut it again.
                 .onChange(of: backdropURL) { _, _ in backdropLoadFailed = false }
 
                 // Build 88 (F9): a stronger scrim — the fade
@@ -221,13 +270,23 @@ struct HeroPosterCard: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
             .onTapGesture { if showsControls { onDetails() } }
+            // Build 89 (item 2): the travel fade — see
+            // panelVisibility. A faded-out panel also stops
+            // taking touches, so a travelling card's buttons
+            // can never be hit mid-swipe.
+            .opacity(panelVisibility)
+            .allowsHitTesting(panelVisibility > 0.5)
         }
         .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(
-                    showsControls ? AppTheme.accent.opacity(0.55) : Color.white.opacity(0.14),
+                    // Build 89 (item 2): the centered card's
+                    // accent border fades with the same travel
+                    // fade as its panel, instead of snapping
+                    // between cards when the selection settles.
+                    showsControls ? AppTheme.accent.opacity(0.55 * panelVisibility) : Color.white.opacity(0.14),
                     lineWidth: showsControls ? 1.2 : 1
                 )
         )
@@ -236,26 +295,27 @@ struct HeroPosterCard: View {
         // same restrained glow family as the selected tab's
         // icon. Peek neighbours stay quiet (plain hairline,
         // no glow), so exactly one card on screen glows.
-        .shadow(color: showsControls ? AppTheme.tabGlow : .clear,
+        // Build 89: the glow fades with the travel fade too.
+        .shadow(color: showsControls ? AppTheme.tabGlow.opacity(panelVisibility) : .clear,
                 radius: showsControls ? 18 : 0, y: showsControls ? 8 : 0)
-        // The parallax reader: an invisible background that
-        // reports the card's global position as it travels.
-        // Updates are a few points of offset on visible cards
-        // only — no timers, no polling.
+        // The centre-distance reader: an invisible background
+        // that reports the card's global position as it
+        // travels, feeding the panel's travel fade. Updates
+        // land only while the value actually moves, on
+        // visible cards only — no timers, no polling.
         .background {
             GeometryReader { geo in
                 Color.clear
-                    .onAppear { updateParallax(midX: geo.frame(in: .global).midX) }
+                    .onAppear { updateCenterDelta(midX: geo.frame(in: .global).midX) }
                     .onChange(of: geo.frame(in: .global).midX) { _, midX in
-                        updateParallax(midX: midX)
+                        updateCenterDelta(midX: midX)
                     }
             }
         }
     }
 
-    private func updateParallax(midX: CGFloat) {
+    private func updateCenterDelta(midX: CGFloat) {
         let delta = midX - UIScreen.main.bounds.width / 2
-        let value = max(-10, min(10, delta * -0.055))
-        if abs(value - parallax) > 0.5 { parallax = value }
+        if abs(delta - centerDelta) > 0.5 { centerDelta = delta }
     }
 }

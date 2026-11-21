@@ -94,8 +94,8 @@ struct MovieDetailView: View {
     private var heroConfig: DetailHeroConfig {
         DetailHeroConfig(
             title: currentMovie.name,
-            backdropURL: currentMovie.backdropPath.flatMap { let t = $0.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : URL(string: t) },
-            posterURL: currentMovie.streamIcon.flatMap { URL(string: $0) },
+            backdropURL: ArtworkURL.url(from: currentMovie.backdropPath),
+            posterURL: currentMovie.streamIcon.flatMap { ArtworkURL.url(from: $0) },
             year: DetailFormatting.year(from: currentMovie.releaseDate),
             releaseDate: currentMovie.releaseDate,
             runtime: currentMovie.duration?.trimmingCharacters(in: .whitespaces),
@@ -507,8 +507,8 @@ struct MovieDetailView: View {
     /// on the owner's recording. No artwork, no card — exactly
     /// like no trailer, no card.
     private var trailerImageURL: URL? {
-        currentMovie.backdropPath.flatMap { let t = $0.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : URL(string: t) }
-            ?? currentMovie.streamIcon.flatMap { URL(string: $0) }
+        ArtworkURL.url(from: currentMovie.backdropPath)
+            ?? currentMovie.streamIcon.flatMap { ArtworkURL.url(from: $0) }
     }
 
     /// C7 trailer tile (build 78 form): the movie's real backdrop
@@ -739,7 +739,7 @@ struct MovieDetailView: View {
                 url: url,
                 title: currentMovie.name,
                 subtitle: parts.isEmpty ? nil : parts.joined(separator: " · "),
-                artworkURL: currentMovie.streamIcon.flatMap { URL(string: $0) },
+                artworkURL: currentMovie.streamIcon.flatMap { ArtworkURL.url(from: $0) },
                 isLiveStream: false,
                 playlistId: playlist.id,
                 streamId: String(currentMovie.streamId),

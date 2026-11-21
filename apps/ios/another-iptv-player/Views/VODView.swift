@@ -155,21 +155,33 @@ struct VODView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
-                // Build 81 (item 7): FIXED header above the scroll
-                // view — see the matching note in SeriesView. Build
-                // 80's in-ScrollView field placement (first element
-                // inside the ScrollViewReader's anchored ScrollView,
-                // rebuilt by the recompute pass on every store
-                // publish, with restoreScrollAnchor re-asserting the
-                // bound scroll position) is the construct that left
-                // the field dead on the owner's device; the fixed
-                // header is the placement every working
-                // CatalogSearchField in the app uses.
-                VStack(spacing: 0) {
-                    tabHeader
+                // Build 89 (item 3): the header (search field +
+                // count + chips) is the FIRST element of the scroll
+                // content — the owner ordered the top block to move
+                // with scrolling. This is NOT the build-80 construct
+                // that left the field dead in build 81:
+                // (1) the header sits OUTSIDE the ScrollViewReader —
+                // the reader wraps only the content branches below
+                // it, so no scrollTo/anchor machinery touches it;
+                // (2) the bound .scrollPosition(id:) anchor and
+                // restoreScrollAnchor's position re-assertion are
+                // GONE — restoration is a one-shot proxy.scrollTo
+                // fired on appear / chip / category changes only,
+                // and top-shelf persistence is a passive visibility
+                // report (onScrollTargetVisibilityChange on the
+                // shelves stack) that never moves the scroll view;
+                // (3) the header's tree position is fixed — first
+                // child of the content stack, outside every
+                // conditional branch — so the recompute pass cannot
+                // churn the field's identity. The search wiring
+                // (the debounce + filter tasks on the outer Group)
+                // is byte-identical to build 88.
+                ScrollView {
+                    VStack(spacing: 0) {
+                        tabHeader
 
-                    ScrollViewReader { proxy in
-                    ScrollView {
+                        ScrollViewReader { proxy in
+                        VStack(spacing: 0) {
                         // The chips swap the scroll content — All keeps
                         // the shelves; Newest renders its grid.
                         // Build 80 (item 4): an active in-tab search
@@ -255,47 +267,59 @@ struct VODView: View {
                                     .id(category.id)
                                 }
                             }
+                            .scrollTargetLayout()
+                            // Build 89 (item 3): passive top-shelf
+                            // tracking for the O9 restore — the first
+                            // visible shelf id is saved exactly as
+                            // the build-61 bound anchor saved it, but
+                            // this report never moves the scroll view
+                            // (the bound .scrollPosition(id:) is
+                            // gone; see the note at the branch top).
+                            // Guarded to the All chip, as the old
+                            // save was — other branches never persist
+                            // an anchor from this stack.
+                            .onScrollTargetVisibilityChange(idType: String.self) { visibleIds in
+                                if selectedChip == .all, let first = visibleIds.first {
+                                    scrollAnchorID = first
+                                    ScrollAnchorStore.save(first, surface: "movies", playlistId: playlist.id)
+                                }
+                            }
                             } // Build 65: end of the All (shelves) branch of the category-chip swap.
                         case .newest:
                             newestGrid
                         }
                         }
-                    }
-                    .refreshable {
-                        // Independent Task: so the refreshable cancellation doesn't propagate to the requests (see LiveStreamsView).
-                        let work = Task { await contentStore.refreshFromNetwork(playlist: playlist, only: .vod) }
-                        await work.value
-                    }
-                    // Build 88 (F3): bottom scroll clearance so the
-                    // floating tab bar never covers the last shelf /
-                    // grid row of this tab.
-                    .contentMargins(.bottom, 40, for: .scrollContent)
-                    .onChange(of: pendingScrollTarget) { _, target in
-                        guard let target else { return }
-                        withAnimation(.easeOut(duration: 0.25)) {
-                            proxy.scrollTo(target, anchor: .top)
                         }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            pendingScrollTarget = nil
+                        .onChange(of: pendingScrollTarget) { _, target in
+                            guard let target else { return }
+                            withAnimation(.easeOut(duration: 0.25)) {
+                                proxy.scrollTo(target, anchor: .top)
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                pendingScrollTarget = nil
+                            }
                         }
+                        // Build 89 (item 3): O9 restoration — a
+                        // one-shot scrollTo on appearance and on
+                        // chip/category changes only; it never fires
+                        // during scrolling, so it cannot fight the
+                        // user or the search field (see the note at
+                        // the top of this branch).
+                        .onAppear { restoreScrollAnchor(proxy: proxy) }
+                        .onChange(of: displayCategories.map(\.id)) { _, _ in restoreScrollAnchor(proxy: proxy) }
+                        .onChange(of: selectedChip) { _, _ in restoreScrollAnchor(proxy: proxy) }
+                        } // ScrollViewReader
                     }
-                    // Build 61 fixer (O9): persisted first-visible
-                    // shelf anchor (see ScrollAnchorStore). Setting
-                    // the binding jumps without animation. Guarded
-                    // to the All chip — in the Newest grid the same
-                    // ScrollView tracks movie IDs, which must never
-                    // be persisted as the shelf anchor.
-                    .scrollPosition(id: $scrollAnchorID, anchor: .top)
-                    .onChange(of: scrollAnchorID) { _, newValue in
-                        if selectedChip == .all, let newValue {
-                            ScrollAnchorStore.save(newValue, surface: "movies", playlistId: playlist.id)
-                        }
-                    }
-                    .onAppear { restoreScrollAnchor() }
-                    .onChange(of: displayCategories.map(\.id)) { _, _ in restoreScrollAnchor() }
-                    .onChange(of: selectedChip) { _, _ in restoreScrollAnchor() }
-                    } // ScrollViewReader
-                } // Build 81 (item 7): fixed-header VStack
+                }
+                .refreshable {
+                    // Independent Task: so the refreshable cancellation doesn't propagate to the requests (see LiveStreamsView).
+                    let work = Task { await contentStore.refreshFromNetwork(playlist: playlist, only: .vod) }
+                    await work.value
+                }
+                // Build 88 (F3): bottom scroll clearance so the
+                // floating tab bar never covers the last shelf /
+                // grid row of this tab.
+                .contentMargins(.bottom, 40, for: .scrollContent)
             }
         }
         .toolbar {
@@ -435,15 +459,19 @@ struct VODView: View {
 
     /// O9 restore: once the shelves exist (All chip), jump back to
     /// the persisted first-visible shelf — only when it is still in
-    /// the list and the position is not already there.
-    private func restoreScrollAnchor() {
+    /// the list. Build 89 (item 3): the jump is a one-shot
+    /// `proxy.scrollTo` — the build-61 bound `.scrollPosition(id:)`
+    /// assignment (which re-asserted the position on every publish)
+    /// is gone, so the equality guard went with it; scrolling to
+    /// the anchor already on screen is a visual no-op.
+    private func restoreScrollAnchor(proxy: ScrollViewProxy) {
         guard selectedChip == .all,
               !displayCategories.isEmpty,
               let saved = ScrollAnchorStore.anchor(surface: "movies", playlistId: playlist.id),
-              saved != scrollAnchorID,
               displayCategories.contains(where: { $0.id == saved })
         else { return }
         scrollAnchorID = saved
+        proxy.scrollTo(saved, anchor: .top)
     }
 
     /// Round 5 elite header, reordered in round 7 by the owner's direct
@@ -455,9 +483,10 @@ struct VODView: View {
             // Build 80 (item 4): a REAL text field (CatalogSearchField,
             // the same field global search uses) bound to the tab's own
             // query — typing filters this tab's catalog below.
-            // Build 81 (item 7): inset to the screen margin now that
-            // the header is a fixed block (the chips row and the
-            // count line already carry their own 16pt insets).
+            // Build 89 (item 3): the header scrolls with the content
+            // (owner's order); the screen-margin insets are unchanged
+            // (the chips row and the count line already carry their
+            // own 16pt insets).
             CatalogSearchField(text: $tabSearchText, placeholder: L("home.search_placeholder"))
             .padding(.top, 4)
             .padding(.horizontal, 16)
@@ -885,7 +914,17 @@ struct TopMoviesShelf: View, Equatable {
                             // rows use).
                             RankedPosterCard(
                                 rank: index + 1,
-                                imageURL: items[index].streamIcon.flatMap { ArtworkURL.url(from: $0) },
+                                // Build 89 (item 7): the same
+                                // artwork chain every other Movies
+                                // card uses (moviePosterCard /
+                                // VODStreamCard) — the record's
+                                // stored backdrop is the fallback
+                                // when the icon field is empty or
+                                // unusable. This call site passed
+                                // the icon ONLY, so a movie with a
+                                // dead/empty icon but a real
+                                // backdrop sat on the title card.
+                                imageURL: ArtworkURL.url(from: items[index].streamIcon) ?? ArtworkURL.url(from: items[index].backdropPath),
                                 title: items[index].name,
                                 ratingText: ContentRating.normalizedDisplayText(
                                     rating: items[index].rating,
@@ -897,7 +936,19 @@ struct TopMoviesShelf: View, Equatable {
                             )
                         }
                         .buttonStyle(.plain)
-                        .shelfEntrance(index: index, replayToken: replayToken)
+                        // Build 89 (item 7): NO shelfEntrance here
+                        // anymore. The B12 entrance rises each cell
+                        // 28 pt with a per-index stagger — while the
+                        // catalog is still publishing progressively,
+                        // this shelf mounts mid-load and its rising
+                        // cells render OVER the shelf below (the
+                        // overlap/ghosting in the owner's Movies
+                        // recording). The cells now render in place
+                        // from the first frame; the only fade left
+                        // is CachedImage's own in-place load
+                        // transition. (The replayToken property is
+                        // kept for the shelf's Equatable identity;
+                        // it no longer drives an entrance.)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -2037,9 +2088,17 @@ struct MovieCollectionsShelf: View, Equatable {
     /// poster URL is usable — the collection's best available
     /// artwork from its own items (the pattern the ranked rails
     /// already use for their representative pick).
+    /// Build 89 (item 7): if NO member's icon parses, fall back
+    /// to the first member backdrop that does — the same second
+    /// field the poster cards use; the card only reaches its
+    /// designed title card when the whole group carries no
+    /// usable artwork in either field.
     private func collectionArtworkURL(_ group: FranchiseGroup) -> URL? {
         for movie in group.movies {
             if let url = ArtworkURL.url(from: movie.streamIcon) { return url }
+        }
+        for movie in group.movies {
+            if let url = ArtworkURL.url(from: movie.backdropPath) { return url }
         }
         return nil
     }

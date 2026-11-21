@@ -181,14 +181,14 @@ private struct HistoryCardGridItem: View {
                     // cropped channel logos at the card edges.
                     if item.type == "live" {
                         LiveLogoArt(
-                            url: item.imageURL.flatMap { URL(string: $0) },
+                            url: item.imageURL.flatMap { ArtworkURL.url(from: $0) },
                             width: 160,
                             height: 95,
                             cornerRadius: AppTheme.smallCornerRadius
                         )
                     } else {
                         CachedImage(
-                            url: item.imageURL.flatMap { URL(string: $0) },
+                            url: item.imageURL.flatMap { ArtworkURL.url(from: $0) },
                             width: 160,
                             height: 95,
                             cornerRadius: 10,

@@ -141,8 +141,7 @@ struct ContinueWatchingRow<Destination: View>: View {
         case "series": backdrop = seriesRecord(for: item)?.backdropPath
         default: backdrop = nil
         }
-        guard let raw = backdrop?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
-        return URL(string: raw)
+        return ArtworkURL.url(from: backdrop)
     }
 
     /// "2026 • Drama" from the record's own fields (point 15).
@@ -175,7 +174,7 @@ struct HistoryCard: View {
     var metaText: String? = nil
 
     private var historyImageURL: URL? {
-        item.imageURL.flatMap { URL(string: $0) }
+        item.imageURL.flatMap { ArtworkURL.url(from: $0) }
     }
 
     var body: some View {

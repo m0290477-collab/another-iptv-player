@@ -68,7 +68,7 @@ struct DownloadsMoviePresentation: View {
             url: localURL,
             title: item.title,
             subtitle: item.secondaryTitle,
-            artworkURL: item.imageURL.flatMap { URL(string: $0) },
+            artworkURL: item.imageURL.flatMap { ArtworkURL.url(from: $0) },
             isLiveStream: false,
             playlistId: playlist.id,
             streamId: item.streamId,

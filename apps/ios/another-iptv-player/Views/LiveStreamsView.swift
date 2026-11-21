@@ -63,6 +63,12 @@ struct LiveStreamsView: View {
     @State private var gridSearchText = ""
     @State private var gridDebouncedQuery = ""
     @State private var gridDebounceTask: Task<Void, Never>?
+    /// Build 89 (item 3): the grid's sort/filter toggle state,
+    /// owned here because the sort/filter entry now lives in the
+    /// in-scroll header pill (the navigation bar is hidden on
+    /// this tab); it is passed into `LiveCategoryContent` as a
+    /// binding, which keeps the grid's processing unchanged.
+    @State private var gridFilter: LiveStreamFilter = []
     @State private var gridItems: [LiveStreamWithCategory] = []
     /// Build 80: the grid's "All" browse grouped by category —
     /// the SAME display set as `gridItems` before search/chip
@@ -294,45 +300,26 @@ struct LiveStreamsView: View {
         // (one per input) each re-fired the full pass on a tab
         // switch; their inputs all ride in `liveRecomputeToken`.
         .task(id: liveRecomputeToken) { await recomputeFilter() }
-        .toolbar {
-            // === B5 (build 61) Item 11: Multiview entry — wave-2 (B8) preserve this item ===
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showMultiview = true
-                } label: {
-                    Image(systemName: "rectangle.split.2x1")
-                        .font(.body.weight(.semibold))
-                }
-                .disabled(contentStore.liveCategories.isEmpty)
-                .accessibilityLabel(L("multiview.title"))
-            }
-            // === End B5 Item 11 entry ===
-            // Build 61 (B8, Z13): grid/list view toggle — one tap
-            // switches the main browsing surface; choice persists.
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    liveViewMode = liveViewMode == "grid" ? "list" : "grid"
-                } label: {
-                    Image(systemName: liveViewMode == "grid" ? "list.bullet" : "square.grid.2x2")
-                        .font(.body.weight(.semibold))
-                }
-                .accessibilityLabel(L(liveViewMode == "grid" ? "channels.view.list" : "channels.view.grid"))
-            }
-            // Round 8 (D-2): NO toolbar grid icon — AllLiveView was
-            // reachable twice from this tab (here + the Trending
-            // shelf's "See all"). The shelf entry stays as the ONE
-            // path, matching the Movies/Series treatment.
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showingCategoryPicker = true
-                } label: {
-                    Image(systemName: "list.bullet.indent")
-                        .font(.body.weight(.semibold))
-                }
-                .disabled(contentStore.liveCategories.isEmpty)
-                .accessibilityLabel(L("list.jump_to_category"))
-            }
-        }
+        // Build 89 (item 3): the navigation bar is HIDDEN on this
+        // tab — the owner's order is that the whole top block
+        // (title, toolbar pill, search, chips) scrolls WITH the
+        // content instead of staying pinned. The bar's actions
+        // (Favorites star, Multiview, grid/list toggle, category
+        // jump, and the grid's sort/filter) live in the in-scroll
+        // header pill now (`liveTabHeaderRow`), rendered as the
+        // first element of each mode's scroll flow; the scroll
+        // views keep the top safe area, so at rest the header
+        // sits below the status bar / Dynamic Island and slides
+        // away only when the user scrolls. Pushed screens (group
+        // pages, All Channels, Favorites) declare their own
+        // titles and get the bar back.
+        // === B5 (build 61) Item 11: Multiview entry — wave-2 (B8):
+        // the entry moved into the header pill (same action, same
+        // disabled state, same accessibility label) — see
+        // `liveTabHeaderRow`. ===
+        // Round 8 (D-2): still NO second AllLiveView entry — the
+        // Trending shelf's "See all" stays the ONE path.
+        .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showingCategoryPicker) {
             CategoryPickerSheet(
                 title: L("category_picker.title"),
@@ -432,7 +419,7 @@ struct LiveStreamsView: View {
                     url: url,
                     title: item.title,
                     subtitle: item.secondaryTitle,
-                    artworkURL: item.imageURL.flatMap { URL(string: $0) },
+                    artworkURL: item.imageURL.flatMap { ArtworkURL.url(from: $0) },
                     isLiveStream: false,
                     playlistId: playlist.id,
                     streamId: item.streamId,
@@ -444,19 +431,135 @@ struct LiveStreamsView: View {
         }
     }
 
+    /// Build 89 (item 3): the tab's title + toolbar pill, built
+    /// to sit INSIDE the scroll flow (the navigation bar is
+    /// hidden on this tab — see the body note). The pill carries
+    /// the exact actions the nav toolbar carried: the Favorites
+    /// star (the same `FavoritesView` destination the dashboard
+    /// chrome linked to), Multiview, the grid/list view toggle
+    /// and the category jump; the grid header additionally
+    /// carries the grid's sort/filter entry. One pill, one place
+    /// — no action exists twice on this tab.
+    @ViewBuilder
+    private func liveTabHeaderRow(includeSortFilter: Bool) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(L("dashboard.live"))
+                .font(.largeTitle.weight(.bold))
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            HStack(spacing: 2) {
+                NavigationLink {
+                    FavoritesView(playlist: playlist, initialType: "live")
+                } label: {
+                    Image(systemName: "star.fill")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L("favorites.title"))
+
+                // === B5 (build 61) Item 11: Multiview entry ===
+                Button {
+                    showMultiview = true
+                } label: {
+                    Image(systemName: "rectangle.split.2x1")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(contentStore.liveCategories.isEmpty)
+                .accessibilityLabel(L("multiview.title"))
+
+                // Build 61 (B8, Z13): grid/list view toggle — one
+                // tap switches the main browsing surface; the
+                // choice persists in AppStorage.
+                Button {
+                    liveViewMode = liveViewMode == "grid" ? "list" : "grid"
+                } label: {
+                    Image(systemName: liveViewMode == "grid" ? "list.bullet" : "square.grid.2x2")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L(liveViewMode == "grid" ? "channels.view.list" : "channels.view.grid"))
+
+                Button {
+                    showingCategoryPicker = true
+                } label: {
+                    Image(systemName: "list.bullet.indent")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(contentStore.liveCategories.isEmpty)
+                .accessibilityLabel(L("list.jump_to_category"))
+
+                if includeSortFilter {
+                    LiveSortFilterButton(filter: $gridFilter)
+                }
+            }
+            .padding(.horizontal, 6)
+            .background(Capsule().fill(AppTheme.elevated))
+            .overlay(Capsule().stroke(AppTheme.cardBorderColor, lineWidth: 1))
+        }
+        .padding(.horizontal, 16)
+    }
+
+    /// Build 89 (item 3): the grid mode's scroll header — title
+    /// row, the in-grid search field and the category chips, in
+    /// the order the pinned block had them, passed into
+    /// `LiveCategoryContent` to render as the first element of
+    /// its scroll flow. The search field keeps its build-63
+    /// wiring verbatim (same binding, same debounce below) — it
+    /// only changed position, from a pinned VStack above the
+    /// grid into the grid's own scroll content.
+    private var gridScrollHeader: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            liveTabHeaderRow(includeSortFilter: true)
+                .padding(.top, 8)
+            CatalogSearchField(text: $gridSearchText, placeholder: L("live.search_placeholder"))
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
+            // Build 65 (inside-sections design): category chips
+            // above the channel grid — the REAL provider
+            // categories, filtering the grid in place (the
+            // in-grid search above keeps its build-63 behavior
+            // across the full catalog).
+            if displayCategories.count > 1 {
+                SectionCategoryChips(
+                    categories: displayCategories,
+                    selectedCategoryId: $selectedCategoryId
+                )
+                .padding(.vertical, 6)
+            }
+        }
+    }
+
     /// Home header. Round 5 order was count → search → chips → hero.
     /// Round 7 (owner's direct order: "search must be at the top"): the
     /// search bar is the FIRST element under the title, above the count
     /// line and the hero. The tab still has exactly ONE search entry.
     /// Round 8 removed the chips row (see the init note), so the hero
     /// and Trending shelf render unconditionally.
+    /// Build 89 (item 3): the title + toolbar pill row now leads
+    /// the header (it scrolls with the shelves — it is inside the
+    /// same ScrollView).
     @ViewBuilder
     private var homeHeader: some View {
+        liveTabHeaderRow(includeSortFilter: false)
+            .padding(.top, 8)
+
         HomeSearchBar(placeholder: L("home.search_placeholder")) {
             showSearchSheet = true
         }
         .padding(.horizontal, 16)
-        .padding(.top, 4)
+        .padding(.top, 10)
 
         // B3: Favorites filter chip (the tab's one filter chip).
         HStack(spacing: 8) {
@@ -529,47 +632,36 @@ struct LiveStreamsView: View {
     /// number, as-you-type) atop the large logo grid. The grid itself
     /// is the SAME `LiveCategoryContent` the category screens use
     /// (one card system, O3), fed every visible channel.
+    /// Build 89 (item 3): the search field + chips are no longer
+    /// pinned in a VStack above the grid — the whole top block
+    /// (title row, search, chips) is passed in as the grid's
+    /// `scrollHeader` and renders as the first element of the
+    /// grid's own scroll flow.
     private var gridContent: some View {
-        VStack(spacing: 0) {
-            CatalogSearchField(text: $gridSearchText, placeholder: L("live.search_placeholder"))
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 4)
-            // Build 65 (inside-sections design): category chips
-            // above the channel grid — the REAL provider
-            // categories, filtering the grid in place (the
-            // in-grid search above keeps its build-63 behavior
-            // across the full catalog).
-            if displayCategories.count > 1 {
-                SectionCategoryChips(
-                    categories: displayCategories,
-                    selectedCategoryId: $selectedCategoryId
-                )
-                .padding(.vertical, 6)
+        // Build 80: browsing "All" (no category chip, no
+        // active search) renders the grid GROUPED by category
+        // with a section header per group; a chip selection or
+        // an active search keeps the flat presentation exactly
+        // as before (nil sections).
+        LiveCategoryContent(
+            playlist: playlist,
+            items: gridItems,
+            groupedSections: (selectedCategoryId == nil
+                && gridDebouncedQuery.trimmingCharacters(in: .whitespaces).isEmpty)
+                ? gridSections : nil,
+            filter: $gridFilter,
+            scrollHeader: AnyView(gridScrollHeader),
+            onStreamSelected: { stream, history in
+                presentLiveSelection(LivePlayerSelection(stream: stream, history: history))
             }
-            // Build 80: browsing "All" (no category chip, no
-            // active search) renders the grid GROUPED by category
-            // with a section header per group; a chip selection or
-            // an active search keeps the flat presentation exactly
-            // as before (nil sections).
-            LiveCategoryContent(
-                playlist: playlist,
-                items: gridItems,
-                groupedSections: (selectedCategoryId == nil
-                    && gridDebouncedQuery.trimmingCharacters(in: .whitespaces).isEmpty)
-                    ? gridSections : nil,
-                onStreamSelected: { stream, history in
-                    presentLiveSelection(LivePlayerSelection(stream: stream, history: history))
-                }
-            )
-            .equatable()
-            // Build 88 (F3): the floating tab bar pill overlays
-            // this tab's content — reserve its height at the
-            // bottom of the scroll surface so the last shelf/row
-            // never rests under it.
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                Color.clear.frame(height: LiveTabBarClearance.height)
-            }
+        )
+        .equatable()
+        // Build 88 (F3): the floating tab bar pill overlays
+        // this tab's content — reserve its height at the
+        // bottom of the scroll surface so the last shelf/row
+        // never rests under it.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear.frame(height: LiveTabBarClearance.height)
         }
         .onChange(of: gridSearchText) { _, new in
             gridDebounceTask?.cancel()
@@ -974,7 +1066,7 @@ struct LiveCategoryShelfRow: View, Equatable {
     private func prefetchIcons(from list: [LiveStreamWithCategory]) {
         let urls = list.prefix(CategoryShelf.prefetchHeadCount)
             .compactMap { $0.stream.streamIcon }
-            .compactMap { URL(string: $0) }
+            .compactMap { ArtworkURL.url(from: $0) }
         ListImagePrefetch.start(
             urls: urls,
             width: LiveChannelTileMetrics.logoWidth,
@@ -990,7 +1082,7 @@ struct LiveCategoryShelfRow: View, Equatable {
         guard start < list.count else { return }
         let urls = list[start..<min(start + ListImagePrefetch.scrollWindow, list.count)]
             .compactMap { $0.stream.streamIcon }
-            .compactMap { URL(string: $0) }
+            .compactMap { ArtworkURL.url(from: $0) }
         ListImagePrefetch.start(
             urls: urls,
             width: LiveChannelTileMetrics.logoWidth,
@@ -1002,7 +1094,7 @@ struct LiveCategoryShelfRow: View, Equatable {
     private func stopPrefetchIcons(from list: [LiveStreamWithCategory]) {
         let urls = list.prefix(CategoryShelf.prefetchHeadCount)
             .compactMap { $0.stream.streamIcon }
-            .compactMap { URL(string: $0) }
+            .compactMap { ArtworkURL.url(from: $0) }
         ListImagePrefetch.stop(
             urls: urls,
             width: LiveChannelTileMetrics.logoWidth,
@@ -1034,7 +1126,7 @@ struct LiveStreamCard: View {
         }) {
             VStack(alignment: .center, spacing: 10) {
                 CachedImage(
-                    url: stream.streamIcon.flatMap { URL(string: $0) },
+                    url: stream.streamIcon.flatMap { ArtworkURL.url(from: $0) },
                     width: iconSize,
                     height: iconSize,
                     cornerRadius: AppTheme.cornerRadius,
@@ -1107,12 +1199,16 @@ enum LiveTabBarClearance {
 /// Shared geometry for the wide Live TV tile (build 88) — the
 /// shelf rows, the grouped browse and the prefetch requests all
 /// size from here, so a logo is decoded once at the size every
-/// surface renders.
+/// surface renders. Build 89 (item 4): the owner liked the wide
+/// tiles but found them a bit too big — the fixed shelf size
+/// shrinks modestly (216×122 → 192×108, the same 16:9 family);
+/// the grid surfaces use the tile's flexible-width form, whose
+/// card follows its grid cell at the same 16:9 ratio.
 enum LiveChannelTileMetrics {
-    static let width: CGFloat = 216
-    static let height: CGFloat = 122
-    static let logoWidth: CGFloat = 148
-    static let logoHeight: CGFloat = 82
+    static let width: CGFloat = 192
+    static let height: CGFloat = 108
+    static let logoWidth: CGFloat = 132
+    static let logoHeight: CGFloat = 74
 }
 
 /// Build 88: the approved mockup's press treatment for the wide
@@ -1166,6 +1262,14 @@ struct LiveChannelTile: View {
     let playlistId: UUID
     let stream: DBLiveStream
     var imageLoadProfile: ImageLoadProfile = .shelf
+    /// Build 89 (item 4): the grid form of the same tile — the
+    /// card fills its grid cell's width at the family's 16:9
+    /// ratio instead of the fixed shelf size, so every channel
+    /// surface (shelves, grouped browse, flat grids) renders ONE
+    /// tile system at any screen width. The logo request size is
+    /// the shared metrics size in both forms, so a channel's logo
+    /// is decoded once and reused across surfaces.
+    var flexibleWidth: Bool = false
     var onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil
 
     // The same badge stores the square card reads (NEW / pin /
@@ -1175,9 +1279,24 @@ struct LiveChannelTile: View {
     @ObservedObject private var audioOnlyStore = AudioOnlyStore.shared
 
     var body: some View {
-        Button {
-            onStreamSelected?(stream, nil)
-        } label: {
+        if flexibleWidth {
+            Button {
+                onStreamSelected?(stream, nil)
+            } label: {
+                tileLabel
+            }
+            .buttonStyle(PressScaleButtonStyle())
+        } else {
+            Button {
+                onStreamSelected?(stream, nil)
+            } label: {
+                tileLabel
+            }
+            .buttonStyle(LiveTileButtonStyle())
+        }
+    }
+
+    private var tileLabel: some View {
             VStack(alignment: .center, spacing: 8) {
                 ZStack {
                     RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
@@ -1185,7 +1304,7 @@ struct LiveChannelTile: View {
                     RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
                         .stroke(AppTheme.cardBorderColor, lineWidth: 1)
                     CachedImage(
-                        url: stream.streamIcon.flatMap { URL(string: $0) },
+                        url: stream.streamIcon.flatMap { ArtworkURL.url(from: $0) },
                         width: LiveChannelTileMetrics.logoWidth,
                         height: LiveChannelTileMetrics.logoHeight,
                         cornerRadius: AppTheme.smallCornerRadius,
@@ -1193,7 +1312,10 @@ struct LiveChannelTile: View {
                         loadProfile: imageLoadProfile
                     )
                 }
-                .frame(width: LiveChannelTileMetrics.width, height: LiveChannelTileMetrics.height)
+                .frame(width: flexibleWidth ? nil : LiveChannelTileMetrics.width,
+                       height: flexibleWidth ? nil : LiveChannelTileMetrics.height)
+                .frame(maxWidth: flexibleWidth ? .infinity : nil)
+                .aspectRatio(flexibleWidth ? 16.0 / 9.0 : nil, contentMode: .fit)
                 .overlay(alignment: .topLeading) {
                     if firstSeenStore.isNewLive(playlistId: playlistId, streamId: stream.streamId) {
                         NewContentBadge()
@@ -1224,7 +1346,8 @@ struct LiveChannelTile: View {
                     .font(.subheadline.weight(.medium))
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
-                    .frame(width: LiveChannelTileMetrics.width)
+                    .frame(width: flexibleWidth ? nil : LiveChannelTileMetrics.width)
+                    .frame(maxWidth: flexibleWidth ? .infinity : nil)
                     .foregroundColor(.primary)
 
                 // The provider's own channel number, only when the
@@ -1237,8 +1360,6 @@ struct LiveChannelTile: View {
                         .lineLimit(1)
                 }
             }
-        }
-        .buttonStyle(LiveTileButtonStyle())
     }
 }
 
@@ -1248,16 +1369,16 @@ struct LiveChannelTile: View {
 /// signal in the catalog, so the row is deterministic: the FIRST channel of
 /// each visible category, in category order (round 3 — one per category
 /// keeps the tiles diverse instead of repeating one category's logos).
-/// Tiles are the existing `LiveStreamCard` (real logo, name, and real EPG
-/// now-line). "See all" opens the existing All Channels grid — the tab's
-/// ONE all-grid entry (round 8 dedupe removed the toolbar grid button
-/// that duplicated it).
+/// Tiles are the shared wide `LiveChannelTile` (real logo, name) — the
+/// same tile every other Live TV shelf uses (build 89 unification; this
+/// shelf previously rendered the small square `LiveStreamCard`). "See
+/// all" opens the existing All Channels grid — the tab's ONE all-grid
+/// entry (round 8 dedupe removed the toolbar grid button that
+/// duplicated it).
 struct TrendingChannelsShelf: View {
     let playlist: Playlist
     let items: [DBLiveStream]
     var onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil
-
-    @Environment(\.posterMetrics) private var posterMetrics
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1270,11 +1391,13 @@ struct TrendingChannelsShelf: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(items.indices, id: \.self) { index in
-                        LiveStreamCard(
+                        // Build 89 (item 4 unification): the wide
+                        // glass logo tile replaces the small square
+                        // card here too — same tile as the category
+                        // shelves (see LiveCategoryShelfRow).
+                        LiveChannelTile(
                             playlistId: playlist.id,
                             stream: items[index],
-                            width: posterMetrics.liveShelfLabelWidth,
-                            iconSize: posterMetrics.liveShelfIcon,
                             imageLoadProfile: .shelf
                         ) { stream, history in
                             onStreamSelected?(stream, history)
@@ -1299,7 +1422,7 @@ struct TrendingChannelsShelf: View {
     }
 
     /// Round 9 (owner recording, build 45): the trending tiles and the
-    /// category-shelf tiles are the SAME `LiveStreamCard` with the same
+    /// category-shelf tiles are the SAME tile with the same
     /// URL field (`streamIcon`), size and profile — but the category
     /// shelves prefetch their head icons with the exact render request
     /// (see `LiveCategoryShelfRow.prefetchIcons`) while this shelf never
@@ -1312,11 +1435,11 @@ struct TrendingChannelsShelf: View {
     private func prefetchIcons(from list: [DBLiveStream]) {
         let urls = list.prefix(CategoryShelf.prefetchHeadCount)
             .compactMap { $0.streamIcon }
-            .compactMap { URL(string: $0) }
+            .compactMap { ArtworkURL.url(from: $0) }
         ListImagePrefetch.start(
             urls: urls,
-            width: posterMetrics.liveShelfIcon,
-            height: posterMetrics.liveShelfIcon,
+            width: LiveChannelTileMetrics.logoWidth,
+            height: LiveChannelTileMetrics.logoHeight,
             loadProfile: .shelf
         )
     }
@@ -1452,7 +1575,7 @@ struct LiveCategoryDetailView: View {
             } label: {
                 HStack(spacing: 12) {
                     CachedImage(
-                        url: item.stream.streamIcon.flatMap { URL(string: $0) },
+                        url: item.stream.streamIcon.flatMap { ArtworkURL.url(from: $0) },
                         width: 76,
                         height: 46,
                         cornerRadius: AppTheme.smallCornerRadius,
@@ -1601,6 +1724,24 @@ struct LiveCategoryDetailView: View {
     }
 }
 
+/// Build 89 (item 5): ONE recompute trigger for `LiveCategoryContent`
+/// — the same build-75 pattern the tab root uses. The grid used to
+/// carry six separate `.task(id:)` modifiers (items signature, sort,
+/// health revision, filter, pinned version, hidden version), so one
+/// appearance or one store bump could queue several full-catalog
+/// passes, each republishing the display model and resetting the
+/// pagination budget — a core part of why the "All" browse staggered
+/// in shelf by shelf. Every input rides in this token; the pass runs
+/// once per actual change set.
+private struct LiveGridRecomputeToken: Equatable {
+    let items: Int
+    let sort: String
+    let filterRaw: Int
+    let healthRevision: Int
+    let pinnedVersion: Int
+    let hiddenVersion: Int
+}
+
 struct LiveCategoryContent: View, Equatable {
     let playlist: Playlist
     let items: [LiveStreamWithCategory]
@@ -1611,6 +1752,19 @@ struct LiveCategoryContent: View, Equatable {
     /// category detail screen, a chip-filtered or searched grid)
     /// keep the flat presentation unchanged.
     let groupedSections: [LiveChannelGridSection]?
+    /// Build 89 (item 3): the toggle filters are owned by the
+    /// caller now — the tab's sort/filter entry lives in its
+    /// in-scroll header pill, which writes the same binding this
+    /// view's processing reads. All Channels passes its own
+    /// state binding; the processing itself is unchanged.
+    @Binding var filter: LiveStreamFilter
+    /// Build 89 (item 3): an optional header rendered as the
+    /// FIRST element of this view's scroll flow (the tab passes
+    /// its title row + search field + category chips; pushed
+    /// surfaces like All Channels pass nil and keep their
+    /// navigation-bar chrome). Ignored by the `==` signature,
+    /// like the selection closure.
+    let scrollHeader: AnyView?
     var onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil
 
     /// Cheap signature compare (ignores the selection closure) so a parent @Published
@@ -1618,6 +1772,12 @@ struct LiveCategoryContent: View, Equatable {
     /// @State updates still invalidate normally.
     static func == (lhs: LiveCategoryContent, rhs: LiveCategoryContent) -> Bool {
         lhs.playlist.id == rhs.playlist.id
+            // Build 89 (item 3): the filter binding is compared by
+            // value — the view's output depends on it, and the tab
+            // wraps this view in `.equatable()`, so a filter change
+            // must read as a change here (its own recompute token
+            // carries it too; this is the guaranteed parent path).
+            && lhs.filter.rawValue == rhs.filter.rawValue
             && lhs.items.count == rhs.items.count
             && lhs.items.first?.stream.streamId == rhs.items.first?.stream.streamId
             && lhs.items.last?.stream.streamId == rhs.items.last?.stream.streamId
@@ -1626,14 +1786,9 @@ struct LiveCategoryContent: View, Equatable {
             && lhs.groupedSections?.last?.id == rhs.groupedSections?.last?.id
     }
 
-    @Environment(\.posterMetrics) private var posterMetrics
-
     @AppStorage(LiveSortOption.storageKey) private var sortOption: LiveSortOption = .defaultOrder
     // Build 61 (B9, Q10): dead-channel markings (hide-dead filter).
     @ObservedObject private var channelHealth = ChannelHealthStore.shared
-    @State private var showSortSheet = false
-    /// Screen-local toggle filters (catch-up / EPG).
-    @State private var filter: LiveStreamFilter = []
     /// Sort/filter output, recomputed off the main thread on input changes.
     @State private var displayItems: [LiveStreamWithCategory] = []
     /// Build 80: grouped render output — the per-category sections
@@ -1648,10 +1803,12 @@ struct LiveCategoryContent: View, Equatable {
     @ObservedObject private var hiddenChannelStore = HiddenChannelStore.shared
     @Query<FavoriteLiveRequest> private var favoriteLiveChannels: [LiveStreamWithCategory]
 
-    init(playlist: Playlist, items: [LiveStreamWithCategory], groupedSections: [LiveChannelGridSection]? = nil, onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil) {
+    init(playlist: Playlist, items: [LiveStreamWithCategory], groupedSections: [LiveChannelGridSection]? = nil, filter: Binding<LiveStreamFilter>, scrollHeader: AnyView? = nil, onStreamSelected: ((DBLiveStream, DBWatchHistory?) -> Void)? = nil) {
         self.playlist = playlist
         self.items = items
         self.groupedSections = groupedSections
+        self._filter = filter
+        self.scrollHeader = scrollHeader
         self.onStreamSelected = onStreamSelected
         _favoriteLiveChannels = Query(FavoriteLiveRequest(playlistId: playlist.id), in: \.appDatabase)
     }
@@ -1673,8 +1830,17 @@ struct LiveCategoryContent: View, Equatable {
         return hasher.finalize()
     }
 
-    private var isFilterActive: Bool {
-        sortOption != .defaultOrder || !filter.isEmpty
+    /// Build 89 (item 5): the single recompute trigger (see
+    /// `LiveGridRecomputeToken`).
+    private var gridRecomputeToken: LiveGridRecomputeToken {
+        LiveGridRecomputeToken(
+            items: itemsToken,
+            sort: sortOption.rawValue,
+            filterRaw: filter.rawValue,
+            healthRevision: channelHealth.revision,
+            pinnedVersion: pinnedStore.version,
+            hiddenVersion: hiddenChannelStore.version
+        )
     }
 
     private func recompute() async {
@@ -1700,6 +1866,16 @@ struct LiveCategoryContent: View, Equatable {
         let hidden = hiddenChannelStore.hiddenIds(playlistId: playlist.id)
         let pinned = pinnedStore.pinnedIds(playlistId: playlist.id)
         let favorites = Set(favoriteLiveChannels.map(\.stream.streamId))
+        // Build 89 (item 5): the common case — default order, no
+        // toggle filter, nothing hidden/dead/pinned and no
+        // favorites — makes every processing step the identity
+        // (the filter and the default sort return their input;
+        // the tier sort with two empty sets preserves order), so
+        // the pass can return each list untouched instead of
+        // running five filter/sort/partition walks per section
+        // over the whole catalog.
+        let isIdentity = sort == .defaultOrder && activeFilter.isEmpty
+            && hidden.isEmpty && dead.isEmpty && pinned.isEmpty && favorites.isEmpty
         let result = await Task.detached(priority: .userInitiated) { () -> (
             flat: [LiveStreamWithCategory],
             sections: [LiveChannelGridSection]
@@ -1708,6 +1884,7 @@ struct LiveCategoryContent: View, Equatable {
             // presentations: toggle filter → hidden channels →
             // dead channels → sort → pinned/favorites tier.
             func process(_ list: [LiveStreamWithCategory]) -> [LiveStreamWithCategory] {
+                if isIdentity { return list }
                 var base = LiveStreamFilter.apply(list, activeFilter)
                 base = base.filter { !hidden.contains($0.stream.streamId) }
                 if !dead.isEmpty {
@@ -1740,10 +1917,35 @@ struct LiveCategoryContent: View, Equatable {
             }
             return (process(source), [])
         }.value
+        guard !Task.isCancelled else { return }
+        let newGrouped = grouping && !result.sections.isEmpty
+        // Build 89 (item 5): publish only on a real change. The
+        // parent republishes the grid model on catalog events
+        // whose signature is unchanged for this surface (same
+        // counts, same first/last channels, same sections) —
+        // reassigning the @State values anyway invalidated the
+        // body and re-diffed the whole shelf stack for nothing.
+        // The signature follows this file's existing cheap
+        // compare convention (counts + boundary ids).
+        let unchanged = displayGrouped == newGrouped
+            && displayItems.count == result.flat.count
+            && displayItems.first?.stream.streamId == result.flat.first?.stream.streamId
+            && displayItems.last?.stream.streamId == result.flat.last?.stream.streamId
+            && displaySections.count == result.sections.count
+            && displaySections.first?.id == result.sections.first?.id
+            && displaySections.last?.id == result.sections.last?.id
+            && displaySections.reduce(0) { $0 + $1.items.count } == result.sections.reduce(0) { $0 + $1.items.count }
+        if unchanged { return }
         displayItems = result.flat
         displaySections = result.sections
-        displayGrouped = grouping && !result.sections.isEmpty
-        visibleCount = min(Self.pageSize, result.flat.count)
+        displayGrouped = newGrouped
+        // Build 89 (item 5): the flat pagination budget is
+        // PRESERVED across recomputes (clamped to the new total)
+        // instead of resetting to one page — a reset after the
+        // user had paged deep restarted the reveal cascade and
+        // collapsed the scroll content under them. The grouped
+        // presentation no longer paginates at all (see the body).
+        visibleCount = min(max(visibleCount, min(Self.pageSize, result.flat.count)), result.flat.count)
         prefetch(result.flat)
     }
 
@@ -1758,40 +1960,19 @@ struct LiveCategoryContent: View, Equatable {
         prefetch(displayItems, startingAt: pageStart)
     }
 
-    /// Build 80: the grouped presentation's visible slices — the
-    /// pagination budget (`visibleCount`, counted over the
-    /// flattened display order) consumed across the sections in
-    /// order. Each slice carries its offset in the flattened order
-    /// so a cell's load-more trigger is the same check the flat
-    /// grid makes.
-    private var groupedVisibleSlices: [(section: LiveChannelGridSection, items: [LiveStreamWithCategory], offset: Int)] {
-        guard displayGrouped else { return [] }
-        var remaining = visibleCount
-        var offset = 0
-        var slices: [(section: LiveChannelGridSection, items: [LiveStreamWithCategory], offset: Int)] = []
-        for section in displaySections {
-            if remaining <= 0 { break }
-            let slice = Array(section.items.prefix(remaining))
-            if !slice.isEmpty {
-                slices.append((section: section, items: slice, offset: offset))
-            }
-            remaining -= slice.count
-            offset += section.items.count
-        }
-        return slices
-    }
-
-    /// The channel cell — ONE implementation shared by the flat
-    /// and grouped grids, so the tile rendering (logo + name card
-    /// and its context menu) is identical in both presentations.
+    /// The flat grid's channel cell. Build 89 (item 4): the
+    /// wide-tile system now covers the flat browse too — the
+    /// old small square `LiveStreamCard` grid is gone from every
+    /// Live TV surface. The tile renders in its flexible-width
+    /// form (the card follows the grid cell at 16:9); the
+    /// context menu is the same one the shelves use.
     @ViewBuilder
     private func channelCell(_ item: LiveStreamWithCategory) -> some View {
-        LiveStreamCard(
+        LiveChannelTile(
             playlistId: playlist.id,
             stream: item.stream,
-            width: posterMetrics.liveGridIconSize,
-            iconSize: posterMetrics.liveGridIconSize,
             imageLoadProfile: .grid,
+            flexibleWidth: true,
             onStreamSelected: onStreamSelected
         )
         .liveCardContextMenu(
@@ -1802,22 +1983,55 @@ struct LiveCategoryContent: View, Equatable {
         )
     }
 
+    /// The flat grid's cells (paginated — a flat grid of
+    /// thousands of channels genuinely needs the budget; the
+    /// grouped shelves do not, see the body).
+    @ViewBuilder
+    private var flatCells: some View {
+        ForEach(Array(displayItems.prefix(visibleCount).enumerated()), id: \.element.stream.streamId) { index, item in
+            channelCell(item)
+                .onAppear { if index >= visibleCount - 15 { loadMore() } }
+        }
+    }
+
+    /// Warm a grouped section's head logos as the section
+    /// materializes — the same head-prefetch the category shelf
+    /// rows run (bounded, exact tile request, so the logos are
+    /// decoded before the shelf's tiles ask for them).
+    private func prefetchSectionHead(_ items: [LiveStreamWithCategory]) {
+        let urls = items.prefix(CategoryShelf.prefetchHeadCount)
+            .compactMap { $0.stream.streamIcon }
+            .compactMap { ArtworkURL.url(from: $0) }
+        ListImagePrefetch.start(
+            urls: urls,
+            width: LiveChannelTileMetrics.logoWidth,
+            height: LiveChannelTileMetrics.logoHeight,
+            loadProfile: .grid
+        )
+    }
+
     var body: some View {
         Group {
             if displayItems.isEmpty {
-                VStack(spacing: 12) {
-                    Spacer()
-                    Image(systemName: "magnifyingglass")
-                        .font(.largeTitle)
-                        .foregroundColor(.secondary)
-                    Text(L("list.no_channel"))
-                        .foregroundColor(.secondary)
-                    Spacer()
+                // Build 89 (item 3): with a scroll header in play
+                // (the tab), the header stays reachable above the
+                // empty state — a search with no results must keep
+                // its field so the user can edit or clear it.
+                VStack(spacing: 0) {
+                    if let scrollHeader {
+                        scrollHeader
+                    }
+                    VStack(spacing: 12) {
+                        Spacer()
+                        Image(systemName: "magnifyingglass")
+                            .font(.largeTitle)
+                            .foregroundColor(.secondary)
+                        Text(L("list.no_channel"))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
                 }
             } else {
-                let columns = [
-                    GridItem(.adaptive(minimum: posterMetrics.liveGridIconSize), spacing: posterMetrics.gridSpacing)
-                ]
                 ScrollView {
                     if displayGrouped {
                         // Build 80: one headed section per category
@@ -1825,17 +2039,33 @@ struct LiveCategoryContent: View, Equatable {
                         // groups are never built. Build 88 (Part
                         // 2-A): each group renders as a SHELF of the
                         // wide glass logo tiles (the approved
-                        // livetv-max mockup) instead of the small
-                        // multi-column grid — the pagination budget
-                        // and its load-more triggers are unchanged.
+                        // livetv-max mockup).
+                        // Build 89 (item 5): the grouped browse no
+                        // longer paginates. The 90-item budget was
+                        // the stagger: the LazyVStack materialized
+                        // newly-budgeted sections, their tiles'
+                        // onAppear fired the next load-more, and
+                        // the cascade chained ~76 rounds for a
+                        // ~6.8k catalog — shelves popping in one by
+                        // one for ~16 s with the pagination spinner
+                        // up throughout. Laziness here is already
+                        // structural (the LazyVStack builds only
+                        // near-viewport sections; each shelf's
+                        // LazyHStack builds only near-viewport
+                        // tiles), so ALL sections render at once,
+                        // settled — the same instant-complete
+                        // behaviour the single-category page has.
                         LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(groupedVisibleSlices, id: \.section.id) { slice in
+                            if let scrollHeader {
+                                scrollHeader
+                            }
+                            ForEach(displaySections) { section in
                                 VStack(alignment: .leading, spacing: 10) {
-                                    LiveGridSectionHeader(playlist: playlist, section: slice.section)
-                                        .padding(.top, slice.offset == 0 ? 6 : 22)
+                                    LiveGridSectionHeader(playlist: playlist, section: section)
+                                        .padding(.top, section.id == displaySections.first?.id ? 6 : 22)
                                     ScrollView(.horizontal, showsIndicators: false) {
                                         LazyHStack(alignment: .top, spacing: 14) {
-                                            ForEach(Array(slice.items.enumerated()), id: \.element.stream.streamId) { index, item in
+                                            ForEach(Array(section.items.enumerated()), id: \.element.stream.streamId) { index, item in
                                                 LiveChannelTile(
                                                     playlistId: playlist.id,
                                                     stream: item.stream,
@@ -1850,26 +2080,51 @@ struct LiveCategoryContent: View, Equatable {
                                                     categoryName: item.categoryName
                                                 )
                                                 .shelfCardAppear(index: index)
-                                                .onAppear { if slice.offset + index >= visibleCount - 15 { loadMore() } }
                                             }
                                         }
                                         .padding(.horizontal, 16)
                                     }
                                 }
+                                .onAppear { prefetchSectionHead(section.items) }
                             }
                         }
                         .padding(.bottom)
                     } else {
-                        LazyVGrid(columns: columns, spacing: posterMetrics.gridRowSpacing) {
-                            ForEach(Array(displayItems.prefix(visibleCount).enumerated()), id: \.element.stream.streamId) { index, item in
-                                channelCell(item)
-                                    .onAppear { if index >= visibleCount - 15 { loadMore() } }
+                        // Build 89 (item 4): the flat browse uses
+                        // the same wide tile, in flexible-width
+                        // form, on adaptive columns (two across on
+                        // a phone, more on wider screens — the
+                        // layout follows the width automatically).
+                        LazyVGrid(columns: [
+                            GridItem(.adaptive(minimum: 168), spacing: 14)
+                        ], spacing: 18) {
+                            if let scrollHeader {
+                                Section {
+                                    flatCells
+                                } header: {
+                                    // The grid's horizontal
+                                    // padding wraps the header
+                                    // too — cancel it so the
+                                    // header's rows (which carry
+                                    // the standard 16 pt inset
+                                    // themselves) align with the
+                                    // tiles below.
+                                    scrollHeader
+                                        .padding(.horizontal, -16)
+                                }
+                            } else {
+                                flatCells
                             }
                         }
-                        .padding()
+                        .padding(.horizontal)
+                        .padding(.bottom)
+                        .padding(.top, scrollHeader == nil ? 16 : 0)
                     }
 
-                    if visibleCount < displayItems.count {
+                    // The pagination spinner belongs to the FLAT
+                    // browse only — the grouped browse renders its
+                    // full model at once (item 5).
+                    if !displayGrouped, visibleCount < displayItems.count {
                         BrandedLoader(size: 28)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 24)
@@ -1879,28 +2134,54 @@ struct LiveCategoryContent: View, Equatable {
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                sortFilterMenu
+                LiveSortFilterButton(filter: $filter)
             }
         }
-        .task(id: itemsToken) { await recompute() }
-        .task(id: sortOption) { await recompute() }
-        .task(id: channelHealth.revision) { await recompute() }
-        .task(id: filter.rawValue) { await recompute() }
-        // Build 61 (B8): pin/hide changes re-run the same recompute.
-        .task(id: pinnedStore.version) { await recompute() }
-        .task(id: hiddenChannelStore.version) { await recompute() }
+        // Build 89 (item 5): ONE recompute task for the whole
+        // input set (see `LiveGridRecomputeToken`) — replaces the
+        // six per-input `.task(id:)` modifiers.
+        .task(id: gridRecomputeToken) { await recompute() }
     }
 
-    /// Round 10 (point 13): the raw popover `Menu` is now the
-    /// styled `SortFilterSheet` bottom sheet — same state, same
-    /// options, same toggle/clear behavior.
-    private var sortFilterMenu: some View {
+    private func prefetch(_ list: [LiveStreamWithCategory], startingAt: Int = 0) {
+        let urls = list.dropFirst(startingAt).prefix(ListImagePrefetch.maxBatch)
+            .compactMap { $0.stream.streamIcon }
+            .compactMap { ArtworkURL.url(from: $0) }
+        // Build 89 (item 4): the flat grid renders the wide tile
+        // now — warm its exact logo request (metrics size, grid
+        // profile), not the retired square card's.
+        ListImagePrefetch.start(urls: urls, width: LiveChannelTileMetrics.logoWidth, height: LiveChannelTileMetrics.logoHeight, loadProfile: .grid)
+    }
+}
+
+/// Build 89 (item 3): the Live grid's sort/filter entry — ONE
+/// component carrying the button + its `SortFilterSheet` (round
+/// 10: the styled bottom sheet that replaced the raw popover
+/// menu — same options, same toggle/clear behavior). It is used
+/// by the tab's in-scroll header pill (the navigation bar is
+/// hidden there) and by All Channels' navigation toolbar alike;
+/// both instances drive the same AppStorage sort key and the
+/// caller's filter binding, so the two surfaces can never
+/// disagree about the grid's state.
+private struct LiveSortFilterButton: View {
+    @AppStorage(LiveSortOption.storageKey) private var sortOption: LiveSortOption = .defaultOrder
+    @Binding var filter: LiveStreamFilter
+    @State private var showSortSheet = false
+
+    private var isFilterActive: Bool {
+        sortOption != .defaultOrder || !filter.isEmpty
+    }
+
+    var body: some View {
         Button {
             showSortSheet = true
         } label: {
             Image(systemName: isFilterActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                 .font(.body.weight(.semibold))
+                .frame(width: 40, height: 40)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(L("sort.title"))
         .sheet(isPresented: $showSortSheet) {
             SortFilterSheet(
@@ -1931,13 +2212,6 @@ struct LiveCategoryContent: View, Equatable {
                 onClearFilters: { filter = []; sortOption = .defaultOrder }
             )
         }
-    }
-
-    private func prefetch(_ list: [LiveStreamWithCategory], startingAt: Int = 0) {
-        let urls = list.dropFirst(startingAt).prefix(ListImagePrefetch.maxBatch)
-            .compactMap { $0.stream.streamIcon }
-            .compactMap { URL(string: $0) }
-        ListImagePrefetch.start(urls: urls, width: posterMetrics.liveGridIconSize, height: posterMetrics.liveGridIconSize, loadProfile: .grid)
     }
 }
 
@@ -1994,6 +2268,11 @@ struct AllLiveView: View {
     @State private var debouncedQuery = ""
     @State private var debounceTask: Task<Void, Never>?
     @State private var displayItems: [LiveStreamWithCategory] = []
+    /// Build 89 (item 3): this page's sort/filter toggle state,
+    /// passed into `LiveCategoryContent` as a binding (the state
+    /// used to live inside that view; its toolbar entry renders
+    /// the shared `LiveSortFilterButton` against this binding).
+    @State private var contentFilter: LiveStreamFilter = []
     /// Build 80: the browsed (unsearched) list grouped by
     /// category, built in this view's own detached recompute;
     /// empty while a search is active (search stays flat).
@@ -2006,6 +2285,7 @@ struct AllLiveView: View {
             playlist: playlist,
             items: displayItems,
             groupedSections: allSections.isEmpty ? nil : allSections,
+            filter: $contentFilter,
             onStreamSelected: { stream, history in
                 let all = currentStreams
                 playerOverlay.present(playlistId: playlist.id) {
@@ -2129,7 +2409,7 @@ struct LivePlayerShell: View {
                     ChannelPanelItem(
                         id: String(stream.streamId),
                         name: stream.name,
-                        iconURL: stream.streamIcon.flatMap { URL(string: $0) }
+                        iconURL: stream.streamIcon.flatMap { ArtworkURL.url(from: $0) }
                     )
                 }
             )
@@ -2179,7 +2459,7 @@ struct LivePlayerShell: View {
                     url: url,
                     title: session.stream.name,
                     subtitle: liveSubtitle,
-                    artworkURL: session.stream.streamIcon.flatMap { URL(string: $0) },
+                    artworkURL: session.stream.streamIcon.flatMap { ArtworkURL.url(from: $0) },
                     isLiveStream: true,
                     playlistId: playlist.id,
                     streamId: String(session.stream.streamId),

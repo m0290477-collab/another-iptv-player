@@ -453,7 +453,7 @@ struct M3UGroupShelfRow: View, Equatable {
         guard start < end else { return }
         let urls = items[start..<end]
             .compactMap { $0.tvgLogo }
-            .compactMap { URL(string: $0) }
+            .compactMap { ArtworkURL.url(from: $0) }
         guard !urls.isEmpty else { return }
         ListImagePrefetch.start(
             urls: urls,
@@ -480,7 +480,7 @@ struct M3UChannelCard: View {
         } label: {
             VStack(alignment: .center, spacing: 10) {
                 CachedImage(
-                    url: channel.tvgLogo.flatMap { URL(string: $0) },
+                    url: channel.tvgLogo.flatMap { ArtworkURL.url(from: $0) },
                     width: iconSize,
                     height: iconSize,
                     cornerRadius: 12,
@@ -654,7 +654,7 @@ struct M3UGroupGridContent: View {
         guard start < end else { return }
         let urls = items[start..<end]
             .compactMap { $0.tvgLogo }
-            .compactMap { URL(string: $0) }
+            .compactMap { ArtworkURL.url(from: $0) }
         guard !urls.isEmpty else { return }
         ListImagePrefetch.start(urls: urls, width: posterMetrics.liveGridIconSize, height: posterMetrics.liveGridIconSize, loadProfile: .grid)
     }
@@ -774,7 +774,7 @@ struct M3UPlayerShell: View {
                     url: url,
                     title: activeChannel.name,
                     subtitle: activeChannel.groupTitle,
-                    artworkURL: activeChannel.tvgLogo.flatMap { URL(string: $0) },
+                    artworkURL: activeChannel.tvgLogo.flatMap { ArtworkURL.url(from: $0) },
                     isLiveStream: classification.isLive,
                     playlistId: playlist.id,
                     streamId: activeChannel.id,
@@ -935,7 +935,7 @@ struct M3UPlayerShell: View {
                     ChannelPanelItem(
                         id: ch.id,
                         name: ch.name,
-                        iconURL: ch.tvgLogo.flatMap { URL(string: $0) }
+                        iconURL: ch.tvgLogo.flatMap { ArtworkURL.url(from: $0) }
                     )
                 }
             )
@@ -961,7 +961,7 @@ struct M3UPlayerShell: View {
                     ChannelPanelItem(
                         id: ch.id,
                         name: ch.name,
-                        iconURL: ch.tvgLogo.flatMap { URL(string: $0) }
+                        iconURL: ch.tvgLogo.flatMap { ArtworkURL.url(from: $0) }
                     )
                 )
             }
