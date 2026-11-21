@@ -1365,9 +1365,15 @@ struct VODCategoryContent: View, Equatable {
     private static let pageSize = 90
     private static let gridTopID = "vodGridTop"
 
-    init(playlist: Playlist, items: [VODWithCategory]) {
+    // Fix round 1 (build 88): this custom init suppresses the
+    // memberwise initializer, so `newMovieIds` must be accepted
+    // here explicitly — the property, its `==` handling and the
+    // body's NEW-chip lookup already existed; only the init had
+    // not been extended, so both hosts' calls failed to compile.
+    init(playlist: Playlist, items: [VODWithCategory], newMovieIds: Set<Int> = []) {
         self.playlist = playlist
         self.items = items
+        self.newMovieIds = newMovieIds
         _progressMap = Query(WatchProgressMapRequest(playlistId: playlist.id, type: "vod"), in: \.appDatabase)
     }
 

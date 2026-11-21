@@ -40,7 +40,12 @@ struct SettingsIconTile: View {
 /// Routed through `Motion.animate`, so Reduce Motion and the
 /// motion-intensity setting still it like every other effect.
 struct SettingsSweepPressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
+    // Fix round 1 (build 88): the configuration type is spelled
+    // out — this file imports GRDB, whose own top-level
+    // `Configuration` type shadows the style's in the bare name,
+    // which broke the conformance (and made `configuration.label`
+    // resolve to GRDB's String label).
+    func makeBody(configuration: ButtonStyle.Configuration) -> some View {
         configuration.label
             .background {
                 LinearGradient(
@@ -70,7 +75,9 @@ struct SettingsSweepPressStyle: ButtonStyle {
 /// (Reduce Motion / intensity still it). Labels are untouched —
 /// every settings toggle's label is a passive icon + text stack.
 struct GlowingToggleStyle: ToggleStyle {
-    func makeBody(configuration: Configuration) -> some View {
+    // Fix round 1 (build 88): qualified configuration type — see
+    // SettingsSweepPressStyle above (GRDB.Configuration shadowing).
+    func makeBody(configuration: ToggleStyle.Configuration) -> some View {
         HStack(spacing: 12) {
             configuration.label
                 .frame(maxWidth: .infinity, alignment: .leading)

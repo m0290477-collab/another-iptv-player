@@ -1124,7 +1124,12 @@ enum LiveChannelTileMetrics {
 /// routed through `Motion.animate`, so Reduce Motion / motion-off
 /// still the whole state change.
 private struct LiveTileButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
+    // Fix round 1 (build 88): the configuration type is spelled
+    // out — this file imports GRDB, whose own top-level
+    // `Configuration` type shadows the style's in the bare name,
+    // which broke the conformance (and made `configuration.label`
+    // resolve to GRDB's String label).
+    func makeBody(configuration: ButtonStyle.Configuration) -> some View {
         configuration.label
             .overlay(alignment: .top) {
                 RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
