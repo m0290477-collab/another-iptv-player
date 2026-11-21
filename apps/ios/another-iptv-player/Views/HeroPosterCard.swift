@@ -55,7 +55,7 @@ struct HeroPosterCard: View {
     /// no rating text, no star row.
     private var filledStars: Int? {
         guard let ratingText,
-              let value = Double(ratingText.filter { $0.isNumber || $0 == "." }))
+              let value = Double(ratingText.filter { $0.isNumber || $0 == "." })
         else { return nil }
         return min(5, max(0, Int((value / 2).rounded())))
     }
