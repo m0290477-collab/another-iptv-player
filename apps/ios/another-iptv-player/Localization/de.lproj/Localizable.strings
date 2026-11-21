@@ -1134,3 +1134,32 @@
 "settings.hub.playlists_count_format" = "%d Playlists";
 "settings.hub.active_until_format" = "Aktiv bis %@";
 "home.sports" = "Sport";
+
+/* Build 84: combined sports update */
+"matches.watch.button" = "Ansehen";
+"matches.live_now" = "Jetzt live";
+"matches.highlights_hub" = "Highlights";
+"matches.leaders" = "Bestenlisten";
+"matches.news" = "Nachrichten";
+"matches.player.age" = "Alter";
+"matches.player.nationality" = "Nationalität";
+"matches.player.number" = "Nummer";
+"matches.player.position" = "Position";
+"matches.player.stats" = "Saisonstatistiken";
+"matches.player.recent" = "Letzte Spiele";
+"matches.table_live" = "Live-Tabelle";
+"matches.table_form" = "Form";
+"matches.compare" = "Teams vergleichen";
+"matches.compare.pick" = "Team zum Vergleichen wählen";
+"matches.compare.position" = "Position";
+"matches.box_score" = "Box Score";
+"matches.box.dnp" = "Nicht gespielt";
+"matches.box.totals" = "Gesamt";
+"matches.detail.play_by_play" = "Spielverlauf";
+"matches.detail.win_probability" = "Siegchance";
+"matches.info.prediction" = "ESPN-Prognose";
+"matches.kickoff_push" = "Benachrichtigung zum Anpfiff";
+"matches.search.players" = "Spieler";
+"matches.next_in" = "in %@";
+"matches.team.leaders" = "Team-Bestenliste";
+"matches.last_updated" = "Zuletzt aktualisiert: %@";

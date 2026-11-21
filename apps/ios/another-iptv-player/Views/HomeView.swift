@@ -1226,13 +1226,17 @@ struct HomeView: View {
                         NavigationLink {
                             MatchDetailView(sport: entry.sport, leaguePath: entry.leaguePath, match: entry.match)
                         } label: {
-                            HomeMatchResultCard(match: entry.match)
+                            HomeMatchResultCard(
+                                match: entry.match, sport: entry.sport,
+                                leaguePath: entry.leaguePath
+                            )
                         }
                         // Build 81 (item 8): press feedback on the
                         // match cards.
                         .buttonStyle(PressScaleButtonStyle())
                     }
                 }
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, 16)
             }
             // Build 81 (item 8): one-shot section entrance.
@@ -2048,6 +2052,10 @@ private struct HomeMatchEntry: Identifiable {
 
 private struct HomeMatchResultCard: View {
     let match: MatchEvent
+    /// Build 84 (item 3b): the entry's sport/league scope for
+    /// the Watch action (defaults keep any other caller whole).
+    var sport: MatchSport = .soccer
+    var leaguePath: String = ""
 
     var body: some View {
         // Build 80 (item 8): the build-77/79 ONE-ROW layout (2 logos
@@ -2064,13 +2072,30 @@ private struct HomeMatchResultCard: View {
         // Compacted: tighter padding/spacing, 22pt logos, headline
         // scores, slimmer chip — same two full-name rows, same tap
         // target, roughly 5–6 cards per screenful instead of ~3.
+        // Build 84 (item 3a, owner screenshot): the scores and the
+        // LIVE chip still clipped at the card's right edge — the
+        // flexible name column could propose more than the card's
+        // width inside the lazy stack, pushing the fixed elements
+        // past the edge. The chip and the score now sit in
+        // RESERVED slots (fixed-width score column, layout
+        // priority on the chip), the name is the ONLY flexible
+        // element, and the card clips its own bounds as a final
+        // guard — nothing can render outside the card again.
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Spacer(minLength: 0)
                 stateChip
+                    .layoutPriority(1)
             }
+            .frame(maxWidth: .infinity)
             teamRow(match.home)
             teamRow(match.away)
+            // Build 84 (item 3b): Watch — live cards only in
+            // practice (the button self-hides without a live
+            // state + a matching channel in the playlist).
+            if !leaguePath.isEmpty {
+                WatchPlayButton(sport: sport, leaguePath: leaguePath, match: match)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -2083,14 +2108,16 @@ private struct HomeMatchResultCard: View {
                         .stroke(AppTheme.cardBorderColor, lineWidth: 1)
                 )
         )
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
     }
 
     /// Build 80 (item 8): one team's row — logo, FULL name (the
     /// row's whole width at build 79's team-name font; the scale
     /// factor remains only as a safety net), and that team's own
-    /// score at the right end. A side the payload has not scored
-    /// yet reads "0", the same rule Home's score lines used.
+    /// score at the right end, in its reserved 36 pt column
+    /// (build 84). A side the payload has not scored yet reads
+    /// "0", the same rule Home's score lines used.
     private func teamRow(_ side: MatchTeamSide) -> some View {
         HStack(spacing: 8) {
             CachedImage(
@@ -2111,6 +2138,8 @@ private struct HomeMatchResultCard: View {
                 .foregroundStyle(.primary)
                 .monospacedDigit()
                 .fixedSize()
+                .frame(width: 36, alignment: .trailing)
+                .layoutPriority(1)
         }
     }
 

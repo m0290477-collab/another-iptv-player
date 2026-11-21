@@ -96,7 +96,15 @@ final class PushNotificationService: NSObject, UNUserNotificationCenterDelegate 
                 "fullTime": team.notifyFullTime
             ] as [String: Any]
         }
-        let payload: [String: Any] = ["token": token, "teams": teams]
+        // Build 84 (item 15): any-match kickoff reminders ride
+        // along ADDITIVELY — the teams contract above is
+        // byte-compatible with the shipped watcher; a watcher
+        // that doesn't know `matches` ignores it.
+        let payload: [String: Any] = [
+            "token": token,
+            "teams": teams,
+            "matches": MatchKickoffPushStore.shared.payload
+        ]
         guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
         var request = URLRequest(url: Self.watcherEndpointURL)
         request.httpMethod = "POST"

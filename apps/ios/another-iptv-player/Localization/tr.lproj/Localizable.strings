@@ -1152,3 +1152,32 @@
 "settings.hub.playlists_count_format" = "%d playlist";
 "settings.hub.active_until_format" = "%@ tarihine kadar aktif";
 "home.sports" = "Spor";
+
+/* Build 84: combined sports update */
+"matches.watch.button" = "İzle";
+"matches.live_now" = "Şimdi Canlı";
+"matches.highlights_hub" = "Öne Çıkanlar";
+"matches.leaders" = "Liderler";
+"matches.news" = "Haberler";
+"matches.player.age" = "Yaş";
+"matches.player.nationality" = "Uyruk";
+"matches.player.number" = "Numara";
+"matches.player.position" = "Pozisyon";
+"matches.player.stats" = "Sezon İstatistikleri";
+"matches.player.recent" = "Son Maçlar";
+"matches.table_live" = "Canlı Puan Durumu";
+"matches.table_form" = "Form";
+"matches.compare" = "Takımları Karşılaştır";
+"matches.compare.pick" = "Karşılaştırmak için takım seçin";
+"matches.compare.position" = "Sıra";
+"matches.box_score" = "Maç İstatistikleri";
+"matches.box.dnp" = "Oynamadı";
+"matches.box.totals" = "Toplam";
+"matches.detail.play_by_play" = "Anlatım";
+"matches.detail.win_probability" = "Kazanma Olasılığı";
+"matches.info.prediction" = "ESPN Tahmini";
+"matches.kickoff_push" = "Başlama Bildirimi";
+"matches.search.players" = "Oyuncular";
+"matches.next_in" = "%@ sonra";
+"matches.team.leaders" = "Takım Liderleri";
+"matches.last_updated" = "Son güncelleme: %@";

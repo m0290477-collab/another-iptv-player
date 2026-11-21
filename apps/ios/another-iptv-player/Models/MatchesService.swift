@@ -208,6 +208,13 @@ struct ESPNCompetitor: Decodable {
     let homeAway: String?
     let score: String?
     let team: ESPNTeam?
+    /// Build 84 (item 20): per-period linescores (NBA/NFL
+    /// header competitors carry them; soccer's do not).
+    let linescores: [ESPNLinescore]?
+}
+
+struct ESPNLinescore: Decodable {
+    let displayValue: String?
 }
 
 struct ESPNTeam: Decodable {
@@ -311,14 +318,72 @@ enum MatchesService {
         }
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
-        let (data, response) = try await URLSession.shared.data(for: request)
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            throw URLError(.badServerResponse)
+        // Build 84 (item 23): every successful payload is saved
+        // to the sports disk cache; when the network fails, the
+        // last saved payload for this league+day is served
+        // instead of an error, and the serve is recorded so the
+        // UI can mark the data stale with its real timestamp.
+        let diskKey = "sb|\(path)|\(dateParameter)"
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                throw URLError(.badServerResponse)
+            }
+            let decoded = try JSONDecoder().decode(ESPNScoreboard.self, from: data)
+            SportsDiskCache.save(key: diskKey, data: data)
+            DiskServeLog.shared.clear(path: path, day: dateParameter)
+            let leagueName = decoded.leagues?.first?.name
+            let matches = (decoded.events ?? []).compactMap(mapEvent)
+            return MatchLeagueResult(leagueName: leagueName, matches: matches)
+        } catch {
+            if let cached = SportsDiskCache.load(key: diskKey),
+               let decoded = try? JSONDecoder().decode(ESPNScoreboard.self, from: cached.data) {
+                DiskServeLog.shared.mark(path: path, day: dateParameter, at: cached.at)
+                let leagueName = decoded.leagues?.first?.name
+                let matches = (decoded.events ?? []).compactMap(mapEvent)
+                return MatchLeagueResult(leagueName: leagueName, matches: matches)
+            }
+            throw error
         }
-        let decoded = try JSONDecoder().decode(ESPNScoreboard.self, from: data)
-        let leagueName = decoded.leagues?.first?.name
-        let matches = (decoded.events ?? []).compactMap(mapEvent)
-        return MatchLeagueResult(leagueName: leagueName, matches: matches)
+    }
+
+    /// Build 84 (item 23): the newest disk-cache timestamp any
+    /// of the sport's league+day scoreboards was served from
+    /// during recent fetches — the Matches view model reads it
+    /// after a refresh to mark on-screen data stale with its
+    /// real "last updated" time. A network success for a
+    /// league+day clears that day's record.
+    static func diskServedStamp(for sport: MatchSport) -> Date? {
+        var latest: Date?
+        for path in sport.leaguePaths {
+            for day in dayParameters() {
+                if let stamp = DiskServeLog.shared.stamp(path: path, day: day) {
+                    latest = max(latest ?? .distantPast, stamp)
+                }
+            }
+        }
+        return latest
+    }
+
+    private final class DiskServeLog: @unchecked Sendable {
+        static let shared = DiskServeLog()
+        private let lock = NSLock()
+        private var stamps: [String: Date] = [:]
+
+        func mark(path: String, day: String, at: Date) {
+            lock.lock(); defer { lock.unlock() }
+            stamps["\(path)|\(day)"] = at
+        }
+
+        func clear(path: String, day: String) {
+            lock.lock(); defer { lock.unlock() }
+            stamps["\(path)|\(day)"] = nil
+        }
+
+        func stamp(path: String, day: String) -> Date? {
+            lock.lock(); defer { lock.unlock() }
+            return stamps["\(path)|\(day)"]
+        }
     }
 
     /// Fetch every league of a sport tab. Leagues load concurrently;
@@ -480,6 +545,9 @@ struct MatchTimelineEvent: Identifiable {
     let title: String
     let detail: String?
     let playerName: String?
+    /// Build 84 (item 4): the payload athlete id behind
+    /// `playerName`, so a timeline row can open the player page.
+    let athleteId: String?
     let headshotURL: URL?
     let teamName: String?
     let kind: Kind
@@ -497,6 +565,9 @@ struct MatchLeaderEntry: Identifiable {
     /// Category label exactly as the payload provides it.
     let category: String
     let athleteName: String
+    /// Build 84 (item 4): payload athlete id — opens the
+    /// player page.
+    let athleteId: String?
     let headshotURL: URL?
     let valueText: String?
     let teamName: String?
@@ -532,11 +603,78 @@ struct MatchDetail {
     let h2h: MatchH2H?
     let videos: [MatchVideo]
     let commentary: [MatchCommentaryEntry]
+    /// Build 84 (item 11): per-player box score (NBA/NFL
+    /// summaries carry `boxscore.players`; soccer summaries
+    /// carry no player box score and this stays empty).
+    let boxScore: [MatchBoxScoreTeam]
+    /// Build 84 (item 19): the play-by-play feed (NBA `plays`;
+    /// NFL `drives.previous[].plays`), newest first.
+    let playsFeed: [MatchPlayEntry]
+    /// Build 84 (item 18): the win-probability series — the
+    /// payload's home-win percentages in play order (NBA/NFL
+    /// only; soccer summaries publish none).
+    let winProbability: [Double]
+    /// Build 84 (item 20): per-period linescores from the
+    /// header competitors (NBA/NFL quarters; empty when the
+    /// payload carries none).
+    let homeLinescores: [String]
+    let awayLinescores: [String]
+    /// Build 84 (item 3b): broadcaster names the summary itself
+    /// lists for this match (US feeds; often empty) — extra
+    /// Watch-matching needles on the detail screen.
+    let broadcastNames: [String]
 
     var isEmpty: Bool {
         timeline.isEmpty && stats.isEmpty && leaders.isEmpty && lineups.isEmpty
             && videos.isEmpty && commentary.isEmpty && h2h == nil
+            && boxScore.isEmpty && playsFeed.isEmpty
     }
+}
+
+/// Build 84 (item 11): one player line of a box score — the
+/// payload's own stat columns, in payload order.
+struct MatchBoxScorePlayer: Identifiable {
+    let athleteId: String?
+    let name: String
+    let headshotURL: URL?
+    /// Stat values aligned with the group's `columns`.
+    let values: [String]
+    let didNotPlay: Bool
+    let dnpReason: String?
+    let isStarter: Bool
+    var id: String { athleteId ?? name }
+}
+
+/// Build 84 (item 11): one stat group of a team's box score
+/// (NBA: a single unnamed group; NFL: passing / rushing /
+/// receiving / defensive / …, titled by the payload's `text`).
+struct MatchBoxScoreGroup: Identifiable {
+    let title: String?
+    let columns: [String]
+    let players: [MatchBoxScorePlayer]
+    let totals: [String]
+    var id: String { (title ?? "") + "|" + columns.joined(separator: ",") }
+}
+
+/// Build 84 (item 11): one team's box score.
+struct MatchBoxScoreTeam: Identifiable {
+    let teamName: String?
+    let logoURL: URL?
+    let homeAway: String?
+    let groups: [MatchBoxScoreGroup]
+    var id: String { (teamName ?? "") + "|" + (homeAway ?? "") }
+}
+
+/// Build 84 (item 19): one play of the play-by-play feed.
+struct MatchPlayEntry: Identifiable {
+    let id: String
+    let periodLabel: String?
+    let clockText: String?
+    let text: String
+    /// Score after the play, "home–away", when the payload
+    /// carries both.
+    let scoreText: String?
+    let scoringPlay: Bool
 }
 
 /// Build 80 (item 16, Facts): match information the summary
@@ -549,6 +687,14 @@ struct MatchInfo {
     let venueText: String?
     let attendance: Int?
     let refereeText: String?
+    /// Build 84 (item 16): ESPN's own pre-match predictor
+    /// (`predictor.homeTeam.gameProjection` /
+    /// `awayTeam.gameProjection`, percentage strings) — verified
+    /// live 2026-11-21 in upcoming NBA/NFL summaries; soccer
+    /// summaries publish no predictor, so these stay nil there.
+    /// Rendered labelled as ESPN's prediction, never as fact.
+    let predictorHome: String?
+    let predictorAway: String?
 }
 
 /// Build 80 (item 15): head-to-head from the summary's
@@ -604,6 +750,10 @@ struct MatchLineupPlayer: Identifiable, Equatable {
     let positionName: String?
     let isStarter: Bool
     let headshotURL: URL?
+    /// Build 84 (item 4): the payload athlete id (the same
+    /// value `id` falls back from) — nil when the payload
+    /// carried none, so a row never links with a fake id.
+    let athleteId: String?
 }
 
 /// Item 10f: one team's lineup from the summary rosters.
@@ -632,6 +782,42 @@ private struct ESPNSummary: Decodable {
     let seasonseries: [ESPNSeries]?
     let videos: [ESPNVideo]?
     let commentary: [ESPNCommentaryEntry]?
+    // Build 84: box-score players, win probability, the
+    // pre-match predictor, NFL drives (play-by-play), and the
+    // match's own broadcaster list — all verified live
+    // 2026-11-21 (see the build-84 report).
+    let winprobability: [ESPNWinProbability]?
+    let predictor: ESPNPredictor?
+    let drives: ESPNDrives?
+    let broadcasts: [ESPNBroadcast]?
+}
+
+private struct ESPNWinProbability: Decodable {
+    let homeWinPercentage: Double?
+    let playId: String?
+}
+
+private struct ESPNPredictor: Decodable {
+    struct Team: Decodable { let gameProjection: String? }
+    let homeTeam: Team?
+    let awayTeam: Team?
+}
+
+private struct ESPNDrives: Decodable {
+    let previous: [ESPNDrive]?
+}
+
+private struct ESPNDrive: Decodable {
+    let plays: [ESPNPlay]?
+}
+
+private struct ESPNBroadcast: Decodable {
+    struct Media: Decodable {
+        let name: String?
+        let shortName: String?
+    }
+    let media: Media?
+    let station: String?
 }
 
 private struct ESPNGameInfo: Decodable {
@@ -780,6 +966,33 @@ struct ESPNHeadshot: Decodable {
 
 private struct ESPNBoxscore: Decodable {
     let teams: [ESPNBoxscoreTeam]?
+    /// Build 84 (item 11): per-player box score groups
+    /// (NBA/NFL summaries; soccer's boxscore has teams only).
+    let players: [ESPNBoxscorePlayerTeam]?
+}
+
+private struct ESPNBoxscorePlayerTeam: Decodable {
+    let team: ESPNTeam?
+    let statistics: [ESPNBoxscorePlayerGroup]?
+}
+
+private struct ESPNBoxscorePlayerGroup: Decodable {
+    /// NFL group name ("passing"); the NBA's single group
+    /// carries none.
+    let name: String?
+    /// NFL group title ("Indianapolis Passing").
+    let text: String?
+    let labels: [String]?
+    let athletes: [ESPNBoxscorePlayerEntry]?
+    let totals: [String]?
+}
+
+private struct ESPNBoxscorePlayerEntry: Decodable {
+    let athlete: ESPNAthlete?
+    let stats: [String]?
+    let didNotPlay: Bool?
+    let reason: String?
+    let starter: Bool?
 }
 
 private struct ESPNBoxscoreTeam: Decodable {
@@ -850,6 +1063,9 @@ extension MatchesService {
     private static func mapDetail(_ summary: ESPNSummary, sport: MatchSport) -> MatchDetail {
         let competition = summary.header?.competitions?.first
         let header = mapHeader(competition)
+        let competitors = competition?.competitors ?? []
+        let homeCompetitor = competitors.first(where: { $0.homeAway == "home" }) ?? competitors.first
+        let awayCompetitor = competitors.first(where: { $0.homeAway == "away" }) ?? competitors.dropFirst().first
         return MatchDetail(
             header: header,
             timeline: mapTimeline(summary, competition: competition, sport: sport),
@@ -859,8 +1075,107 @@ extension MatchesService {
             info: mapInfo(summary),
             h2h: mapH2H(summary),
             videos: mapVideos(summary),
-            commentary: mapCommentary(summary)
+            commentary: mapCommentary(summary),
+            boxScore: mapBoxScore(summary, sport: sport),
+            playsFeed: mapPlaysFeed(summary, sport: sport),
+            winProbability: (summary.winprobability ?? []).compactMap { $0.homeWinPercentage },
+            homeLinescores: (homeCompetitor?.linescores ?? []).compactMap { $0.displayValue },
+            awayLinescores: (awayCompetitor?.linescores ?? []).compactMap { $0.displayValue },
+            broadcastNames: (summary.broadcasts ?? []).compactMap { $0.media?.name ?? $0.station }
         )
+    }
+
+    /// Build 84 (item 11): the per-player box score. Groups and
+    /// columns are the payload's own (labels aligned with each
+    /// athlete's stats array — the payload's contract, verified
+    /// live for NBA + NFL); a player the payload marks
+    /// didNotPlay renders as DNP with the payload's reason.
+    private static func mapBoxScore(_ summary: ESPNSummary, sport: MatchSport) -> [MatchBoxScoreTeam] {
+        guard sport != .soccer else { return [] }
+        let competitors = summary.header?.competitions?.first?.competitors ?? []
+        let homeId = competitors.first(where: { $0.homeAway == "home" })?.team?.id
+        let awayId = competitors.first(where: { $0.homeAway == "away" })?.team?.id
+        let teams = (summary.boxscore?.players ?? []).compactMap { teamGroup -> MatchBoxScoreTeam? in
+            let groups = (teamGroup.statistics ?? []).compactMap { group -> MatchBoxScoreGroup? in
+                let players = (group.athletes ?? []).compactMap { entry -> MatchBoxScorePlayer? in
+                    guard let athlete = entry.athlete,
+                          let name = athlete.displayName ?? athlete.shortName,
+                          !name.isEmpty else { return nil }
+                    return MatchBoxScorePlayer(
+                        athleteId: athlete.id,
+                        name: name,
+                        headshotURL: headshotURL(sport: sport, athlete: athlete),
+                        values: entry.stats ?? [],
+                        didNotPlay: entry.didNotPlay ?? false,
+                        dnpReason: entry.reason,
+                        isStarter: entry.starter ?? false
+                    )
+                }
+                guard !players.isEmpty else { return nil }
+                return MatchBoxScoreGroup(
+                    title: group.text ?? group.name,
+                    columns: group.labels ?? [],
+                    players: players,
+                    totals: group.totals ?? []
+                )
+            }
+            guard !groups.isEmpty else { return nil }
+            let homeAway: String?
+            if let teamId = teamGroup.team?.id, teamId == homeId { homeAway = "home" }
+            else if let teamId = teamGroup.team?.id, teamId == awayId { homeAway = "away" }
+            else { homeAway = nil }
+            return MatchBoxScoreTeam(
+                teamName: teamGroup.team?.displayName,
+                logoURL: teamGroup.team?.logo.flatMap { URL(string: $0) },
+                homeAway: homeAway,
+                groups: groups
+            )
+        }
+        // Home team first, matching every other detail surface.
+        return teams.sorted { a, b in
+            (a.homeAway == "home" ? 0 : 1) < (b.homeAway == "home" ? 0 : 1)
+        }
+    }
+
+    /// Build 84 (item 19): the play-by-play feed — NBA's flat
+    /// `plays` list, or the NFL's drives flattened in payload
+    /// (chronological) order; either way the result is reversed
+    /// to newest-first and capped so the list stays sane.
+    private static func mapPlaysFeed(_ summary: ESPNSummary, sport: MatchSport) -> [MatchPlayEntry] {
+        guard sport != .soccer else { return [] }
+        let plays: [ESPNPlay]
+        if let flat = summary.plays, !flat.isEmpty {
+            plays = flat
+        } else if let drives = summary.drives?.previous {
+            plays = drives.flatMap { $0.plays ?? [] }
+        } else {
+            return []
+        }
+        let entries = plays.enumerated().compactMap { index, play -> MatchPlayEntry? in
+            let text = play.text ?? play.type?.text ?? ""
+            guard !text.isEmpty else { return nil }
+            let periodLabel: String?
+            if let period = play.period?.number, period > 0 {
+                periodLabel = period <= 4 ? "Q\(period)" : "OT"
+            } else {
+                periodLabel = play.period?.displayValue
+            }
+            let scoreText: String?
+            if let home = play.homeScore, let away = play.awayScore {
+                scoreText = "\(home)–\(away)"
+            } else {
+                scoreText = nil
+            }
+            return MatchPlayEntry(
+                id: play.id ?? "feed-\(index)",
+                periodLabel: periodLabel,
+                clockText: play.clock?.displayValue,
+                text: text,
+                scoreText: scoreText,
+                scoringPlay: play.scoringPlay ?? false
+            )
+        }
+        return Array(entries.reversed().prefix(250))
     }
 
     /// Build 80 (item 16): Facts-tab match info — only fields the
@@ -876,10 +1191,13 @@ extension MatchesService {
             leagueName: summary.header?.league?.name,
             venueText: venueText.isEmpty ? nil : venueText,
             attendance: summary.gameInfo?.attendance,
-            refereeText: summary.gameInfo?.officials?.first?.displayName
+            refereeText: summary.gameInfo?.officials?.first?.displayName,
+            predictorHome: summary.predictor?.homeTeam?.gameProjection,
+            predictorAway: summary.predictor?.awayTeam?.gameProjection
         )
         guard info.leagueName != nil || info.venueText != nil
-            || info.attendance != nil || info.refereeText != nil else { return nil }
+            || info.attendance != nil || info.refereeText != nil
+            || info.predictorHome != nil else { return nil }
         return info
     }
 
@@ -958,7 +1276,8 @@ extension MatchesService {
                     positionAbbreviation: entry.position?.abbreviation,
                     positionName: entry.position?.name ?? entry.position?.displayName,
                     isStarter: entry.starter ?? false,
-                    headshotURL: headshotURL(sport: sport, athlete: athlete)
+                    headshotURL: headshotURL(sport: sport, athlete: athlete),
+                    athleteId: athlete.id
                 )
             }
             guard !players.isEmpty else { return nil }
@@ -1020,6 +1339,7 @@ extension MatchesService {
                     title: title,
                     detail: detailText,
                     playerName: scorer?.displayName,
+                    athleteId: scorer?.id,
                     headshotURL: headshotURL(sport: sport, athlete: scorer),
                     teamName: detail.team?.displayName,
                     kind: kind
@@ -1061,6 +1381,7 @@ extension MatchesService {
             title: play.text ?? play.type?.text ?? athlete?.displayName ?? "",
             detail: detail,
             playerName: athlete?.displayName,
+            athleteId: athlete?.id,
             headshotURL: headshotURL(sport: sport, athlete: athlete),
             teamName: play.team?.displayName,
             kind: .scoring
@@ -1141,6 +1462,7 @@ extension MatchesService {
                         id: "leader-\(entries.count)-\(index)",
                         category: categoryName,
                         athleteName: name,
+                        athleteId: entry.athlete?.id,
                         headshotURL: headshotURL(sport: sport, athlete: entry.athlete),
                         valueText: entry.displayValue,
                         teamName: group.team?.displayName

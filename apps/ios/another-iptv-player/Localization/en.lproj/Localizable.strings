@@ -1152,3 +1152,32 @@
 "settings.hub.playlists_count_format" = "%d playlists";
 "settings.hub.active_until_format" = "Active until %@";
 "home.sports" = "Sports";
+
+/* Build 84: combined sports update */
+"matches.watch.button" = "Watch";
+"matches.live_now" = "Live Now";
+"matches.highlights_hub" = "Highlights";
+"matches.leaders" = "Leaders";
+"matches.news" = "News";
+"matches.player.age" = "Age";
+"matches.player.nationality" = "Nationality";
+"matches.player.number" = "Number";
+"matches.player.position" = "Position";
+"matches.player.stats" = "Season Stats";
+"matches.player.recent" = "Recent Matches";
+"matches.table_live" = "Live Table";
+"matches.table_form" = "Form";
+"matches.compare" = "Compare Teams";
+"matches.compare.pick" = "Choose a team to compare";
+"matches.compare.position" = "Position";
+"matches.box_score" = "Box Score";
+"matches.box.dnp" = "DNP";
+"matches.box.totals" = "Totals";
+"matches.detail.play_by_play" = "Play by Play";
+"matches.detail.win_probability" = "Win Probability";
+"matches.info.prediction" = "ESPN Prediction";
+"matches.kickoff_push" = "Kickoff Notification";
+"matches.search.players" = "Players";
+"matches.next_in" = "in %@";
+"matches.team.leaders" = "Team Leaders";
+"matches.last_updated" = "Last updated %@";

@@ -32,6 +32,13 @@ struct MatchDetailView: View {
     /// Item 10c state.
     @State private var watchHits: [WatchChannelHit] = []
     @State private var watchLoaded = false
+    /// Build 84 (item 3b): broadcaster-pattern Watch hits over
+    /// the active playlist, shown ahead of the name-search hits.
+    @State private var broadcastHits: [WatchChannelHit] = []
+    /// Build 84 (item 15): the any-match kickoff PUSH toggle
+    /// state (the local 15-minute reminder above is separate
+    /// and unchanged).
+    @State private var kickoffPushOn = false
     /// Item 10e state.
     @State private var reminderOn = false
     /// Build 65 (Match detail style 1 'Scoreboard Pro') introduced
@@ -51,6 +58,10 @@ struct MatchDetailView: View {
 
     private enum DetailTab: Hashable {
         case facts, lineups, stats, h2h, commentary
+        // Build 84 (items 11/19): box score + play-by-play —
+        // NBA/NFL summaries only, present only when the payload
+        // carries them.
+        case boxScore, plays
 
         var title: String {
             switch self {
@@ -59,6 +70,8 @@ struct MatchDetailView: View {
             case .stats: return L("matches.stats")
             case .h2h: return L("matches.detail.h2h")
             case .commentary: return L("matches.detail.commentary")
+            case .boxScore: return L("matches.box_score")
+            case .plays: return L("matches.detail.play_by_play")
             }
         }
     }
@@ -66,6 +79,8 @@ struct MatchDetailView: View {
     private var hasTimeline: Bool { !(detail?.timeline.isEmpty ?? true) }
     private var hasLineups: Bool { !(detail?.lineups.isEmpty ?? true) }
     private var hasStats: Bool { !(detail?.stats.isEmpty ?? true) }
+    private var hasBoxScore: Bool { !(detail?.boxScore.isEmpty ?? true) }
+    private var hasPlays: Bool { !(detail?.playsFeed.isEmpty ?? true) }
     /// Facts exists when any of its three groups has real data:
     /// the timeline, the payload's match info, or its videos.
     private var hasFacts: Bool {
@@ -81,6 +96,8 @@ struct MatchDetailView: View {
         if hasFacts { tabs.append(.facts) }
         if hasLineups { tabs.append(.lineups) }
         if hasStats { tabs.append(.stats) }
+        if hasBoxScore { tabs.append(.boxScore) }
+        if hasPlays { tabs.append(.plays) }
         if hasH2H { tabs.append(.h2h) }
         if hasCommentary { tabs.append(.commentary) }
         return tabs
@@ -151,6 +168,7 @@ struct MatchDetailView: View {
 
     private func load() async {
         reminderOn = MatchReminderService.shared.isScheduled(eventId: eventId)
+        kickoffPushOn = MatchKickoffPushStore.shared.contains(eventId: eventId)
         do {
             detail = try await MatchesService.fetchDetail(
                 sport: sport, leaguePath: leaguePath, eventId: eventId
@@ -164,6 +182,15 @@ struct MatchDetailView: View {
             watchHits = await WatchChannelSearch.search(
                 homeName: home?.name, awayName: away?.name, leagueName: leagueName
             )
+            // Build 84 (item 3b): the broadcaster-pattern match
+            // over the ACTIVE playlist, with the summary's own
+            // broadcaster names as extra needles — also local.
+            if let seedMatch {
+                broadcastHits = await MatchWatchService.hits(
+                    sport: sport, leaguePath: leaguePath, match: seedMatch,
+                    extraNeedles: detail?.broadcastNames ?? []
+                )
+            }
         }
         watchLoaded = true
     }
@@ -181,7 +208,11 @@ struct MatchDetailView: View {
 
             reminderSection
 
+            kickoffPushSection
+
             watchSection
+
+            headerExtrasSection
 
             if let detail, !detail.leaders.isEmpty {
                 Section {
@@ -225,7 +256,22 @@ struct MatchDetailView: View {
                     if !detail.timeline.isEmpty {
                         Section {
                             ForEach(detail.timeline) { event in
-                                timelineRow(event)
+                                // Build 84 (item 4): a timeline
+                                // event with a known athlete
+                                // opens the player page.
+                                if let athleteId = event.athleteId {
+                                    NavigationLink {
+                                        PlayerPageView(
+                                            sport: sport, leaguePath: leaguePath,
+                                            athleteId: athleteId, fallbackName: event.playerName
+                                        )
+                                    } label: {
+                                        timelineRow(event)
+                                    }
+                                    .buttonStyle(PressOpacityButtonStyle())
+                                } else {
+                                    timelineRow(event)
+                                }
                             }
                         } header: {
                             sectionHeader(L("matches.detail.timeline"))
@@ -259,6 +305,27 @@ struct MatchDetailView: View {
                         }
                     } header: {
                         sectionHeader(L("matches.detail.team_stats"))
+                    }
+                    .listRowBackground(AppTheme.surface)
+                } else if selectedTab == .boxScore {
+                    // Build 84 (item 11): the per-player box
+                    // score (NBA/NFL payloads only).
+                    Section {
+                        BoxScoreRows(
+                            teams: detail.boxScore, sport: sport, leaguePath: leaguePath
+                        )
+                    } header: {
+                        sectionHeader(L("matches.box_score"))
+                    }
+                    .listRowBackground(AppTheme.surface)
+                } else if selectedTab == .plays {
+                    // Build 84 (item 19): the play-by-play feed,
+                    // newest first; live games prepend on the
+                    // existing detail refresh.
+                    Section {
+                        PlayByPlayRows(plays: detail.playsFeed)
+                    } header: {
+                        sectionHeader(L("matches.detail.play_by_play"))
                     }
                     .listRowBackground(AppTheme.surface)
                 } else if selectedTab == .h2h {
@@ -503,6 +570,120 @@ struct MatchDetailView: View {
         }
     }
 
+    // MARK: Kickoff push (build 84, item 15)
+
+    /// Any-match kickoff push: ON stores the fixture in
+    /// MatchKickoffPushStore and re-uploads the watcher
+    /// registration (the `matches` array rides additively);
+    /// the watcher fires ONE push at kickoff and drops it.
+    /// Separate from the local 15-minute reminder above.
+    @ViewBuilder
+    private var kickoffPushSection: some View {
+        if let seedMatch, seedMatch.state == .upcoming {
+            Section {
+                Toggle(isOn: Binding(
+                    get: { kickoffPushOn },
+                    set: { newValue in
+                        kickoffPushOn = newValue
+                        MatchKickoffPushStore.shared.set(
+                            match: seedMatch, leaguePath: leaguePath,
+                            sport: sport, enabled: newValue
+                        )
+                        // Same calls FollowedTeamsStore makes
+                        // (both synchronous): enabling asks for
+                        // authorization + registers (the token
+                        // callback re-uploads), and uploads at
+                        // once so an existing token's new
+                        // `matches` set reaches the watcher now;
+                        // disabling just re-uploads.
+                        if newValue {
+                            PushNotificationService.shared.ensureAuthorizationAndRegister()
+                        }
+                        PushNotificationService.shared.uploadRegistration()
+                    }
+                )) {
+                    Label(L("matches.kickoff_push"), systemImage: "bell.badge")
+                        .font(AppTheme.fontCardTitle)
+                }
+                .tint(AppTheme.accent)
+            }
+            .listRowBackground(AppTheme.surface)
+        }
+    }
+
+    // MARK: Header extras (build 84, items 18/20)
+
+    /// The win-probability curve and the quarter linescore
+    /// grid, in their own section under the header — each
+    /// rendered only when the summary publishes it (NBA/NFL).
+    @ViewBuilder
+    private var headerExtrasSection: some View {
+        if let detail,
+           detail.winProbability.count >= 2
+            || !detail.homeLinescores.isEmpty || !detail.awayLinescores.isEmpty {
+            Section {
+                if detail.winProbability.count >= 2 {
+                    WinProbabilityChart(
+                        values: detail.winProbability,
+                        homeName: detail.header?.home.name
+                    )
+                }
+                if !detail.homeLinescores.isEmpty || !detail.awayLinescores.isEmpty {
+                    linescoreGrid(detail)
+                }
+            }
+            .listRowBackground(AppTheme.surface)
+        }
+    }
+
+    /// Q1 Q2 Q3 Q4 (OT…) T per team, from the header
+    /// competitors' payload linescores; T is the header score.
+    private func linescoreGrid(_ detail: MatchDetail) -> some View {
+        let periods = max(detail.homeLinescores.count, detail.awayLinescores.count)
+        return VStack(spacing: 6) {
+            HStack(spacing: 0) {
+                Color.clear.frame(width: 128, height: 16)
+                ForEach(0..<periods, id: \.self) { index in
+                    Text(index < 4 ? "Q\(index + 1)" : "OT")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32)
+                }
+                Text("T")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32)
+            }
+            linescoreRow(
+                side: detail.header?.home, values: detail.homeLinescores, periods: periods
+            )
+            linescoreRow(
+                side: detail.header?.away, values: detail.awayLinescores, periods: periods
+            )
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func linescoreRow(side: MatchTeamSide?, values: [String], periods: Int) -> some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 7) {
+                CachedImage(url: side?.logoURL, width: 20, height: 20, cornerRadius: 10, iconName: "shield")
+                Text(side?.name ?? "")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .frame(width: 128, alignment: .leading)
+            ForEach(0..<periods, id: \.self) { index in
+                Text(index < values.count ? values[index] : "–")
+                    .font(.caption.monospacedDigit())
+                    .frame(width: 32)
+            }
+            Text(side?.score ?? "–")
+                .font(.caption.weight(.bold).monospacedDigit())
+                .frame(width: 32)
+        }
+    }
+
     // MARK: Watch on your channels (item 10c)
 
     @ViewBuilder
@@ -516,12 +697,15 @@ struct MatchDetailView: View {
                             .font(AppTheme.fontMetadata)
                             .foregroundStyle(.secondary)
                     }
-                } else if watchHits.isEmpty {
+                } else if watchHits.isEmpty && broadcastHits.isEmpty {
                     Text(L("matches.watch.none"))
                         .font(AppTheme.fontMetadata)
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(watchHits) { hit in
+                    // Build 84 (item 3b): broadcaster hits lead;
+                    // the name-search hits follow, de-duplicated
+                    // by channel name.
+                    ForEach(mergedWatchHits) { hit in
                         Button { playWatchHit(hit) } label: {
                             HStack(spacing: 10) {
                                 CachedImage(
@@ -544,13 +728,23 @@ struct MatchDetailView: View {
                                     .foregroundStyle(AppTheme.accent)
                             }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressOpacityButtonStyle())
                     }
                 }
             } header: {
                 sectionHeader(L("matches.watch.title"))
             }
             .listRowBackground(AppTheme.surface)
+        }
+    }
+
+    /// Build 84 (item 3b): the watch section's rows — the
+    /// broadcaster-pattern hits first, then the shipped
+    /// name-search hits that don't duplicate a channel.
+    private var mergedWatchHits: [WatchChannelHit] {
+        let broadcastNames = Set(broadcastHits.map { $0.channelName.lowercased() })
+        return broadcastHits + watchHits.filter {
+            !broadcastNames.contains($0.channelName.lowercased())
         }
     }
 
@@ -646,7 +840,7 @@ struct MatchDetailView: View {
                         Capsule().stroke(followed != nil ? Color.secondary.opacity(0.4) : AppTheme.accent, lineWidth: 1)
                     )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressOpacityButtonStyle())
         }
         if let followed {
             preferenceToggle(
@@ -687,27 +881,45 @@ struct MatchDetailView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: 14) {
                 ForEach(leaders) { entry in
-                    VStack(spacing: 5) {
-                        PlayerPhotoView(url: entry.headshotURL, name: entry.athleteName, size: 46)
-                        Text(entry.athleteName)
-                            .font(AppTheme.fontBadge)
-                            .lineLimit(1)
-                            .frame(width: 84)
-                        if let value = entry.valueText {
-                            Text(value)
-                                .font(AppTheme.fontCardTitle)
-                                .foregroundStyle(AppTheme.accent)
-                                .monospacedDigit()
+                    // Build 84 (item 4): a leader card opens
+                    // the player page.
+                    if let athleteId = entry.athleteId {
+                        NavigationLink {
+                            PlayerPageView(
+                                sport: sport, leaguePath: leaguePath,
+                                athleteId: athleteId, fallbackName: entry.athleteName
+                            )
+                        } label: {
+                            leaderCard(entry)
                         }
-                        Text(entry.category)
-                            .font(AppTheme.fontMetadata)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .frame(width: 84)
+                        .buttonStyle(PressOpacityButtonStyle())
+                    } else {
+                        leaderCard(entry)
                     }
                 }
             }
             .padding(.vertical, 4)
+        }
+    }
+
+    private func leaderCard(_ entry: MatchLeaderEntry) -> some View {
+        VStack(spacing: 5) {
+            PlayerPhotoView(url: entry.headshotURL, name: entry.athleteName, size: 46)
+            Text(entry.athleteName)
+                .font(AppTheme.fontBadge)
+                .lineLimit(1)
+                .frame(width: 84)
+            if let value = entry.valueText {
+                Text(value)
+                    .font(AppTheme.fontCardTitle)
+                    .foregroundStyle(AppTheme.accent)
+                    .monospacedDigit()
+            }
+            Text(entry.category)
+                .font(AppTheme.fontMetadata)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: 84)
         }
     }
 
@@ -838,6 +1050,19 @@ struct MatchDetailView: View {
         }
         if let referee = info.refereeText {
             infoRow(label: L("matches.info.referee"), value: referee)
+        }
+        // Build 84 (item 16): ESPN's own pre-match predictor,
+        // labelled as exactly that — the payload's win
+        // projections for both teams, shown only pre-match
+        // (finished/live summaries publish no predictor).
+        if let homePct = info.predictorHome, let awayPct = info.predictorAway,
+           let header = detail?.header {
+            let homeName = header.home.name ?? ""
+            let awayName = header.away.name ?? ""
+            infoRow(
+                label: L("matches.info.prediction"),
+                value: "\(homeName) \(homePct)% · \(awayName) \(awayPct)%"
+            )
         }
     }
 
@@ -983,7 +1208,7 @@ private struct PlayerPhotoView: View {
 /// on appear, pauses and releases on dismiss; the standard
 /// AVKit chrome (its own close via the X button) and nothing
 /// else — no custom overlays, no web view.
-private struct HighlightPlayerView: View {
+struct HighlightPlayerView: View {
     let url: URL
     @State private var player: AVPlayer?
     @Environment(\.dismiss) private var dismiss

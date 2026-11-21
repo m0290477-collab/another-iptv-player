@@ -1134,3 +1134,32 @@
 "settings.hub.playlists_count_format" = "%d 个播放列表";
 "settings.hub.active_until_format" = "有效期至 %@";
 "home.sports" = "体育";
+
+/* Build 84: combined sports update */
+"matches.watch.button" = "观看";
+"matches.live_now" = "正在直播";
+"matches.highlights_hub" = "精彩集锦";
+"matches.leaders" = "排行榜";
+"matches.news" = "新闻";
+"matches.player.age" = "年龄";
+"matches.player.nationality" = "国籍";
+"matches.player.number" = "号码";
+"matches.player.position" = "位置";
+"matches.player.stats" = "赛季数据";
+"matches.player.recent" = "近期比赛";
+"matches.table_live" = "实时积分榜";
+"matches.table_form" = "状态";
+"matches.compare" = "比较球队";
+"matches.compare.pick" = "选择要比较的球队";
+"matches.compare.position" = "排名";
+"matches.box_score" = "技术统计";
+"matches.box.dnp" = "未出场";
+"matches.box.totals" = "总计";
+"matches.detail.play_by_play" = "实时播报";
+"matches.detail.win_probability" = "获胜概率";
+"matches.info.prediction" = "ESPN 预测";
+"matches.kickoff_push" = "开赛通知";
+"matches.search.players" = "球员";
+"matches.next_in" = "%@后开赛";
+"matches.team.leaders" = "球队领袖";
+"matches.last_updated" = "最后更新 %@";

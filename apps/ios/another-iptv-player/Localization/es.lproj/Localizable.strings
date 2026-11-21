@@ -1134,3 +1134,32 @@
 "settings.hub.playlists_count_format" = "%d listas de reproducción";
 "settings.hub.active_until_format" = "Activo hasta el %@";
 "home.sports" = "Deportes";
+
+/* Build 84: combined sports update */
+"matches.watch.button" = "Ver";
+"matches.live_now" = "En vivo ahora";
+"matches.highlights_hub" = "Momentos destacados";
+"matches.leaders" = "Líderes";
+"matches.news" = "Noticias";
+"matches.player.age" = "Edad";
+"matches.player.nationality" = "Nacionalidad";
+"matches.player.number" = "Número";
+"matches.player.position" = "Posición";
+"matches.player.stats" = "Estadísticas de la temporada";
+"matches.player.recent" = "Partidos recientes";
+"matches.table_live" = "Clasificación en vivo";
+"matches.table_form" = "Forma";
+"matches.compare" = "Comparar equipos";
+"matches.compare.pick" = "Elige un equipo para comparar";
+"matches.compare.position" = "Posición";
+"matches.box_score" = "Estadísticas";
+"matches.box.dnp" = "No jugó";
+"matches.box.totals" = "Totales";
+"matches.detail.play_by_play" = "Jugada a jugada";
+"matches.detail.win_probability" = "Probabilidad de victoria";
+"matches.info.prediction" = "Predicción de ESPN";
+"matches.kickoff_push" = "Aviso al inicio";
+"matches.search.players" = "Jugadores";
+"matches.next_in" = "en %@";
+"matches.team.leaders" = "Líderes del equipo";
+"matches.last_updated" = "Última actualización: %@";

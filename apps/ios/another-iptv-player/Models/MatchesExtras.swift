@@ -97,14 +97,16 @@ enum MatchesStandingsService {
     /// The league standings endpoint lives on the `apis/v2`
     /// family (the site/v2 path 404s): children carry conference
     /// / division / overall groups as the feed defines them.
-    static func fetch(sport: MatchSport, leaguePath: String) async -> [StandingGroup] {
+    /// Build 84 (item 23): the payload goes through the sports
+    /// disk cache — offline, the last real table renders with
+    /// its `stamp` so the view can show when it was fetched.
+    static func fetch(sport: MatchSport, leaguePath: String) async -> (groups: [StandingGroup], stamp: Date?) {
         let path = leaguePath
-        guard let url = URL(string: "https://site.api.espn.com/apis/v2/sports/\(path)/standings") else { return [] }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 20
-        guard let (data, _) = try? await URLSession.shared.data(for: request),
-              let wire = try? JSONDecoder().decode(Wire.self, from: data) else { return [] }
-        return (wire.children ?? []).compactMap { child in
+        guard let url = URL(string: "https://site.api.espn.com/apis/v2/sports/\(path)/standings"),
+              let result = await SportsDiskCache.espnData(url: url, cacheKey: "st|\(path)"),
+              let wire = try? JSONDecoder().decode(Wire.self, from: result.data)
+        else { return ([], nil) }
+        let groups = (wire.children ?? []).compactMap { child in
             let entries = (child.standings?.entries ?? []).compactMap { entry -> StandingEntry? in
                 guard let team = entry.team,
                       let name = team.displayName ?? team.name, !name.isEmpty else { return nil }
@@ -139,6 +141,7 @@ enum MatchesStandingsService {
             }
             return StandingGroup(name: child.name ?? "", entries: entries, legend: legend)
         }
+        return (groups, result.stamp)
     }
 }
 
@@ -413,6 +416,9 @@ struct SquadPlayer: Identifiable {
     let name: String
     let positionName: String?
     let headshotURL: URL?
+    /// Build 84 (item 4): payload athlete id for the player
+    /// page; nil when the payload carried none.
+    var athleteId: String? = nil
 }
 
 enum TeamService {
@@ -497,7 +503,8 @@ enum TeamService {
                 id: athlete.id ?? name,
                 name: name,
                 positionName: athlete.position?.displayName ?? athlete.position?.name,
-                headshotURL: headshot
+                headshotURL: headshot,
+                athleteId: athlete.id
             )
         }
     }

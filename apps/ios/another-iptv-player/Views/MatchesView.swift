@@ -90,6 +90,15 @@ final class MatchesViewModel: ObservableObject {
             working.lastUpdated = Date()
         }
         working.isStale = anyFailureWithKeptData
+        // Build 84 (item 23): if any of this sport's scoreboards
+        // was served from the sports disk cache during this
+        // refresh (network down), the on-screen data is stale
+        // with the cache's real timestamp — the banner's time
+        // is that timestamp, not now.
+        if let diskStamp = MatchesService.diskServedStamp(for: sport) {
+            working.isStale = true
+            working.lastUpdated = diskStamp
+        }
         working.isLoading = false
         states[sport] = working
     }
@@ -173,6 +182,8 @@ struct MatchesView: View {
 
             dayStrip
 
+            hubRow
+
             sportContent(model.state(for: selectedSport))
         }
         // Build 81 (item 8): sport/day switches ease instead of
@@ -221,12 +232,70 @@ struct MatchesView: View {
         // disappears — no timer outlives the screen (M3).
         .task(id: selectedSport) {
             await model.loadIfNeeded(sport: selectedSport)
+            liveNowCount = await SportsHubService.liveCount()
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 60_000_000_000)
                 if Task.isCancelled { break }
                 await model.refresh(sport: selectedSport)
+                liveNowCount = await SportsHubService.liveCount()
             }
         }
+    }
+
+    // MARK: Hub entries (build 84, items 13/14)
+
+    /// Build 84 (item 13): the count of matches live right now
+    /// across all 19 competitions, refreshed on the same
+    /// 60-second cadence as the tab itself (the aggregation
+    /// reads the shared day cache — no extra polling).
+    @State private var liveNowCount = 0
+
+    /// Live Now + Highlights entries, riding between the day
+    /// strip and the tab content on every sport tab.
+    private var hubRow: some View {
+        HStack(spacing: 10) {
+            NavigationLink {
+                LiveNowView()
+            } label: {
+                HStack(spacing: 7) {
+                    Circle().fill(AppTheme.live).frame(width: 7, height: 7)
+                    Text(L("matches.live_now"))
+                        .font(AppTheme.fontCardTitle)
+                    if liveNowCount > 0 {
+                        Text("\(liveNowCount)")
+                            .font(AppTheme.fontBadge)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 1)
+                            .background(AppTheme.live, in: Capsule())
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(AppTheme.surface, in: Capsule())
+                .overlay(Capsule().strokeBorder(AppTheme.cardBorderColor, lineWidth: 1))
+            }
+            .buttonStyle(PressOpacityButtonStyle())
+            NavigationLink {
+                HighlightsHubView()
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "play.rectangle.on.rectangle")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                    Text(L("matches.highlights_hub"))
+                        .font(AppTheme.fontCardTitle)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(AppTheme.surface, in: Capsule())
+                .overlay(Capsule().strokeBorder(AppTheme.cardBorderColor, lineWidth: 1))
+            }
+            .buttonStyle(PressOpacityButtonStyle())
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, AppTheme.spacingScreenMargin)
+        .padding(.vertical, 6)
     }
 
     // MARK: First-entry explainer (build 66, item 12)
@@ -295,7 +364,7 @@ struct MatchesView: View {
                             } label: {
                                 myTeamCard(entry)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(PressOpacityButtonStyle())
                         }
                     }
                     .padding(.horizontal, AppTheme.spacingScreenMargin)
@@ -334,7 +403,11 @@ struct MatchesView: View {
                     .monospacedDigit()
             case .upcoming:
                 if let start = match.startDate {
-                    Text(Self.kickoffText(start))
+                    // Build 84 (item 10): the My Teams strip is
+                    // followed teams only — the kickoff line is
+                    // a live countdown (switching to LIVE at
+                    // kickoff) instead of a static time.
+                    CountdownText(target: start)
                         .font(AppTheme.fontMetadata.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -548,9 +621,15 @@ struct MatchesView: View {
                                 leagueName: section.result?.leagueName
                             )
                         } label: {
-                            MatchRowView(match: match, isStale: sportState.isStale)
+                            MatchRowView(
+                                match: match, isStale: sportState.isStale,
+                                watchContext: (
+                                    sport: selectedSport,
+                                    leaguePath: selectedSport.leaguePaths[section.index]
+                                )
+                            )
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressOpacityButtonStyle())
                     }
                 }
             } else if section.failed {
@@ -580,19 +659,21 @@ struct MatchesView: View {
                             .foregroundStyle(.secondary)
                     }
                     .accessibilityLabel(L("matches.standings"))
-                    if selectedSport == .soccer {
-                        NavigationLink {
-                            TopScorersView(
-                                leaguePath: selectedSport.leaguePaths[section.index],
-                                leagueName: name
-                            )
-                        } label: {
-                            Image(systemName: "list.number")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .accessibilityLabel(L("matches.scorers"))
+                    // Build 84 (item 7): the leaders page (all
+                    // verified categories for the sport) — every
+                    // sport now, not soccer only.
+                    NavigationLink {
+                        LeadersView(
+                            sport: selectedSport,
+                            leaguePath: selectedSport.leaguePaths[section.index],
+                            leagueName: name
+                        )
+                    } label: {
+                        Image(systemName: "list.number")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary)
                     }
+                    .accessibilityLabel(L("matches.leaders"))
                 }
             }
         }
@@ -686,15 +767,28 @@ struct MatchesView: View {
 struct MatchRowView: View {
     let match: MatchEvent
     let isStale: Bool
+    /// Build 84 (item 3b): when a surface provides its sport +
+    /// league, the row carries the Watch action under the
+    /// teams (rendered only when the active playlist has a
+    /// channel broadcasting this match).
+    var watchContext: (sport: MatchSport, leaguePath: String)?
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(spacing: 8) {
-                teamRow(match.home)
-                teamRow(match.away)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(spacing: 8) {
+                    teamRow(match.home)
+                    teamRow(match.away)
+                }
+                stateColumn
+                    .frame(width: 92, alignment: .trailing)
             }
-            stateColumn
-                .frame(width: 92, alignment: .trailing)
+            if let watchContext {
+                WatchPlayButton(
+                    sport: watchContext.sport, leaguePath: watchContext.leaguePath,
+                    match: match
+                )
+            }
         }
         .padding(.vertical, 4)
     }
@@ -720,7 +814,13 @@ struct MatchRowView: View {
             if match.state != .upcoming, let score = side.score {
                 // Item 11(2): a live score change flashes once
                 // (goal moment) — see FlashScoreText.
+                // Build 84 (item 3a audit): the score is pinned —
+                // fixed intrinsic size + top layout priority, so
+                // the flexible team name always yields first and
+                // the score can never be squeezed or clipped.
                 FlashScoreText(text: score, isLive: match.state == .live)
+                    .fixedSize()
+                    .layoutPriority(1)
             }
         }
     }
@@ -745,6 +845,7 @@ struct MatchRowView: View {
                         .font(AppTheme.fontMetadata.weight(.semibold))
                         .foregroundStyle(isStale ? .secondary : AppTheme.accent)
                         .monospacedDigit()
+                        .fixedSize()
                 }
             }
         case .upcoming:

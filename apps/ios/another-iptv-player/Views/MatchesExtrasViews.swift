@@ -63,6 +63,32 @@ struct StandingsView: View {
     @State private var loaded = false
     /// Build 83 (item 2): FotMob's Short / Full column modes.
     @State private var fullMode = false
+    /// Build 84 (item 23): when the table on screen came from
+    /// the disk cache, the time it was really fetched.
+    @State private var stamp: Date?
+    /// Build 84 (item 6): the as-it-stands live table.
+    @State private var liveMode = false
+    @State private var liveMatches: [MatchEvent] = []
+    /// Build 84 (item 5): derived last-5 form per teamId,
+    /// loaded lazily the first time Full mode opens.
+    @State private var form: [String: [String]] = [:]
+
+    /// The groups actually rendered: the official table, or —
+    /// in live mode — each group re-ranked with the live
+    /// scores applied (LiveTableAdjuster). Zone bars/legend
+    /// belong to the OFFICIAL table and are suppressed live.
+    private var displayGroups: [StandingGroup] {
+        guard liveMode else { return groups }
+        return groups.map { group in
+            StandingGroup(
+                name: group.name,
+                entries: LiveTableAdjuster.adjusted(
+                    entries: group.entries, liveMatches: liveMatches, sport: sport
+                ),
+                legend: group.legend
+            )
+        }
+    }
 
     var body: some View {
         List {
@@ -79,10 +105,48 @@ struct StandingsView: View {
                         Text(L("matches.table_full")).tag(true)
                     }
                     .pickerStyle(.segmented)
+                    if let stamp {
+                        LastUpdatedStamp(date: stamp)
+                    }
+                    // Build 84 (item 6): the Live toggle exists
+                    // only while a match in this league is
+                    // actually in progress right now.
+                    if !liveMatches.isEmpty {
+                        Toggle(isOn: $liveMode) {
+                            HStack(spacing: 6) {
+                                Circle().fill(AppTheme.live).frame(width: 7, height: 7)
+                                Text(L("matches.table_live"))
+                                    .font(AppTheme.fontCardTitle)
+                                Text(L("matches.live"))
+                                    .font(AppTheme.fontBadge)
+                                    .foregroundStyle(AppTheme.live)
+                            }
+                        }
+                        .tint(AppTheme.live)
+                    }
+                }
+                .listRowBackground(AppTheme.surface)
+                // Build 84 (items 7/8): the league's leaders
+                // and news live one tap from its table.
+                Section {
+                    NavigationLink {
+                        LeadersView(sport: sport, leaguePath: leaguePath, leagueName: leagueName)
+                    } label: {
+                        Label(L("matches.leaders"), systemImage: "list.number")
+                            .font(AppTheme.fontCardTitle)
+                    }
+                    .buttonStyle(PressOpacityButtonStyle())
+                    NavigationLink {
+                        LeagueNewsView(leaguePath: leaguePath, leagueName: leagueName)
+                    } label: {
+                        Label(L("matches.news"), systemImage: "newspaper")
+                            .font(AppTheme.fontCardTitle)
+                    }
+                    .buttonStyle(PressOpacityButtonStyle())
                 }
                 .listRowBackground(AppTheme.surface)
             }
-            ForEach(groups) { group in
+            ForEach(displayGroups) { group in
                 Section {
                     columnHeaderRow(group: group)
                     ForEach(Array(group.entries.enumerated()), id: \.element.id) { index, entry in
@@ -95,9 +159,10 @@ struct StandingsView: View {
                         } label: {
                             standingRow(index: index, entry: entry, columns: visibleColumns(for: group))
                         }
+                        .buttonStyle(PressOpacityButtonStyle())
                         .disabled(entry.teamId == nil)
                     }
-                    if !group.legend.isEmpty {
+                    if !group.legend.isEmpty && !liveMode {
                         legendRow(group: group)
                     }
                 } header: {
@@ -114,11 +179,30 @@ struct StandingsView: View {
         .overlay { if !loaded { BrandedLoader() } }
         // Build 83 (item 5): the Short/Full swap crossfades on
         // the shared chip token (nil — instant — under Reduce
-        // Motion / reduced effects, as everywhere).
+        // Motion / reduced effects, as everywhere). Build 84:
+        // the live-table swap rides the same token.
         .animation(Motion.animate(Motion.chipSwap), value: fullMode)
+        .animation(Motion.animate(Motion.chipSwap), value: liveMode)
         .task {
-            groups = await MatchesStandingsService.fetch(sport: sport, leaguePath: leaguePath)
+            let result = await MatchesStandingsService.fetch(sport: sport, leaguePath: leaguePath)
+            groups = result.groups
+            stamp = result.stamp
             loaded = true
+            // Item 6: today's live matches in THIS league (the
+            // shared day cache — no extra fetch when Matches
+            // already loaded the day).
+            if let today = try? await MatchesService.fetchLeague(
+                path: leaguePath, dateParameter: MatchesService.todayParameter()
+            ) {
+                liveMatches = today.matches.filter { $0.state == .live }
+            }
+        }
+        .onChange(of: fullMode) { _, isFull in
+            // Item 5: form derives lazily — only when the user
+            // actually opens the Full set.
+            if isFull, form.isEmpty {
+                Task { form = await TeamFormService.form(sport: sport, leaguePath: leaguePath) }
+            }
         }
     }
 
@@ -163,14 +247,24 @@ struct StandingsView: View {
                    StandingColumn(statName: "pointDifferential", width: 36, bold: false),
                    StandingColumn(statName: "points", width: 32, bold: true)]
         case .nba:
+            // Build 84 (items 17/21): the Full set gains the
+            // payload's own Home / Road record splits and its
+            // streak stat — both verified in the live payload
+            // 2026-11-21 (a split TABLE does not exist in any
+            // ESPN standings variant, so the splits ship as the
+            // columns the payload itself carries). PF/PA leave
+            // the Full set to keep the row fittable — the
+            // differential column carries their net, and PF/PA
+            // remain on the Compare screen.
             return fullMode
                 ? [StandingColumn(statName: "wins", width: 26, bold: false),
                    StandingColumn(statName: "losses", width: 26, bold: false),
                    StandingColumn(statName: "winPercent", width: 42, bold: false),
                    StandingColumn(statName: "gamesBehind", width: 34, bold: false),
-                   StandingColumn(statName: "pointsFor", width: 44, bold: false),
-                   StandingColumn(statName: "pointsAgainst", width: 44, bold: false),
-                   StandingColumn(statName: "pointDifferential", width: 40, bold: false)]
+                   StandingColumn(statName: "Home", width: 38, bold: false),
+                   StandingColumn(statName: "Road", width: 38, bold: false),
+                   StandingColumn(statName: "pointDifferential", width: 40, bold: false),
+                   StandingColumn(statName: "streak", width: 36, bold: false)]
                 : [StandingColumn(statName: "wins", width: 28, bold: false),
                    StandingColumn(statName: "losses", width: 28, bold: false),
                    StandingColumn(statName: "winPercent", width: 44, bold: false),
@@ -181,9 +275,11 @@ struct StandingsView: View {
                    StandingColumn(statName: "losses", width: 26, bold: false),
                    StandingColumn(statName: "ties", width: 24, bold: false),
                    StandingColumn(statName: "winPercent", width: 42, bold: false),
-                   StandingColumn(statName: "pointsFor", width: 42, bold: false),
-                   StandingColumn(statName: "pointsAgainst", width: 42, bold: false),
-                   StandingColumn(statName: "pointDifferential", width: 38, bold: false)]
+                   StandingColumn(statName: "gamesBehind", width: 34, bold: false),
+                   StandingColumn(statName: "Home", width: 38, bold: false),
+                   StandingColumn(statName: "Road", width: 38, bold: false),
+                   StandingColumn(statName: "pointDifferential", width: 38, bold: false),
+                   StandingColumn(statName: "streak", width: 36, bold: false)]
                 : [StandingColumn(statName: "wins", width: 28, bold: false),
                    StandingColumn(statName: "losses", width: 28, bold: false),
                    StandingColumn(statName: "ties", width: 26, bold: false),
@@ -273,10 +369,20 @@ struct StandingsView: View {
                 .monospacedDigit()
                 .frame(width: 20, alignment: .trailing)
             CachedImage(url: entry.logoURL, width: 22, height: 22, cornerRadius: 11, iconName: "shield")
-            Text(entry.teamName)
-                .font(AppTheme.fontCardTitle)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // Build 84 (item 5): in Full mode the derived
+            // last-results chips ride under the name — the
+            // count shown is exactly the count the scoreboard
+            // derivation found (never padded to five).
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.teamName)
+                    .font(AppTheme.fontCardTitle)
+                    .lineLimit(2)
+                if fullMode, let teamId = entry.teamId,
+                   let results = form[teamId], !results.isEmpty {
+                    FormChipsRow(results: results)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             ForEach(columns) { column in
                 Text(columnValue(column, for: entry))
                     .font(column.bold ? AppTheme.fontCardTitle : AppTheme.fontMetadata)
@@ -296,7 +402,9 @@ struct StandingsView: View {
     /// bar inferred from the rank.
     @ViewBuilder
     private func zoneBar(for entry: StandingEntry) -> some View {
-        if let hex = entry.noteColorHex, let color = zoneColor(hex) {
+        // Build 84 (item 6): in live mode the notes describe
+        // OFFICIAL positions — no zone bars on the live table.
+        if !liveMode, let hex = entry.noteColorHex, let color = zoneColor(hex) {
             RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                 .fill(color)
                 .frame(width: 3, height: 26)
@@ -428,7 +536,7 @@ struct LineupsView: View {
     @ViewBuilder
     private func sideView(_ side: MatchLineupSide) -> some View {
         if sport == .soccer, let lines = pitchLines(side) {
-            PitchView(side: side, lines: lines)
+            PitchView(side: side, lines: lines, sport: sport, leaguePath: leaguePath)
         } else {
             groupedList(side)
         }
@@ -514,7 +622,25 @@ struct LineupsView: View {
         }
     }
 
+    @ViewBuilder
     private func playerRow(_ player: MatchLineupPlayer) -> some View {
+        // Build 84 (item 4): lineup rows open the player page.
+        if let athleteId = player.athleteId {
+            NavigationLink {
+                PlayerPageView(
+                    sport: sport, leaguePath: leaguePath,
+                    athleteId: athleteId, fallbackName: player.name
+                )
+            } label: {
+                playerRowContent(player)
+            }
+            .buttonStyle(PressOpacityButtonStyle())
+        } else {
+            playerRowContent(player)
+        }
+    }
+
+    private func playerRowContent(_ player: MatchLineupPlayer) -> some View {
         HStack(spacing: 10) {
             PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 32)
             Text(player.name)
@@ -538,6 +664,10 @@ struct LineupsView: View {
 private struct PitchView: View {
     let side: MatchLineupSide
     let lines: [[MatchLineupPlayer]]
+    /// Build 84 (item 4): pitch markers + bench rows open the
+    /// player page — the surface needs its sport/league scope.
+    let sport: MatchSport
+    let leaguePath: String
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
 
@@ -583,17 +713,20 @@ private struct PitchView: View {
             if !side.bench.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(side.bench) { player in
-                        HStack(spacing: 10) {
-                            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 28)
-                            Text(player.name)
-                                .font(AppTheme.fontMetadata)
-                                .lineLimit(1)
-                            Spacer()
-                            if let position = player.positionName {
-                                Text(position)
-                                    .font(AppTheme.fontMetadata)
-                                    .foregroundStyle(.secondary)
+                        // Build 84 (item 4): bench rows open
+                        // the player page too.
+                        if let athleteId = player.athleteId {
+                            NavigationLink {
+                                PlayerPageView(
+                                    sport: sport, leaguePath: leaguePath,
+                                    athleteId: athleteId, fallbackName: player.name
+                                )
+                            } label: {
+                                benchRow(player)
                             }
+                            .buttonStyle(PressOpacityButtonStyle())
+                        } else {
+                            benchRow(player)
                         }
                     }
                 }
@@ -605,9 +738,25 @@ private struct PitchView: View {
         }
     }
 
+    private func benchRow(_ player: MatchLineupPlayer) -> some View {
+        HStack(spacing: 10) {
+            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 28)
+            Text(player.name)
+                .font(AppTheme.fontMetadata)
+                .lineLimit(1)
+            Spacer()
+            if let position = player.positionName {
+                Text(position)
+                    .font(AppTheme.fontMetadata)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
     private func marker(_ player: MatchLineupPlayer) -> some View {
         let flatIndex = lines.flatMap { $0 }.firstIndex(of: player) ?? 0
-        return VStack(spacing: 2) {
+        let content = VStack(spacing: 2) {
             PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 34)
             Text(shortName(player.name))
                 .font(.system(size: 9, weight: .semibold))
@@ -623,6 +772,21 @@ private struct PitchView: View {
             reduceMotion ? nil : .easeOut(duration: 0.3).delay(Double(flatIndex) * 0.04),
             value: appeared
         )
+        // Build 84 (item 4): a pitch marker opens the player
+        // page (the entrance stagger above is untouched).
+        if let athleteId = player.athleteId {
+            NavigationLink {
+                PlayerPageView(
+                    sport: sport, leaguePath: leaguePath,
+                    athleteId: athleteId, fallbackName: player.name
+                )
+            } label: {
+                content
+            }
+            .buttonStyle(.plain)
+        } else {
+            content
+        }
     }
 
     private func shortName(_ name: String) -> String {
@@ -639,7 +803,21 @@ struct TeamPageView: View {
     @State private var fixtures: [MatchEvent] = []
     @State private var squad: [SquadPlayer] = []
     @State private var loaded = false
+    /// Build 84 (item 12): the team's own leaders from the
+    /// verified core team-leaders endpoint.
+    @State private var teamLeaders: [(category: String, rows: [LeaderRow84])] = []
     @ObservedObject private var followStore = FollowedTeamsStore.shared
+
+    private var isFollowed: Bool {
+        followStore.team(sport: team.sport, leaguePath: team.leaguePath, teamId: team.id) != nil
+    }
+
+    /// The next upcoming fixture (for the item-10 countdown).
+    private var nextFixture: MatchEvent? {
+        upcoming.filter { $0.state == .upcoming }
+            .sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
+            .first
+    }
 
     private var upcoming: [MatchEvent] {
         fixtures.filter { $0.state == .upcoming || $0.state == .live }
@@ -659,55 +837,117 @@ struct TeamPageView: View {
                     Spacer()
                     followButton
                 }
+                // Build 84 (item 10): a followed team's next
+                // match carries a live countdown to kickoff.
+                if isFollowed, let next = nextFixture, let start = next.startDate {
+                    HStack(spacing: 8) {
+                        Image(systemName: "clock")
+                            .foregroundStyle(AppTheme.accent)
+                        Text(next.home.teamId == team.id
+                             ? "vs \(next.away.name ?? "")"
+                             : "@ \(next.home.name ?? "")")
+                            .font(AppTheme.fontMetadata)
+                            .lineLimit(1)
+                        Spacer()
+                        CountdownText(target: start)
+                            .font(AppTheme.fontMetadata.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                // Build 84 (item 22): compare this team with
+                // another from the same league.
+                NavigationLink {
+                    CompareTeamsView(team: team)
+                } label: {
+                    Label(L("matches.compare"), systemImage: "arrow.left.arrow.right")
+                        .font(AppTheme.fontCardTitle)
+                }
+                .buttonStyle(PressOpacityButtonStyle())
             }
             .listRowBackground(AppTheme.surface)
 
+            // Build 84 (item 12): the FULL season lists — the
+            // build-63 prefix(8) caps are gone; the schedule
+            // endpoint returns the whole season (verified).
             if !upcoming.isEmpty {
                 Section {
-                    ForEach(upcoming.prefix(8)) { match in
+                    ForEach(upcoming) { match in
                         NavigationLink {
                             MatchDetailView(sport: team.sport, leaguePath: team.leaguePath, match: match)
                         } label: {
                             TeamFixtureRow(match: match, focusTeamId: team.id)
                         }
+                        .buttonStyle(PressOpacityButtonStyle())
                     }
                 } header: { extrasSectionHeader(L("matches.team.next")) }
                 .listRowBackground(AppTheme.surface)
             }
             if !results.isEmpty {
                 Section {
-                    ForEach(results.prefix(8)) { match in
+                    ForEach(results) { match in
                         NavigationLink {
                             MatchDetailView(sport: team.sport, leaguePath: team.leaguePath, match: match)
                         } label: {
                             TeamFixtureRow(match: match, focusTeamId: team.id)
                         }
+                        .buttonStyle(PressOpacityButtonStyle())
                     }
                 } header: { extrasSectionHeader(L("matches.team.recent")) }
+                .listRowBackground(AppTheme.surface)
+            }
+            // Build 84 (item 12): the team's own leaders, from
+            // the verified core team-leaders endpoint — each
+            // category the payload returns, its top players,
+            // tapping through to the player page.
+            ForEach(Array(teamLeaders.enumerated()), id: \.offset) { _, group in
+                Section {
+                    ForEach(group.rows) { row in
+                        NavigationLink {
+                            PlayerPageView(
+                                sport: team.sport, leaguePath: team.leaguePath,
+                                athleteId: row.athleteId, fallbackName: row.name
+                            )
+                        } label: {
+                            HStack(spacing: 10) {
+                                PlayerPhotoDisc(url: row.headshotURL, name: row.name, size: 30)
+                                Text(row.name)
+                                    .font(AppTheme.fontCardTitle)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(row.valueText)
+                                    .font(AppTheme.fontMetadata.weight(.semibold))
+                                    .foregroundStyle(AppTheme.accent)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                        }
+                        .buttonStyle(PressOpacityButtonStyle())
+                    }
+                } header: { extrasSectionHeader("\(L("matches.team.leaders")) · \(group.category)") }
                 .listRowBackground(AppTheme.surface)
             }
             if !squad.isEmpty {
                 Section {
                     ForEach(squad) { player in
-                        // Build 81 (item 1, owner): squad rows carry
-                        // NO player picture — name + position only,
-                        // for every team in every sport. (Most rows
-                        // rendered the monogram fallback anyway; the
-                        // owner ordered the element gone.) The header
-                        // crest stays — it is the team logo. Match-
-                        // detail lineup/bench/pitch headshots are a
-                        // different surface and stay.
-                        HStack(spacing: 10) {
-                            Text(player.name)
-                                .font(AppTheme.fontCardTitle)
-                                .lineLimit(1)
-                            Spacer()
-                            if let position = player.positionName {
-                                Text(position)
-                                    .font(AppTheme.fontMetadata)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                        // Build 84 (item 1, owner — supersedes
+                        // build 81's picture removal for THIS
+                        // surface): squad rows carry the
+                        // player's ESPN photo again (the disc's
+                        // initials render only where ESPN has
+                        // no photo), and a row with a known
+                        // athlete id opens the player page.
+                        if let athleteId = player.athleteId {
+                            NavigationLink {
+                                PlayerPageView(
+                                    sport: team.sport, leaguePath: team.leaguePath,
+                                    athleteId: athleteId, fallbackName: player.name
+                                )
+                            } label: {
+                                squadRow(player)
                             }
+                            .buttonStyle(PressOpacityButtonStyle())
+                        } else {
+                            squadRow(player)
                         }
                     }
                 } header: { extrasSectionHeader(L("matches.team.squad")) }
@@ -732,6 +972,25 @@ struct TeamPageView: View {
             fixtures = await schedule
             squad = await roster
             loaded = true
+            teamLeaders = await MatchesLeadersService.fetchTeam(
+                sport: team.sport, leaguePath: team.leaguePath, teamId: team.id
+            )
+        }
+    }
+
+    private func squadRow(_ player: SquadPlayer) -> some View {
+        HStack(spacing: 10) {
+            PlayerPhotoDisc(url: player.headshotURL, name: player.name, size: 32)
+            Text(player.name)
+                .font(AppTheme.fontCardTitle)
+                .lineLimit(1)
+            Spacer()
+            if let position = player.positionName {
+                Text(position)
+                    .font(AppTheme.fontMetadata)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
     }
 
@@ -751,7 +1010,7 @@ struct TeamPageView: View {
                 .padding(.vertical, 5)
                 .background(Capsule().stroke(followed ? Color.secondary.opacity(0.4) : AppTheme.accent, lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressOpacityButtonStyle())
     }
 }
 
@@ -858,11 +1117,15 @@ struct GoalAlertHostView: View {
 // MARK: - 12c Team search
 
 /// Finds any team across the three sports (the full team lists
-/// load once from the feed) and opens its team page.
+/// load once from the feed) and opens its team page. Build 84
+/// (item 9): players are searchable too — ESPN's public search
+/// (verified) — grouped under their own Players section, each
+/// opening the player page.
 struct TeamSearchView: View {
     @State private var query = ""
     @State private var allTeams: [TeamRef] = []
     @State private var loaded = false
+    @State private var playerHits: [PlayerSearchHit] = []
     @Environment(\.dismiss) private var dismiss
 
     private var results: [TeamRef] {
@@ -873,23 +1136,65 @@ struct TeamSearchView: View {
 
     var body: some View {
         List {
-            ForEach(results) { team in
-                NavigationLink {
-                    TeamPageView(team: team)
-                } label: {
-                    HStack(spacing: 10) {
-                        CachedImage(url: team.logoURL, width: 28, height: 28, cornerRadius: 14, iconName: "shield")
-                        Text(team.name)
-                            .font(AppTheme.fontCardTitle)
-                            .lineLimit(1)
-                        Spacer()
-                        Text(L(team.sport.titleKey))
-                            .font(AppTheme.fontMetadata)
-                            .foregroundStyle(.secondary)
+            if !results.isEmpty {
+                Section {
+                    ForEach(results) { team in
+                        NavigationLink {
+                            TeamPageView(team: team)
+                        } label: {
+                            HStack(spacing: 10) {
+                                CachedImage(url: team.logoURL, width: 28, height: 28, cornerRadius: 14, iconName: "shield")
+                                Text(team.name)
+                                    .font(AppTheme.fontCardTitle)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(L(team.sport.titleKey))
+                                    .font(AppTheme.fontMetadata)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
-                }
+                } header: { extrasSectionHeader(L("matches.team_label")) }
+                .listRowBackground(AppTheme.surface)
             }
-            .listRowBackground(AppTheme.surface)
+            if !playerHits.isEmpty {
+                Section {
+                    ForEach(playerHits) { hit in
+                        NavigationLink {
+                            PlayerPageView(
+                                sport: hit.sport, leaguePath: hit.leaguePath,
+                                athleteId: hit.athleteId, fallbackName: hit.name
+                            )
+                        } label: {
+                            HStack(spacing: 10) {
+                                PlayerPhotoDisc(
+                                    url: CoreCoordinates.headshotURL(
+                                        sport: hit.sport, athleteId: hit.athleteId, href: nil
+                                    ),
+                                    name: hit.name, size: 28
+                                )
+                                Text(hit.name)
+                                    .font(AppTheme.fontCardTitle)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(L(hit.sport.titleKey))
+                                    .font(AppTheme.fontMetadata)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(PressOpacityButtonStyle())
+                    }
+                } header: { extrasSectionHeader(L("matches.search.players")) }
+                .listRowBackground(AppTheme.surface)
+            }
+        }
+        .task(id: query) {
+            // Debounced remote player search (3+ characters).
+            let trimmed = query.trimmingCharacters(in: .whitespaces)
+            guard trimmed.count >= 3 else { playerHits = []; return }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            if Task.isCancelled { return }
+            playerHits = await PlayerSearchService.search(query: trimmed)
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -959,7 +1264,7 @@ struct LeagueBrowserView: View {
                             .lineLimit(1)
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressOpacityButtonStyle())
                 .listRowBackground(AppTheme.surface)
             }
         }
@@ -1004,17 +1309,28 @@ struct LeaguePageView: View {
                     Label(L("matches.standings"), systemImage: "chart.bar.fill")
                         .font(AppTheme.fontCardTitle)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressOpacityButtonStyle())
                 NavigationLink {
-                    TopScorersView(
+                    LeadersView(
+                        sport: .soccer,
                         leaguePath: league.leaguePath,
                         leagueName: league.name
                     )
                 } label: {
-                    Label(L("matches.scorers"), systemImage: "list.number")
+                    Label(L("matches.leaders"), systemImage: "list.number")
                         .font(AppTheme.fontCardTitle)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressOpacityButtonStyle())
+                NavigationLink {
+                    LeagueNewsView(
+                        leaguePath: league.leaguePath,
+                        leagueName: league.name
+                    )
+                } label: {
+                    Label(L("matches.news"), systemImage: "newspaper")
+                        .font(AppTheme.fontCardTitle)
+                }
+                .buttonStyle(PressOpacityButtonStyle())
             } header: {
                 HStack(spacing: 8) {
                     CachedImage(
@@ -1046,9 +1362,12 @@ struct LeaguePageView: View {
                             leagueName: league.name
                         )
                     } label: {
-                        MatchRowView(match: match, isStale: false)
+                        MatchRowView(
+                            match: match, isStale: false,
+                            watchContext: (sport: .soccer, leaguePath: league.leaguePath)
+                        )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressOpacityButtonStyle())
                 }
             }
             .listRowBackground(AppTheme.surface)

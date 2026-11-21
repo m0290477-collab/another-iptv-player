@@ -1134,3 +1134,32 @@
 "settings.hub.playlists_count_format" = "%d प्लेलिस्ट";
 "settings.hub.active_until_format" = "%@ तक सक्रिय";
 "home.sports" = "खेल";
+
+/* Build 84: combined sports update */
+"matches.watch.button" = "देखें";
+"matches.live_now" = "अभी लाइव";
+"matches.highlights_hub" = "हाइलाइट्स";
+"matches.leaders" = "अग्रणी खिलाड़ी";
+"matches.news" = "समाचार";
+"matches.player.age" = "आयु";
+"matches.player.nationality" = "राष्ट्रीयता";
+"matches.player.number" = "नंबर";
+"matches.player.position" = "स्थिति";
+"matches.player.stats" = "सीज़न के आँकड़े";
+"matches.player.recent" = "हाल के मैच";
+"matches.table_live" = "लाइव तालिका";
+"matches.table_form" = "फॉर्म";
+"matches.compare" = "टीमों की तुलना करें";
+"matches.compare.pick" = "तुलना के लिए टीम चुनें";
+"matches.compare.position" = "स्थिति";
+"matches.box_score" = "बॉक्स स्कोर";
+"matches.box.dnp" = "नहीं खेले";
+"matches.box.totals" = "कुल";
+"matches.detail.play_by_play" = "प्ले बाय प्ले";
+"matches.detail.win_probability" = "जीत की संभावना";
+"matches.info.prediction" = "ESPN भविष्यवाणी";
+"matches.kickoff_push" = "किकऑफ़ सूचना";
+"matches.search.players" = "खिलाड़ी";
+"matches.next_in" = "%@ में";
+"matches.team.leaders" = "टीम के अग्रणी";
+"matches.last_updated" = "अंतिम अपडेट %@";

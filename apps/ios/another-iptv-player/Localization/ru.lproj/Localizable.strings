@@ -1134,3 +1134,32 @@
 "settings.hub.playlists_count_format" = "%d плейлистов";
 "settings.hub.active_until_format" = "Активно до %@";
 "home.sports" = "Спорт";
+
+/* Build 84: combined sports update */
+"matches.watch.button" = "Смотреть";
+"matches.live_now" = "Сейчас в эфире";
+"matches.highlights_hub" = "Лучшие моменты";
+"matches.leaders" = "Лидеры";
+"matches.news" = "Новости";
+"matches.player.age" = "Возраст";
+"matches.player.nationality" = "Гражданство";
+"matches.player.number" = "Номер";
+"matches.player.position" = "Позиция";
+"matches.player.stats" = "Статистика сезона";
+"matches.player.recent" = "Последние матчи";
+"matches.table_live" = "Таблица в реальном времени";
+"matches.table_form" = "Форма";
+"matches.compare" = "Сравнить команды";
+"matches.compare.pick" = "Выберите команду для сравнения";
+"matches.compare.position" = "Позиция";
+"matches.box_score" = "Статистика игроков";
+"matches.box.dnp" = "Не играл";
+"matches.box.totals" = "Итого";
+"matches.detail.play_by_play" = "Ход матча";
+"matches.detail.win_probability" = "Вероятность победы";
+"matches.info.prediction" = "Прогноз ESPN";
+"matches.kickoff_push" = "Уведомление о начале";
+"matches.search.players" = "Игроки";
+"matches.next_in" = "через %@";
+"matches.team.leaders" = "Лидеры команды";
+"matches.last_updated" = "Обновлено: %@";

@@ -1134,3 +1134,32 @@
 "settings.hub.playlists_count_format" = "%d قوائم تشغيل";
 "settings.hub.active_until_format" = "نشط حتى %@";
 "home.sports" = "الرياضة";
+
+/* Build 84: combined sports update */
+"matches.watch.button" = "شاهد";
+"matches.live_now" = "مباشر الآن";
+"matches.highlights_hub" = "أبرز اللقطات";
+"matches.leaders" = "المتصدرون";
+"matches.news" = "الأخبار";
+"matches.player.age" = "العمر";
+"matches.player.nationality" = "الجنسية";
+"matches.player.number" = "الرقم";
+"matches.player.position" = "المركز";
+"matches.player.stats" = "إحصائيات الموسم";
+"matches.player.recent" = "المباريات الأخيرة";
+"matches.table_live" = "الترتيب المباشر";
+"matches.table_form" = "الأداء الأخير";
+"matches.compare" = "مقارنة الفرق";
+"matches.compare.pick" = "اختر فريقاً للمقارنة";
+"matches.compare.position" = "الترتيب";
+"matches.box_score" = "إحصائيات اللاعبين";
+"matches.box.dnp" = "لم يلعب";
+"matches.box.totals" = "المجموع";
+"matches.detail.play_by_play" = "أحداث المباراة";
+"matches.detail.win_probability" = "احتمالية الفوز";
+"matches.info.prediction" = "توقعات ESPN";
+"matches.kickoff_push" = "إشعار عند بدء المباراة";
+"matches.search.players" = "اللاعبون";
+"matches.next_in" = "بعد %@";
+"matches.team.leaders" = "أبرز لاعبي الفريق";
+"matches.last_updated" = "آخر تحديث %@";
