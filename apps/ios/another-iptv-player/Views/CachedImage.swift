@@ -327,10 +327,10 @@ final class ArtworkAspectProbe {
                 )
             ]
         )
-        guard let container = try? await ImagePipeline.shared.image(for: request) else {
+        guard let image = try? await ImagePipeline.shared.image(for: request) else {
             return nil
         }
-        let size = container.image.size
+        let size = image.size
         guard size.width > 0, size.height > 0 else { return nil }
         let aspect = size.width / size.height
         lock.lock()
