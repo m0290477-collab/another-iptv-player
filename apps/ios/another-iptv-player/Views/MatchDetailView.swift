@@ -54,6 +54,10 @@ struct MatchDetailView: View {
     @State private var detailTab = 0
     /// Build 81 (item 3): the highlight currently playing in-app.
     @State private var playingHighlight: MatchVideo?
+    /// Build 87 (item 12): deeper head-to-head — meetings from
+    /// the two previous seasons, intersected from the core
+    /// API's per-season team event lists.
+    @State private var deepMeetings: [MatchH2HMeeting] = []
     /// Build 85 (sweep): the recap article open in the Safari
     /// sheet, when the user taps it.
     @State private var articleURL: URL?
@@ -136,6 +140,17 @@ struct MatchDetailView: View {
     private var state: MatchState? { seedMatch?.state ?? detail?.header?.state }
 
     var body: some View {
+        // Build 87 (item 1): hockey's detail is the NHL API's
+        // own page — the ESPN summary pipeline never sees the
+        // .nhl sport (its payloads are a different shape).
+        if sport == .nhl {
+            NHLMatchDetailView(leaguePath: leaguePath, eventId: eventId, seedMatch: seedMatch)
+        } else {
+            espnBody
+        }
+    }
+
+    private var espnBody: some View {
         Group {
             if detail == nil && !loadFailed {
                 BrandedLoader()
@@ -214,6 +229,19 @@ struct MatchDetailView: View {
                     extraNeedles: detail?.broadcastNames ?? []
                 )
             }
+        }
+        // Build 87 (item 12): deeper H2H loads after the
+        // detail — the two teams' core event lists for the
+        // two previous seasons, intersected; meetings the
+        // summary already showed are excluded by event id.
+        if let h2h = detail?.h2h, !h2h.meetings.isEmpty,
+           let homeId = home?.teamId, let awayId = away?.teamId {
+            deepMeetings = await DeepH2HService.fetch(
+                sport: sport, leaguePath: leaguePath,
+                homeId: homeId, awayId: awayId,
+                homeName: home?.name, awayName: away?.name,
+                excludeIds: Set(h2h.meetings.map(\.id))
+            )
         }
         watchLoaded = true
     }
@@ -405,6 +433,21 @@ struct MatchDetailView: View {
                             }
                         } header: {
                             sectionHeader(L("matches.detail.h2h"))
+                        }
+                        .listRowBackground(AppTheme.surface)
+                    }
+                    // Build 87 (item 12): the deeper history —
+                    // meetings from the two previous seasons
+                    // (core team-event intersection), rendered
+                    // only when it found meetings the summary
+                    // didn't already show.
+                    if !deepMeetings.isEmpty {
+                        Section {
+                            ForEach(deepMeetings) { meeting in
+                                h2hRow(meeting)
+                            }
+                        } header: {
+                            sectionHeader(L("matches.h2h.more"))
                         }
                         .listRowBackground(AppTheme.surface)
                     }

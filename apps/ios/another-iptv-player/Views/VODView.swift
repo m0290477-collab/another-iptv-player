@@ -1771,147 +1771,45 @@ struct MovieFeaturedHero: View {
     let onDetails: () -> Void
     let onPlay: () -> Void
 
-    /// Build 82 (item 1): same failure swap as the Series tab
-    /// hero — a backdrop string that exists but fails to load
-    /// no longer strands the hero on the placeholder while the
-    /// movie's poster sits unused; the poster aspect-fills the
-    /// wide frame (the build 81 item 4 treatment).
-    @State private var backdropLoadFailed = false
+    // Build 87 (item 16, owner-picked design 4): the Movies
+    // tab hero is the design-4 poster card — the tab features
+    // ONE item, so the card renders centered with no peek
+    // neighbours (there is nothing to peek). HeroPosterCard
+    // owns the art chain (backdrop → poster on failure → the
+    // designed title card), the centered title/star/meta
+    // block and the Play/Details actions; this composition
+    // keeps the existing wiring (the same onPlay/onDetails
+    // the wide hero ran) and the real rating/meta only.
 
-    /// Build 83 (item 4): the hero art's MEASURED aspect
-    /// (width ÷ height), probed through the image pipeline —
-    /// see `ArtworkAspectProbe`. Nil until measured.
-    @State private var artAspect: CGFloat? = nil
-
-    private var backdropURL: URL? {
-        movie.backdropPath.flatMap { ArtworkURL.url(from: $0) }
-    }
-
-    private var posterURL: URL? {
-        movie.streamIcon.flatMap { ArtworkURL.url(from: $0) }
-    }
-
-    private var heroURL: URL? {
-        if let backdropURL, !backdropLoadFailed { return backdropURL }
-        return posterURL
-    }
-
-    /// Build 83 (item 4, owner — artwork shown WHOLE, never
-    /// cropped): wide art (measured aspect ≥ 1.15, or the
-    /// backdrop field before measurement) fills the frame as
-    /// before; portrait/square art is aspect-FITTED over the
-    /// hero's near-black ground — a 2:3 poster aspect-filled
-    /// into this wide frame loses over half its height (the
-    /// cut faces in the owner's screenshot). The backdrop-
-    /// preferred order from builds 81/82 is unchanged; only
-    /// the fit changes.
-    private var heroContentMode: ContentMode {
-        let aspect = artAspect ?? heroURL.flatMap { ArtworkAspectProbe.shared.cachedAspect(for: $0) }
-        if let aspect { return aspect >= 1.15 ? .fill : .fit }
-        return (backdropURL != nil && heroURL == backdropURL) ? .fill : .fit
+    private var metaLine: String? {
+        var parts: [String] = []
+        if let genre = movie.genre?.split(separator: ",").first {
+            parts.append(genre.trimmingCharacters(in: .whitespaces))
+        }
+        if let year = DetailFormatting.year(from: movie.releaseDate) {
+            parts.append(year)
+        }
+        if let duration = movie.duration?.trimmingCharacters(in: .whitespaces), !duration.isEmpty {
+            parts.append(duration)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " • ")
     }
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            // Build 83 (item 4): the near-black ground the
-            // aspect-fitted art sits on (invisible when wide
-            // art fills the frame).
-            RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
-                .fill(Color.black)
-                .frame(width: UIScreen.main.bounds.width - 32, height: 210)
-            CachedImage(
-                url: heroURL,
-                width: UIScreen.main.bounds.width - 32,
-                height: 210,
-                cornerRadius: AppTheme.heroCornerRadius,
-                contentMode: heroContentMode,
-                iconName: "film",
-                loadProfile: .high,
-                onLoadFailed: {
-                    if heroURL == backdropURL { backdropLoadFailed = true }
-                }
-            )
-            .onChange(of: backdropURL) { _, _ in backdropLoadFailed = false }
-            .task(id: heroURL) {
-                artAspect = nil
-                if let heroURL {
-                    artAspect = await ArtworkAspectProbe.shared.probe(heroURL)
-                }
-            }
-            LinearGradient(
-                colors: [.clear, AppTheme.background.opacity(0.88)],
-                startPoint: .center,
-                endPoint: .bottom
-            )
-            .clipShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L("home.featured"))
-                    .font(AppTheme.fontBadge)
-                    .foregroundStyle(AppTheme.accent)
-                Text(movie.name)
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                HStack(spacing: 10) {
-                    if let rating = ContentRating.normalizedDisplayText(rating: movie.rating, rating5Based: movie.rating5Based) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "star.fill")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(AppTheme.ratingGold)
-                            Text(rating)
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.white)
-                        }
-                    }
-                    if let year = DetailFormatting.year(from: movie.releaseDate) {
-                        Text(year)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.8))
-                    }
-                    if let genre = movie.genre?.split(separator: ",").first {
-                        Text(genre.trimmingCharacters(in: .whitespaces))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.8))
-                            .lineLimit(1)
-                    }
-                }
-                HStack(spacing: 10) {
-                    Button(action: onPlay) {
-                        Label(L("home.play"), systemImage: "play.fill")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 9)
-                            .background(Capsule().fill(AppTheme.accent))
-                    }
-                    .buttonStyle(.plain)
-                    Button(action: onDetails) {
-                        Label(L("home.details"), systemImage: "info.circle")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 9)
-                            .background(Capsule().fill(.ultraThinMaterial))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(16)
-        }
-        .frame(height: 210)
-        .clipShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
-                .strokeBorder(AppTheme.cardBorderColor, lineWidth: 0.5)
+        HeroPosterCard(
+            title: movie.name,
+            backdropURL: movie.backdropPath.flatMap { ArtworkURL.url(from: $0) },
+            posterURL: movie.streamIcon.flatMap { ArtworkURL.url(from: $0) },
+            ratingText: ContentRating.normalizedDisplayText(rating: movie.rating, rating5Based: movie.rating5Based),
+            metaLine: metaLine,
+            iconName: "film",
+            width: (UIScreen.main.bounds.width - 32) * 0.78,
+            onPlay: onPlay,
+            onDetails: onDetails
         )
-        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity)
         .padding(.top, 6)
         .padding(.bottom, 8)
-        // Section identity (round 14, A7): the Movies hero carries
-        // the section's own accent token.
-        .tint(SectionTheme.movies)
     }
 }
 

@@ -224,6 +224,20 @@ struct PlayerPageView: View {
                 if !profile.recentEvents.isEmpty {
                     recentSection(profile)
                 }
+                // Build 87 (item 6): compare this player with
+                // another from the same league's leaders.
+                Section {
+                    NavigationLink {
+                        PlayerCompareView(
+                            sport: sport, leaguePath: leaguePath,
+                            firstAthleteId: athleteId
+                        )
+                    } label: {
+                        Label(L("matches.compare_players"), systemImage: "person.2")
+                            .font(AppTheme.fontCardTitle)
+                    }
+                    .buttonStyle(PressOpacityButtonStyle())
+                }
                 if let playerBio {
                     bioSection(playerBio)
                 }
@@ -288,20 +302,40 @@ struct PlayerPageView: View {
                         .font(.title3.weight(.bold))
                         .lineLimit(2)
                     if let teamId = profile.teamId, let teamName = profile.teamName {
-                        NavigationLink {
-                            TeamPageView(team: TeamRef(
-                                id: teamId, sport: sport, leaguePath: leaguePath,
-                                name: teamName, logoURL: profile.teamLogoURL
-                            ))
-                        } label: {
-                            HStack(spacing: 6) {
-                                CachedImage(url: profile.teamLogoURL, width: 22, height: 22, cornerRadius: 11, iconName: "shield")
-                                Text(teamName)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(AppTheme.accent)
+                        // Build 87 (item 1): hockey profiles
+                        // open the NHL club page (teamId is the
+                        // club abbreviation there).
+                        if sport == .nhl {
+                            NavigationLink {
+                                NHLTeamPageView(
+                                    abbrev: teamId, name: teamName,
+                                    logoURL: profile.teamLogoURL
+                                )
+                            } label: {
+                                HStack(spacing: 6) {
+                                    CachedImage(url: profile.teamLogoURL, width: 22, height: 22, cornerRadius: 11, iconName: "shield")
+                                    Text(teamName)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(AppTheme.accent)
+                                }
                             }
+                            .buttonStyle(PressOpacityButtonStyle())
+                        } else {
+                            NavigationLink {
+                                TeamPageView(team: TeamRef(
+                                    id: teamId, sport: sport, leaguePath: leaguePath,
+                                    name: teamName, logoURL: profile.teamLogoURL
+                                ))
+                            } label: {
+                                HStack(spacing: 6) {
+                                    CachedImage(url: profile.teamLogoURL, width: 22, height: 22, cornerRadius: 11, iconName: "shield")
+                                    Text(teamName)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(AppTheme.accent)
+                                }
+                            }
+                            .buttonStyle(PressOpacityButtonStyle())
                         }
-                        .buttonStyle(PressOpacityButtonStyle())
                     } else if let teamName = profile.teamName {
                         Text(teamName)
                             .font(.subheadline)
@@ -704,29 +738,48 @@ struct LiveNowView: View {
 
 // MARK: - Highlights hub (item 14)
 
-/// One feed of highlight videos across competitions — today's
-/// and yesterday's finished matches, only the videos their own
-/// summary payloads carry (the build-81 verified set), playing
-/// in-app through the same direct-MP4 AVKit sheet.
+/// One feed of highlight videos across competitions —
+/// today's and yesterday's finished matches, only the videos
+/// their own summary payloads carry (the build-81 verified
+/// set), playing in-app through the same direct-MP4 AVKit
+/// sheet. Build 87 (item 13): the feed is GROUPED BY SPORT
+/// under sport headers in the app's sport order — never one
+/// mixed list.
 struct HighlightsHubView: View {
     @State private var highlights: [HubHighlight] = []
     @State private var didLoad = false
     @State private var selected: MatchVideo?
 
+    /// The feed's sport groups, in MatchSport order.
+    private var sportGroups: [(sport: MatchSport, items: [HubHighlight])] {
+        MatchSport.allCases.compactMap { sport in
+            let items = highlights.filter { $0.sport == sport }
+            return items.isEmpty ? nil : (sport: sport, items: items)
+        }
+    }
+
     var body: some View {
         List {
-            Section {
-                if highlights.isEmpty {
+            if highlights.isEmpty {
+                Section {
                     Text(didLoad ? L("matches.empty") : L("common.loading"))
                         .foregroundStyle(.secondary)
-                } else {
-                    ForEach(highlights) { item in
-                        Button {
-                            selected = item.video
-                        } label: {
-                            highlightRow(item)
+                }
+            } else {
+                ForEach(Array(sportGroups.enumerated()), id: \.offset) { _, group in
+                    Section {
+                        ForEach(group.items) { item in
+                            Button {
+                                selected = item.video
+                            } label: {
+                                highlightRow(item)
+                            }
+                            .buttonStyle(PressOpacityButtonStyle())
                         }
-                        .buttonStyle(PressOpacityButtonStyle())
+                    } header: {
+                        Text(L(group.sport.titleKey))
+                            .font(AppTheme.fontBadge)
+                            .foregroundStyle(AppTheme.accent)
                     }
                 }
             }
@@ -1197,6 +1250,14 @@ struct CompareTeamsView: View {
             candidates = ["wins", "losses", "winPercent", "gamesBehind",
                           "pointsFor", "pointsAgainst", "pointDifferential",
                           "Last Ten Games", "streak"]
+        case .nhl:
+            // Build 87 (item 1): for exhaustiveness — NHL
+            // teams never reach CompareTeamsView (their page
+            // is NHLTeamPageView, which offers no compare
+            // entry), but the NHL entries' keys mirror the
+            // ESPN names if one ever did.
+            candidates = ["gamesPlayed", "wins", "losses", "otLosses",
+                          "pointsFor", "pointsAgainst", "pointDifferential", "points"]
         }
         return candidates.filter { own.stats[$0] != nil || other.stats[$0] != nil }
     }

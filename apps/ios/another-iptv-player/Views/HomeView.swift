@@ -322,22 +322,6 @@ struct HomeView: View {
         continueNextLabels = resolved
     }
 
-    /// Round 7 (landscape fix): the card width used to derive from the
-    /// screen's WIDTH alone — `min(width - 32, 760)`. In landscape the
-    /// width is the long edge (~852 pt), so the card grew to 760 pt and
-    /// its 16:9 art to ~427 pt tall — taller than the entire landscape
-    /// viewport (~393 pt) — and a 2:3 poster was fill-cropped into that
-    /// frame at full-screen size: the giant faces in the owner's video
-    /// ("the top images blow up… not tidy"). The art height is now
-    /// capped at 62% of the screen HEIGHT and the width derives from
-    /// that cap when it binds. Portrait phones are unchanged
-    /// (361 pt wide → 203 pt of art; the height cap is ~528 pt there).
-    private var cardWidth: CGFloat {
-        let bounds = UIScreen.main.bounds
-        let heightCappedWidth = (bounds.height * 0.62) * 16 / 9
-        return min(bounds.width - 32, 760, heightCappedWidth)
-    }
-
     var body: some View {
         Group {
             if catalogIsEmpty {
@@ -416,6 +400,20 @@ struct HomeView: View {
                             SkeletonShelf()
                         }
 
+                        // Build 87 (owner decision, design 18):
+                        // the slim live-scores strip DIRECTLY
+                        // under the hero — one compact bar of
+                        // today's scores fed by the SAME
+                        // matchResults data the Match Results
+                        // cards below render (no new fetch). It
+                        // exists only when today has live or
+                        // finished matches (exactly when
+                        // matchResults is non-empty), under the
+                        // same section gate.
+                        if !UserDefaults.standard.bool(forKey: "sections.hidden.matches") {
+                            homeLiveStrip
+                        }
+
                         // Build 77 (Design A) — sections 2–5, in
                         // the owner's picked order. Everything that
                         // used to sit here is gone: the "Live now"
@@ -441,6 +439,16 @@ struct HomeView: View {
                             matchResultsSection
                         }
 
+                        // Build 87 (owner decision, design 15):
+                        // Continue Watching now sits directly
+                        // under Match Results — the picked
+                        // top-to-bottom order is hero → strip →
+                        // sports → Match Results → Continue
+                        // Watching → Most Popular Movies → Top
+                        // Series → Support. Same content and
+                        // destinations, re-ordered only.
+                        mergedContinueRail
+
                         // Section 3: Most Popular Movies — the
                         // catalog's normalized-rating ranking (see
                         // the header note), hero-deduped, F6-gated
@@ -454,11 +462,6 @@ struct HomeView: View {
                         if sectionVisibility.isVisible(.series), topRatedSeries.count >= 3 {
                             popularSeriesRail
                         }
-
-                        // Section 5: ONE Continue Watching rail of
-                        // wide cards — Continue Watching and
-                        // Continue Series merged, each item once.
-                        mergedContinueRail
 
                         // Build 80 (item 11): the Support entry
                         // ordered in the build-74 round and never
@@ -979,88 +982,98 @@ struct HomeView: View {
 
     // MARK: - Featured carousel
 
-    /// Build 80 (item 6, owner-picked Option 3): the hero is a
-    /// WIDE cinematic letterbox — 16:9 in BOTH orientations (the
-    /// build-65 tall portrait hero with its stretched poster and
-    /// blurred side pillars is gone). `heroHeight` is the BACKDROP
-    /// height; the slide adds a small overflow below it for the
-    /// overlapping poster thumbnail.
-    private var heroHeight: CGFloat {
-        cardWidth * 9 / 16
+    /// Build 87 (item 16, owner-picked design 4 — supersedes
+    /// build 80's wide Option 3): the hero is an immersive
+    /// POSTER carousel. One large center card (78% of the
+    /// screen width, 3:4) with the previous/next cards peeking
+    /// at the edges, scaled down and darkened by the scroll
+    /// transition; page dots CENTERED below. Portrait posters
+    /// are the design's native art; wide backdrops fill the
+    /// same card (HeroPosterCard owns the art chain). The
+    /// pager stays a horizontal ScrollView (the build-80
+    /// gesture negotiation with the page scroll is unchanged),
+    /// snapping view-aligned; the auto-advance timer, the
+    /// swipe-pause and the play/details actions are the
+    /// existing ones.
+    private var heroCardWidth: CGFloat {
+        UIScreen.main.bounds.width * 0.78
     }
 
-    /// The full slide height: backdrop + the poster thumbnail's
-    /// overflow below the backdrop's bottom edge.
-    private var heroSlideHeight: CGFloat { heroHeight + 30 }
+    private var heroCardHeight: CGFloat {
+        heroCardWidth * 4 / 3
+    }
 
-    /// Build 80 (items 3 + 6): the pager is a HORIZONTAL ScrollView
-    /// with paging behavior — NOT a TabView. The old page-style
-    /// TabView's gesture ate vertical drags that started on the
-    /// hero, so the page would not scroll from the cover (item 3);
-    /// a horizontal ScrollView inside the vertical page scroll
-    /// negotiates by drag direction: vertical drags scroll the
-    /// page, horizontal drags page the hero. The page dots sit at
-    /// the RIGHT end of the current slide's button row (item 6's
-    /// picked composition), overlaid on the frame.
     private var featuredCarousel: some View {
-        ZStack(alignment: .bottomTrailing) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 0) {
-                    ForEach(featured.indices, id: \.self) { index in
-                        FeaturedSlide(
-                            entry: featured[index],
-                            isCurrent: index == featuredIndex,
-                            width: cardWidth,
-                            height: heroHeight,
-                            onPlay: { playFeatured(featured[index]) },
-                            onDetails: { showFeaturedDetails(featured[index]) }
-                        )
-                        .id(index)
+        VStack(spacing: 12) {
+            GeometryReader { geo in
+                let cardWidth = geo.size.width * 0.78
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 14) {
+                        ForEach(featured.indices, id: \.self) { index in
+                            HeroPosterCard(
+                                title: featured[index].title,
+                                backdropURL: featured[index].hasBackdropArt ? featured[index].artURL : nil,
+                                posterURL: featured[index].posterURL,
+                                ratingText: featured[index].ratingText,
+                                metaLine: featured[index].metaLine,
+                                iconName: featured[index].iconName,
+                                width: cardWidth,
+                                showsControls: index == featuredIndex,
+                                onPlay: { playFeatured(featured[index]) },
+                                onDetails: { showFeaturedDetails(featured[index]) }
+                            )
+                            .scrollTransition(.interactive, axis: .horizontal) { content, phase in
+                                content
+                                    .scaleEffect(phase.isIdentity ? 1 : 0.9)
+                                    .brightness(phase.isIdentity ? 0 : -0.3)
+                                    .opacity(phase.isIdentity ? 1 : 0.75)
+                            }
+                            .id(index)
+                        }
+                    }
+                    .scrollTargetLayout()
+                    .padding(.horizontal, (geo.size.width - cardWidth) / 2)
+                }
+                .scrollTargetBehavior(.viewAligned)
+                .scrollPosition(id: featuredPosition)
+                .onChange(of: featuredIndex) { _, _ in
+                    // Timer-driven advances set the suppression flag first; a
+                    // change without it is a user swipe — pause auto-advance
+                    // so the carousel never fights the reader.
+                    if suppressCarouselPause {
+                        suppressCarouselPause = false
+                    } else {
+                        carouselPauseUntil = Date().addingTimeInterval(12)
                     }
                 }
-                .scrollTargetLayout()
             }
-            .scrollTargetBehavior(.paging)
-            .scrollPosition(id: featuredPosition)
-            .frame(width: cardWidth, height: heroSlideHeight)
-            .frame(maxWidth: .infinity)
-            .onChange(of: featuredIndex) { _, _ in
-                // Timer-driven advances set the suppression flag first; a
-                // change without it is a user swipe — pause auto-advance
-                // so the carousel never fights the reader.
-                if suppressCarouselPause {
-                    suppressCarouselPause = false
-                } else {
-                    carouselPauseUntil = Date().addingTimeInterval(12)
-                }
-            }
+            .frame(height: heroCardHeight)
 
-            // Page dots — at the right end of the button row
-            // (item 6), tappable (manual jump; the onChange above
-            // pauses auto-rotation after any manual move).
-            HStack(spacing: 6) {
+            // Page dots — CENTERED below the card (design 4),
+            // tappable (manual jump; the onChange above pauses
+            // auto-rotation after any manual move).
+            HStack(spacing: 7) {
                 ForEach(featured.indices, id: \.self) { index in
                     Button {
-                        withAnimation(Motion.animate(Motion.shelfSpring) ?? .easeInOut(duration: 0.45)) {
+                        withAnimation(Motion.animate(Motion.heroSwap) ?? .easeInOut(duration: 0.45)) {
                             featuredIndex = index
                         }
                     } label: {
-                        // B12: the active dot is an elongated pill
-                        // whose width springs; inactive dots stay 7 pt.
+                        // Build 87 (per-surface motion): the
+                        // active dot stretches into a short
+                        // capsule, animated on the hero-swap
+                        // token; inactive dots stay 7 pt circles.
                         Capsule()
-                            .fill(index == featuredIndex ? AppTheme.accent : Color.white.opacity(0.45))
-                            .frame(width: index == featuredIndex ? 22 : 7, height: 7)
+                            .fill(index == featuredIndex ? AppTheme.accent : Color.white.opacity(0.35))
+                            .frame(width: index == featuredIndex ? 18 : 7, height: 7)
                             .frame(width: 22, height: 22)
-                            .contentShape(Capsule())
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .animation(Motion.animate(Motion.shelfSpring), value: featuredIndex)
+                    .animation(Motion.animate(Motion.heroSwap), value: featuredIndex)
                 }
             }
-            .padding(.trailing, AppTheme.spacingScreenMargin)
-            // Aligned with the slide's button row, which sits 40 pt
-            // above the slide's bottom edge (item 6 layout).
-            .padding(.bottom, 44)
+            .frame(maxWidth: .infinity)
         }
         .task(id: featured.count) { await runCarouselTimer() }
     }
@@ -1145,51 +1158,84 @@ struct HomeView: View {
     /// sport preselected. Design A section language: the shared
     /// small-caps header (its See All opens Matches on the default
     /// sport) over a tidy row of equal cards.
+    /// Build 87 (items 1/2/4/5/14): the row now scrolls
+    /// horizontally — the five MatchSport cards (Soccer / NFL /
+    /// NBA / MLB / NHL) keep their fixed 80pt height and full
+    /// width, and the four extra sections (F1, Tennis, Golf,
+    /// UFC) ride as cards of the same shape behind them, in
+    /// the sports area's fixed order. Cards never shrink to
+    /// fit (the build-82 even-cards rule); the row scrolls.
     private var homeSportsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            CinematicSectionHeader(title: L("home.sports")) {
+            HomeSectionHeader(title: L("home.sports")) {
                 MatchesView()
             }
-            HStack(spacing: 10) {
-                ForEach(MatchSport.allCases) { sport in
-                    NavigationLink {
-                        MatchesView(initialSport: sport)
-                    } label: {
-                        VStack(spacing: 8) {
-                            Image(systemName: sportSymbolName(sport))
-                                .font(.system(size: 24, weight: .semibold))
-                                .foregroundStyle(AppTheme.accent)
-                            Text(L(sport.titleKey))
-                                .font(AppTheme.fontCardTitle)
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.85)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(MatchSport.allCases) { sport in
+                        NavigationLink {
+                            MatchesView(initialSport: sport)
+                        } label: {
+                            sportCard(symbol: sportSymbolName(sport), title: L(sport.titleKey))
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        // Build 82 (item 7): one fixed height for
-                        // all three cards — icon + label + the
-                        // vertical padding sum to exactly this —
-                        // so the row can never drift uneven again
-                        // (it aligns by construction, on any
-                        // screen width).
-                        .frame(height: 80)
-                        .background(
-                            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                                .fill(AppTheme.surface)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
-                                        .stroke(AppTheme.cardBorderColor, lineWidth: 1)
-                                )
-                        )
-                        .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
+                        .buttonStyle(PressScaleButtonStyle())
+                    }
+                    NavigationLink {
+                        F1View()
+                    } label: {
+                        sportCard(symbol: "flag.checkered", title: L("matches.f1"))
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                    NavigationLink {
+                        TennisView()
+                    } label: {
+                        sportCard(symbol: "tennis.racket", title: L("matches.tennis"))
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                    NavigationLink {
+                        GolfView()
+                    } label: {
+                        sportCard(symbol: "flag.fill", title: L("matches.golf"))
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                    NavigationLink {
+                        UFCView()
+                    } label: {
+                        sportCard(symbol: "figure.martial.arts", title: L("matches.ufc"))
                     }
                     .buttonStyle(PressScaleButtonStyle())
                 }
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
+            .scrollClipDisabled()
         }
         .sectionAppear()
+    }
+
+    /// One sports card: icon + label on the shared surface at
+    /// the fixed 80pt height (build 82), at a fixed card width
+    /// now that the row scrolls.
+    private func sportCard(symbol: String, title: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
+            Text(title)
+                .font(AppTheme.fontCardTitle)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+        .frame(width: 104, height: 80)
+        .background(
+            RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                .fill(AppTheme.surface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous)
+                        .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+                )
+        )
+        .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius, style: .continuous))
     }
 
     private func sportSymbolName(_ sport: MatchSport) -> String {
@@ -1208,7 +1254,146 @@ struct HomeView: View {
         // as basketball.fill) — the fourth card joins the
         // row at the same fixed 80pt height by construction.
         case .mlb: return "baseball.fill"
+        // Build 87: "hockey.puck.fill" (SF Symbols 5+, the
+        // deployment target is iOS 18) — the fifth card.
+        case .nhl: return "hockey.puck.fill"
         }
+    }
+
+    // MARK: Live-scores strip (build 87, owner decision — design 18)
+
+    /// Design 18's slim strip: ONE rounded bar under the hero,
+    /// its cells divided by vertical hairlines — each cell a
+    /// state line (LIVE chip + clock, or FT), the score line
+    /// (both logos + names + the score between them) and the
+    /// sport label. Fed by `matchResults` itself — the same
+    /// entries, in the same order, as the Match Results cards
+    /// below; a tap opens the same match detail. Renders
+    /// nothing when today has no live or finished match.
+    @ViewBuilder
+    private var homeLiveStrip: some View {
+        Group {
+            if !matchResults.isEmpty {
+                stripBar
+                    // Build 87 (per-surface motion): the strip
+                    // slides in/out as the day's matches appear
+                    // and clear, on the standard token.
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(Motion.animate(.easeInOut(duration: 0.35)), value: matchResults.isEmpty)
+    }
+
+    private var stripBar: some View {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    ForEach(Array(matchResults.enumerated()), id: \.element.id) { index, entry in
+                        if index > 0 {
+                            Rectangle()
+                                .fill(AppTheme.cardBorderColor)
+                                .frame(width: 0.5)
+                                .padding(.vertical, 10)
+                        }
+                        NavigationLink {
+                            MatchDetailView(sport: entry.sport, leaguePath: entry.leaguePath, match: entry.match)
+                        } label: {
+                            stripCell(entry)
+                        }
+                        .buttonStyle(PressOpacityButtonStyle())
+                    }
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(AppTheme.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(AppTheme.cardBorderColor, lineWidth: 1)
+                    )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, 16)
+            .sectionAppear()
+    }
+
+    private func stripCell(_ entry: HomeMatchEntry) -> some View {
+        let match = entry.match
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                if match.state == .live {
+                    Text(L("matches.live"))
+                        .font(.system(size: 9, weight: .black))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(AppTheme.live))
+                    if let clock = stripClockText(entry) {
+                        Text(clock)
+                            .font(AppTheme.fontBadge)
+                            .foregroundStyle(AppTheme.live)
+                            .monospacedDigit()
+                    }
+                } else {
+                    Text(stripClockText(entry) ?? L("matches.final"))
+                        .font(AppTheme.fontBadge)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+            HStack(spacing: 5) {
+                CachedImage(url: match.home.logoURL, width: 15, height: 15, cornerRadius: 7.5, iconName: "shield")
+                Text(match.home.name ?? "")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                StripScoreView(text: "\(match.home.score ?? "0") – \(match.away.score ?? "0")")
+                Text(match.away.name ?? "")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                CachedImage(url: match.away.logoURL, width: 15, height: 15, cornerRadius: 7.5, iconName: "shield")
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.primary)
+            Text(L(entry.sport.titleKey))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(width: 208, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .contentShape(Rectangle())
+    }
+
+    /// The strip's state text from payload fields only — the
+    /// MatchRowView rule: statusDetail for baseball/hockey,
+    /// the displayClock (with Q/OT period) for the rest, the
+    /// payload's short status for finished matches.
+    private func stripClockText(_ entry: HomeMatchEntry) -> String? {
+        let match = entry.match
+        if entry.sport == .mlb || entry.sport == .nhl,
+           let detail = match.statusDetail?.trimmingCharacters(in: .whitespaces),
+           !detail.isEmpty {
+            return detail
+        }
+        if match.state == .finished {
+            return L("matches.final")
+        }
+        let clock = match.displayClock?.trimmingCharacters(in: .whitespaces)
+        let hasClock = clock != nil && clock != "0.0" && !(clock?.isEmpty ?? true)
+        guard let period = match.period, period > 0 else {
+            return hasClock ? clock : nil
+        }
+        let periodLabel = period <= 4 ? "Q\(period)" : "OT"
+        return hasClock ? "\(periodLabel) \(clock!)" : periodLabel
+    }
+
+    /// Build 87 (owner decision, design 15): the hairline that
+    /// separates Home's sections in the Apple-clean system.
+    private var homeHairline: some View {
+        Rectangle()
+            .fill(AppTheme.cardBorderColor)
+            .frame(height: 0.5)
+            .padding(.horizontal, 16)
     }
 
     // MARK: Section 2 — Match Results
@@ -1223,7 +1408,8 @@ struct HomeView: View {
     private var matchResultsSection: some View {
         if !matchResults.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                CinematicSectionHeader(title: L("home.match_results")) {
+                homeHairline
+                HomeSectionHeader(title: L("home.match_results")) {
                     MatchesView()
                 }
                 VStack(spacing: 8) {
@@ -1308,7 +1494,8 @@ struct HomeView: View {
     /// the movie's detail page with the rail as its queue.
     private var popularMoviesRail: some View {
         VStack(alignment: .leading, spacing: 12) {
-            CinematicSectionHeader(title: L("home.most_popular_movies")) {
+            homeHairline
+            HomeSectionHeader(title: L("home.most_popular_movies")) {
                 AllVODView(playlist: playlist)
             }
             ScrollView(.horizontal, showsIndicators: false) {
@@ -1357,7 +1544,8 @@ struct HomeView: View {
     /// opens the full Series list; a card opens the series' detail.
     private var popularSeriesRail: some View {
         VStack(alignment: .leading, spacing: 12) {
-            CinematicSectionHeader(title: L("home.most_popular_series")) {
+            homeHairline
+            HomeSectionHeader(title: L("home.most_popular_series")) {
                 AllSeriesView(playlist: playlist)
             }
             ScrollView(.horizontal, showsIndicators: false) {
@@ -1413,7 +1601,8 @@ struct HomeView: View {
         let items = mergedContinueItems
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
-                CinematicSectionHeader(title: L("continue_watching.title")) {
+                homeHairline
+                HomeSectionHeader(title: L("continue_watching.title")) {
                     WatchHistoryListView(playlist: playlist, typeFilter: nil) { item in
                         presentHistoryItem(item)
                     }
@@ -2193,249 +2382,69 @@ private struct HomeMatchResultCard: View {
     }
 }
 
-// MARK: - Featured slide
+// MARK: - Home section header (build 87, owner decision — design 15)
 
-private struct FeaturedSlide: View {
-    let entry: FeaturedEntry
-    let isCurrent: Bool
-    let width: CGFloat
-    /// Build 80 (item 6): the BACKDROP height (16:9 wide, computed
-    /// by the carousel); the slide adds a 30 pt overflow below it
-    /// for the overlapping poster thumbnail.
-    let height: CGFloat
-    let onPlay: () -> Void
-    let onDetails: () -> Void
-
-    /// B12: title-block entrance, driven by slide change.
-    @State private var textShown = false
-
-    /// Build 83 (item 4): the slide art's MEASURED aspect
-    /// (width ÷ height), probed through the image pipeline —
-    /// see `ArtworkAspectProbe`. Nil until measured.
-    @State private var artAspect: CGFloat? = nil
-
-    /// The artwork the backdrop layer actually shows: the
-    /// backdrop when the record carries one, else the poster
-    /// (build 81 item 4's order, unchanged).
-    private var currentArtURL: URL? {
-        entry.hasBackdropArt ? entry.artURL : entry.posterURL
-    }
-
-    /// Build 83 (item 4, owner — artwork shown WHOLE, never
-    /// cropped): wide art (measured aspect ≥ 1.15, or the
-    /// backdrop field before measurement) fills the frame as
-    /// before; portrait/square art is aspect-FITTED over the
-    /// hero's near-black ground. Build 81's poster fill is what
-    /// cropped the faces in the owner's screenshot — a 2:3
-    /// poster filled into this 16:9 frame loses over half its
-    /// height. No blurred pillars (rejected in build 80).
-    private var slideContentMode: ContentMode {
-        let aspect = artAspect ?? currentArtURL.flatMap { ArtworkAspectProbe.shared.cachedAspect(for: $0) }
-        if let aspect { return aspect >= 1.15 ? .fill : .fit }
-        return entry.hasBackdropArt ? .fill : .fit
-    }
+/// The Apple-clean section header for HOME only: a small
+/// semibold title in the primary color on the left, the
+/// accent "See All ›" on the right, over the section's
+/// hairline. The app's shared CinematicSectionHeader keeps
+/// serving every other screen — this is Home's picked system,
+/// applied to Home's sections only (design 15's discipline:
+/// small gray headers, consistent margins, restrained accent).
+private struct HomeSectionHeader<Destination: View>: View {
+    let title: String
+    @ViewBuilder let destination: () -> Destination
 
     var body: some View {
-        // Build 80 (item 6, owner-picked Option 3): the WIDE
-        // letterbox composition — full-bleed backdrop; a SMALL
-        // poster thumbnail overlapping the backdrop's bottom-left
-        // corner (hanging 30 pt into the slide's overflow zone);
-        // the title beside the poster with the meta line under it;
-        // Play + Details under the title; the carousel's page dots
-        // overlay the right end of the button row. Poster-only
-        // entries get a plain surface backdrop — the build-65
-        // blurred-pillar / stretched-poster presentation is GONE.
-        // B1: tapping the backdrop itself opens the detail page
-        // (the buttons keep their own actions).
-        ZStack(alignment: .bottomLeading) {
-            backdropView
-
-            HStack(alignment: .bottom, spacing: 12) {
-                posterThumb
-                    // The overlap: the thumb's layout bottom sits
-                    // on the backdrop's bottom edge; the offset
-                    // hangs it 30 pt into the overflow zone.
-                    .offset(y: 30)
-
-                textColumn
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Spacer()
+            NavigationLink(destination: destination) {
+                HStack(spacing: 3) {
+                    Text(L("category.see_all"))
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                }
+                .font(AppFont.font(.subheadline, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
             }
-            .padding(.horizontal, AppTheme.spacingScreenMargin)
-            // Row bottom = 10 pt above the backdrop's bottom edge
-            // (30 overflow + 10), so title/meta/buttons all live
-            // over the backdrop's gradient in both themes.
-            .padding(.bottom, 40)
-            .frame(width: width, alignment: .leading)
+            .buttonStyle(PressScaleButtonStyle())
         }
-        .frame(width: width, height: height + 30)
-        .contentShape(Rectangle())
-        .onChange(of: isCurrent) { _, current in
-            if current {
-                textShown = false
-                withAnimation(Motion.animate(.easeOut(duration: 0.4).delay(0.05))) { textShown = true }
-            } else {
-                // Round 16 (P4b): hide immediately on losing
-                // currency so the entrance replays cleanly next
-                // time and nothing of this slide's block lingers
-                // into the transition.
-                textShown = false
-            }
-        }
-        .onAppear {
-            withAnimation(Motion.animate(.easeOut(duration: 0.4).delay(0.05))) { textShown = true }
-        }
+        .padding(.horizontal, 16)
     }
+}
 
-    /// The wide backdrop: real 16:9 art full-bleed when the record
-    /// carries it. Build 81 (item 4, owner): catalog records
-    /// almost never carry a backdropPath (only detail-info fetches
-    /// fill it), so build 80's gate left nearly EVERY slide on the
-    /// plain-surface branch — the owner's hero was a black slab
-    /// with only the small poster thumb showing. Now the poster
-    /// artwork itself fills the wide frame when no backdrop
-    /// exists — the same fallback the Movies/Series tab heroes
-    /// already use (backdrop ?? streamIcon, aspect-fill) and the
-    /// reason those heroes showed images while Home's did not.
-    /// No blurred pillars (the owner rejected those); the bottom
-    /// gradient keeps the overlaid text readable on any art.
-    private var backdropView: some View {
-        ZStack {
-            // Build 83 (item 4): the near-black ground the
-            // aspect-fitted art sits on (invisible when wide
-            // art fills the frame).
-            RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
-                .fill(Color.black)
-                .frame(width: width, height: height)
-            if entry.hasBackdropArt {
-                CachedImage(
-                    url: entry.artURL,
-                    width: width,
-                    height: height,
-                    cornerRadius: AppTheme.heroCornerRadius,
-                    contentMode: slideContentMode,
-                    iconName: entry.iconName,
-                    loadProfile: .high
-                )
-            } else if let poster = entry.posterURL {
-                CachedImage(
-                    url: poster,
-                    width: width,
-                    height: height,
-                    cornerRadius: AppTheme.heroCornerRadius,
-                    contentMode: slideContentMode,
-                    iconName: entry.iconName,
-                    loadProfile: .high
-                )
-            } else {
-                RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous)
-                    .fill(AppTheme.surface)
-                    .frame(width: width, height: height)
-            }
+/// Build 87 (per-surface motion): the live strip's score —
+/// digits roll on a change (numeric content transition) and
+/// the changed score gets ONE brief accent flash, then
+/// settles. Nothing loops; the flash is driven solely by an
+/// actual score change in the data.
+private struct StripScoreView: View {
+    let text: String
+    @State private var flash = false
 
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0.35),
-                    .init(color: AppTheme.background.opacity(0.92), location: 1)
-                ],
-                startPoint: .top, endPoint: .bottom
+    var body: some View {
+        Text(text)
+            .fontWeight(.bold)
+            .monospacedDigit()
+            .fixedSize()
+            .contentTransition(.numericText())
+            .padding(.horizontal, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(AppTheme.accent.opacity(flash ? 0.35 : 0))
             )
-            .allowsHitTesting(false)
-        }
-        .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: AppTheme.heroCornerRadius, style: .continuous))
-        .onTapGesture { if isCurrent { onDetails() } }
-        // Build 83 (item 4): measure the current art's aspect;
-        // the memo makes re-visits instant.
-        .task(id: currentArtURL) {
-            artAspect = nil
-            if let currentArtURL {
-                artAspect = await ArtworkAspectProbe.shared.probe(currentArtURL)
-            }
-        }
-    }
-
-    /// The small poster thumbnail overlapping the backdrop's
-    /// bottom-left corner (the item-6 signature element).
-    private var posterThumb: some View {
-        CachedImage(
-            url: entry.posterURL,
-            width: 54,
-            height: 81,
-            cornerRadius: 8,
-            contentMode: .fill,
-            iconName: entry.iconName,
-            loadProfile: .standard
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.25), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
-    }
-
-    /// Title + meta + actions beside the poster. Round 16 (P4b)
-    /// gating kept: only the CURRENT slide's block shows and takes
-    /// hits, so a page transition never shows two control sets.
-    private var textColumn: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(entry.title)
-                .font(.title3.weight(.black))
-                .foregroundStyle(.white)
-                .lineLimit(2)
-                .shadow(color: .black.opacity(0.45), radius: 6, y: 2)
-
-            HStack(spacing: 8) {
-                if let ratingText = entry.ratingText {
-                    HStack(spacing: 4) {
-                        Image(systemName: "star.fill")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(AppTheme.ratingGold)
-                        Text(ratingText)
-                            .font(AppTheme.fontMetadata.weight(.bold))
-                            .foregroundStyle(.white)
-                    }
-                }
-                if let metaLine = entry.metaLine {
-                    Text(metaLine)
-                        .font(AppTheme.fontMetadata)
-                        .foregroundStyle(.white.opacity(0.8))
-                        .lineLimit(1)
+            .animation(Motion.animate(.easeOut(duration: 0.65)), value: flash)
+            .onChange(of: text) { _, _ in
+                guard Motion.animate(.easeOut(duration: 0.3)) != nil else { return }
+                flash = true
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(650))
+                    flash = false
                 }
             }
-
-            HStack(spacing: 10) {
-                Button(action: onPlay) {
-                    // Design-4 PLAY pill: solid accent, BLACK bold
-                    // text (SPEC §2, as the gate's primary).
-                    Label(L("home.play"), systemImage: "play.fill")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(AppTheme.onAccent)
-                        .padding(.horizontal, 22)
-                        .padding(.vertical, 10)
-                        .background(Capsule().fill(AppTheme.accent))
-                        // ST2 (B7): the signature glow lives ONLY
-                        // under primary/hero actions like this one.
-                        .signatureGlow()
-                }
-                .buttonStyle(PressScaleButtonStyle())
-
-                Button(action: onDetails) {
-                    // The mockup's ghost action beside Play — a
-                    // translucent capsule with a hairline border
-                    // and the info glyph.
-                    Label(L("home.details"), systemImage: "info.circle")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 22)
-                        .padding(.vertical, 10)
-                        .background(Capsule().fill(Color.white.opacity(0.14)))
-                        .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
-                }
-                .buttonStyle(PressScaleButtonStyle())
-            }
-        }
-        .opacity(isCurrent && textShown ? 1 : 0)
-        .offset(y: textShown ? 0 : 12)
-        .allowsHitTesting(isCurrent)
     }
 }

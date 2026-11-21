@@ -1187,3 +1187,40 @@
 "matches.team.stadium" = "الملعب";
 "matches.team.about" = "نبذة عن النادي";
 "matches.player.bio" = "السيرة";
+
+// Build 87: NHL/F1/tennis/golf/UFC, calendar, live wall,
+// player compare, gate tagline + import timeline states.
+"common.retry" = "إعادة المحاولة";
+"gate.import.back" = "رجوع";
+"gate.tagline" = "أقوى الأفلام • أحداث مباشرة • مجاناً دائماً";
+"gate.import.checking_streams" = "فحص القنوات";
+"gate.import.current" = "الآن";
+"gate.import.so_far" = "حتى الآن";
+"gate.import.auto_enter" = "عند انتهاء التحميل، تدخل تلقائياً.";
+"gate.import.expires" = "ينتهي %@";
+"gate.import.checking_note" = "أخذ عيّنة من القنوات المباشرة للتأكد أنها تعمل";
+"matches.calendar" = "التقويم";
+"matches.live_wall" = "جدار المباشر";
+"matches.compare_players" = "مقارنة اللاعبين";
+"matches.compare.pick_player" = "اختر لاعباً";
+"matches.explainer.nhl.title" = "مرحباً بك في NHL";
+"matches.explainer.nhl.live.title" = "النتائج المباشرة";
+"matches.explainer.nhl.live.detail" = "كل مباراة، تُحدَّث فوراً";
+"matches.explainer.nhl.standings.title" = "الترتيب";
+"matches.explainer.nhl.standings.detail" = "ترتيب NHL الكامل";
+"matches.explainer.nhl.stats.title" = "الإحصائيات وأفضل اللاعبين";
+"matches.explainer.nhl.stats.detail" = "الأرقام خلف كل مباراة";
+"matches.explainer.nhl.follow.title" = "تابع فرقك";
+"matches.explainer.nhl.follow.detail" = "المباريات والنتائج والعد التنازلي للمباراة القادمة";
+"matches.f1" = "فورمولا 1";
+"matches.f1.races" = "السباقات";
+"matches.f1.results" = "النتائج";
+"matches.f1.drivers" = "السائقون";
+"matches.f1.constructors" = "الصانعون";
+"matches.golf" = "الغولف";
+"matches.h2h.more" = "مواجهات أخرى";
+"matches.points" = "النقاط";
+"matches.stats.career" = "المسيرة";
+"matches.tab.nhl" = "NHL";
+"matches.tennis" = "التنس";
+"matches.ufc" = "UFC";

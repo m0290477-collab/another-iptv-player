@@ -373,6 +373,27 @@ struct StandingsView: View {
                    StandingColumn(statName: "losses", width: 28, bold: false),
                    StandingColumn(statName: "winPercent", width: 44, bold: false),
                    StandingColumn(statName: "gamesBehind", width: 36, bold: false)]
+        case .nhl:
+            // Build 87 (item 1): for exhaustiveness — NHL
+            // teams never reach this view (their header links
+            // open NHLStandingsView), but if one ever did, the
+            // columns are the NHL entries' own stat keys
+            // (NHLService mirrors the ESPN names).
+            return fullMode
+                ? [StandingColumn(statName: "gamesPlayed", width: 28, bold: false),
+                   StandingColumn(statName: "wins", width: 24, bold: false),
+                   StandingColumn(statName: "losses", width: 24, bold: false),
+                   StandingColumn(statName: "otLosses", width: 28, bold: false),
+                   StandingColumn(statName: "pointsFor", width: 32, bold: false),
+                   StandingColumn(statName: "pointsAgainst", width: 32, bold: false),
+                   StandingColumn(statName: "pointDifferential", width: 38, bold: false),
+                   StandingColumn(statName: "streak", width: 36, bold: false),
+                   StandingColumn(statName: "points", width: 30, bold: true)]
+                : [StandingColumn(statName: "gamesPlayed", width: 30, bold: false),
+                   StandingColumn(statName: "wins", width: 26, bold: false),
+                   StandingColumn(statName: "losses", width: 26, bold: false),
+                   StandingColumn(statName: "otLosses", width: 30, bold: false),
+                   StandingColumn(statName: "points", width: 32, bold: true)]
         }
     }
 
@@ -944,8 +965,26 @@ struct TeamPageView: View {
     /// Build 86: TheSportsDB club details (stadium name +
     /// description) — soccer only, rendered only when the
     /// free source verifies an exact-name club record.
+    /// Build 87 (item 9): the same verified lookup for every
+    /// sport whose clubs TheSportsDB carries (its own sport
+    /// name gates the record, exactly as soccer's did).
     @State private var teamDetails: SportsDBService.TeamDetails?
+    /// Build 87 (item 3): official MLBAM headshots for this
+    /// club's squad, keyed by normalized player name — the
+    /// MLB team page's photo upgrade (ESPN's stay fallback).
+    @State private var mlbHeadshots: [String: URL] = [:]
     @ObservedObject private var followStore = FollowedTeamsStore.shared
+
+    /// TheSportsDB's own sport name for this page's sport.
+    private var sportsDBSportName: String {
+        switch team.sport {
+        case .soccer: return "Soccer"
+        case .nba: return "Basketball"
+        case .nfl: return "American Football"
+        case .mlb: return "Baseball"
+        case .nhl: return "Ice Hockey"
+        }
+    }
 
     private var isFollowed: Bool {
         followStore.team(sport: team.sport, leaguePath: team.leaguePath, teamId: team.id) != nil
@@ -1171,8 +1210,16 @@ struct TeamPageView: View {
             }
             // Build 86: TheSportsDB club details (soccer
             // only) — one cached lookup per club.
-            if team.sport == .soccer {
-                teamDetails = await SportsDBService.teamDetails(teamName: team.name)
+            // Build 87 (item 9): every sport now, gated by
+            // TheSportsDB's own sport name for the page's
+            // sport (NHL teams use NHLTeamPageView, which
+            // runs the same lookup itself).
+            teamDetails = await SportsDBService.teamDetails(
+                teamName: team.name, expectedSport: sportsDBSportName
+            )
+            // Build 87 (item 3): the MLBAM squad headshots.
+            if team.sport == .mlb {
+                mlbHeadshots = await MLBStatsService.squadHeadshots(teamName: team.name)
             }
         }
     }
@@ -1180,7 +1227,11 @@ struct TeamPageView: View {
     private func squadRow(_ player: SquadPlayer) -> some View {
         HStack(spacing: 10) {
             PlayerPhotoDisc(
-                url: player.headshotURL, name: player.name, size: 32,
+                // Build 87 (item 3): the official MLBAM
+                // headshot wins on MLB team pages when the
+                // verified roster carries this player.
+                url: mlbHeadshots[SoccerPhotoResolver.normName(player.name)] ?? player.headshotURL,
+                name: player.name, size: 32,
                 fallback: soccerFallback(
                     athleteId: player.athleteId, name: player.name,
                     citizenship: player.citizenship, dateOfBirth: player.dateOfBirth
@@ -1555,6 +1606,18 @@ struct LeaguePageView: View {
                     )
                 } label: {
                     Label(L("matches.news"), systemImage: "newspaper")
+                        .font(AppTheme.fontCardTitle)
+                }
+                .buttonStyle(PressOpacityButtonStyle())
+                // Build 87 (item 13): THIS league's own
+                // highlights, inside its page.
+                NavigationLink {
+                    SectionHighlightsView(
+                        competitions: [(sport: .soccer, leaguePath: league.leaguePath)],
+                        title: league.name
+                    )
+                } label: {
+                    Label(L("matches.highlights_hub"), systemImage: "play.rectangle.on.rectangle")
                         .font(AppTheme.fontCardTitle)
                 }
                 .buttonStyle(PressOpacityButtonStyle())

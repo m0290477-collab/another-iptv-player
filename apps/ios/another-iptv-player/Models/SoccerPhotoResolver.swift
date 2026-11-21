@@ -531,7 +531,25 @@ enum SportsDBService {
     }
 
     static func teamDetails(teamName: String) async -> TeamDetails? {
-        let key = SoccerPhotoResolver.normName(teamName)
+        await teamDetails(teamName: teamName, expectedSport: "Soccer")
+    }
+
+    /// Build 87 (item 9): the same verified lookup for the
+    /// other sports' team pages — TheSportsDB carries NBA /
+    /// NFL / MLB / NHL clubs with the same stadium +
+    /// description fields (verified live 2026-11-21: Lakers →
+    /// "Crypto.com Arena" + 3,058-char description; Maple
+    /// Leafs → "Scotiabank Arena" + 1,586 chars). The identity
+    /// discipline is unchanged: the record's sport must equal
+    /// `expectedSport` (TheSportsDB's own sport names:
+    /// "Basketball", "American Football", "Baseball",
+    /// "Ice Hockey"), the normalized name must match exactly,
+    /// and exactly one record may qualify. The free payload
+    /// still carries NO stadium-photo field (re-verified
+    /// 2026-11-21 — fanart fields exist and are never shown
+    /// as a stadium photo).
+    static func teamDetails(teamName: String, expectedSport: String) async -> TeamDetails? {
+        let key = SoccerPhotoResolver.normName(teamName) + "|" + expectedSport
         guard !key.isEmpty else { return nil }
         if let cached = SessionCache.shared.team(key) { return cached }
         var result: TeamDetails?
@@ -539,9 +557,10 @@ enum SportsDBService {
             "\(SoccerPhotoResolver.sportsDBBase)/searchteams.php?t=\(SoccerPhotoResolver.encode(teamName))"
         ),
         let wire = try? JSONDecoder().decode(TeamsWire.self, from: data) {
+            let nameKey = SoccerPhotoResolver.normName(teamName)
             let matches = (wire.teams ?? []).filter {
-                $0.strSport == "Soccer"
-                    && SoccerPhotoResolver.normName($0.strTeam ?? "") == key
+                $0.strSport == expectedSport
+                    && SoccerPhotoResolver.normName($0.strTeam ?? "") == nameKey
             }
             if matches.count == 1 {
                 let stadium = matches[0].strStadium?.trimmingCharacters(in: .whitespacesAndNewlines)

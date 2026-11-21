@@ -1205,3 +1205,40 @@
 "matches.team.stadium" = "Stadyum";
 "matches.team.about" = "Kulüp Hakkında";
 "matches.player.bio" = "Biyografi";
+
+// Build 87: NHL/F1/tennis/golf/UFC, calendar, live wall,
+// player compare, gate tagline + import timeline states.
+"common.retry" = "Tekrar dene";
+"gate.import.back" = "Geri";
+"gate.tagline" = "Gişe filmleri • Canlı etkinlikler • Her zaman ücretsiz";
+"gate.import.checking_streams" = "Yayınlar kontrol ediliyor";
+"gate.import.current" = "Şu an";
+"gate.import.so_far" = "şu ana kadar";
+"gate.import.auto_enter" = "Yükleme bittiğinde otomatik olarak girersiniz.";
+"gate.import.expires" = "%@ tarihinde bitiyor";
+"gate.import.checking_note" = "Canlı yayınlardan örnekler oynatılarak kontrol ediliyor";
+"matches.calendar" = "Takvim";
+"matches.live_wall" = "Canlı duvar";
+"matches.compare_players" = "Oyuncuları karşılaştır";
+"matches.compare.pick_player" = "Oyuncu seç";
+"matches.explainer.nhl.title" = "NHL'ye hoş geldiniz";
+"matches.explainer.nhl.live.title" = "Canlı skorlar";
+"matches.explainer.nhl.live.detail" = "Her maç, anında güncellenir";
+"matches.explainer.nhl.standings.title" = "Puan durumu";
+"matches.explainer.nhl.standings.detail" = "NHL puan durumunun tamamı";
+"matches.explainer.nhl.stats.title" = "İstatistikler ve öne çıkanlar";
+"matches.explainer.nhl.stats.detail" = "Her maçın arkasındaki rakamlar";
+"matches.explainer.nhl.follow.title" = "Takımlarınızı takip edin";
+"matches.explainer.nhl.follow.detail" = "Maçlar, sonuçlar ve geri sayımlar";
+"matches.f1" = "Formula 1";
+"matches.f1.races" = "Yarışlar";
+"matches.f1.results" = "Sonuçlar";
+"matches.f1.drivers" = "Pilotlar";
+"matches.f1.constructors" = "Takımlar";
+"matches.golf" = "Golf";
+"matches.h2h.more" = "Diğer karşılaşmalar";
+"matches.points" = "Puan";
+"matches.stats.career" = "Kariyer";
+"matches.tab.nhl" = "NHL";
+"matches.tennis" = "Tenis";
+"matches.ufc" = "UFC";

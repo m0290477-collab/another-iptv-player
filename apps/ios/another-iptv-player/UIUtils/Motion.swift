@@ -77,6 +77,35 @@ enum Motion {
     static var contentIn: Animation {
         .easeOut(duration: 0.28)
     }
+
+    // Build 87 (item 15, owner: "سوي تاثيرات هواي" — lots of
+    // effects): three more tokens join the set. Same discipline
+    // as every token above — transform/opacity only, routed
+    // through `animate(_:)` at the call site or the EffectsGate
+    // in the modifier, so Reduce Motion / intensity still them
+    // all, and nothing here ever runs over playback (these are
+    // browse-surface entrances and swaps only).
+
+    /// Card entrance spring: a touch livelier than the shelf
+    /// spring — cards settle with a small overshoot. Used by
+    /// `CardEntranceModifier` (scale 0.96→1 + fade + 8 pt rise).
+    static var cardPop: Animation {
+        .spring(response: 0.42, dampingFraction: 0.82)
+    }
+
+    /// Hero swap: the picked design-4 hero crossfades + settles
+    /// its card when the featured item changes (auto-advance or
+    /// swipe landing) — a slow, calm ease, never a slide show.
+    static var heroSwap: Animation {
+        .easeInOut(duration: 0.45)
+    }
+
+    /// Live-state swap (score/state changes on the live wall and
+    /// calendar): a quick, quiet ease so refreshed rows update
+    /// without a hard cut.
+    static var liveSwap: Animation {
+        .easeInOut(duration: 0.22)
+    }
 }
 
 // MARK: - Haptics (B12 map)
@@ -151,6 +180,41 @@ struct ShelfEntranceModifier: ViewModifier {
     }
 }
 
+// MARK: - Card entrance (build 87, item 15)
+
+/// One-shot card entrance: a card fades in with a small rise
+/// and a 0.96→1 settle (`Motion.cardPop`), staggered by at most
+/// 8 × 0.05 s. Same discipline as the section entrance:
+/// transform/opacity only, no timers, no blur, fully stilled by
+/// the EffectsGate — with Reduce Motion / reduced effects /
+/// motion off, the card renders already-shown. Indices ≥ 10
+/// render already-shown so recycled cells deep in a long list
+/// never replay a wave while scrolling. Apply to CARDS and
+/// section blocks, not to rows the system transitions itself.
+struct CardEntranceModifier: ViewModifier {
+    let index: Int
+    @State private var shown = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var animates: Bool {
+        index < 10 && EffectsGate.allowsHeavyEffects(reduceMotion: reduceMotion)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .scaleEffect(shown ? 1 : 0.96)
+            .offset(y: shown ? 0 : 8)
+            .onAppear {
+                if shown { return }
+                guard animates else { shown = true; return }
+                withAnimation(Motion.cardPop.delay(Double(min(index, 8)) * 0.05)) {
+                    shown = true
+                }
+            }
+    }
+}
+
 // MARK: - iPad hover (C9)
 
 /// One hover token for cards/buttons on iPad, reusing the press style's
@@ -214,6 +278,12 @@ extension View {
     /// SectionAppearModifier).
     func sectionAppear() -> some View {
         modifier(SectionAppearModifier())
+    }
+
+    /// Build 87 (item 15): the one-shot card entrance (see
+    /// CardEntranceModifier).
+    func cardEntrance(index: Int = 0) -> some View {
+        modifier(CardEntranceModifier(index: index))
     }
 
     /// C9 iPad hover token (reuses the press spring + card border).

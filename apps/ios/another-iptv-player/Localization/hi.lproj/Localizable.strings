@@ -1187,3 +1187,40 @@
 "matches.team.stadium" = "स्टेडियम";
 "matches.team.about" = "क्लब के बारे में";
 "matches.player.bio" = "जीवनी";
+
+// Build 87: NHL/F1/tennis/golf/UFC, calendar, live wall,
+// player compare, gate tagline + import timeline states.
+"common.retry" = "पुनः प्रयास करें";
+"gate.import.back" = "वापस";
+"gate.tagline" = "ब्लॉकबस्टर • लाइव इवेंट • हमेशा मुफ़्त";
+"gate.import.checking_streams" = "स्ट्रीम जाँच हो रही है";
+"gate.import.current" = "वर्तमान";
+"gate.import.so_far" = "अब तक";
+"gate.import.auto_enter" = "लोडिंग पूरी होने पर आप अपने आप अंदर चले जाएँगे।";
+"gate.import.expires" = "%@ को समाप्त";
+"gate.import.checking_note" = "लाइव स्ट्रीम का नमूना लेकर जाँच हो रही है कि वे चलते हैं";
+"matches.calendar" = "कैलेंडर";
+"matches.live_wall" = "लाइव वॉल";
+"matches.compare_players" = "खिलाड़ियों की तुलना";
+"matches.compare.pick_player" = "खिलाड़ी चुनें";
+"matches.explainer.nhl.title" = "NHL में आपका स्वागत है";
+"matches.explainer.nhl.live.title" = "लाइव स्कोर";
+"matches.explainer.nhl.live.detail" = "हर मैच, तुरंत अपडेट";
+"matches.explainer.nhl.standings.title" = "स्टैंडिंग";
+"matches.explainer.nhl.standings.detail" = "पूरी NHL स्टैंडिंग";
+"matches.explainer.nhl.stats.title" = "आँकड़े और शीर्ष खिलाड़ी";
+"matches.explainer.nhl.stats.detail" = "हर मैच के पीछे के आँकड़े";
+"matches.explainer.nhl.follow.title" = "अपनी टीमों को फॉलो करें";
+"matches.explainer.nhl.follow.detail" = "मैच, परिणाम और अगले मैच की उलटी गिनती";
+"matches.f1" = "फ़ॉर्मूला 1";
+"matches.f1.races" = "रेस";
+"matches.f1.results" = "परिणाम";
+"matches.f1.drivers" = "ड्राइवर";
+"matches.f1.constructors" = "कंस्ट्रक्टर";
+"matches.golf" = "गोल्फ़";
+"matches.h2h.more" = "और मुक़ाबले";
+"matches.points" = "अंक";
+"matches.stats.career" = "करियर";
+"matches.tab.nhl" = "NHL";
+"matches.tennis" = "टेनिस";
+"matches.ufc" = "UFC";

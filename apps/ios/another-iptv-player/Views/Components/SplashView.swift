@@ -19,6 +19,11 @@ struct SplashView: View {
     /// X1 (B7): the one-shot ignition — the flame scales up from a
     /// spark with a bright flash, ~0.8 s total, once per cold start.
     @State private var ignited = false
+    /// Build 87 (per-surface motion): the collage's very slow
+    /// Ken Burns push-in (one settle, never a loop) and the
+    /// flame's soft breathing glow — both effects-gated.
+    @State private var kenBurns = false
+    @State private var glowPulse = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// X1 guards: ignition is a heavy effect — skipped entirely
@@ -29,8 +34,27 @@ struct SplashView: View {
 
     var body: some View {
         ZStack {
-            AppTheme.background
+            // Build 87 (owner-picked gate design 2, 'cinematic'):
+            // the bundled poster/stadium collage under a smooth
+            // black gradient — ONE local asset, no network, so
+            // the splash renders instantly on cold launch. The
+            // lockup, ignition and hand-off behavior are
+            // unchanged; only the presentation was replaced.
+            Image("GateCollage")
+                .resizable()
+                .scaledToFill()
+                .scaleEffect(kenBurns ? 1.07 : 1.0)
+                .offset(y: kenBurns ? -8 : 0)
                 .ignoresSafeArea()
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(0.62), location: 0),
+                    .init(color: .black.opacity(0.30), location: 0.45),
+                    .init(color: .black.opacity(0.78), location: 1)
+                ],
+                startPoint: .top, endPoint: .bottom
+            )
+            .ignoresSafeArea()
 
             VStack(spacing: 12) {
                 // The Design-4 flame mark in the fixed brand
@@ -40,7 +64,7 @@ struct SplashView: View {
                 Image(systemName: "flame.fill")
                     .font(.system(size: 64, weight: .bold))
                     .foregroundStyle(AppTheme.brandGradient)
-                    .shadow(color: AppTheme.accentStart.opacity(ignited ? 0.45 : 0.95),
+                    .shadow(color: AppTheme.accentStart.opacity(ignited ? (glowPulse ? 0.62 : 0.45) : 0.95),
                             radius: ignited ? 16 : 30, x: 0, y: 8)
                     .scaleEffect(ignitionAllowed && !ignited ? 0.55 : 1)
                     .opacity(ignitionAllowed && !ignited ? 0.6 : 1)
@@ -62,9 +86,11 @@ struct SplashView: View {
                 .font(.system(size: 34, weight: .black))
                 .tracking(-0.5)
 
-                Text(L("gate.subtitle"))
+                // Build 87 (design 2): the cinematic tagline
+                // replaces the functional subtitle on the splash.
+                Text(L("gate.tagline"))
                     .font(.subheadline.weight(.semibold))
-                    .foregroundColor(AppTheme.accent)
+                    .foregroundColor(.white.opacity(0.85))
             }
             .opacity(shown ? 1 : 0)
             .scaleEffect(shown || reduceMotion ? 1 : 0.96)
@@ -92,6 +118,19 @@ struct SplashView: View {
                 }
             } else {
                 ignited = true
+            }
+            // Build 87: the Ken Burns settle (one slow push-in
+            // over the splash's whole stay — the view itself is
+            // animated, the bundled asset is untouched) and the
+            // flame's breathing glow. Both still entirely
+            // under the effects gate / Reduce Motion.
+            if EffectsGate.allowsHeavyEffects(reduceMotion: reduceMotion) {
+                withAnimation(.easeOut(duration: 18)) {
+                    kenBurns = true
+                }
+                withAnimation(.easeInOut(duration: 3).repeatForever(autoreverses: true)) {
+                    glowPulse = true
+                }
             }
         }
     }

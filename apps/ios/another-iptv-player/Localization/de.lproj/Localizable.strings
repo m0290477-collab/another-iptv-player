@@ -1187,3 +1187,40 @@
 "matches.team.stadium" = "Stadion";
 "matches.team.about" = "Über den Verein";
 "matches.player.bio" = "Biografie";
+
+// Build 87: NHL/F1/tennis/golf/UFC, calendar, live wall,
+// player compare, gate tagline + import timeline states.
+"common.retry" = "Erneut versuchen";
+"gate.import.back" = "Zurück";
+"gate.tagline" = "Blockbuster • Live-Events • Immer kostenlos";
+"gate.import.checking_streams" = "Streams werden geprüft";
+"gate.import.current" = "Aktuell";
+"gate.import.so_far" = "bisher";
+"gate.import.auto_enter" = "Nach dem Laden geht es automatisch weiter.";
+"gate.import.expires" = "endet %@";
+"gate.import.checking_note" = "Live-Streams werden stichprobenartig geprüft";
+"matches.calendar" = "Kalender";
+"matches.live_wall" = "Live-Wand";
+"matches.compare_players" = "Spieler vergleichen";
+"matches.compare.pick_player" = "Spieler wählen";
+"matches.explainer.nhl.title" = "Willkommen in der NHL";
+"matches.explainer.nhl.live.title" = "Live-Ergebnisse";
+"matches.explainer.nhl.live.detail" = "Jedes Spiel, sofort aktualisiert";
+"matches.explainer.nhl.standings.title" = "Tabelle";
+"matches.explainer.nhl.standings.detail" = "Die komplette NHL-Tabelle";
+"matches.explainer.nhl.stats.title" = "Statistiken & Topspieler";
+"matches.explainer.nhl.stats.detail" = "Die Zahlen hinter jedem Spiel";
+"matches.explainer.nhl.follow.title" = "Folge deinen Teams";
+"matches.explainer.nhl.follow.detail" = "Spielpläne, Ergebnisse und Countdowns";
+"matches.f1" = "Formel 1";
+"matches.f1.races" = "Rennen";
+"matches.f1.results" = "Ergebnisse";
+"matches.f1.drivers" = "Fahrer";
+"matches.f1.constructors" = "Konstrukteure";
+"matches.golf" = "Golf";
+"matches.h2h.more" = "Weitere Duelle";
+"matches.points" = "Punkte";
+"matches.stats.career" = "Karriere";
+"matches.tab.nhl" = "NHL";
+"matches.tennis" = "Tennis";
+"matches.ufc" = "UFC";

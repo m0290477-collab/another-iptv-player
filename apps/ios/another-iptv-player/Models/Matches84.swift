@@ -107,6 +107,11 @@ enum CoreCoordinates {
         case .nba: return "basketball"
         case .nfl: return "football"
         case .mlb: return "baseball"
+        // Build 87: hockey's segment names the NHL search
+        // leaguePath only — NHL data never flows through the
+        // ESPN core URLs this segment builds (every ESPN-core
+        // consumer branches on .nhl before reaching them).
+        case .nhl: return "hockey"
         }
     }
 
@@ -117,6 +122,7 @@ enum CoreCoordinates {
         case .nba: return "nba"
         case .nfl: return "nfl"
         case .mlb: return "mlb"
+        case .nhl: return "nhl"
         }
     }
 
@@ -132,6 +138,10 @@ enum CoreCoordinates {
         // (spring training opens in February) — before
         // February the completed season is last year's.
         case .mlb: return month >= 2 ? year : year - 1
+        // Build 87: the NHL season opens in October; its start
+        // year keys the (unused-by-NHL) core season math the
+        // same way the NBA's does.
+        case .nhl: return month >= 10 ? year : year - 1
         }
     }
 
@@ -153,6 +163,7 @@ enum CoreCoordinates {
         case .nba: return "nba"
         case .nfl: return "nfl"
         case .mlb: return "mlb"
+        case .nhl: return "nhl"
         }
     }
 
@@ -241,6 +252,11 @@ enum MatchesLeadersService {
             "ERA", "WHIP", "wins", "strikeouts", "saves",
             "qualityStarts", "holds", "avgGameScore"
         ]
+        // Build 87: the ESPN core leaders payload is never
+        // queried for hockey — NHL leaders come from the NHL
+        // API's own leaders endpoints (NHLLeadersView). This
+        // case exists so the switch stays exhaustive.
+        case .nhl: return []
         }
     }
 
@@ -566,6 +582,14 @@ enum PlayerProfileService {
     }
 
     static func fetch(sport: MatchSport, leaguePath: String, athleteId: String) async -> PlayerProfile? {
+        // Build 87 (item 1): NHL player pages come from the
+        // NHL API's player landing endpoint (official
+        // headshot, bio, featured + career stats) — the ESPN
+        // core athlete graph below is never queried for
+        // hockey.
+        if sport == .nhl {
+            return await NHLPlayerService.fetch(athleteId: athleteId)
+        }
         let cacheKey = "\(sport.rawValue)|\(athleteId)"
         if let cached = SessionCache.shared.get(cacheKey) { return cached }
         // Candidate league slugs: the surface's own league
@@ -577,6 +601,20 @@ enum PlayerProfileService {
         if !slugs.contains(primary) { slugs.append(primary) }
         for slug in slugs {
             if let profile = await fetchScoped(sport: sport, slug: slug, athleteId: athleteId) {
+                // Build 87 (item 3): MLB player pages upgrade
+                // through the official MLB Stats API — its
+                // headshot becomes primary (ESPN's stays the
+                // fallback inside the disc chain) and its
+                // season + career lines append to the stat
+                // list, but ONLY when the name search verifies
+                // exactly one matching person (see
+                // MLBStatsService). Any failure keeps the
+                // ESPN profile untouched.
+                if sport == .mlb {
+                    let enriched = await MLBStatsService.enrich(profile)
+                    SessionCache.shared.put(cacheKey, enriched)
+                    return enriched
+                }
                 SessionCache.shared.put(cacheKey, profile)
                 return profile
             }
@@ -765,6 +803,10 @@ enum PlayerSearchService {
         // players carry sport "baseball" and
         // defaultLeagueSlug "mlb" in the search payload.
         case "baseball": return .mlb
+        // Build 87: hockey players resolve to the NHL tab;
+        // their pages come from the NHL API (the profile
+        // service branches on the sport), never ESPN core.
+        case "hockey": return .nhl
         default: return nil
         }
     }
@@ -913,7 +955,7 @@ enum LiveTableAdjuster {
                 let ga = int(a.stats["pointDifferential"]), gb = int(b.stats["pointDifferential"])
                 if ga != gb { return ga > gb }
                 return int(a.stats["pointsFor"]) > int(b.stats["pointsFor"])
-            case .nba, .nfl, .mlb:
+            case .nba, .nfl, .mlb, .nhl:
                 let wa = double(a.stats["winPercent"]), wb = double(b.stats["winPercent"])
                 if wa != wb { return wa > wb }
                 return int(a.stats["wins"]) > int(b.stats["wins"])
@@ -943,7 +985,7 @@ enum LiveTableAdjuster {
             else { bump("ties", by: 1); bump("points", by: 1) }
             let diff = int(stats["pointsFor"]) - int(stats["pointsAgainst"])
             stats["pointDifferential"] = diff > 0 ? "+\(diff)" : "\(diff)"
-        case .nba, .nfl, .mlb:
+        case .nba, .nfl, .mlb, .nhl:
             if scored > conceded { bump("wins", by: 1) }
             else if scored < conceded { bump("losses", by: 1) }
             else if stats["ties"] != nil { bump("ties", by: 1) }
@@ -1023,6 +1065,13 @@ enum MatchWatchService {
             // needles against the user's own channel names,
             // exactly like the other sports.
             return ["ESPN", "FOX", "FS1", "TBS", "MLB Network", "Apple TV", "Peacock", "NBC", "ABC"]
+        case .nhl:
+            // Build 87: the NHL's national carriers (US:
+            // ESPN/ABC, TNT/truTV, NHL Network; Canada:
+            // Sportsnet, TSN, CBC) — needles against the
+            // user's own channel names, exactly like the
+            // other sports.
+            return ["ESPN", "ABC", "TNT", "truTV", "NHL Network", "Sportsnet", "TSN", "CBC"]
         case .soccer:
             var patterns = ["beIN Sports", "beIN"]
             switch CoreCoordinates.slug(from: leaguePath) {
@@ -1232,6 +1281,10 @@ struct HubHighlight: Identifiable {
     let awayName: String?
     let leagueName: String?
     let date: Date?
+    /// Build 87 (item 13): the highlight's sport — the hub
+    /// groups its feed by sport (never one mixed list), and
+    /// the per-section pages filter on it.
+    let sport: MatchSport
     /// Scoped by its match so two summaries can never collide
     /// in the feed's identity space.
     var id: String { "\(video.id)|\(leagueName ?? "")|\(homeName ?? "")" }
@@ -1243,13 +1296,27 @@ struct HubHighlight: Identifiable {
 /// scoreboards; Highlights reads today's + yesterday's finished
 /// matches and their summaries' verified videos.
 enum SportsHubService {
-    /// All 20 competitions: the 17-league soccer catalog plus
-    /// the NFL, the NBA and (build 85) MLB.
+    /// All 21 competitions: the 17-league soccer catalog plus
+    /// the NFL, the NBA, MLB (build 85) and the NHL (build
+    /// 87 — its scoreboard routes through NHLService inside
+    /// `MatchesService.fetchLeague`).
     static var allCompetitions: [(sport: MatchSport, leaguePath: String)] {
         MatchSport.soccerLeagueCatalog.map { (sport: MatchSport.soccer, leaguePath: $0.leaguePath) }
             + [(sport: MatchSport.nfl, leaguePath: "football/nfl"),
                (sport: MatchSport.nba, leaguePath: "basketball/nba"),
-               (sport: MatchSport.mlb, leaguePath: "baseball/mlb")]
+               (sport: MatchSport.mlb, leaguePath: "baseball/mlb"),
+               (sport: MatchSport.nhl, leaguePath: "nhl")]
+    }
+
+    /// The competitions whose highlights the ESPN summary
+    /// pipeline can serve — every competition EXCEPT the NHL:
+    /// hockey summaries don't come from ESPN (the NHL API
+    /// publishes no direct-MP4 highlight feed — its recap ids
+    /// point at nhl.com pages, which this app never links out
+    /// to for video), so hockey contributes to Live Now and
+    /// the calendar but not to the highlights feed.
+    static var highlightCompetitions: [(sport: MatchSport, leaguePath: String)] {
+        allCompetitions.filter { $0.sport != .nhl }
     }
 
     static func liveNow() async -> [LiveNowGroup] {
@@ -1288,6 +1355,17 @@ enum SportsHubService {
     /// match contributes only the videos its own summary
     /// payload carries (the build-81 verified direct-MP4 set).
     static func highlights() async -> [HubHighlight] {
+        await highlights(competitions: highlightCompetitions)
+    }
+
+    /// Build 87 (item 13): ONE section's own highlights — the
+    /// same aggregation scoped to a caller-chosen competition
+    /// set (one league for a league page, one sport's leagues
+    /// for a sport page). The hub above passes every
+    /// highlight-capable competition.
+    static func highlights(
+        competitions: [(sport: MatchSport, leaguePath: String)]
+    ) async -> [HubHighlight] {
         let calendar = Calendar.current
         let days = [Date(), calendar.date(byAdding: .day, value: -1, to: Date())].compactMap { $0 }
         var candidates: [(sport: MatchSport, leaguePath: String, leagueName: String?, match: MatchEvent)] = []
@@ -1296,7 +1374,7 @@ enum SportsHubService {
             let perLeague = await withTaskGroup(
                 of: [(sport: MatchSport, leaguePath: String, leagueName: String?, match: MatchEvent)].self
             ) { group in
-                for competition in allCompetitions {
+                for competition in competitions {
                     group.addTask {
                         guard let result = try? await MatchesService.fetchLeague(
                             path: competition.leaguePath, dateParameter: parameter
@@ -1331,7 +1409,8 @@ enum SportsHubService {
                                 homeName: candidate.match.home.name,
                                 awayName: candidate.match.away.name,
                                 leagueName: candidate.leagueName,
-                                date: candidate.match.startDate
+                                date: candidate.match.startDate,
+                                sport: candidate.sport
                             )
                         }
                     }

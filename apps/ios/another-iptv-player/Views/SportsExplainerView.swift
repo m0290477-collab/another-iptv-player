@@ -136,6 +136,33 @@ struct SportsExplainerContent {
                         detailKey: "matches.explainer.mlb.follow.detail")
                 ]
             )
+        case .nhl:
+            // Build 87: live scores (hockey tab, the NHL
+            // official API), standings (division tables from
+            // the league header), stats & leaders (game
+            // scoring, three stars, skater lines, the stats
+            // leaders) — all shipped this build. Follow is
+            // worded for what is true locally, like baseball:
+            // fixtures, results and the next-game countdown;
+            // the kickoff bell on any fixture is the reminder
+            // path (the watcher's generic matches contract).
+            return SportsExplainerContent(
+                titleKey: "matches.explainer.nhl.title",
+                rows: [
+                    Row(icon: "bolt.fill",
+                        titleKey: "matches.explainer.nhl.live.title",
+                        detailKey: "matches.explainer.nhl.live.detail"),
+                    Row(icon: "chart.bar.fill",
+                        titleKey: "matches.explainer.nhl.standings.title",
+                        detailKey: "matches.explainer.nhl.standings.detail"),
+                    Row(icon: "list.number",
+                        titleKey: "matches.explainer.nhl.stats.title",
+                        detailKey: "matches.explainer.nhl.stats.detail"),
+                    Row(icon: "bell.fill",
+                        titleKey: "matches.explainer.nhl.follow.title",
+                        detailKey: "matches.explainer.nhl.follow.detail")
+                ]
+            )
         }
     }
 }

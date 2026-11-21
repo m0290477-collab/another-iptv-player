@@ -1187,3 +1187,40 @@
 "matches.team.stadium" = "Стадион";
 "matches.team.about" = "О клубе";
 "matches.player.bio" = "Биография";
+
+// Build 87: NHL/F1/tennis/golf/UFC, calendar, live wall,
+// player compare, gate tagline + import timeline states.
+"common.retry" = "Повторить";
+"gate.import.back" = "Назад";
+"gate.tagline" = "Блокбастеры • Прямые трансляции • Всегда бесплатно";
+"gate.import.checking_streams" = "Проверка потоков";
+"gate.import.current" = "Сейчас";
+"gate.import.so_far" = "уже";
+"gate.import.auto_enter" = "Когда загрузка завершится, вы войдёте автоматически.";
+"gate.import.expires" = "истекает %@";
+"gate.import.checking_note" = "Проверяем выборку прямых трансляций";
+"matches.calendar" = "Календарь";
+"matches.live_wall" = "Прямой эфир";
+"matches.compare_players" = "Сравнить игроков";
+"matches.compare.pick_player" = "Выберите игрока";
+"matches.explainer.nhl.title" = "Добро пожаловать в NHL";
+"matches.explainer.nhl.live.title" = "Счёт в прямом эфире";
+"matches.explainer.nhl.live.detail" = "Каждый матч, мгновенные обновления";
+"matches.explainer.nhl.standings.title" = "Таблица";
+"matches.explainer.nhl.standings.detail" = "Полная таблица NHL";
+"matches.explainer.nhl.stats.title" = "Статистика и лучшие игроки";
+"matches.explainer.nhl.stats.detail" = "Цифры каждого матча";
+"matches.explainer.nhl.follow.title" = "Следите за командами";
+"matches.explainer.nhl.follow.detail" = "Матчи, результаты и обратный отсчёт";
+"matches.f1" = "Формула 1";
+"matches.f1.races" = "Гонки";
+"matches.f1.results" = "Результаты";
+"matches.f1.drivers" = "Пилоты";
+"matches.f1.constructors" = "Конструкторы";
+"matches.golf" = "Гольф";
+"matches.h2h.more" = "Ещё встречи";
+"matches.points" = "Очки";
+"matches.stats.career" = "Карьера";
+"matches.tab.nhl" = "NHL";
+"matches.tennis" = "Теннис";
+"matches.ufc" = "UFC";

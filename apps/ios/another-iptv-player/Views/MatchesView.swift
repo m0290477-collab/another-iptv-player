@@ -152,6 +152,8 @@ struct MatchesView: View {
     @AppStorage("explainer.seen.nba") private var explainerSeenNBA = false
     /// Build 85: the MLB tab's first-entry explainer flag.
     @AppStorage("explainer.seen.mlb") private var explainerSeenMLB = false
+    /// Build 87: the NHL tab's first-entry explainer flag.
+    @AppStorage("explainer.seen.nhl") private var explainerSeenNHL = false
     /// The sport whose explainer sheet is currently presented.
     @State private var explainerSport: MatchSport?
     /// The last sport the explainer was presented for — by the
@@ -252,52 +254,73 @@ struct MatchesView: View {
     /// reads the shared day cache — no extra polling).
     @State private var liveNowCount = 0
 
-    /// Live Now + Highlights entries, riding between the day
-    /// strip and the tab content on every sport tab.
+    /// Build 87 (items 7/8/11/13/14): the hub row is ONE
+    /// horizontally scrolling chip strip in a fixed order —
+    /// Live Now (+count), Live Wall, Calendar, Highlights,
+    /// Top Scorers — the same destinations from every sport
+    /// tab, no duplicated entries anywhere else on the tab.
     private var hubRow: some View {
-        HStack(spacing: 10) {
-            NavigationLink {
-                LiveNowView()
-            } label: {
-                HStack(spacing: 7) {
-                    Circle().fill(AppTheme.live).frame(width: 7, height: 7)
-                    Text(L("matches.live_now"))
-                        .font(AppTheme.fontCardTitle)
-                    if liveNowCount > 0 {
-                        Text("\(liveNowCount)")
-                            .font(AppTheme.fontBadge)
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 1)
-                            .background(AppTheme.live, in: Capsule())
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                NavigationLink {
+                    LiveNowView()
+                } label: {
+                    HStack(spacing: 7) {
+                        Circle().fill(AppTheme.live).frame(width: 7, height: 7)
+                        Text(L("matches.live_now"))
+                            .font(AppTheme.fontCardTitle)
+                        if liveNowCount > 0 {
+                            Text("\(liveNowCount)")
+                                .font(AppTheme.fontBadge)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 1)
+                                .background(AppTheme.live, in: Capsule())
+                        }
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(AppTheme.surface, in: Capsule())
+                    .overlay(Capsule().strokeBorder(AppTheme.cardBorderColor, lineWidth: 1))
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(AppTheme.surface, in: Capsule())
-                .overlay(Capsule().strokeBorder(AppTheme.cardBorderColor, lineWidth: 1))
-            }
-            .buttonStyle(PressOpacityButtonStyle())
-            NavigationLink {
-                HighlightsHubView()
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "play.rectangle.on.rectangle")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(AppTheme.accent)
-                    Text(L("matches.highlights_hub"))
-                        .font(AppTheme.fontCardTitle)
+                .buttonStyle(PressOpacityButtonStyle())
+                hubChip(systemImage: "rectangle.grid.1x2", titleKey: "matches.live_wall") {
+                    LiveWallView()
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(AppTheme.surface, in: Capsule())
-                .overlay(Capsule().strokeBorder(AppTheme.cardBorderColor, lineWidth: 1))
+                hubChip(systemImage: "calendar", titleKey: "matches.calendar") {
+                    SportsCalendarView()
+                }
+                hubChip(systemImage: "play.rectangle.on.rectangle", titleKey: "matches.highlights_hub") {
+                    HighlightsHubView()
+                }
+                hubChip(systemImage: "list.number", titleKey: "matches.scorers") {
+                    CrossLeagueScorersView()
+                }
             }
-            .buttonStyle(PressOpacityButtonStyle())
-            Spacer(minLength: 0)
+            .padding(.horizontal, AppTheme.spacingScreenMargin)
+            .padding(.vertical, 6)
         }
-        .padding(.horizontal, AppTheme.spacingScreenMargin)
-        .padding(.vertical, 6)
+    }
+
+    /// One hub chip (icon + title in the shared capsule).
+    private func hubChip<Destination: View>(
+        systemImage: String, titleKey: String,
+        @ViewBuilder destination: @escaping () -> Destination
+    ) -> some View {
+        NavigationLink(destination: destination) {
+            HStack(spacing: 7) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+                Text(L(titleKey))
+                    .font(AppTheme.fontCardTitle)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(AppTheme.surface, in: Capsule())
+            .overlay(Capsule().strokeBorder(AppTheme.cardBorderColor, lineWidth: 1))
+        }
+        .buttonStyle(PressOpacityButtonStyle())
     }
 
     // MARK: First-entry explainer (build 66, item 12)
@@ -308,6 +331,7 @@ struct MatchesView: View {
         case .nfl: return explainerSeenNFL
         case .nba: return explainerSeenNBA
         case .mlb: return explainerSeenMLB
+        case .nhl: return explainerSeenNHL
         }
     }
 
@@ -317,6 +341,7 @@ struct MatchesView: View {
         case .nfl: explainerSeenNFL = true
         case .nba: explainerSeenNBA = true
         case .mlb: explainerSeenMLB = true
+        case .nhl: explainerSeenNHL = true
         }
     }
 
@@ -652,33 +677,71 @@ struct MatchesView: View {
                     Spacer()
                     // Items 10a/10b: standings for every league;
                     // top scorers for soccer leagues.
-                    NavigationLink {
-                        StandingsView(
-                            sport: selectedSport,
-                            leaguePath: selectedSport.leaguePaths[section.index],
-                            leagueName: name
-                        )
-                    } label: {
-                        Image(systemName: "chart.bar.fill")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                    // Build 87 (item 1): hockey's standings and
+                    // leaders are the NHL API's own pages — the
+                    // ESPN-core views never see the .nhl sport.
+                    if selectedSport == .nhl {
+                        NavigationLink {
+                            NHLStandingsView(leagueName: name)
+                        } label: {
+                            Image(systemName: "chart.bar.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityLabel(L("matches.standings"))
+                        NavigationLink {
+                            NHLLeadersView()
+                        } label: {
+                            Image(systemName: "list.number")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityLabel(L("matches.leaders"))
+                    } else {
+                        NavigationLink {
+                            StandingsView(
+                                sport: selectedSport,
+                                leaguePath: selectedSport.leaguePaths[section.index],
+                                leagueName: name
+                            )
+                        } label: {
+                            Image(systemName: "chart.bar.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityLabel(L("matches.standings"))
+                        // Build 84 (item 7): the leaders page (all
+                        // verified categories for the sport) —
+                        // every sport now, not soccer only.
+                        NavigationLink {
+                            LeadersView(
+                                sport: selectedSport,
+                                leaguePath: selectedSport.leaguePaths[section.index],
+                                leagueName: name
+                            )
+                        } label: {
+                            Image(systemName: "list.number")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityLabel(L("matches.leaders"))
+                        // Build 87 (item 13): THIS league's own
+                        // highlights, inside its section.
+                        NavigationLink {
+                            SectionHighlightsView(
+                                competitions: [(
+                                    sport: selectedSport,
+                                    leaguePath: selectedSport.leaguePaths[section.index]
+                                )],
+                                title: name
+                            )
+                        } label: {
+                            Image(systemName: "play.rectangle.on.rectangle")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityLabel(L("matches.highlights_hub"))
                     }
-                    .accessibilityLabel(L("matches.standings"))
-                    // Build 84 (item 7): the leaders page (all
-                    // verified categories for the sport) — every
-                    // sport now, not soccer only.
-                    NavigationLink {
-                        LeadersView(
-                            sport: selectedSport,
-                            leaguePath: selectedSport.leaguePaths[section.index],
-                            leagueName: name
-                        )
-                    } label: {
-                        Image(systemName: "list.number")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .accessibilityLabel(L("matches.leaders"))
                 }
             }
         }
@@ -881,7 +944,7 @@ struct MatchRowView: View {
     }
 
     private var finishedText: String {
-        if sport == .mlb,
+        if sport == .mlb || sport == .nhl,
            let detail = match.statusDetail?.trimmingCharacters(in: .whitespaces),
            !detail.isEmpty {
             return detail
@@ -896,7 +959,7 @@ struct MatchRowView: View {
     /// displayClock is a dummy "0:00" — the label is the
     /// payload's own status text ("Top 5th"), verbatim.
     private var liveClockText: String? {
-        if sport == .mlb {
+        if sport == .mlb || sport == .nhl {
             let detail = match.statusDetail?.trimmingCharacters(in: .whitespaces)
             return (detail?.isEmpty == false) ? detail : nil
         }

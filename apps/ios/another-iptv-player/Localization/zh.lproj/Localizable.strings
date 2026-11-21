@@ -1187,3 +1187,40 @@
 "matches.team.stadium" = "球场";
 "matches.team.about" = "关于俱乐部";
 "matches.player.bio" = "简介";
+
+// Build 87: NHL/F1/tennis/golf/UFC, calendar, live wall,
+// player compare, gate tagline + import timeline states.
+"common.retry" = "重试";
+"gate.import.back" = "返回";
+"gate.tagline" = "大片 • 现场活动 • 永久免费";
+"gate.import.checking_streams" = "正在检查直播流";
+"gate.import.current" = "当前";
+"gate.import.so_far" = "目前";
+"gate.import.auto_enter" = "加载完成后将自动进入。";
+"gate.import.expires" = "%@ 到期";
+"gate.import.checking_note" = "正在抽样检查直播流是否能播放";
+"matches.calendar" = "日历";
+"matches.live_wall" = "直播墙";
+"matches.compare_players" = "球员对比";
+"matches.compare.pick_player" = "选择球员";
+"matches.explainer.nhl.title" = "欢迎来到 NHL";
+"matches.explainer.nhl.live.title" = "实时比分";
+"matches.explainer.nhl.live.detail" = "每场比赛，即时更新";
+"matches.explainer.nhl.standings.title" = "排名";
+"matches.explainer.nhl.standings.detail" = "完整的 NHL 排名";
+"matches.explainer.nhl.stats.title" = "数据与最佳球员";
+"matches.explainer.nhl.stats.detail" = "每场比赛背后的数据";
+"matches.explainer.nhl.follow.title" = "关注你的球队";
+"matches.explainer.nhl.follow.detail" = "赛程、结果和倒计时";
+"matches.f1" = "一级方程式";
+"matches.f1.races" = "比赛";
+"matches.f1.results" = "结果";
+"matches.f1.drivers" = "车手";
+"matches.f1.constructors" = "车队";
+"matches.golf" = "高尔夫";
+"matches.h2h.more" = "更多交锋";
+"matches.points" = "积分";
+"matches.stats.career" = "生涯";
+"matches.tab.nhl" = "NHL";
+"matches.tennis" = "网球";
+"matches.ufc" = "UFC";

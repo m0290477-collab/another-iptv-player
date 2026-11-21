@@ -470,6 +470,12 @@ enum TeamService {
 
     /// 12c: every team in a sport's leagues (for search).
     static func allTeams(sport: MatchSport) async -> [TeamRef] {
+        // Build 87 (item 1): NHL teams come from the NHL API's
+        // standings payload (abbrev-keyed TeamRefs), never the
+        // ESPN teams endpoint.
+        if sport == .nhl {
+            return await NHLService.allTeams()
+        }
         var out: [TeamRef] = []
         for leaguePath in sport.leaguePaths {
             let path = leaguePath
@@ -529,6 +535,11 @@ enum TeamService {
             case .nba: segment = "nba"
             case .nfl: segment = "nfl"
             case .mlb: segment = "mlb"
+            // Build 87: NHL squads come from the NHL API
+            // (NHLTeamPageView) — this ESPN roster path is
+            // never called for hockey; the case keeps the
+            // switch exhaustive.
+            case .nhl: segment = "nhl"
             }
             let headshot = athlete.headshot?.href.flatMap { URL(string: $0) }
                 ?? athlete.id.flatMap {

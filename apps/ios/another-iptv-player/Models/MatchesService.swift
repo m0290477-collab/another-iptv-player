@@ -39,6 +39,18 @@ enum MatchSport: String, CaseIterable, Identifiable {
     /// standings, teams/roster/schedule, news, core leaders +
     /// athletes — see the build-85 report).
     case mlb
+    /// Build 87 (item 1): NHL hockey — a full fifth sport, but
+    /// NOT from ESPN: the NHL's own official free API
+    /// (api-web.nhle.com, keyless, verified live 2026-11-21 —
+    /// schedule / standings / roster / leaders / player landing
+    /// / gamecenter). The sentinel league path "nhl" routes
+    /// `fetchLeague` to `NHLService`, which maps the NHL
+    /// payloads into the SAME domain models, so every shared
+    /// surface (tabs, Live Now, calendar, Watch, bell, follows)
+    /// consumes hockey unchanged. ESPN-shaped services
+    /// (standings / leaders / team / player) branch on this
+    /// sport to their NHL counterparts — see Matches87.swift.
+    case nhl
 
     var id: String { rawValue }
 
@@ -62,6 +74,8 @@ enum MatchSport: String, CaseIterable, Identifiable {
             return ["basketball/nba"]
         case .mlb:
             return ["baseball/mlb"]
+        case .nhl:
+            return ["nhl"]
         }
     }
 
@@ -71,6 +85,7 @@ enum MatchSport: String, CaseIterable, Identifiable {
         case .nfl: return "matches.tab.nfl"
         case .nba: return "matches.tab.nba"
         case .mlb: return "matches.tab.mlb"
+        case .nhl: return "matches.tab.nhl"
         }
     }
 }
@@ -330,6 +345,14 @@ enum MatchesService {
     /// Throws on transport/HTTP/decode failure; a successful response
     /// with no events returns an empty matches array (NOT an error).
     static func fetchLeague(path: String, dateParameter: String) async throws -> MatchLeagueResult {
+        // Build 87 (item 1): the NHL sentinel path routes to
+        // the NHL's own official API service, which maps its
+        // payloads into the same domain models (and keeps its
+        // own week cache + disk fallback). Every other path is
+        // an ESPN site/v2 path, unchanged.
+        if path == MatchSport.nhl.leaguePaths[0] {
+            return try await NHLService.scoreboard(dateParameter: dateParameter)
+        }
         let cacheKey = "\(path)|\(dateParameter)"
         if let cached = DayCache.shared.get(cacheKey, ttl: cacheTTL(forDayParameter: dateParameter)) {
             return cached
@@ -1121,6 +1144,10 @@ extension MatchesService {
         case .nba: segment = "nba"
         case .nfl: segment = "nfl"
         case .mlb: segment = "mlb"
+        case .nhl:
+            // NHL headshots come from the NHL API's own URLs —
+            // the ESPN CDN pattern is never used for hockey.
+            return nil
         }
         return URL(string: "https://a.espncdn.com/i/headshots/\(segment)/players/full/\(id).png")
     }
