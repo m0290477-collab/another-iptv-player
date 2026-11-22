@@ -264,7 +264,14 @@ struct CachedImage: View {
                 // when the cell reappears. .standard/.grid keep
                 // .cancel; .high (heroes/backdrops, not scroll cells)
                 // keeps nil.
-                .onDisappear(disappearAction)
+                // The behaviour is spelled inline: naming the
+                // nested type (`LazyImage.DisappearBehavior`)
+                // in a property annotation fails — LazyImage is
+                // generic and the reference needs its arguments
+                // (Codemagic #89). In argument position the type
+                // is inferred from the modifier itself.
+                .onDisappear(loadProfile == .shelf ? .lowerPriority
+                             : loadProfile == .high ? nil : .cancel)
                 // Build 90 (F4): an in-place retry bumps
                 // `loadGeneration`; the new identity rebuilds the
                 // LazyImage so it issues a fresh load instead of
@@ -321,19 +328,6 @@ struct CachedImage: View {
             retryDeadline = nil
             visibleRetriesUsed = 0
             bypassMemo = false
-        }
-    }
-
-    /// Build 90 (F5c): the LazyImage disappear action per profile
-    /// (see the `.onDisappear` call site for the full reasoning).
-    private var disappearAction: LazyImage.DisappearBehavior? {
-        switch loadProfile {
-        case .standard, .grid:
-            return .cancel
-        case .shelf:
-            return .lowerPriority
-        case .high:
-            return nil
         }
     }
 
